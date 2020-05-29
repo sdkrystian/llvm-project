@@ -1,0 +1,549 @@
+{
+	"archive" : 
+	{
+		"commandFragments" : 
+		[
+			{
+				"fragment" : "/machine:x64",
+				"role" : "flags"
+			}
+		]
+	},
+	"artifacts" : 
+	[
+		{
+			"path" : "lib/lldCOFF.lib"
+		}
+	],
+	"backtrace" : 3,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_library",
+			"llvm_add_library",
+			"add_lld_library",
+			"install",
+			"target_link_libraries",
+			"add_dependencies",
+			"set_property",
+			"llvm_update_compile_flags",
+			"add_definitions",
+			"include",
+			"include_directories"
+		],
+		"files" : 
+		[
+			"C:/Users/Krystian/src/llvm-project/build/lib/cmake/llvm/AddLLVM.cmake",
+			"cmake/modules/AddLLD.cmake",
+			"COFF/CMakeLists.txt",
+			"C:/Users/Krystian/src/llvm-project/build/lib/cmake/llvm/HandleLLVMOptions.cmake",
+			"CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 2
+			},
+			{
+				"command" : 2,
+				"file" : 2,
+				"line" : 9,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 1,
+				"line" : 10,
+				"parent" : 1
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 498,
+				"parent" : 2
+			},
+			{
+				"command" : 3,
+				"file" : 1,
+				"line" : 20,
+				"parent" : 1
+			},
+			{
+				"command" : 4,
+				"file" : 0,
+				"line" : 616,
+				"parent" : 2
+			},
+			{
+				"command" : 5,
+				"file" : 0,
+				"line" : 623,
+				"parent" : 2
+			},
+			{
+				"command" : 7,
+				"file" : 0,
+				"line" : 522,
+				"parent" : 2
+			},
+			{
+				"command" : 6,
+				"file" : 0,
+				"line" : 79,
+				"parent" : 7
+			},
+			{
+				"file" : 4
+			},
+			{
+				"command" : 9,
+				"file" : 4,
+				"line" : 56,
+				"parent" : 9
+			},
+			{
+				"file" : 3,
+				"parent" : 10
+			},
+			{
+				"command" : 8,
+				"file" : 3,
+				"line" : 401,
+				"parent" : 11
+			},
+			{
+				"command" : 8,
+				"file" : 3,
+				"line" : 390,
+				"parent" : 11
+			},
+			{
+				"command" : 8,
+				"file" : 3,
+				"line" : 779,
+				"parent" : 11
+			},
+			{
+				"command" : 8,
+				"file" : 3,
+				"line" : 780,
+				"parent" : 11
+			},
+			{
+				"command" : 8,
+				"file" : 3,
+				"line" : 781,
+				"parent" : 11
+			},
+			{
+				"command" : 10,
+				"file" : 4,
+				"line" : 171,
+				"parent" : 9
+			},
+			{
+				"command" : 10,
+				"file" : 4,
+				"line" : 47,
+				"parent" : 9
+			}
+		]
+	},
+	"compileGroups" : 
+	[
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "/DWIN32 /D_WINDOWS /W3   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 /MDd /Zi /Ob0 /Od /RTC1   -wd4530 -wd4062"
+				},
+				{
+					"fragment" : " /EHs-c- /GR-"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"backtrace" : 8,
+					"define" : "GTEST_HAS_RTTI=0"
+				},
+				{
+					"backtrace" : 12,
+					"define" : "UNICODE"
+				},
+				{
+					"backtrace" : 13,
+					"define" : "_CRT_NONSTDC_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 13,
+					"define" : "_CRT_NONSTDC_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 13,
+					"define" : "_CRT_SECURE_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 13,
+					"define" : "_CRT_SECURE_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 8,
+					"define" : "_HAS_EXCEPTIONS=0"
+				},
+				{
+					"backtrace" : 13,
+					"define" : "_SCL_SECURE_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 13,
+					"define" : "_SCL_SECURE_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 12,
+					"define" : "_UNICODE"
+				},
+				{
+					"backtrace" : 14,
+					"define" : "__STDC_CONSTANT_MACROS"
+				},
+				{
+					"backtrace" : 15,
+					"define" : "__STDC_FORMAT_MACROS"
+				},
+				{
+					"backtrace" : 16,
+					"define" : "__STDC_LIMIT_MACROS"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"path" : "C:/Users/Krystian/src/llvm-project/lld/out/build/x64-Debug/COFF"
+				},
+				{
+					"path" : "C:/Users/Krystian/src/llvm-project/lld/COFF"
+				},
+				{
+					"backtrace" : 17,
+					"path" : "C:/Users/Krystian/src/llvm-project/lld/include"
+				},
+				{
+					"backtrace" : 17,
+					"path" : "C:/Users/Krystian/src/llvm-project/lld/out/build/x64-Debug/include"
+				},
+				{
+					"backtrace" : 18,
+					"path" : "C:/Users/Krystian/src/llvm-project/build/include"
+				},
+				{
+					"backtrace" : 18,
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/include"
+				}
+			],
+			"language" : "CXX",
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10,
+				11,
+				12,
+				13,
+				14,
+				15
+			]
+		}
+	],
+	"dependencies" : 
+	[
+		{
+			"backtrace" : 5,
+			"id" : "lldCommon::@13b50f4fff9a3833e1fc"
+		},
+		{
+			"backtrace" : 6,
+			"id" : "COFFOptionsTableGen::@de9166d2c92805c7258d"
+		}
+	],
+	"folder" : 
+	{
+		"name" : "lld libraries"
+	},
+	"id" : "lldCOFF::@de9166d2c92805c7258d",
+	"install" : 
+	{
+		"destinations" : 
+		[
+			{
+				"backtrace" : 4,
+				"path" : "lib"
+			}
+		],
+		"prefix" : 
+		{
+			"path" : "C:/Users/Krystian/src/llvm-project/lld/out/install/x64-Debug"
+		}
+	},
+	"name" : "lldCOFF",
+	"nameOnDisk" : "lldCOFF.lib",
+	"paths" : 
+	{
+		"build" : "COFF",
+		"source" : "COFF"
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "Source Files",
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10,
+				11,
+				12,
+				13,
+				14,
+				15
+			]
+		},
+		{
+			"name" : "TableGen descriptions",
+			"sourceIndexes" : 
+			[
+				16
+			]
+		},
+		{
+			"name" : "Header Files",
+			"sourceIndexes" : 
+			[
+				17,
+				18,
+				19,
+				20,
+				21,
+				22,
+				23,
+				24,
+				25,
+				26,
+				27,
+				28,
+				29,
+				30,
+				31,
+				32,
+				33
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 3,
+			"compileGroupIndex" : 0,
+			"path" : "COFF/Chunks.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 3,
+			"compileGroupIndex" : 0,
+			"path" : "COFF/DebugTypes.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 3,
+			"compileGroupIndex" : 0,
+			"path" : "COFF/DLL.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 3,
+			"compileGroupIndex" : 0,
+			"path" : "COFF/Driver.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 3,
+			"compileGroupIndex" : 0,
+			"path" : "COFF/DriverUtils.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 3,
+			"compileGroupIndex" : 0,
+			"path" : "COFF/ICF.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 3,
+			"compileGroupIndex" : 0,
+			"path" : "COFF/InputFiles.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 3,
+			"compileGroupIndex" : 0,
+			"path" : "COFF/LLDMapFile.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 3,
+			"compileGroupIndex" : 0,
+			"path" : "COFF/LTO.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 3,
+			"compileGroupIndex" : 0,
+			"path" : "COFF/MapFile.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 3,
+			"compileGroupIndex" : 0,
+			"path" : "COFF/MarkLive.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 3,
+			"compileGroupIndex" : 0,
+			"path" : "COFF/MinGW.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 3,
+			"compileGroupIndex" : 0,
+			"path" : "COFF/PDB.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 3,
+			"compileGroupIndex" : 0,
+			"path" : "COFF/SymbolTable.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 3,
+			"compileGroupIndex" : 0,
+			"path" : "COFF/Symbols.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 3,
+			"compileGroupIndex" : 0,
+			"path" : "COFF/Writer.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 3,
+			"path" : "COFF/Options.td",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 3,
+			"path" : "COFF/Chunks.h",
+			"sourceGroupIndex" : 2
+		},
+		{
+			"backtrace" : 3,
+			"path" : "COFF/Config.h",
+			"sourceGroupIndex" : 2
+		},
+		{
+			"backtrace" : 3,
+			"path" : "COFF/DLL.h",
+			"sourceGroupIndex" : 2
+		},
+		{
+			"backtrace" : 3,
+			"path" : "COFF/DebugTypes.h",
+			"sourceGroupIndex" : 2
+		},
+		{
+			"backtrace" : 3,
+			"path" : "COFF/Driver.h",
+			"sourceGroupIndex" : 2
+		},
+		{
+			"backtrace" : 3,
+			"path" : "COFF/ICF.h",
+			"sourceGroupIndex" : 2
+		},
+		{
+			"backtrace" : 3,
+			"path" : "COFF/InputFiles.h",
+			"sourceGroupIndex" : 2
+		},
+		{
+			"backtrace" : 3,
+			"path" : "COFF/LLDMapFile.h",
+			"sourceGroupIndex" : 2
+		},
+		{
+			"backtrace" : 3,
+			"path" : "COFF/LTO.h",
+			"sourceGroupIndex" : 2
+		},
+		{
+			"backtrace" : 3,
+			"path" : "COFF/MapFile.h",
+			"sourceGroupIndex" : 2
+		},
+		{
+			"backtrace" : 3,
+			"path" : "COFF/MarkLive.h",
+			"sourceGroupIndex" : 2
+		},
+		{
+			"backtrace" : 3,
+			"path" : "COFF/MinGW.h",
+			"sourceGroupIndex" : 2
+		},
+		{
+			"backtrace" : 3,
+			"path" : "COFF/PDB.h",
+			"sourceGroupIndex" : 2
+		},
+		{
+			"backtrace" : 3,
+			"path" : "COFF/SymbolTable.h",
+			"sourceGroupIndex" : 2
+		},
+		{
+			"backtrace" : 3,
+			"path" : "COFF/Symbols.h",
+			"sourceGroupIndex" : 2
+		},
+		{
+			"backtrace" : 3,
+			"path" : "COFF/TypeMerger.h",
+			"sourceGroupIndex" : 2
+		},
+		{
+			"backtrace" : 3,
+			"path" : "COFF/Writer.h",
+			"sourceGroupIndex" : 2
+		}
+	],
+	"type" : "STATIC_LIBRARY"
+}

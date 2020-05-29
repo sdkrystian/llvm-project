@@ -1,0 +1,374 @@
+{
+	"archive" : 
+	{
+		"commandFragments" : 
+		[
+			{
+				"fragment" : "/machine:x64",
+				"role" : "flags"
+			}
+		]
+	},
+	"artifacts" : 
+	[
+		{
+			"path" : "lib/LLVMTableGenGlobalISel.lib"
+		}
+	],
+	"backtrace" : 2,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_library",
+			"llvm_add_library",
+			"target_link_libraries",
+			"set_property",
+			"llvm_update_compile_flags",
+			"add_definitions",
+			"include",
+			"include_directories"
+		],
+		"files" : 
+		[
+			"cmake/modules/AddLLVM.cmake",
+			"utils/TableGen/GlobalISel/CMakeLists.txt",
+			"cmake/modules/HandleLLVMOptions.cmake",
+			"CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 1
+			},
+			{
+				"command" : 1,
+				"file" : 1,
+				"line" : 5,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 498,
+				"parent" : 1
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 616,
+				"parent" : 1
+			},
+			{
+				"command" : 4,
+				"file" : 0,
+				"line" : 522,
+				"parent" : 1
+			},
+			{
+				"command" : 3,
+				"file" : 0,
+				"line" : 79,
+				"parent" : 4
+			},
+			{
+				"file" : 3
+			},
+			{
+				"command" : 6,
+				"file" : 3,
+				"line" : 660,
+				"parent" : 6
+			},
+			{
+				"file" : 2,
+				"parent" : 7
+			},
+			{
+				"command" : 5,
+				"file" : 2,
+				"line" : 401,
+				"parent" : 8
+			},
+			{
+				"command" : 5,
+				"file" : 2,
+				"line" : 390,
+				"parent" : 8
+			},
+			{
+				"command" : 5,
+				"file" : 2,
+				"line" : 779,
+				"parent" : 8
+			},
+			{
+				"command" : 5,
+				"file" : 2,
+				"line" : 780,
+				"parent" : 8
+			},
+			{
+				"command" : 5,
+				"file" : 2,
+				"line" : 781,
+				"parent" : 8
+			},
+			{
+				"command" : 7,
+				"file" : 3,
+				"line" : 862,
+				"parent" : 6
+			}
+		]
+	},
+	"compileGroups" : 
+	[
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "/DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 /MDd /Zi /Ob0 /Od /RTC1  "
+				},
+				{
+					"fragment" : " /EHs-c- /GR-"
+				},
+				{
+					"fragment" : "-std:c++14"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"backtrace" : 5,
+					"define" : "GTEST_HAS_RTTI=0"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "UNICODE"
+				},
+				{
+					"backtrace" : 10,
+					"define" : "_CRT_NONSTDC_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 10,
+					"define" : "_CRT_NONSTDC_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 10,
+					"define" : "_CRT_SECURE_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 10,
+					"define" : "_CRT_SECURE_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 5,
+					"define" : "_HAS_EXCEPTIONS=0"
+				},
+				{
+					"backtrace" : 10,
+					"define" : "_SCL_SECURE_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 10,
+					"define" : "_SCL_SECURE_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "_UNICODE"
+				},
+				{
+					"backtrace" : 11,
+					"define" : "__STDC_CONSTANT_MACROS"
+				},
+				{
+					"backtrace" : 12,
+					"define" : "__STDC_FORMAT_MACROS"
+				},
+				{
+					"backtrace" : 13,
+					"define" : "__STDC_LIMIT_MACROS"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/out/build/x64-Debug/utils/TableGen/GlobalISel"
+				},
+				{
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/utils/TableGen/GlobalISel"
+				},
+				{
+					"backtrace" : 14,
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/out/build/x64-Debug/include"
+				},
+				{
+					"backtrace" : 14,
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/include"
+				}
+			],
+			"language" : "CXX",
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7
+			]
+		}
+	],
+	"dependencies" : 
+	[
+		{
+			"backtrace" : 3,
+			"id" : "LLVMDemangle::@3c7ef39cff93a35ba752"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "LLVMSupport::@928d1708d80fe1f55e59"
+		}
+	],
+	"id" : "LLVMTableGenGlobalISel::@9adc9143a7a0a5767f12",
+	"name" : "LLVMTableGenGlobalISel",
+	"nameOnDisk" : "LLVMTableGenGlobalISel.lib",
+	"paths" : 
+	{
+		"build" : "utils/TableGen/GlobalISel",
+		"source" : "utils/TableGen/GlobalISel"
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "Source Files",
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7
+			]
+		},
+		{
+			"name" : "Header Files",
+			"sourceIndexes" : 
+			[
+				8,
+				9,
+				10,
+				11,
+				12,
+				13,
+				14,
+				15,
+				16
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "utils/TableGen/GlobalISel/CodeExpander.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "utils/TableGen/GlobalISel/GIMatchDag.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "utils/TableGen/GlobalISel/GIMatchDagEdge.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "utils/TableGen/GlobalISel/GIMatchDagInstr.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "utils/TableGen/GlobalISel/GIMatchDagOperands.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "utils/TableGen/GlobalISel/GIMatchDagPredicate.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "utils/TableGen/GlobalISel/GIMatchDagPredicateDependencyEdge.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "utils/TableGen/GlobalISel/GIMatchTree.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"path" : "utils/TableGen/GlobalISel/CodeExpander.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 2,
+			"path" : "utils/TableGen/GlobalISel/CodeExpansions.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 2,
+			"path" : "utils/TableGen/GlobalISel/GIMatchDag.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 2,
+			"path" : "utils/TableGen/GlobalISel/GIMatchDagEdge.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 2,
+			"path" : "utils/TableGen/GlobalISel/GIMatchDagInstr.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 2,
+			"path" : "utils/TableGen/GlobalISel/GIMatchDagOperands.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 2,
+			"path" : "utils/TableGen/GlobalISel/GIMatchDagPredicate.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 2,
+			"path" : "utils/TableGen/GlobalISel/GIMatchDagPredicateDependencyEdge.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 2,
+			"path" : "utils/TableGen/GlobalISel/GIMatchTree.h",
+			"sourceGroupIndex" : 1
+		}
+	],
+	"type" : "STATIC_LIBRARY"
+}

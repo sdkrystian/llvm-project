@@ -1,0 +1,54 @@
+{
+	"backtrace" : 3,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_custom_target",
+			"add_llvm_library",
+			"add_llvm_pass_plugin"
+		],
+		"files" : 
+		[
+			"cmake/modules/AddLLVM.cmake",
+			"examples/Bye/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 1
+			},
+			{
+				"command" : 2,
+				"file" : 1,
+				"line" : 5,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 894,
+				"parent" : 1
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 722,
+				"parent" : 2
+			}
+		]
+	},
+	"folder" : 
+	{
+		"name" : "Loadable modules"
+	},
+	"id" : "Bye::@959325562bb79a68c91a",
+	"name" : "Bye",
+	"paths" : 
+	{
+		"build" : "examples/Bye",
+		"source" : "examples/Bye"
+	},
+	"sources" : [],
+	"type" : "UTILITY"
+}

@@ -1,0 +1,288 @@
+Determining if the CLC compiler works failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libclc/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_f8244 && [1/2] Building CLC object CMakeFiles\cmTC_f8244.dir\testCLCCompiler.bc
+FAILED: CMakeFiles/cmTC_f8244.dir/testCLCCompiler.bc 
+C:\Users\Krystian\src\llvm-project\build\bin\clang.exe    -o CMakeFiles\cmTC_f8244.dir\testCLCCompiler.bc -c testCLCCompiler.cl -emit-llvm
+PLEASE submit a bug report to https://bugs.llvm.org/ and include the crash backtrace, preprocessed source, and associated run script.
+Stack dump:
+0.	Program arguments: C:\Users\Krystian\src\llvm-project\build\bin\clang.exe -o CMakeFiles\cmTC_f8244.dir\testCLCCompiler.bc -c testCLCCompiler.cl -emit-llvm 
+1.	<eof> parser at end of file
+2.	Per-function optimization
+3.	Running pass 'Simplify the CFG' on function '@test_k'
+ #0 0x6608b020 (C:\Windows\SYSTEM32\ucrtbased.dll+0x8b020)
+ #1 0x6608db3c (C:\Windows\SYSTEM32\ucrtbased.dll+0x8db3c)
+ #2 0x6608e110 (C:\Windows\SYSTEM32\ucrtbased.dll+0x8e110)
+ #3 0x035ba7ff llvm::SmallVectorImpl<class llvm::LLT>::~SmallVectorImpl<class llvm::LLT>(void) C:\Users\Krystian\src\llvm-project\llvm\include\llvm\ADT\SmallVector.h:336:0
+ #4 0x037bcc5c llvm::SmallVector<class llvm::LLT, 4>::~SmallVector<class llvm::LLT, 4>(void) C:\Users\Krystian\src\llvm-project\llvm\include\llvm\ADT\SmallVector.h:844:0
+ #5 0x05e50296 <lambda_543130242edd05ce781a30adb393f226>::~<lambda_543130242edd05ce781a30adb393f226> (C:\Users\Krystian\src\llvm-project\build\bin\clang.exe+0x4fc0296)
+ #6 0x05e504c9 std::_Func_impl_no_alloc<<lambda_543130242edd05ce781a30adb393f226>,bool,llvm::LegalityQuery const &>::~_Func_impl_no_alloc<<lambda_543130242edd05ce781a30adb393f226>,bool,llvm::LegalityQuery const &> (C:\Users\Krystian\src\llvm-project\build\bin\clang.exe+0x4fc04c9)
+ #7 0x05e52666 std::_Func_impl_no_alloc<<lambda_543130242edd05ce781a30adb393f226>,bool,llvm::LegalityQuery const &>::`scalar deleting destructor' (C:\Users\Krystian\src\llvm-project\build\bin\clang.exe+0x4fc2666)
+ #8 0x05e52eb8 std::_Func_impl_no_alloc<<lambda_543130242edd05ce781a30adb393f226>,bool,llvm::LegalityQuery const &>::_Delete_this C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\functional:943:0
+ #9 0x0154f886 std::_Func_class<bool, struct llvm::LegalityQuery const &>::_Tidy(void) C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\functional:1058:0
+#10 0x01547016 std::_Func_class<bool, struct llvm::LegalityQuery const &>::~_Func_class<bool, struct llvm::LegalityQuery const &>(void) C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\functional:981:0
+#11 0x01547286 std::function<(struct llvm::LegalityQuery const &)>::~function<(struct llvm::LegalityQuery const &)>(void) C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\list:1046:0
+#12 0x0154366d llvm::LegalityPredicates::all<class std::function<(struct llvm::LegalityQuery const &)>>(class std::function<bool __cdecl(struct llvm::LegalityQuery const &)>, class std::function<bool __cdecl(struct llvm::LegalityQuery const &)>) C:\Users\Krystian\src\llvm-project\llvm\include\llvm\CodeGen\GlobalISel\LegalizerInfo.h:197:0
+#13 0x0154fdd6 llvm::LegalizeRuleSet::actionForCartesianProduct(enum llvm::LegalizeActions::LegalizeAction, class std::initializer_list<class llvm::LLT>, class std::initializer_list<class llvm::LLT>) C:\Users\Krystian\src\llvm-project\llvm\include\llvm\CodeGen\GlobalISel\LegalizerInfo.h:451:0
+#14 0x015514c8 llvm::LegalizeRuleSet::legalForCartesianProduct(class std::initializer_list<class llvm::LLT>, class std::initializer_list<class llvm::LLT>) C:\Users\Krystian\src\llvm-project\llvm\include\llvm\CodeGen\GlobalISel\LegalizerInfo.h:521:0
+#15 0x02e22d19 llvm::X86LegalizerInfo::setLegalizerInfo32bit(void) C:\Users\Krystian\src\llvm-project\llvm\lib\Target\X86\X86LegalizerInfo.cpp:147:0
+#16 0x02e220fc llvm::X86LegalizerInfo::X86LegalizerInfo(class llvm::X86Subtarget const &, class llvm::X86TargetMachine const &) C:\Users\Krystian\src\llvm-project\llvm\lib\Target\X86\X86LegalizerInfo.cpp:63:0
+#17 0x02b9dc23 llvm::X86Subtarget::X86Subtarget(class llvm::Triple const &, class llvm::StringRef, class llvm::StringRef, class llvm::X86TargetMachine const &, struct llvm::MaybeAlign, unsigned int, unsigned int) C:\Users\Krystian\src\llvm-project\llvm\lib\Target\X86\X86Subtarget.cpp:351:0
+#18 0x02a9c74f std::make_unique<class llvm::X86Subtarget, class llvm::Triple const &, class llvm::StringRef &, class llvm::StringRef &, class llvm::X86TargetMachine const &, struct llvm::MaybeAlign, unsigned int &, unsigned int &, 0>(class llvm::Triple const &, class llvm::StringRef &, class llvm::StringRef &, class llvm::X86TargetMachine const &, struct llvm::MaybeAlign &&, unsigned int &, unsigned int &) C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\memory:2064:0
+#19 0x02a9a2c9 llvm::X86TargetMachine::getSubtargetImpl(class llvm::Function const &) const C:\Users\Krystian\src\llvm-project\llvm\lib\Target\X86\X86TargetMachine.cpp:304:0
+#20 0x02a9d0bc llvm::X86TTIImpl::X86TTIImpl(class llvm::X86TargetMachine const *, class llvm::Function const &) C:\Users\Krystian\src\llvm-project\llvm\lib\Target\X86\X86TargetTransformInfo.h:98:0
+#21 0x02a9a449 llvm::X86TargetMachine::getTargetTransformInfo(class llvm::Function const &) C:\Users\Krystian\src\llvm-project\llvm\lib\Target\X86\X86TargetMachine.cpp:326:0
+#22 0x06731a64 <lambda_df6a9d95dd0aa0f9f5ad835854e9ad20>::operator() C:\Users\Krystian\src\llvm-project\llvm\lib\Target\TargetMachine.cpp:270:0
+#23 0x06731772 std::_Invoker_functor::_Call<<lambda_df6a9d95dd0aa0f9f5ad835854e9ad20> &,llvm::Function const &> C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\type_traits:1610:0
+#24 0x067318d3 std::invoke<<lambda_df6a9d95dd0aa0f9f5ad835854e9ad20> &,llvm::Function const &> C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\type_traits:1610:0
+#25 0x06731703 std::_Invoker_ret<llvm::TargetTransformInfo,0>::_Call<<lambda_df6a9d95dd0aa0f9f5ad835854e9ad20> &,llvm::Function const &> C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\type_traits:1636:0
+#26 0x06731bdb std::_Func_impl_no_alloc<<lambda_df6a9d95dd0aa0f9f5ad835854e9ad20>,llvm::TargetTransformInfo,llvm::Function const &>::_Do_call C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\functional:926:0
+#27 0x031b64a4 std::_Func_class<class llvm::TargetTransformInfo, class llvm::Function const &>::operator()(class llvm::Function const &) const C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\functional:976:0
+#28 0x031b035d llvm::TargetIRAnalysis::run(class llvm::Function const &, class llvm::AnalysisManager<class llvm::Function> &) C:\Users\Krystian\src\llvm-project\llvm\lib\Analysis\TargetTransformInfo.cpp:1374:0
+#29 0x031b04e2 llvm::TargetTransformInfoWrapperPass::getTTI(class llvm::Function const &) C:\Users\Krystian\src\llvm-project\llvm\lib\Analysis\TargetTransformInfo.cpp:1405:0
+#30 0x0469c7e6 `anonymous namespace'::CFGSimplifyPass::runOnFunction C:\Users\Krystian\src\llvm-project\llvm\lib\Transforms\Scalar\SimplifyCFGPass.cpp:284:0
+#31 0x03b5c0f0 llvm::FPPassManager::runOnFunction(class llvm::Function &) C:\Users\Krystian\src\llvm-project\llvm\lib\IR\LegacyPassManager.cpp:1482:0
+#32 0x03b5c9cf llvm::legacy::FunctionPassManagerImpl::run(class llvm::Function &) C:\Users\Krystian\src\llvm-project\llvm\lib\IR\LegacyPassManager.cpp:1419:0
+#33 0x03b56dba llvm::legacy::FunctionPassManager::run(class llvm::Function &) C:\Users\Krystian\src\llvm-project\llvm\lib\IR\LegacyPassManager.cpp:1345:0
+#34 0x04f95e44 `anonymous namespace'::EmitAssemblyHelper::EmitAssembly C:\Users\Krystian\src\llvm-project\clang\lib\CodeGen\BackendUtil.cpp:926:0
+#35 0x04f93e06 clang::EmitBackendOutput(class clang::DiagnosticsEngine &, class clang::HeaderSearchOptions const &, class clang::CodeGenOptions const &, class clang::TargetOptions const &, class clang::LangOptions const &, class llvm::DataLayout const &, class llvm::Module *, enum clang::BackendAction, class std::unique_ptr<class llvm::raw_pwrite_stream, struct std::default_delete<class llvm::raw_pwrite_stream>>) C:\Users\Krystian\src\llvm-project\clang\lib\CodeGen\BackendUtil.cpp:1628:0
+#36 0x0a5fafb4 clang::BackendConsumer::HandleTranslationUnit(class clang::ASTContext &) C:\Users\Krystian\src\llvm-project\clang\lib\CodeGen\CodeGenAction.cpp:335:0
+#37 0x08081dc7 clang::ParseAST(class clang::Sema &, bool, bool) C:\Users\Krystian\src\llvm-project\clang\lib\Parse\ParseAST.cpp:171:0
+#38 0x058fe084 clang::ASTFrontendAction::ExecuteAction(void) C:\Users\Krystian\src\llvm-project\clang\lib\Frontend\FrontendAction.cpp:1047:0
+#39 0x0a5f1301 clang::CodeGenAction::ExecuteAction(void) C:\Users\Krystian\src\llvm-project\clang\lib\CodeGen\CodeGenAction.cpp:1180:0
+#40 0x058fdb19 clang::FrontendAction::Execute(void) C:\Users\Krystian\src\llvm-project\clang\lib\Frontend\FrontendAction.cpp:940:0
+#41 0x0588a842 clang::CompilerInstance::ExecuteAction(class clang::FrontendAction &) C:\Users\Krystian\src\llvm-project\clang\lib\Frontend\CompilerInstance.cpp:973:0
+#42 0x05aaa22f clang::ExecuteCompilerInvocation(class clang::CompilerInstance *) C:\Users\Krystian\src\llvm-project\clang\lib\FrontendTool\ExecuteCompilerInvocation.cpp:282:0
+#43 0x0123bdb2 cc1_main(class llvm::ArrayRef<char const *>, char const *, void *) C:\Users\Krystian\src\llvm-project\clang\tools\driver\cc1_main.cpp:240:0
+#44 0x0122a19f ExecuteCC1Tool C:\Users\Krystian\src\llvm-project\clang\tools\driver\driver.cpp:330:0
+#45 0x057b2303 <lambda_bbae134195eadf9b833d53886a5470c4>::operator() C:\Users\Krystian\src\llvm-project\clang\lib\Driver\Job.cpp:417:0
+#46 0x057b17db llvm::function_ref<(void)>::callback_fn<class <lambda_bbae134195eadf9b833d53886a5470c4>>(int) C:\Users\Krystian\src\llvm-project\llvm\include\llvm\ADT\STLExtras.h:110:0
+#47 0x048e385c llvm::function_ref<(void)>::operator()(void) const C:\Users\Krystian\src\llvm-project\llvm\include\llvm\ADT\STLExtras.h:124:0
+#48 0x048e2fa5 llvm::CrashRecoveryContext::RunSafely(class llvm::function_ref<(void)>) C:\Users\Krystian\src\llvm-project\llvm\lib\Support\CrashRecoveryContext.cpp:229:0
+#49 0x057afa72 clang::driver::CC1Command::Execute(class llvm::ArrayRef<class llvm::Optional<class llvm::StringRef>>, class std::basic_string<char, struct std::char_traits<char>, class std::allocator<char>> *, bool *) const C:\Users\Krystian\src\llvm-project\clang\lib\Driver\Job.cpp:417:0
+#50 0x05720ee8 clang::driver::Compilation::ExecuteCommand(class clang::driver::Command const &, class clang::driver::Command const *&) const C:\Users\Krystian\src\llvm-project\clang\lib\Driver\Compilation.cpp:195:0
+#51 0x057210f1 clang::driver::Compilation::ExecuteJobs(class clang::driver::JobList const &, class llvm::SmallVectorImpl<struct std::pair<int, class clang::driver::Command const *>> &) const C:\Users\Krystian\src\llvm-project\clang\lib\Driver\Compilation.cpp:246:0
+#52 0x056dc267 clang::driver::Driver::ExecuteCompilation(class clang::driver::Compilation &, class llvm::SmallVectorImpl<struct std::pair<int, class clang::driver::Command const *>> &) C:\Users\Krystian\src\llvm-project\clang\lib\Driver\Driver.cpp:1483:0
+#53 0x0122b09e main C:\Users\Krystian\src\llvm-project\clang\tools\driver\driver.cpp:502:0
+#54 0x0ea1bd38 
+#55 0x0a2c9837 _scrt_common_main_seh d:\agent\_work\4\s\src\vctools\crt\vcstartup\src\startup\exe_common.inl:288:0
+#56 0x0a2c96cd _scrt_common_main d:\agent\_work\4\s\src\vctools\crt\vcstartup\src\startup\exe_common.inl:331:0
+#57 0x0a2c9a68 mainCRTStartup d:\agent\_work\4\s\src\vctools\crt\vcstartup\src\startup\exe_main.cpp:17:0
+#58 0x76516359 (C:\Windows\System32\KERNEL32.DLL+0x16359)
+#59 0x76fa7b74 (C:\Windows\SYSTEM32\ntdll.dll+0x67b74)
+#60 0x76fa7b44 (C:\Windows\SYSTEM32\ntdll.dll+0x67b44)
+clang: error: clang frontend command failed due to signal (use -v to see invocation)
+clang version 11.0.0 (https://github.com/llvm/llvm-project.git cdd1cd712087377b69aee1c9f13be7cd73fb340d)
+Target: i686-pc-windows-msvc
+Thread model: posix
+InstalledDir: C:\Users\Krystian\src\llvm-project\build\bin
+clang: note: diagnostic msg: 
+********************
+
+PLEASE ATTACH THE FOLLOWING FILES TO THE BUG REPORT:
+Preprocessed source(s) and associated run script(s) are located at:
+clang: note: diagnostic msg: C:\Users\Krystian\AppData\Local\Temp\testCLCCompiler-3cc06d.cl
+clang: note: diagnostic msg: C:\Users\Krystian\AppData\Local\Temp\testCLCCompiler-3cc06d.sh
+clang: note: diagnostic msg: 
+
+********************
+ninja: build stopped: subcommand failed.
+
+
+
+Determining if the CLC compiler works failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libclc/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_8069e && [1/2] Building CLC object CMakeFiles\cmTC_8069e.dir\testCLCCompiler.bc
+FAILED: CMakeFiles/cmTC_8069e.dir/testCLCCompiler.bc 
+C:\Users\Krystian\src\llvm-project\build\bin\clang.exe    -o CMakeFiles\cmTC_8069e.dir\testCLCCompiler.bc -c testCLCCompiler.cl -emit-llvm
+PLEASE submit a bug report to https://bugs.llvm.org/ and include the crash backtrace, preprocessed source, and associated run script.
+Stack dump:
+0.	Program arguments: C:\Users\Krystian\src\llvm-project\build\bin\clang.exe -o CMakeFiles\cmTC_8069e.dir\testCLCCompiler.bc -c testCLCCompiler.cl -emit-llvm 
+1.	<eof> parser at end of file
+2.	Per-function optimization
+3.	Running pass 'Simplify the CFG' on function '@test_k'
+ #0 0x79fab020 (C:\Windows\SYSTEM32\ucrtbased.dll+0x8b020)
+ #1 0x79fadb3c (C:\Windows\SYSTEM32\ucrtbased.dll+0x8db3c)
+ #2 0x79fae110 (C:\Windows\SYSTEM32\ucrtbased.dll+0x8e110)
+ #3 0x02d8a7ff llvm::SmallVectorImpl<class llvm::LLT>::~SmallVectorImpl<class llvm::LLT>(void) C:\Users\Krystian\src\llvm-project\llvm\include\llvm\ADT\SmallVector.h:336:0
+ #4 0x02f8cc5c llvm::SmallVector<class llvm::LLT, 4>::~SmallVector<class llvm::LLT, 4>(void) C:\Users\Krystian\src\llvm-project\llvm\include\llvm\ADT\SmallVector.h:844:0
+ #5 0x05620296 <lambda_543130242edd05ce781a30adb393f226>::~<lambda_543130242edd05ce781a30adb393f226> (C:\Users\Krystian\src\llvm-project\build\bin\clang.exe+0x4fc0296)
+ #6 0x056204c9 std::_Func_impl_no_alloc<<lambda_543130242edd05ce781a30adb393f226>,bool,llvm::LegalityQuery const &>::~_Func_impl_no_alloc<<lambda_543130242edd05ce781a30adb393f226>,bool,llvm::LegalityQuery const &> (C:\Users\Krystian\src\llvm-project\build\bin\clang.exe+0x4fc04c9)
+ #7 0x05622666 std::_Func_impl_no_alloc<<lambda_543130242edd05ce781a30adb393f226>,bool,llvm::LegalityQuery const &>::`scalar deleting destructor' (C:\Users\Krystian\src\llvm-project\build\bin\clang.exe+0x4fc2666)
+ #8 0x05622eb8 std::_Func_impl_no_alloc<<lambda_543130242edd05ce781a30adb393f226>,bool,llvm::LegalityQuery const &>::_Delete_this C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\functional:943:0
+ #9 0x00d1f886 std::_Func_class<bool, struct llvm::LegalityQuery const &>::_Tidy(void) C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\functional:1058:0
+#10 0x00d17016 std::_Func_class<bool, struct llvm::LegalityQuery const &>::~_Func_class<bool, struct llvm::LegalityQuery const &>(void) C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\functional:981:0
+#11 0x00d17286 std::function<(struct llvm::LegalityQuery const &)>::~function<(struct llvm::LegalityQuery const &)>(void) C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\list:1046:0
+#12 0x00d1366d llvm::LegalityPredicates::all<class std::function<(struct llvm::LegalityQuery const &)>>(class std::function<bool __cdecl(struct llvm::LegalityQuery const &)>, class std::function<bool __cdecl(struct llvm::LegalityQuery const &)>) C:\Users\Krystian\src\llvm-project\llvm\include\llvm\CodeGen\GlobalISel\LegalizerInfo.h:197:0
+#13 0x00d1fdd6 llvm::LegalizeRuleSet::actionForCartesianProduct(enum llvm::LegalizeActions::LegalizeAction, class std::initializer_list<class llvm::LLT>, class std::initializer_list<class llvm::LLT>) C:\Users\Krystian\src\llvm-project\llvm\include\llvm\CodeGen\GlobalISel\LegalizerInfo.h:451:0
+#14 0x00d214c8 llvm::LegalizeRuleSet::legalForCartesianProduct(class std::initializer_list<class llvm::LLT>, class std::initializer_list<class llvm::LLT>) C:\Users\Krystian\src\llvm-project\llvm\include\llvm\CodeGen\GlobalISel\LegalizerInfo.h:521:0
+#15 0x025f2d19 llvm::X86LegalizerInfo::setLegalizerInfo32bit(void) C:\Users\Krystian\src\llvm-project\llvm\lib\Target\X86\X86LegalizerInfo.cpp:147:0
+#16 0x025f20fc llvm::X86LegalizerInfo::X86LegalizerInfo(class llvm::X86Subtarget const &, class llvm::X86TargetMachine const &) C:\Users\Krystian\src\llvm-project\llvm\lib\Target\X86\X86LegalizerInfo.cpp:63:0
+#17 0x0236dc23 llvm::X86Subtarget::X86Subtarget(class llvm::Triple const &, class llvm::StringRef, class llvm::StringRef, class llvm::X86TargetMachine const &, struct llvm::MaybeAlign, unsigned int, unsigned int) C:\Users\Krystian\src\llvm-project\llvm\lib\Target\X86\X86Subtarget.cpp:351:0
+#18 0x0226c74f std::make_unique<class llvm::X86Subtarget, class llvm::Triple const &, class llvm::StringRef &, class llvm::StringRef &, class llvm::X86TargetMachine const &, struct llvm::MaybeAlign, unsigned int &, unsigned int &, 0>(class llvm::Triple const &, class llvm::StringRef &, class llvm::StringRef &, class llvm::X86TargetMachine const &, struct llvm::MaybeAlign &&, unsigned int &, unsigned int &) C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\memory:2064:0
+#19 0x0226a2c9 llvm::X86TargetMachine::getSubtargetImpl(class llvm::Function const &) const C:\Users\Krystian\src\llvm-project\llvm\lib\Target\X86\X86TargetMachine.cpp:304:0
+#20 0x0226d0bc llvm::X86TTIImpl::X86TTIImpl(class llvm::X86TargetMachine const *, class llvm::Function const &) C:\Users\Krystian\src\llvm-project\llvm\lib\Target\X86\X86TargetTransformInfo.h:98:0
+#21 0x0226a449 llvm::X86TargetMachine::getTargetTransformInfo(class llvm::Function const &) C:\Users\Krystian\src\llvm-project\llvm\lib\Target\X86\X86TargetMachine.cpp:326:0
+#22 0x05f01a64 <lambda_df6a9d95dd0aa0f9f5ad835854e9ad20>::operator() C:\Users\Krystian\src\llvm-project\llvm\lib\Target\TargetMachine.cpp:270:0
+#23 0x05f01772 std::_Invoker_functor::_Call<<lambda_df6a9d95dd0aa0f9f5ad835854e9ad20> &,llvm::Function const &> C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\type_traits:1610:0
+#24 0x05f018d3 std::invoke<<lambda_df6a9d95dd0aa0f9f5ad835854e9ad20> &,llvm::Function const &> C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\type_traits:1610:0
+#25 0x05f01703 std::_Invoker_ret<llvm::TargetTransformInfo,0>::_Call<<lambda_df6a9d95dd0aa0f9f5ad835854e9ad20> &,llvm::Function const &> C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\type_traits:1636:0
+#26 0x05f01bdb std::_Func_impl_no_alloc<<lambda_df6a9d95dd0aa0f9f5ad835854e9ad20>,llvm::TargetTransformInfo,llvm::Function const &>::_Do_call C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\functional:926:0
+#27 0x029864a4 std::_Func_class<class llvm::TargetTransformInfo, class llvm::Function const &>::operator()(class llvm::Function const &) const C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\functional:976:0
+#28 0x0298035d llvm::TargetIRAnalysis::run(class llvm::Function const &, class llvm::AnalysisManager<class llvm::Function> &) C:\Users\Krystian\src\llvm-project\llvm\lib\Analysis\TargetTransformInfo.cpp:1374:0
+#29 0x029804e2 llvm::TargetTransformInfoWrapperPass::getTTI(class llvm::Function const &) C:\Users\Krystian\src\llvm-project\llvm\lib\Analysis\TargetTransformInfo.cpp:1405:0
+#30 0x03e6c7e6 `anonymous namespace'::CFGSimplifyPass::runOnFunction C:\Users\Krystian\src\llvm-project\llvm\lib\Transforms\Scalar\SimplifyCFGPass.cpp:284:0
+#31 0x0332c0f0 llvm::FPPassManager::runOnFunction(class llvm::Function &) C:\Users\Krystian\src\llvm-project\llvm\lib\IR\LegacyPassManager.cpp:1482:0
+#32 0x0332c9cf llvm::legacy::FunctionPassManagerImpl::run(class llvm::Function &) C:\Users\Krystian\src\llvm-project\llvm\lib\IR\LegacyPassManager.cpp:1419:0
+#33 0x03326dba llvm::legacy::FunctionPassManager::run(class llvm::Function &) C:\Users\Krystian\src\llvm-project\llvm\lib\IR\LegacyPassManager.cpp:1345:0
+#34 0x04765e44 `anonymous namespace'::EmitAssemblyHelper::EmitAssembly C:\Users\Krystian\src\llvm-project\clang\lib\CodeGen\BackendUtil.cpp:926:0
+#35 0x04763e06 clang::EmitBackendOutput(class clang::DiagnosticsEngine &, class clang::HeaderSearchOptions const &, class clang::CodeGenOptions const &, class clang::TargetOptions const &, class clang::LangOptions const &, class llvm::DataLayout const &, class llvm::Module *, enum clang::BackendAction, class std::unique_ptr<class llvm::raw_pwrite_stream, struct std::default_delete<class llvm::raw_pwrite_stream>>) C:\Users\Krystian\src\llvm-project\clang\lib\CodeGen\BackendUtil.cpp:1628:0
+#36 0x09dcafb4 clang::BackendConsumer::HandleTranslationUnit(class clang::ASTContext &) C:\Users\Krystian\src\llvm-project\clang\lib\CodeGen\CodeGenAction.cpp:335:0
+#37 0x07851dc7 clang::ParseAST(class clang::Sema &, bool, bool) C:\Users\Krystian\src\llvm-project\clang\lib\Parse\ParseAST.cpp:171:0
+#38 0x050ce084 clang::ASTFrontendAction::ExecuteAction(void) C:\Users\Krystian\src\llvm-project\clang\lib\Frontend\FrontendAction.cpp:1047:0
+#39 0x09dc1301 clang::CodeGenAction::ExecuteAction(void) C:\Users\Krystian\src\llvm-project\clang\lib\CodeGen\CodeGenAction.cpp:1180:0
+#40 0x050cdb19 clang::FrontendAction::Execute(void) C:\Users\Krystian\src\llvm-project\clang\lib\Frontend\FrontendAction.cpp:940:0
+#41 0x0505a842 clang::CompilerInstance::ExecuteAction(class clang::FrontendAction &) C:\Users\Krystian\src\llvm-project\clang\lib\Frontend\CompilerInstance.cpp:973:0
+#42 0x0527a22f clang::ExecuteCompilerInvocation(class clang::CompilerInstance *) C:\Users\Krystian\src\llvm-project\clang\lib\FrontendTool\ExecuteCompilerInvocation.cpp:282:0
+#43 0x00a0bdb2 cc1_main(class llvm::ArrayRef<char const *>, char const *, void *) C:\Users\Krystian\src\llvm-project\clang\tools\driver\cc1_main.cpp:240:0
+#44 0x009fa19f ExecuteCC1Tool C:\Users\Krystian\src\llvm-project\clang\tools\driver\driver.cpp:330:0
+#45 0x04f82303 <lambda_bbae134195eadf9b833d53886a5470c4>::operator() C:\Users\Krystian\src\llvm-project\clang\lib\Driver\Job.cpp:417:0
+#46 0x04f817db llvm::function_ref<(void)>::callback_fn<class <lambda_bbae134195eadf9b833d53886a5470c4>>(int) C:\Users\Krystian\src\llvm-project\llvm\include\llvm\ADT\STLExtras.h:110:0
+#47 0x040b385c llvm::function_ref<(void)>::operator()(void) const C:\Users\Krystian\src\llvm-project\llvm\include\llvm\ADT\STLExtras.h:124:0
+#48 0x040b2fa5 llvm::CrashRecoveryContext::RunSafely(class llvm::function_ref<(void)>) C:\Users\Krystian\src\llvm-project\llvm\lib\Support\CrashRecoveryContext.cpp:229:0
+#49 0x04f7fa72 clang::driver::CC1Command::Execute(class llvm::ArrayRef<class llvm::Optional<class llvm::StringRef>>, class std::basic_string<char, struct std::char_traits<char>, class std::allocator<char>> *, bool *) const C:\Users\Krystian\src\llvm-project\clang\lib\Driver\Job.cpp:417:0
+#50 0x04ef0ee8 clang::driver::Compilation::ExecuteCommand(class clang::driver::Command const &, class clang::driver::Command const *&) const C:\Users\Krystian\src\llvm-project\clang\lib\Driver\Compilation.cpp:195:0
+#51 0x04ef10f1 clang::driver::Compilation::ExecuteJobs(class clang::driver::JobList const &, class llvm::SmallVectorImpl<struct std::pair<int, class clang::driver::Command const *>> &) const C:\Users\Krystian\src\llvm-project\clang\lib\Driver\Compilation.cpp:246:0
+#52 0x04eac267 clang::driver::Driver::ExecuteCompilation(class clang::driver::Compilation &, class llvm::SmallVectorImpl<struct std::pair<int, class clang::driver::Command const *>> &) C:\Users\Krystian\src\llvm-project\clang\lib\Driver\Driver.cpp:1483:0
+#53 0x009fb09e main C:\Users\Krystian\src\llvm-project\clang\tools\driver\driver.cpp:502:0
+#54 0x0e58b990 
+#55 0x09a99837 _scrt_common_main_seh d:\agent\_work\4\s\src\vctools\crt\vcstartup\src\startup\exe_common.inl:288:0
+#56 0x09a996cd _scrt_common_main d:\agent\_work\4\s\src\vctools\crt\vcstartup\src\startup\exe_common.inl:331:0
+#57 0x09a99a68 mainCRTStartup d:\agent\_work\4\s\src\vctools\crt\vcstartup\src\startup\exe_main.cpp:17:0
+#58 0x758e6359 (C:\Windows\System32\KERNEL32.DLL+0x16359)
+#59 0x77db7b74 (C:\Windows\SYSTEM32\ntdll.dll+0x67b74)
+#60 0x77db7b44 (C:\Windows\SYSTEM32\ntdll.dll+0x67b44)
+clang: error: clang frontend command failed due to signal (use -v to see invocation)
+clang version 11.0.0 (https://github.com/llvm/llvm-project.git cdd1cd712087377b69aee1c9f13be7cd73fb340d)
+Target: i686-pc-windows-msvc
+Thread model: posix
+InstalledDir: C:\Users\Krystian\src\llvm-project\build\bin
+clang: note: diagnostic msg: 
+********************
+
+PLEASE ATTACH THE FOLLOWING FILES TO THE BUG REPORT:
+Preprocessed source(s) and associated run script(s) are located at:
+clang: note: diagnostic msg: C:\Users\Krystian\AppData\Local\Temp\testCLCCompiler-c058b6.cl
+clang: note: diagnostic msg: C:\Users\Krystian\AppData\Local\Temp\testCLCCompiler-c058b6.sh
+clang: note: diagnostic msg: 
+
+********************
+ninja: build stopped: subcommand failed.
+
+
+
+Determining if the CLC compiler works failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libclc/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_e414f && [1/2] Building CLC object CMakeFiles\cmTC_e414f.dir\testCLCCompiler.bc
+FAILED: CMakeFiles/cmTC_e414f.dir/testCLCCompiler.bc 
+C:\Users\Krystian\src\llvm-project\build\bin\clang.exe    -o CMakeFiles\cmTC_e414f.dir\testCLCCompiler.bc -c testCLCCompiler.cl -emit-llvm
+PLEASE submit a bug report to https://bugs.llvm.org/ and include the crash backtrace, preprocessed source, and associated run script.
+Stack dump:
+0.	Program arguments: C:\Users\Krystian\src\llvm-project\build\bin\clang.exe -o CMakeFiles\cmTC_e414f.dir\testCLCCompiler.bc -c testCLCCompiler.cl -emit-llvm 
+1.	<eof> parser at end of file
+2.	Per-function optimization
+3.	Running pass 'Simplify the CFG' on function '@test_k'
+ #0 0x79fab020 (C:\Windows\SYSTEM32\ucrtbased.dll+0x8b020)
+ #1 0x79fadb3c (C:\Windows\SYSTEM32\ucrtbased.dll+0x8db3c)
+ #2 0x79fae110 (C:\Windows\SYSTEM32\ucrtbased.dll+0x8e110)
+ #3 0x0314a7ff llvm::SmallVectorImpl<class llvm::LLT>::~SmallVectorImpl<class llvm::LLT>(void) C:\Users\Krystian\src\llvm-project\llvm\include\llvm\ADT\SmallVector.h:336:0
+ #4 0x0334cc5c llvm::SmallVector<class llvm::LLT, 4>::~SmallVector<class llvm::LLT, 4>(void) C:\Users\Krystian\src\llvm-project\llvm\include\llvm\ADT\SmallVector.h:844:0
+ #5 0x059e0296 <lambda_543130242edd05ce781a30adb393f226>::~<lambda_543130242edd05ce781a30adb393f226> (C:\Users\Krystian\src\llvm-project\build\bin\clang.exe+0x4fc0296)
+ #6 0x059e04c9 std::_Func_impl_no_alloc<<lambda_543130242edd05ce781a30adb393f226>,bool,llvm::LegalityQuery const &>::~_Func_impl_no_alloc<<lambda_543130242edd05ce781a30adb393f226>,bool,llvm::LegalityQuery const &> (C:\Users\Krystian\src\llvm-project\build\bin\clang.exe+0x4fc04c9)
+ #7 0x059e2666 std::_Func_impl_no_alloc<<lambda_543130242edd05ce781a30adb393f226>,bool,llvm::LegalityQuery const &>::`scalar deleting destructor' (C:\Users\Krystian\src\llvm-project\build\bin\clang.exe+0x4fc2666)
+ #8 0x059e2eb8 std::_Func_impl_no_alloc<<lambda_543130242edd05ce781a30adb393f226>,bool,llvm::LegalityQuery const &>::_Delete_this C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\functional:943:0
+ #9 0x010df886 std::_Func_class<bool, struct llvm::LegalityQuery const &>::_Tidy(void) C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\functional:1058:0
+#10 0x010d7016 std::_Func_class<bool, struct llvm::LegalityQuery const &>::~_Func_class<bool, struct llvm::LegalityQuery const &>(void) C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\functional:981:0
+#11 0x010d7286 std::function<(struct llvm::LegalityQuery const &)>::~function<(struct llvm::LegalityQuery const &)>(void) C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\list:1046:0
+#12 0x010d366d llvm::LegalityPredicates::all<class std::function<(struct llvm::LegalityQuery const &)>>(class std::function<bool __cdecl(struct llvm::LegalityQuery const &)>, class std::function<bool __cdecl(struct llvm::LegalityQuery const &)>) C:\Users\Krystian\src\llvm-project\llvm\include\llvm\CodeGen\GlobalISel\LegalizerInfo.h:197:0
+#13 0x010dfdd6 llvm::LegalizeRuleSet::actionForCartesianProduct(enum llvm::LegalizeActions::LegalizeAction, class std::initializer_list<class llvm::LLT>, class std::initializer_list<class llvm::LLT>) C:\Users\Krystian\src\llvm-project\llvm\include\llvm\CodeGen\GlobalISel\LegalizerInfo.h:451:0
+#14 0x010e14c8 llvm::LegalizeRuleSet::legalForCartesianProduct(class std::initializer_list<class llvm::LLT>, class std::initializer_list<class llvm::LLT>) C:\Users\Krystian\src\llvm-project\llvm\include\llvm\CodeGen\GlobalISel\LegalizerInfo.h:521:0
+#15 0x029b2d19 llvm::X86LegalizerInfo::setLegalizerInfo32bit(void) C:\Users\Krystian\src\llvm-project\llvm\lib\Target\X86\X86LegalizerInfo.cpp:147:0
+#16 0x029b20fc llvm::X86LegalizerInfo::X86LegalizerInfo(class llvm::X86Subtarget const &, class llvm::X86TargetMachine const &) C:\Users\Krystian\src\llvm-project\llvm\lib\Target\X86\X86LegalizerInfo.cpp:63:0
+#17 0x0272dc23 llvm::X86Subtarget::X86Subtarget(class llvm::Triple const &, class llvm::StringRef, class llvm::StringRef, class llvm::X86TargetMachine const &, struct llvm::MaybeAlign, unsigned int, unsigned int) C:\Users\Krystian\src\llvm-project\llvm\lib\Target\X86\X86Subtarget.cpp:351:0
+#18 0x0262c74f std::make_unique<class llvm::X86Subtarget, class llvm::Triple const &, class llvm::StringRef &, class llvm::StringRef &, class llvm::X86TargetMachine const &, struct llvm::MaybeAlign, unsigned int &, unsigned int &, 0>(class llvm::Triple const &, class llvm::StringRef &, class llvm::StringRef &, class llvm::X86TargetMachine const &, struct llvm::MaybeAlign &&, unsigned int &, unsigned int &) C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\memory:2064:0
+#19 0x0262a2c9 llvm::X86TargetMachine::getSubtargetImpl(class llvm::Function const &) const C:\Users\Krystian\src\llvm-project\llvm\lib\Target\X86\X86TargetMachine.cpp:304:0
+#20 0x0262d0bc llvm::X86TTIImpl::X86TTIImpl(class llvm::X86TargetMachine const *, class llvm::Function const &) C:\Users\Krystian\src\llvm-project\llvm\lib\Target\X86\X86TargetTransformInfo.h:98:0
+#21 0x0262a449 llvm::X86TargetMachine::getTargetTransformInfo(class llvm::Function const &) C:\Users\Krystian\src\llvm-project\llvm\lib\Target\X86\X86TargetMachine.cpp:326:0
+#22 0x062c1a64 <lambda_df6a9d95dd0aa0f9f5ad835854e9ad20>::operator() C:\Users\Krystian\src\llvm-project\llvm\lib\Target\TargetMachine.cpp:270:0
+#23 0x062c1772 std::_Invoker_functor::_Call<<lambda_df6a9d95dd0aa0f9f5ad835854e9ad20> &,llvm::Function const &> C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\type_traits:1610:0
+#24 0x062c18d3 std::invoke<<lambda_df6a9d95dd0aa0f9f5ad835854e9ad20> &,llvm::Function const &> C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\type_traits:1610:0
+#25 0x062c1703 std::_Invoker_ret<llvm::TargetTransformInfo,0>::_Call<<lambda_df6a9d95dd0aa0f9f5ad835854e9ad20> &,llvm::Function const &> C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\type_traits:1636:0
+#26 0x062c1bdb std::_Func_impl_no_alloc<<lambda_df6a9d95dd0aa0f9f5ad835854e9ad20>,llvm::TargetTransformInfo,llvm::Function const &>::_Do_call C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\functional:926:0
+#27 0x02d464a4 std::_Func_class<class llvm::TargetTransformInfo, class llvm::Function const &>::operator()(class llvm::Function const &) const C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\include\functional:976:0
+#28 0x02d4035d llvm::TargetIRAnalysis::run(class llvm::Function const &, class llvm::AnalysisManager<class llvm::Function> &) C:\Users\Krystian\src\llvm-project\llvm\lib\Analysis\TargetTransformInfo.cpp:1374:0
+#29 0x02d404e2 llvm::TargetTransformInfoWrapperPass::getTTI(class llvm::Function const &) C:\Users\Krystian\src\llvm-project\llvm\lib\Analysis\TargetTransformInfo.cpp:1405:0
+#30 0x0422c7e6 `anonymous namespace'::CFGSimplifyPass::runOnFunction C:\Users\Krystian\src\llvm-project\llvm\lib\Transforms\Scalar\SimplifyCFGPass.cpp:284:0
+#31 0x036ec0f0 llvm::FPPassManager::runOnFunction(class llvm::Function &) C:\Users\Krystian\src\llvm-project\llvm\lib\IR\LegacyPassManager.cpp:1482:0
+#32 0x036ec9cf llvm::legacy::FunctionPassManagerImpl::run(class llvm::Function &) C:\Users\Krystian\src\llvm-project\llvm\lib\IR\LegacyPassManager.cpp:1419:0
+#33 0x036e6dba llvm::legacy::FunctionPassManager::run(class llvm::Function &) C:\Users\Krystian\src\llvm-project\llvm\lib\IR\LegacyPassManager.cpp:1345:0
+#34 0x04b25e44 `anonymous namespace'::EmitAssemblyHelper::EmitAssembly C:\Users\Krystian\src\llvm-project\clang\lib\CodeGen\BackendUtil.cpp:926:0
+#35 0x04b23e06 clang::EmitBackendOutput(class clang::DiagnosticsEngine &, class clang::HeaderSearchOptions const &, class clang::CodeGenOptions const &, class clang::TargetOptions const &, class clang::LangOptions const &, class llvm::DataLayout const &, class llvm::Module *, enum clang::BackendAction, class std::unique_ptr<class llvm::raw_pwrite_stream, struct std::default_delete<class llvm::raw_pwrite_stream>>) C:\Users\Krystian\src\llvm-project\clang\lib\CodeGen\BackendUtil.cpp:1628:0
+#36 0x0a18afb4 clang::BackendConsumer::HandleTranslationUnit(class clang::ASTContext &) C:\Users\Krystian\src\llvm-project\clang\lib\CodeGen\CodeGenAction.cpp:335:0
+#37 0x07c11dc7 clang::ParseAST(class clang::Sema &, bool, bool) C:\Users\Krystian\src\llvm-project\clang\lib\Parse\ParseAST.cpp:171:0
+#38 0x0548e084 clang::ASTFrontendAction::ExecuteAction(void) C:\Users\Krystian\src\llvm-project\clang\lib\Frontend\FrontendAction.cpp:1047:0
+#39 0x0a181301 clang::CodeGenAction::ExecuteAction(void) C:\Users\Krystian\src\llvm-project\clang\lib\CodeGen\CodeGenAction.cpp:1180:0
+#40 0x0548db19 clang::FrontendAction::Execute(void) C:\Users\Krystian\src\llvm-project\clang\lib\Frontend\FrontendAction.cpp:940:0
+#41 0x0541a842 clang::CompilerInstance::ExecuteAction(class clang::FrontendAction &) C:\Users\Krystian\src\llvm-project\clang\lib\Frontend\CompilerInstance.cpp:973:0
+#42 0x0563a22f clang::ExecuteCompilerInvocation(class clang::CompilerInstance *) C:\Users\Krystian\src\llvm-project\clang\lib\FrontendTool\ExecuteCompilerInvocation.cpp:282:0
+#43 0x00dcbdb2 cc1_main(class llvm::ArrayRef<char const *>, char const *, void *) C:\Users\Krystian\src\llvm-project\clang\tools\driver\cc1_main.cpp:240:0
+#44 0x00dba19f ExecuteCC1Tool C:\Users\Krystian\src\llvm-project\clang\tools\driver\driver.cpp:330:0
+#45 0x05342303 <lambda_bbae134195eadf9b833d53886a5470c4>::operator() C:\Users\Krystian\src\llvm-project\clang\lib\Driver\Job.cpp:417:0
+#46 0x053417db llvm::function_ref<(void)>::callback_fn<class <lambda_bbae134195eadf9b833d53886a5470c4>>(int) C:\Users\Krystian\src\llvm-project\llvm\include\llvm\ADT\STLExtras.h:110:0
+#47 0x0447385c llvm::function_ref<(void)>::operator()(void) const C:\Users\Krystian\src\llvm-project\llvm\include\llvm\ADT\STLExtras.h:124:0
+#48 0x04472fa5 llvm::CrashRecoveryContext::RunSafely(class llvm::function_ref<(void)>) C:\Users\Krystian\src\llvm-project\llvm\lib\Support\CrashRecoveryContext.cpp:229:0
+#49 0x0533fa72 clang::driver::CC1Command::Execute(class llvm::ArrayRef<class llvm::Optional<class llvm::StringRef>>, class std::basic_string<char, struct std::char_traits<char>, class std::allocator<char>> *, bool *) const C:\Users\Krystian\src\llvm-project\clang\lib\Driver\Job.cpp:417:0
+#50 0x052b0ee8 clang::driver::Compilation::ExecuteCommand(class clang::driver::Command const &, class clang::driver::Command const *&) const C:\Users\Krystian\src\llvm-project\clang\lib\Driver\Compilation.cpp:195:0
+#51 0x052b10f1 clang::driver::Compilation::ExecuteJobs(class clang::driver::JobList const &, class llvm::SmallVectorImpl<struct std::pair<int, class clang::driver::Command const *>> &) const C:\Users\Krystian\src\llvm-project\clang\lib\Driver\Compilation.cpp:246:0
+#52 0x0526c267 clang::driver::Driver::ExecuteCompilation(class clang::driver::Compilation &, class llvm::SmallVectorImpl<struct std::pair<int, class clang::driver::Command const *>> &) C:\Users\Krystian\src\llvm-project\clang\lib\Driver\Driver.cpp:1483:0
+#53 0x00dbb09e main C:\Users\Krystian\src\llvm-project\clang\tools\driver\driver.cpp:502:0
+#54 0x0e5ab878 
+#55 0x09e59837 _scrt_common_main_seh d:\agent\_work\4\s\src\vctools\crt\vcstartup\src\startup\exe_common.inl:288:0
+#56 0x09e596cd _scrt_common_main d:\agent\_work\4\s\src\vctools\crt\vcstartup\src\startup\exe_common.inl:331:0
+#57 0x09e59a68 mainCRTStartup d:\agent\_work\4\s\src\vctools\crt\vcstartup\src\startup\exe_main.cpp:17:0
+#58 0x758e6359 (C:\Windows\System32\KERNEL32.DLL+0x16359)
+#59 0x77db7b74 (C:\Windows\SYSTEM32\ntdll.dll+0x67b74)
+#60 0x77db7b44 (C:\Windows\SYSTEM32\ntdll.dll+0x67b44)
+clang: error: clang frontend command failed due to signal (use -v to see invocation)
+clang version 11.0.0 (https://github.com/llvm/llvm-project.git cdd1cd712087377b69aee1c9f13be7cd73fb340d)
+Target: i686-pc-windows-msvc
+Thread model: posix
+InstalledDir: C:\Users\Krystian\src\llvm-project\build\bin
+clang: note: diagnostic msg: 
+********************
+
+PLEASE ATTACH THE FOLLOWING FILES TO THE BUG REPORT:
+Preprocessed source(s) and associated run script(s) are located at:
+clang: note: diagnostic msg: C:\Users\Krystian\AppData\Local\Temp\testCLCCompiler-6f0dae.cl
+clang: note: diagnostic msg: C:\Users\Krystian\AppData\Local\Temp\testCLCCompiler-6f0dae.sh
+clang: note: diagnostic msg: 
+
+********************
+ninja: build stopped: subcommand failed.
+
+
+
+Determining if the LLAsm compiler works failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libclc/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_1d2a2 && [1/2] Building LLAsm object CMakeFiles\cmTC_1d2a2.dir\testLLAsmCompiler.bc
+FAILED: CMakeFiles/cmTC_1d2a2.dir/testLLAsmCompiler.bc 
+C:/Users/Krystian/src/llvm-project/build/bin/clang.exe -E -P     -x cl  testLLAsmCompiler.ll -o - | C:\Users\Krystian\src\llvm-project\build\bin\llvm-as.exe -o CMakeFiles\cmTC_1d2a2.dir\testLLAsmCompiler.bc 
+clang: error: no such file or directory: '|'
+clang: error: cannot specify -o when generating multiple output files
+ninja: build stopped: subcommand failed.
+
+
+

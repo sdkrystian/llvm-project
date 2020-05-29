@@ -668,7 +668,9 @@ class QualType {
   }
 
   const ExtQualsTypeCommonBase *getCommonPtr() const {
-    assert(!isNull() && "Cannot retrieve a NULL type pointer");
+    if (isNull())
+      throw std::exception("Cannot retrieve a NULL type pointer");
+    // assert(!isNull() && "Cannot retrieve a NULL type pointer");
     auto CommonPtrVal = reinterpret_cast<uintptr_t>(Value.getOpaqueValue());
     CommonPtrVal &= ~(uintptr_t)((1 << TypeAlignmentInBits) - 1);
     return reinterpret_cast<ExtQualsTypeCommonBase*>(CommonPtrVal);

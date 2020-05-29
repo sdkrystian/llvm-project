@@ -1,0 +1,59 @@
+{
+	"backtrace" : 1,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_custom_target",
+			"add_dependencies"
+		],
+		"files" : 
+		[
+			"runtime/src/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 267,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 269,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 280,
+				"parent" : 0
+			}
+		]
+	},
+	"dependencies" : 
+	[
+		{
+			"backtrace" : 2,
+			"id" : "libomp-test-touch::@1fea58607f1c6e09f84e"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "libomp-test-deps::@1fea58607f1c6e09f84e"
+		}
+	],
+	"id" : "libomp-micro-tests::@1fea58607f1c6e09f84e",
+	"name" : "libomp-micro-tests",
+	"paths" : 
+	{
+		"build" : "runtime/src",
+		"source" : "runtime/src"
+	},
+	"sources" : [],
+	"type" : "UTILITY"
+}

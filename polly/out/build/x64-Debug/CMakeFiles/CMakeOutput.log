@@ -1,0 +1,181 @@
+The system is: Windows - 10.0.18362 - AMD64
+Compiling the C compiler identification source file "CMakeCCompilerId.c" succeeded.
+Compiler: C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/VC/Tools/MSVC/14.25.28610/bin/HostX64/x64/cl.exe 
+Build flags: 
+Id flags:  
+
+The output was:
+0
+Microsoft (R) C/C++ Optimizing Compiler Version 19.25.28611 for x64
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+CMakeCCompilerId.c
+Microsoft (R) Incremental Linker Version 14.25.28611.0
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+/out:CMakeCCompilerId.exe 
+CMakeCCompilerId.obj 
+
+
+Compilation of the C compiler identification source "CMakeCCompilerId.c" produced "CMakeCCompilerId.exe"
+
+Compilation of the C compiler identification source "CMakeCCompilerId.c" produced "CMakeCCompilerId.obj"
+
+The C compiler identification is MSVC, found in "C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/3.16.19112601-MSVC_2/CompilerIdC/CMakeCCompilerId.exe"
+
+Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+Compiler: C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/VC/Tools/MSVC/14.25.28610/bin/HostX64/x64/cl.exe 
+Build flags: 
+Id flags:  
+
+The output was:
+0
+Microsoft (R) C/C++ Optimizing Compiler Version 19.25.28611 for x64
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+CMakeCXXCompilerId.cpp
+Microsoft (R) Incremental Linker Version 14.25.28611.0
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+/out:CMakeCXXCompilerId.exe 
+CMakeCXXCompilerId.obj 
+
+
+Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CMakeCXXCompilerId.exe"
+
+Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CMakeCXXCompilerId.obj"
+
+The CXX compiler identification is MSVC, found in "C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/3.16.19112601-MSVC_2/CompilerIdCXX/CMakeCXXCompilerId.exe"
+
+Determining if the C compiler works passed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_7be79 && [1/2] Building C object CMakeFiles\cmTC_7be79.dir\testCCompiler.c.obj
+[2/2] Linking C executable cmTC_7be79.exe
+
+
+
+Detecting C compiler ABI info compiled with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_71857 && [1/2] Building C object CMakeFiles\cmTC_71857.dir\CMakeCCompilerABI.c.obj
+[2/2] Linking C executable cmTC_71857.exe
+
+
+
+Determining if the CXX compiler works passed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_913d1 && [1/2] Building CXX object CMakeFiles\cmTC_913d1.dir\testCXXCompiler.cxx.obj
+[2/2] Linking CXX executable cmTC_913d1.exe
+
+
+
+Detecting CXX compiler ABI info compiled with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_2931b && [1/2] Building CXX object CMakeFiles\cmTC_2931b.dir\CMakeCXXCompilerABI.cpp.obj
+[2/2] Linking CXX executable cmTC_2931b.exe
+
+
+
+Performing C SOURCE FILE Test HAVE_DECL__BITSCANFORWARD succeeded with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_2d57e && [1/2] Building C object CMakeFiles\cmTC_2d57e.dir\src.c.obj
+cl : Command line warning D9002 : ignoring unknown option '-fPIC'
+[2/2] Linking C executable cmTC_2d57e.exe
+
+
+Source file was:
+
+  #include <intrin.h>
+  int main() { (void)_BitScanForward(NULL, 0); return 0; }
+  
+Performing C SOURCE FILE Test HAVE_DECL__STRICMP succeeded with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_269d6 && [1/2] Building C object CMakeFiles\cmTC_269d6.dir\src.c.obj
+cl : Command line warning D9002 : ignoring unknown option '-fPIC'
+[2/2] Linking C executable cmTC_269d6.exe
+
+
+Source file was:
+
+  #include <string.h>
+  int main() { (void)_stricmp("", ""); return 0; }
+  
+Performing C SOURCE FILE Test HAVE_DECL__STRNICMP succeeded with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_fb941 && [1/2] Building C object CMakeFiles\cmTC_fb941.dir\src.c.obj
+cl : Command line warning D9002 : ignoring unknown option '-fPIC'
+[2/2] Linking C executable cmTC_fb941.exe
+
+
+Source file was:
+
+  #include <string.h>
+  int main() { (void)_strnicmp("", "", 0); return 0; }
+  
+Performing C SOURCE FILE Test HAVE_DECL_SNPRINTF succeeded with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_2f7ce && [1/2] Building C object CMakeFiles\cmTC_2f7ce.dir\src.c.obj
+cl : Command line warning D9002 : ignoring unknown option '-fPIC'
+[2/2] Linking C executable cmTC_2f7ce.exe
+
+
+Source file was:
+
+  #include <stdio.h>
+  int main() { snprintf((void*)0, 0, " "); return 0; }
+  
+Performing C SOURCE FILE Test HAVE_DECL__SNPRINTF succeeded with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_d4448 && [1/2] Building C object CMakeFiles\cmTC_d4448.dir\src.c.obj
+cl : Command line warning D9002 : ignoring unknown option '-fPIC'
+src.c(3): warning C4996: '_snprintf': This function or variable may be unsafe. Consider using _snprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+[2/2] Linking C executable cmTC_d4448.exe
+
+
+Source file was:
+
+  #include <stdio.h>
+  int main() { _snprintf((void*)0, 0, " "); return 0; }
+  
+Performing C SOURCE FILE Test HAVE_STDINT_H succeeded with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_7788c && [1/2] Building C object CMakeFiles\cmTC_7788c.dir\src.c.obj
+cl : Command line warning D9002 : ignoring unknown option '-fPIC'
+[2/2] Linking C executable cmTC_7788c.exe
+
+
+Source file was:
+
+    #include<stdint.h>
+
+    uint8_t typeVar;
+    int main() {
+    return 0;
+    }
+    
+Performing C SOURCE FILE Test HAVE_INTTYPES_H succeeded with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_c2d95 && [1/2] Building C object CMakeFiles\cmTC_c2d95.dir\src.c.obj
+cl : Command line warning D9002 : ignoring unknown option '-fPIC'
+[2/2] Linking C executable cmTC_c2d95.exe
+
+
+Source file was:
+
+    #include<inttypes.h>
+
+    uint8_t typeVar;
+    int main() {
+    return 0;
+    }
+    

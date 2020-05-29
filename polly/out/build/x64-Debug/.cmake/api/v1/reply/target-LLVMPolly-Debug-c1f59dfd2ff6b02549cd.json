@@ -1,0 +1,39 @@
+{
+	"backtrace" : 1,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_custom_target"
+		],
+		"files" : 
+		[
+			"lib/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 149,
+				"parent" : 0
+			}
+		]
+	},
+	"folder" : 
+	{
+		"name" : "Polly"
+	},
+	"id" : "LLVMPolly::@306ed2d68c6501e8728f",
+	"name" : "LLVMPolly",
+	"paths" : 
+	{
+		"build" : "lib",
+		"source" : "lib"
+	},
+	"sources" : [],
+	"type" : "UTILITY"
+}

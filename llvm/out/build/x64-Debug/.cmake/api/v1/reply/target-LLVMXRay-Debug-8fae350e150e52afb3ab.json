@@ -1,0 +1,1039 @@
+{
+	"archive" : 
+	{
+		"commandFragments" : 
+		[
+			{
+				"fragment" : "/machine:x64",
+				"role" : "flags"
+			}
+		]
+	},
+	"artifacts" : 
+	[
+		{
+			"path" : "lib/LLVMXRay.lib"
+		}
+	],
+	"backtrace" : 4,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_library",
+			"llvm_add_library",
+			"add_llvm_library",
+			"add_llvm_component_library",
+			"install",
+			"target_link_libraries",
+			"set_property",
+			"llvm_update_compile_flags",
+			"add_definitions",
+			"include",
+			"include_directories"
+		],
+		"files" : 
+		[
+			"cmake/modules/AddLLVM.cmake",
+			"lib/XRay/CMakeLists.txt",
+			"cmake/modules/HandleLLVMOptions.cmake",
+			"CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 1
+			},
+			{
+				"command" : 3,
+				"file" : 1,
+				"line" : 1,
+				"parent" : 0
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 695,
+				"parent" : 1
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 709,
+				"parent" : 2
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 498,
+				"parent" : 3
+			},
+			{
+				"command" : 4,
+				"file" : 0,
+				"line" : 738,
+				"parent" : 2
+			},
+			{
+				"command" : 5,
+				"file" : 0,
+				"line" : 616,
+				"parent" : 3
+			},
+			{
+				"command" : 7,
+				"file" : 0,
+				"line" : 522,
+				"parent" : 3
+			},
+			{
+				"command" : 6,
+				"file" : 0,
+				"line" : 79,
+				"parent" : 7
+			},
+			{
+				"file" : 3
+			},
+			{
+				"command" : 9,
+				"file" : 3,
+				"line" : 660,
+				"parent" : 9
+			},
+			{
+				"file" : 2,
+				"parent" : 10
+			},
+			{
+				"command" : 8,
+				"file" : 2,
+				"line" : 401,
+				"parent" : 11
+			},
+			{
+				"command" : 8,
+				"file" : 2,
+				"line" : 390,
+				"parent" : 11
+			},
+			{
+				"command" : 8,
+				"file" : 2,
+				"line" : 779,
+				"parent" : 11
+			},
+			{
+				"command" : 8,
+				"file" : 2,
+				"line" : 780,
+				"parent" : 11
+			},
+			{
+				"command" : 8,
+				"file" : 2,
+				"line" : 781,
+				"parent" : 11
+			},
+			{
+				"command" : 10,
+				"file" : 3,
+				"line" : 862,
+				"parent" : 9
+			}
+		]
+	},
+	"compileGroups" : 
+	[
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "/DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 /MDd /Zi /Ob0 /Od /RTC1  "
+				},
+				{
+					"fragment" : " /EHs-c- /GR-"
+				},
+				{
+					"fragment" : "-std:c++14"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"backtrace" : 8,
+					"define" : "GTEST_HAS_RTTI=0"
+				},
+				{
+					"backtrace" : 12,
+					"define" : "UNICODE"
+				},
+				{
+					"backtrace" : 13,
+					"define" : "_CRT_NONSTDC_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 13,
+					"define" : "_CRT_NONSTDC_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 13,
+					"define" : "_CRT_SECURE_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 13,
+					"define" : "_CRT_SECURE_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 8,
+					"define" : "_HAS_EXCEPTIONS=0"
+				},
+				{
+					"backtrace" : 13,
+					"define" : "_SCL_SECURE_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 13,
+					"define" : "_SCL_SECURE_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 12,
+					"define" : "_UNICODE"
+				},
+				{
+					"backtrace" : 14,
+					"define" : "__STDC_CONSTANT_MACROS"
+				},
+				{
+					"backtrace" : 15,
+					"define" : "__STDC_FORMAT_MACROS"
+				},
+				{
+					"backtrace" : 16,
+					"define" : "__STDC_LIMIT_MACROS"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/out/build/x64-Debug/lib/XRay"
+				},
+				{
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/lib/XRay"
+				},
+				{
+					"backtrace" : 17,
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/out/build/x64-Debug/include"
+				},
+				{
+					"backtrace" : 17,
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/include"
+				}
+			],
+			"language" : "CXX",
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10,
+				11,
+				12,
+				13
+			]
+		}
+	],
+	"dependencies" : 
+	[
+		{
+			"backtrace" : 6,
+			"id" : "LLVMDemangle::@3c7ef39cff93a35ba752"
+		},
+		{
+			"backtrace" : 6,
+			"id" : "LLVMSupport::@928d1708d80fe1f55e59"
+		},
+		{
+			"backtrace" : 6,
+			"id" : "LLVMCore::@fbfd63cd06ffdf52319f"
+		},
+		{
+			"backtrace" : 6,
+			"id" : "LLVMBinaryFormat::@c9b0ef5de2116d71f170"
+		},
+		{
+			"backtrace" : 6,
+			"id" : "LLVMBitstreamReader::@95731b79b16df93229d4"
+		},
+		{
+			"backtrace" : 6,
+			"id" : "LLVMBitReader::@b3ae57fb53631d19cf66"
+		},
+		{
+			"backtrace" : 6,
+			"id" : "LLVMMCParser::@d8f04122018374db0703"
+		},
+		{
+			"backtrace" : 6,
+			"id" : "LLVMMC::@9597ad869864cf27958c"
+		},
+		{
+			"backtrace" : 6,
+			"id" : "LLVMObject::@642aa1c006d9cde9317d"
+		},
+		{
+			"backtrace" : 6,
+			"id" : "LLVMRemarks::@6a63c042d04b6deafc56"
+		},
+		{
+			"backtrace" : 6,
+			"id" : "LLVMDebugInfoCodeView::@841a9fddc0a02ad6b960"
+		},
+		{
+			"backtrace" : 6,
+			"id" : "LLVMDebugInfoMSF::@bb9873363af6a4074de7"
+		},
+		{
+			"backtrace" : 6,
+			"id" : "LLVMTextAPI::@e4706a94ab4f7fb58b7f"
+		}
+	],
+	"folder" : 
+	{
+		"name" : "Libraries"
+	},
+	"id" : "LLVMXRay::@819c21a7dea3ddb9813c",
+	"install" : 
+	{
+		"destinations" : 
+		[
+			{
+				"backtrace" : 5,
+				"path" : "lib"
+			}
+		],
+		"prefix" : 
+		{
+			"path" : "C:/Users/Krystian/src/llvm-project/llvm/out/install/x64-Debug"
+		}
+	},
+	"name" : "LLVMXRay",
+	"nameOnDisk" : "LLVMXRay.lib",
+	"paths" : 
+	{
+		"build" : "lib/XRay",
+		"source" : "lib/XRay"
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "Source Files",
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10,
+				11,
+				12,
+				13
+			]
+		},
+		{
+			"name" : "Header Files",
+			"sourceIndexes" : 
+			[
+				14,
+				15,
+				16,
+				17,
+				18,
+				19,
+				20,
+				21,
+				22,
+				23,
+				24,
+				25,
+				26,
+				27,
+				28,
+				29,
+				30,
+				31,
+				32,
+				33,
+				34,
+				35,
+				36,
+				37,
+				38,
+				39,
+				40,
+				41,
+				42,
+				43,
+				44,
+				45,
+				46,
+				47,
+				48,
+				49,
+				50,
+				51,
+				52,
+				53,
+				54,
+				55,
+				56,
+				57,
+				58,
+				59,
+				60,
+				61,
+				62,
+				63,
+				64,
+				65,
+				66,
+				67,
+				68,
+				69,
+				70,
+				71,
+				72,
+				73,
+				74,
+				75,
+				76,
+				77,
+				78,
+				79,
+				80,
+				81,
+				82,
+				83,
+				84,
+				85,
+				86,
+				87,
+				88,
+				89,
+				90,
+				91,
+				92,
+				93,
+				94,
+				95,
+				96,
+				97,
+				98,
+				99,
+				100,
+				101,
+				102,
+				103,
+				104,
+				105,
+				106,
+				107,
+				108,
+				109,
+				110,
+				111
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/XRay/BlockIndexer.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/XRay/BlockPrinter.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/XRay/BlockVerifier.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/XRay/FDRRecordProducer.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/XRay/FDRRecords.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/XRay/FDRTraceExpander.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/XRay/FDRTraceWriter.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/XRay/FileHeaderReader.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/XRay/InstrumentationMap.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/XRay/LogBuilderConsumer.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/XRay/Profile.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/XRay/RecordInitializer.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/XRay/RecordPrinter.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/XRay/Trace.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/APFloat.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/APInt.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/APSInt.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/AllocatorList.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/Any.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/ArrayRef.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/BitVector.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/BitmaskEnum.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/BreadthFirstIterator.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/CachedHashString.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/CoalescingBitVector.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/DAGDeltaAlgorithm.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/DeltaAlgorithm.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/DenseMap.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/DenseMapInfo.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/DenseSet.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/DepthFirstIterator.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/DirectedGraph.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/EnumeratedArray.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/EpochTracker.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/EquivalenceClasses.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/FloatingPointMode.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/FoldingSet.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/FunctionExtras.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/GraphTraits.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/Hashing.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/ImmutableList.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/ImmutableMap.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/ImmutableSet.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/IndexedMap.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/IntEqClasses.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/IntervalMap.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/IntrusiveRefCntPtr.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/MapVector.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/None.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/Optional.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/PackedVector.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/PointerEmbeddedInt.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/PointerIntPair.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/PointerSumType.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/PointerUnion.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/PostOrderIterator.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/PriorityQueue.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/PriorityWorklist.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/SCCIterator.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/STLExtras.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/ScopeExit.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/ScopedHashTable.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/Sequence.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/SetOperations.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/SetVector.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/SmallBitVector.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/SmallPtrSet.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/SmallSet.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/SmallString.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/SmallVector.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/SparseBitVector.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/SparseMultiSet.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/SparseSet.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/Statistic.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/StringExtras.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/StringMap.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/StringRef.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/StringSet.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/StringSwitch.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/TinyPtrVector.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/Triple.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/Twine.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/UniqueVector.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/bit.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/edit_distance.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/fallible_iterator.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/ilist.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/ilist_base.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/ilist_iterator.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/ilist_node.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/ilist_node_base.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/ilist_node_options.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/iterator.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/iterator_range.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/ADT/simple_ilist.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/XRay/BlockIndexer.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/XRay/BlockPrinter.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/XRay/BlockVerifier.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/XRay/FDRLogBuilder.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/XRay/FDRRecordConsumer.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/XRay/FDRRecordProducer.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/XRay/FDRRecords.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/XRay/FDRTraceExpander.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/XRay/FDRTraceWriter.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/XRay/FileHeaderReader.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/XRay/Graph.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/XRay/InstrumentationMap.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/XRay/Profile.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/XRay/RecordPrinter.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/XRay/Trace.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/XRay/XRayRecord.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/XRay/YAMLXRayRecord.h",
+			"sourceGroupIndex" : 1
+		}
+	],
+	"type" : "STATIC_LIBRARY"
+}

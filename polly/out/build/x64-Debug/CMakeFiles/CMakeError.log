@@ -1,0 +1,171 @@
+Determining if the os_signpost_interval_begin exist failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_a94b1 && [1/2] Building C object CMakeFiles\cmTC_a94b1.dir\CheckSymbolExists.c.obj
+FAILED: CMakeFiles/cmTC_a94b1.dir/CheckSymbolExists.c.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\HostX64\x64\cl.exe  /nologo   /DWIN32 /D_WINDOWS /W3 /Zc:inline /Zc:strictStrings /Oi -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238  /MDd /Zi /Ob0 /Od /RTC1 /showIncludes /FoCMakeFiles\cmTC_a94b1.dir\CheckSymbolExists.c.obj /FdCMakeFiles\cmTC_a94b1.dir\ /FS -c CheckSymbolExists.c
+CheckSymbolExists.c(2): fatal error C1083: Cannot open include file: 'os/signpost.h': No such file or directory
+ninja: build stopped: subcommand failed.
+
+
+File C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/CMakeTmp/CheckSymbolExists.c:
+/* */
+#include <os/signpost.h>
+
+int main(int argc, char** argv)
+{
+  (void)argv;
+#ifndef os_signpost_interval_begin
+  return ((int*)(&os_signpost_interval_begin))[argc];
+#else
+  (void)argc;
+  return 0;
+#endif
+}
+Performing C SOURCE FILE Test HAS_ATTRIBUTE_WARN_UNUSED_RESULT failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_b12ff && [1/2] Building C object CMakeFiles\cmTC_b12ff.dir\src.c.obj
+FAILED: CMakeFiles/cmTC_b12ff.dir/src.c.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\HostX64\x64\cl.exe  /nologo   /DWIN32 /D_WINDOWS /W3 /Zc:inline /Zc:strictStrings /Oi -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -fPIC -DHAS_ATTRIBUTE_WARN_UNUSED_RESULT /MDd /Zi /Ob0 /Od /RTC1 /showIncludes /FoCMakeFiles\cmTC_b12ff.dir\src.c.obj /FdCMakeFiles\cmTC_b12ff.dir\ /FS -c src.c
+cl : Command line warning D9002 : ignoring unknown option '-fPIC'
+src.c(2): error C2061: syntax error: identifier '__attribute__'
+src.c(2): error C2059: syntax error: ';'
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+
+  int func(void) __attribute__((__warn_unused_result__));
+  int main() { return 0; }
+  
+Performing C SOURCE FILE Test HAVE___ATTRIBUTE__ failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_29c7e && [1/2] Building C object CMakeFiles\cmTC_29c7e.dir\src.c.obj
+FAILED: CMakeFiles/cmTC_29c7e.dir/src.c.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\HostX64\x64\cl.exe  /nologo   /DWIN32 /D_WINDOWS /W3 /Zc:inline /Zc:strictStrings /Oi -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -fPIC -DHAVE___ATTRIBUTE__ /MDd /Zi /Ob0 /Od /RTC1 /showIncludes /FoCMakeFiles\cmTC_29c7e.dir\src.c.obj /FdCMakeFiles\cmTC_29c7e.dir\ /FS -c src.c
+cl : Command line warning D9002 : ignoring unknown option '-fPIC'
+src.c(2): error C2143: syntax error: missing ')' before '('
+src.c(2): error C2059: syntax error: ')'
+src.c(2): error C2143: syntax error: missing ')' before 'type'
+src.c(2): error C2091: function returns function
+src.c(2): error C2085: 'foo': not in formal parameter list
+src.c(3): error C2085: 'main': not in formal parameter list
+src.c(3): error C2143: syntax error: missing ';' before '{'
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+
+  __attribute__ ((unused)) static void foo(void);
+  int main() { return 0; }
+  
+Performing C SOURCE FILE Test HAVE_DECL_FFS failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_d82b1 && [1/2] Building C object CMakeFiles\cmTC_d82b1.dir\src.c.obj
+FAILED: CMakeFiles/cmTC_d82b1.dir/src.c.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\HostX64\x64\cl.exe  /nologo   /DWIN32 /D_WINDOWS /W3 /Zc:inline /Zc:strictStrings /Oi -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -fPIC -DHAVE_DECL_FFS /MDd /Zi /Ob0 /Od /RTC1 /showIncludes /FoCMakeFiles\cmTC_d82b1.dir\src.c.obj /FdCMakeFiles\cmTC_d82b1.dir\ /FS -c src.c
+cl : Command line warning D9002 : ignoring unknown option '-fPIC'
+src.c(2): fatal error C1083: Cannot open include file: 'strings.h': No such file or directory
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+
+  #include <strings.h>
+  int main() { (void)ffs(0); return 0; }
+  
+Performing C SOURCE FILE Test HAVE_DECL___BUILTIN_FFS failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_75382 && [1/2] Building C object CMakeFiles\cmTC_75382.dir\src.c.obj
+cl : Command line warning D9002 : ignoring unknown option '-fPIC'
+src.c(2): warning C4013: '__builtin_ffs' undefined; assuming extern returning int
+[2/2] Linking C executable cmTC_75382.exe
+FAILED: cmTC_75382.exe 
+cmd.exe /C "cd . && "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E vs_link_exe --intdir=CMakeFiles\cmTC_75382.dir --rc=C:\PROGRA~2\WI3CF2~1\10\bin\100183~1.0\x64\rc.exe --mt=C:\PROGRA~2\WI3CF2~1\10\bin\100183~1.0\x64\mt.exe --manifests  -- C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\link.exe /nologo CMakeFiles\cmTC_75382.dir\src.c.obj  /out:cmTC_75382.exe /implib:cmTC_75382.lib /pdb:cmTC_75382.pdb /version:0.0  /machine:x64 /STACK:10000000  /debug /INCREMENTAL /subsystem:console  kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib && cd ."
+LINK Pass 1: command "C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\link.exe /nologo CMakeFiles\cmTC_75382.dir\src.c.obj /out:cmTC_75382.exe /implib:cmTC_75382.lib /pdb:cmTC_75382.pdb /version:0.0 /machine:x64 /STACK:10000000 /debug /INCREMENTAL /subsystem:console kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTFILE:CMakeFiles\cmTC_75382.dir/intermediate.manifest CMakeFiles\cmTC_75382.dir/manifest.res" failed (exit code 1120) with the following output:
+src.c.obj : error LNK2019: unresolved external symbol __builtin_ffs referenced in function main
+cmTC_75382.exe : fatal error LNK1120: 1 unresolved externals
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+
+  int main() { (void)__builtin_ffs(0); return 0; }
+  
+Performing C SOURCE FILE Test HAVE_DECL_STRCASECMP failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_daf17 && [1/2] Building C object CMakeFiles\cmTC_daf17.dir\src.c.obj
+FAILED: CMakeFiles/cmTC_daf17.dir/src.c.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\HostX64\x64\cl.exe  /nologo   /DWIN32 /D_WINDOWS /W3 /Zc:inline /Zc:strictStrings /Oi -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -fPIC -DHAVE_DECL_STRCASECMP /MDd /Zi /Ob0 /Od /RTC1 /showIncludes /FoCMakeFiles\cmTC_daf17.dir\src.c.obj /FdCMakeFiles\cmTC_daf17.dir\ /FS -c src.c
+cl : Command line warning D9002 : ignoring unknown option '-fPIC'
+src.c(2): fatal error C1083: Cannot open include file: 'strings.h': No such file or directory
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+
+  #include <strings.h>
+  int main() { (void)strcasecmp("", ""); return 0; }
+  
+Performing C SOURCE FILE Test HAVE_DECL_STRNCASECMP failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_1701e && [1/2] Building C object CMakeFiles\cmTC_1701e.dir\src.c.obj
+FAILED: CMakeFiles/cmTC_1701e.dir/src.c.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\HostX64\x64\cl.exe  /nologo   /DWIN32 /D_WINDOWS /W3 /Zc:inline /Zc:strictStrings /Oi -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -fPIC -DHAVE_DECL_STRNCASECMP /MDd /Zi /Ob0 /Od /RTC1 /showIncludes /FoCMakeFiles\cmTC_1701e.dir\src.c.obj /FdCMakeFiles\cmTC_1701e.dir\ /FS -c src.c
+cl : Command line warning D9002 : ignoring unknown option '-fPIC'
+src.c(2): fatal error C1083: Cannot open include file: 'strings.h': No such file or directory
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+
+  #include <strings.h>
+  int main() { (void)strncasecmp("", "", 0); return 0; }
+  
+Performing C SOURCE FILE Test HAVE_UINT8T failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_36cde && [1/2] Building C object CMakeFiles\cmTC_36cde.dir\src.c.obj
+FAILED: CMakeFiles/cmTC_36cde.dir/src.c.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\HostX64\x64\cl.exe  /nologo   /DWIN32 /D_WINDOWS /W3 /Zc:inline /Zc:strictStrings /Oi -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -fPIC -DHAVE_UINT8T /MDd /Zi /Ob0 /Od /RTC1 /showIncludes /FoCMakeFiles\cmTC_36cde.dir\src.c.obj /FdCMakeFiles\cmTC_36cde.dir\ /FS -c src.c
+cl : Command line warning D9002 : ignoring unknown option '-fPIC'
+src.c(3): error C2061: syntax error: identifier 'typeVar'
+src.c(3): error C2059: syntax error: ';'
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+
+    
+    uint8_t typeVar;
+    int main() {
+    return 0;
+    }
+    
+Performing C SOURCE FILE Test HAVE_SYS_INTTYPES_H failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_4740b && [1/2] Building C object CMakeFiles\cmTC_4740b.dir\src.c.obj
+FAILED: CMakeFiles/cmTC_4740b.dir/src.c.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\HostX64\x64\cl.exe  /nologo   /DWIN32 /D_WINDOWS /W3 /Zc:inline /Zc:strictStrings /Oi -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -fPIC -DHAVE_SYS_INTTYPES_H /MDd /Zi /Ob0 /Od /RTC1 /showIncludes /FoCMakeFiles\cmTC_4740b.dir\src.c.obj /FdCMakeFiles\cmTC_4740b.dir\ /FS -c src.c
+cl : Command line warning D9002 : ignoring unknown option '-fPIC'
+src.c(4): error C2061: syntax error: identifier 'typeVar'
+src.c(4): error C2059: syntax error: ';'
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+
+    #include<sys/types.h>
+
+    uint8_t typeVar;
+    int main() {
+    return 0;
+    }
+    

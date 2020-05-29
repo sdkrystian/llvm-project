@@ -1,0 +1,432 @@
+{
+	"configurations" : 
+	[
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1,
+						2,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13
+					],
+					"hasInstallRule" : true,
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.4.3"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						7
+					]
+				},
+				{
+					"build" : "Common",
+					"hasInstallRule" : true,
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.4.3"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "Common",
+					"targetIndexes" : 
+					[
+						10
+					]
+				},
+				{
+					"build" : "lib",
+					"childIndexes" : 
+					[
+						3,
+						4,
+						5
+					],
+					"hasInstallRule" : true,
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.4.3"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "lib"
+				},
+				{
+					"build" : "lib/Core",
+					"hasInstallRule" : true,
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.4.3"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 0,
+					"source" : "lib/Core",
+					"targetIndexes" : 
+					[
+						11
+					]
+				},
+				{
+					"build" : "lib/Driver",
+					"hasInstallRule" : true,
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.4.3"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 0,
+					"source" : "lib/Driver",
+					"targetIndexes" : 
+					[
+						1,
+						12
+					]
+				},
+				{
+					"build" : "lib/ReaderWriter",
+					"childIndexes" : 
+					[
+						6,
+						7
+					],
+					"hasInstallRule" : true,
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.4.3"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 0,
+					"source" : "lib/ReaderWriter",
+					"targetIndexes" : 
+					[
+						16
+					]
+				},
+				{
+					"build" : "lib/ReaderWriter/MachO",
+					"hasInstallRule" : true,
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.4.3"
+					},
+					"parentIndex" : 5,
+					"projectIndex" : 0,
+					"source" : "lib/ReaderWriter/MachO",
+					"targetIndexes" : 
+					[
+						14
+					]
+				},
+				{
+					"build" : "lib/ReaderWriter/YAML",
+					"hasInstallRule" : true,
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.4.3"
+					},
+					"parentIndex" : 5,
+					"projectIndex" : 0,
+					"source" : "lib/ReaderWriter/YAML",
+					"targetIndexes" : 
+					[
+						18
+					]
+				},
+				{
+					"build" : "tools/lld",
+					"hasInstallRule" : true,
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.4.3"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "tools/lld",
+					"targetIndexes" : 
+					[
+						5,
+						6,
+						8
+					]
+				},
+				{
+					"build" : "docs",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.4.3"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "docs"
+				},
+				{
+					"build" : "COFF",
+					"hasInstallRule" : true,
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.4.3"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "COFF",
+					"targetIndexes" : 
+					[
+						0,
+						9
+					]
+				},
+				{
+					"build" : "ELF",
+					"hasInstallRule" : true,
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.4.3"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "ELF",
+					"targetIndexes" : 
+					[
+						2,
+						13
+					]
+				},
+				{
+					"build" : "MinGW",
+					"hasInstallRule" : true,
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.4.3"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "MinGW",
+					"targetIndexes" : 
+					[
+						3,
+						15
+					]
+				},
+				{
+					"build" : "wasm",
+					"hasInstallRule" : true,
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.4.3"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "wasm",
+					"targetIndexes" : 
+					[
+						4,
+						17
+					]
+				}
+			],
+			"name" : "Debug",
+			"projects" : 
+			[
+				{
+					"directoryIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						4,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13
+					],
+					"name" : "lld",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						4,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						17,
+						18
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 10,
+					"id" : "COFFOptionsTableGen::@de9166d2c92805c7258d",
+					"jsonFile" : "target-COFFOptionsTableGen-Debug-46f3d6768c3a42c9645b.json",
+					"name" : "COFFOptionsTableGen",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 4,
+					"id" : "DriverOptionsTableGen::@aadc8320e76fd80710e5",
+					"jsonFile" : "target-DriverOptionsTableGen-Debug-3aff7d9155b21a0c92e8.json",
+					"name" : "DriverOptionsTableGen",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 11,
+					"id" : "ELFOptionsTableGen::@989d46508617d418f1e5",
+					"jsonFile" : "target-ELFOptionsTableGen-Debug-2edf85abc0dd2c81ae24.json",
+					"name" : "ELFOptionsTableGen",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 12,
+					"id" : "MinGWOptionsTableGen::@3eca61e88b6fd9c0f9ff",
+					"jsonFile" : "target-MinGWOptionsTableGen-Debug-0c5215f6de4adce219bb.json",
+					"name" : "MinGWOptionsTableGen",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 13,
+					"id" : "WasmOptionsTableGen::@a060a96d00d91701a629",
+					"jsonFile" : "target-WasmOptionsTableGen-Debug-767d755d3002a3212dc7.json",
+					"name" : "WasmOptionsTableGen",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 8,
+					"id" : "install-lld::@c1306acf53f41310bdf6",
+					"jsonFile" : "target-install-lld-Debug-87b900d1b34976dfad7a.json",
+					"name" : "install-lld",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 8,
+					"id" : "install-lld-stripped::@c1306acf53f41310bdf6",
+					"jsonFile" : "target-install-lld-stripped-Debug-eeb82c2831f2491415fe.json",
+					"name" : "install-lld-stripped",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "intrinsics_gen::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-intrinsics_gen-Debug-fa181407861249025d19.json",
+					"name" : "intrinsics_gen",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 8,
+					"id" : "lld::@c1306acf53f41310bdf6",
+					"jsonFile" : "target-lld-Debug-ade89cdbaf9de41322c3.json",
+					"name" : "lld",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 10,
+					"id" : "lldCOFF::@de9166d2c92805c7258d",
+					"jsonFile" : "target-lldCOFF-Debug-e1699ce3e374636e9b18.json",
+					"name" : "lldCOFF",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "lldCommon::@13b50f4fff9a3833e1fc",
+					"jsonFile" : "target-lldCommon-Debug-4e81ef643a03e5ae0902.json",
+					"name" : "lldCommon",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 3,
+					"id" : "lldCore::@8c670c06cd2b9c7b8e28",
+					"jsonFile" : "target-lldCore-Debug-f7823950ee1c013b1a14.json",
+					"name" : "lldCore",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 4,
+					"id" : "lldDriver::@aadc8320e76fd80710e5",
+					"jsonFile" : "target-lldDriver-Debug-220d22b1f23405755e58.json",
+					"name" : "lldDriver",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 11,
+					"id" : "lldELF::@989d46508617d418f1e5",
+					"jsonFile" : "target-lldELF-Debug-d676f5dd83ea800ce261.json",
+					"name" : "lldELF",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 6,
+					"id" : "lldMachO::@893db1d22af58cfd8a1d",
+					"jsonFile" : "target-lldMachO-Debug-b81ad26b6d8ffe3d94d2.json",
+					"name" : "lldMachO",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 12,
+					"id" : "lldMinGW::@3eca61e88b6fd9c0f9ff",
+					"jsonFile" : "target-lldMinGW-Debug-da9007af4815bf439d91.json",
+					"name" : "lldMinGW",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 5,
+					"id" : "lldReaderWriter::@84cb29dd4d54c9a3b83d",
+					"jsonFile" : "target-lldReaderWriter-Debug-429bd18bb28b2399ca6a.json",
+					"name" : "lldReaderWriter",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 13,
+					"id" : "lldWasm::@a060a96d00d91701a629",
+					"jsonFile" : "target-lldWasm-Debug-f6bc6e9bec360761cd0f.json",
+					"name" : "lldWasm",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 7,
+					"id" : "lldYAML::@bac9ddefe8e04a7bde2d",
+					"jsonFile" : "target-lldYAML-Debug-1c65525593f8730f9384.json",
+					"name" : "lldYAML",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "C:/Users/Krystian/src/llvm-project/lld/out/build/x64-Debug",
+		"source" : "C:/Users/Krystian/src/llvm-project/lld"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 0
+	}
+}

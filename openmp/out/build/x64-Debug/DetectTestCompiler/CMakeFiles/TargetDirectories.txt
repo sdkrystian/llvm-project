@@ -1,0 +1,2 @@
+C:/Users/Krystian/src/llvm-project/openmp/out/build/x64-Debug/DetectTestCompiler/CMakeFiles/edit_cache.dir
+C:/Users/Krystian/src/llvm-project/openmp/out/build/x64-Debug/DetectTestCompiler/CMakeFiles/rebuild_cache.dir

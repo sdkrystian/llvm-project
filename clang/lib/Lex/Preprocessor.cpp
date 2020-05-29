@@ -171,7 +171,9 @@ Preprocessor::Preprocessor(std::shared_ptr<PreprocessorOptions> PPOpts,
 }
 
 Preprocessor::~Preprocessor() {
-  assert(BacktrackPositions.empty() && "EnableBacktrack/Backtrack imbalance!");
+  if (!BacktrackPositions.empty())
+    throw std::exception("EnableBacktrack/Backtrack imbalance!");
+  //assert(BacktrackPositions.empty() && "EnableBacktrack/Backtrack imbalance!");
 
   IncludeMacroStack.clear();
 
@@ -537,7 +539,9 @@ void Preprocessor::EnterMainSourceFile() {
   // We do not allow the preprocessor to reenter the main file.  Doing so will
   // cause FileID's to accumulate information from both runs (e.g. #line
   // information) and predefined macros aren't guaranteed to be set properly.
-  assert(NumEnteredSourceFiles == 0 && "Cannot reenter the main file!");
+  if (NumEnteredSourceFiles != 0)
+    throw std::exception("Cannot reenter the main file!");
+  //assert(NumEnteredSourceFiles == 0 && "Cannot reenter the main file!");
   FileID MainFileID = SourceMgr.getMainFileID();
 
   // If MainFileID is loaded it means we loaded an AST file, no need to enter

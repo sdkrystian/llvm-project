@@ -13038,10 +13038,9 @@ CXXDestructorDecl *Sema::DeclareImplicitDestructor(CXXRecordDecl *ClassDecl) {
 
 void Sema::DefineImplicitDestructor(SourceLocation CurrentLocation,
                                     CXXDestructorDecl *Destructor) {
-  assert((Destructor->isDefaulted() &&
-          !Destructor->doesThisDeclarationHaveABody() &&
-          !Destructor->isDeleted()) &&
-         "DefineImplicitDestructor - call it for implicit default dtor");
+  if (!(Destructor->isDefaulted() && !Destructor->doesThisDeclarationHaveABody() && !Destructor->isDeleted()))
+	  throw std::exception("DefineImplicitDestructor - call it for implicit default dtor");
+										
   if (Destructor->willHaveBody() || Destructor->isInvalidDecl())
     return;
 

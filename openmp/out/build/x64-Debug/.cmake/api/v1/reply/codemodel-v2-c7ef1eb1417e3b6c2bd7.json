@@ -1,0 +1,218 @@
+{
+	"configurations" : 
+	[
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1
+					],
+					"hasInstallRule" : true,
+					"minimumCMakeVersion" : 
+					{
+						"string" : "2.8"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						2
+					]
+				},
+				{
+					"build" : "runtime",
+					"childIndexes" : 
+					[
+						2,
+						3
+					],
+					"hasInstallRule" : true,
+					"minimumCMakeVersion" : 
+					{
+						"string" : "2.8"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "runtime"
+				},
+				{
+					"build" : "runtime/src",
+					"hasInstallRule" : true,
+					"minimumCMakeVersion" : 
+					{
+						"string" : "2.8"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 0,
+					"source" : "runtime/src",
+					"targetIndexes" : 
+					[
+						3,
+						4,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12
+					]
+				},
+				{
+					"build" : "runtime/test",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "2.8"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 0,
+					"source" : "runtime/test",
+					"targetIndexes" : 
+					[
+						0,
+						1
+					]
+				}
+			],
+			"name" : "Debug",
+			"projects" : 
+			[
+				{
+					"directoryIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3
+					],
+					"name" : "openmp",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						4,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 3,
+					"id" : "check-libomp::@a8eaccf0a1ccf70dba8d",
+					"jsonFile" : "target-check-libomp-Debug-c3789533549b56de3332.json",
+					"name" : "check-libomp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 3,
+					"id" : "check-ompt::@a8eaccf0a1ccf70dba8d",
+					"jsonFile" : "target-check-ompt-Debug-e5cc6198743b2457a5e3.json",
+					"name" : "check-ompt",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "check-openmp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-check-openmp-Debug-f2c499bd8107db97a42b.json",
+					"name" : "check-openmp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 2,
+					"id" : "libomp-micro-tests::@1fea58607f1c6e09f84e",
+					"jsonFile" : "target-libomp-micro-tests-Debug-d1e17034f898250d07ad.json",
+					"name" : "libomp-micro-tests",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 2,
+					"id" : "libomp-needed-headers::@1fea58607f1c6e09f84e",
+					"jsonFile" : "target-libomp-needed-headers-Debug-92129224a91470edc237.json",
+					"name" : "libomp-needed-headers",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 2,
+					"id" : "libomp-needed-windows-files::@1fea58607f1c6e09f84e",
+					"jsonFile" : "target-libomp-needed-windows-files-Debug-ffc2a9a2bffad7e0f4a0.json",
+					"name" : "libomp-needed-windows-files",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 2,
+					"id" : "libomp-test-deps::@1fea58607f1c6e09f84e",
+					"jsonFile" : "target-libomp-test-deps-Debug-5a5c72973b2f49c14058.json",
+					"name" : "libomp-test-deps",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 2,
+					"id" : "libomp-test-execstack::@1fea58607f1c6e09f84e",
+					"jsonFile" : "target-libomp-test-execstack-Debug-5096de1d3e892839e8cf.json",
+					"name" : "libomp-test-execstack",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 2,
+					"id" : "libomp-test-instr::@1fea58607f1c6e09f84e",
+					"jsonFile" : "target-libomp-test-instr-Debug-3e7f43e7dc038d1e3f14.json",
+					"name" : "libomp-test-instr",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 2,
+					"id" : "libomp-test-relo::@1fea58607f1c6e09f84e",
+					"jsonFile" : "target-libomp-test-relo-Debug-3f35885abd894202021f.json",
+					"name" : "libomp-test-relo",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 2,
+					"id" : "libomp-test-touch::@1fea58607f1c6e09f84e",
+					"jsonFile" : "target-libomp-test-touch-Debug-5437d439d430c810a539.json",
+					"name" : "libomp-test-touch",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 2,
+					"id" : "omp::@1fea58607f1c6e09f84e",
+					"jsonFile" : "target-omp-Debug-9b518789384213e46964.json",
+					"name" : "omp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 2,
+					"id" : "ompimp::@1fea58607f1c6e09f84e",
+					"jsonFile" : "target-ompimp-Debug-a1e3fa6687600160a2f5.json",
+					"name" : "ompimp",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "C:/Users/Krystian/src/llvm-project/openmp/out/build/x64-Debug",
+		"source" : "C:/Users/Krystian/src/llvm-project/openmp"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 0
+	}
+}

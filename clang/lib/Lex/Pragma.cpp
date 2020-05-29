@@ -52,6 +52,8 @@
 #include <utility>
 #include <vector>
 
+#include <iostream>
+
 using namespace clang;
 
 // Out-of-line destructor to provide a home for the class.
@@ -87,14 +89,18 @@ PragmaHandler *PragmaNamespace::FindHandler(StringRef Name,
 }
 
 void PragmaNamespace::AddPragma(PragmaHandler *Handler) {
-  assert(!Handlers.lookup(Handler->getName()) &&
-         "A handler with this name is already registered in this namespace");
+  if (Handlers.lookup(Handler->getName()))
+    throw std::exception("A handler with this name is already registered in this namespace");
+  //assert(!Handlers.lookup(Handler->getName()) &&
+  //       "A handler with this name is already registered in this namespace");
   Handlers[Handler->getName()] = Handler;
 }
 
 void PragmaNamespace::RemovePragmaHandler(PragmaHandler *Handler) {
-  assert(Handlers.lookup(Handler->getName()) &&
-         "Handler not registered in this namespace");
+  if (!Handlers.lookup(Handler->getName()))
+    throw std::exception("Handler not registered in this namespace");
+  //assert(Handlers.lookup(Handler->getName()) &&
+  //       "Handler not registered in this namespace");
   Handlers.erase(Handler->getName());
 }
 
@@ -909,8 +915,9 @@ void Preprocessor::AddPragmaHandler(StringRef Namespace,
   }
 
   // Check to make sure we don't already have a pragma for this identifier.
-  assert(!InsertNS->FindHandler(Handler->getName()) &&
-         "Pragma handler already exists for this identifier!");
+  if (InsertNS->FindHandler(Handler->getName()))
+    return;
+
   InsertNS->AddPragma(Handler);
 }
 
@@ -925,7 +932,9 @@ void Preprocessor::RemovePragmaHandler(StringRef Namespace,
   // If this is specified to be in a namespace, step down into it.
   if (!Namespace.empty()) {
     PragmaHandler *Existing = PragmaHandlers->FindHandler(Namespace);
-    assert(Existing && "Namespace containing handler does not exist!");
+    if (!Existing)
+      return;
+    //assert(Existing && "Namespace containing handler does not exist!");
 
     NS = Existing->getIfNamespace();
     assert(NS && "Invalid namespace, registered as a regular pragma handler!");
@@ -1874,7 +1883,6 @@ void Preprocessor::RegisterBuiltinPragmas() {
   // #pragma clang ...
   AddPragmaHandler("clang", new PragmaPoisonHandler());
   AddPragmaHandler("clang", new PragmaSystemHeaderHandler());
-  AddPragmaHandler("clang", new PragmaDebugHandler());
   AddPragmaHandler("clang", new PragmaDependencyHandler());
   AddPragmaHandler("clang", new PragmaDiagnosticHandler("clang"));
   AddPragmaHandler("clang", new PragmaARCCFCodeAuditedHandler());

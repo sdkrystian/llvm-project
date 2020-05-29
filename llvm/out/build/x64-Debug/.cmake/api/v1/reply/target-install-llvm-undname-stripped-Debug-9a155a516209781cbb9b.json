@@ -1,0 +1,95 @@
+{
+	"backtrace" : 3,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_custom_target",
+			"add_llvm_install_targets",
+			"add_llvm_tool",
+			"add_dependencies"
+		],
+		"files" : 
+		[
+			"cmake/modules/AddLLVM.cmake",
+			"tools/llvm-undname/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 1
+			},
+			{
+				"command" : 2,
+				"file" : 1,
+				"line" : 6,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 1091,
+				"parent" : 1
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 675,
+				"parent" : 2
+			},
+			{
+				"command" : 3,
+				"file" : 0,
+				"line" : 685,
+				"parent" : 2
+			}
+		]
+	},
+	"dependencies" : 
+	[
+		{
+			"backtrace" : 4,
+			"id" : "llvm-undname::@429dc2c0e7960140b443"
+		}
+	],
+	"id" : "install-llvm-undname-stripped::@429dc2c0e7960140b443",
+	"name" : "install-llvm-undname-stripped",
+	"paths" : 
+	{
+		"build" : "tools/llvm-undname",
+		"source" : "tools/llvm-undname"
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "",
+			"sourceIndexes" : 
+			[
+				0
+			]
+		},
+		{
+			"name" : "CMake Rules",
+			"sourceIndexes" : 
+			[
+				1
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 3,
+			"isGenerated" : true,
+			"path" : "out/build/x64-Debug/tools/llvm-undname/CMakeFiles/install-llvm-undname-stripped",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 0,
+			"isGenerated" : true,
+			"path" : "out/build/x64-Debug/tools/llvm-undname/CMakeFiles/install-llvm-undname-stripped.rule",
+			"sourceGroupIndex" : 1
+		}
+	],
+	"type" : "UTILITY"
+}

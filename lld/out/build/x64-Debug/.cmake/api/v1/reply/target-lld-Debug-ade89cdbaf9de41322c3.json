@@ -1,0 +1,1018 @@
+{
+	"artifacts" : 
+	[
+		{
+			"path" : "bin/lld.exe"
+		},
+		{
+			"path" : "bin/lld.pdb"
+		}
+	],
+	"backtrace" : 4,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_executable",
+			"add_llvm_executable",
+			"add_lld_executable",
+			"add_lld_tool",
+			"install",
+			"link_directories",
+			"target_link_libraries",
+			"explicit_llvm_config",
+			"llvm_config",
+			"set_property",
+			"llvm_update_compile_flags",
+			"add_definitions",
+			"include",
+			"include_directories"
+		],
+		"files" : 
+		[
+			"C:/Users/Krystian/src/llvm-project/build/lib/cmake/llvm/AddLLVM.cmake",
+			"cmake/modules/AddLLD.cmake",
+			"tools/lld/CMakeLists.txt",
+			"CMakeLists.txt",
+			"C:/Users/Krystian/src/llvm-project/build/lib/cmake/llvm/LLVM-Config.cmake",
+			"C:/Users/Krystian/src/llvm-project/build/lib/cmake/llvm/HandleLLVMOptions.cmake"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 2
+			},
+			{
+				"command" : 3,
+				"file" : 2,
+				"line" : 5,
+				"parent" : 0
+			},
+			{
+				"command" : 2,
+				"file" : 1,
+				"line" : 46,
+				"parent" : 1
+			},
+			{
+				"command" : 1,
+				"file" : 1,
+				"line" : 37,
+				"parent" : 2
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 794,
+				"parent" : 3
+			},
+			{
+				"command" : 4,
+				"file" : 1,
+				"line" : 55,
+				"parent" : 1
+			},
+			{
+				"command" : 4,
+				"file" : 2,
+				"line" : 23,
+				"parent" : 0
+			},
+			{
+				"file" : 3
+			},
+			{
+				"command" : 5,
+				"file" : 3,
+				"line" : 48,
+				"parent" : 7
+			},
+			{
+				"command" : 8,
+				"file" : 0,
+				"line" : 834,
+				"parent" : 3
+			},
+			{
+				"command" : 7,
+				"file" : 4,
+				"line" : 93,
+				"parent" : 9
+			},
+			{
+				"command" : 6,
+				"file" : 4,
+				"line" : 105,
+				"parent" : 10
+			},
+			{
+				"command" : 6,
+				"file" : 2,
+				"line" : 13,
+				"parent" : 0
+			},
+			{
+				"command" : 10,
+				"file" : 0,
+				"line" : 809,
+				"parent" : 3
+			},
+			{
+				"command" : 9,
+				"file" : 0,
+				"line" : 79,
+				"parent" : 13
+			},
+			{
+				"command" : 12,
+				"file" : 3,
+				"line" : 56,
+				"parent" : 7
+			},
+			{
+				"file" : 5,
+				"parent" : 15
+			},
+			{
+				"command" : 11,
+				"file" : 5,
+				"line" : 401,
+				"parent" : 16
+			},
+			{
+				"command" : 11,
+				"file" : 5,
+				"line" : 390,
+				"parent" : 16
+			},
+			{
+				"command" : 11,
+				"file" : 5,
+				"line" : 779,
+				"parent" : 16
+			},
+			{
+				"command" : 11,
+				"file" : 5,
+				"line" : 780,
+				"parent" : 16
+			},
+			{
+				"command" : 11,
+				"file" : 5,
+				"line" : 781,
+				"parent" : 16
+			},
+			{
+				"command" : 13,
+				"file" : 3,
+				"line" : 171,
+				"parent" : 7
+			},
+			{
+				"command" : 13,
+				"file" : 3,
+				"line" : 47,
+				"parent" : 7
+			}
+		]
+	},
+	"compileGroups" : 
+	[
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "/DWIN32 /D_WINDOWS /W3   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 /MDd /Zi /Ob0 /Od /RTC1   -wd4530 -wd4062"
+				},
+				{
+					"fragment" : " /EHs-c- /GR-"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"backtrace" : 14,
+					"define" : "GTEST_HAS_RTTI=0"
+				},
+				{
+					"backtrace" : 17,
+					"define" : "UNICODE"
+				},
+				{
+					"backtrace" : 18,
+					"define" : "_CRT_NONSTDC_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 18,
+					"define" : "_CRT_NONSTDC_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 18,
+					"define" : "_CRT_SECURE_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 18,
+					"define" : "_CRT_SECURE_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 14,
+					"define" : "_HAS_EXCEPTIONS=0"
+				},
+				{
+					"backtrace" : 18,
+					"define" : "_SCL_SECURE_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 18,
+					"define" : "_SCL_SECURE_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 17,
+					"define" : "_UNICODE"
+				},
+				{
+					"backtrace" : 19,
+					"define" : "__STDC_CONSTANT_MACROS"
+				},
+				{
+					"backtrace" : 20,
+					"define" : "__STDC_FORMAT_MACROS"
+				},
+				{
+					"backtrace" : 21,
+					"define" : "__STDC_LIMIT_MACROS"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"path" : "C:/Users/Krystian/src/llvm-project/lld/out/build/x64-Debug/tools/lld"
+				},
+				{
+					"path" : "C:/Users/Krystian/src/llvm-project/lld/tools/lld"
+				},
+				{
+					"backtrace" : 22,
+					"path" : "C:/Users/Krystian/src/llvm-project/lld/include"
+				},
+				{
+					"backtrace" : 22,
+					"path" : "C:/Users/Krystian/src/llvm-project/lld/out/build/x64-Debug/include"
+				},
+				{
+					"backtrace" : 23,
+					"path" : "C:/Users/Krystian/src/llvm-project/build/include"
+				},
+				{
+					"backtrace" : 23,
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/include"
+				}
+			],
+			"language" : "CXX",
+			"sourceIndexes" : 
+			[
+				0
+			]
+		}
+	],
+	"dependencies" : 
+	[
+		{
+			"backtrace" : 12,
+			"id" : "lldCommon::@13b50f4fff9a3833e1fc"
+		},
+		{
+			"backtrace" : 12,
+			"id" : "lldELF::@989d46508617d418f1e5"
+		},
+		{
+			"backtrace" : 12,
+			"id" : "lldMinGW::@3eca61e88b6fd9c0f9ff"
+		},
+		{
+			"backtrace" : 12,
+			"id" : "lldCOFF::@de9166d2c92805c7258d"
+		},
+		{
+			"backtrace" : 12,
+			"id" : "lldDriver::@aadc8320e76fd80710e5"
+		},
+		{
+			"backtrace" : 12,
+			"id" : "lldYAML::@bac9ddefe8e04a7bde2d"
+		},
+		{
+			"backtrace" : 12,
+			"id" : "lldReaderWriter::@84cb29dd4d54c9a3b83d"
+		},
+		{
+			"backtrace" : 12,
+			"id" : "lldMachO::@893db1d22af58cfd8a1d"
+		},
+		{
+			"backtrace" : 12,
+			"id" : "lldCore::@8c670c06cd2b9c7b8e28"
+		},
+		{
+			"backtrace" : 12,
+			"id" : "lldWasm::@a060a96d00d91701a629"
+		}
+	],
+	"folder" : 
+	{
+		"name" : "lld executables"
+	},
+	"id" : "lld::@c1306acf53f41310bdf6",
+	"install" : 
+	{
+		"destinations" : 
+		[
+			{
+				"backtrace" : 5,
+				"path" : "bin"
+			},
+			{
+				"backtrace" : 6,
+				"path" : "bin"
+			}
+		],
+		"prefix" : 
+		{
+			"path" : "C:/Users/Krystian/src/llvm-project/lld/out/install/x64-Debug"
+		}
+	},
+	"link" : 
+	{
+		"commandFragments" : 
+		[
+			{
+				"fragment" : "/DWIN32 /D_WINDOWS /W3   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 /MDd /Zi /Ob0 /Od /RTC1",
+				"role" : "flags"
+			},
+			{
+				"fragment" : "/machine:x64 /STACK:10000000 /debug /INCREMENTAL /subsystem:console",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 8,
+				"fragment" : "-LIBPATH:C:\\Users\\Krystian\\src\\llvm-project\\build\\.\\lib",
+				"role" : "libraryPath"
+			},
+			{
+				"backtrace" : 11,
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMSupport.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 12,
+				"fragment" : "..\\..\\lib\\lldCommon.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 12,
+				"fragment" : "..\\..\\lib\\lldCOFF.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 12,
+				"fragment" : "..\\..\\lib\\lldDriver.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 12,
+				"fragment" : "..\\..\\lib\\lldELF.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 12,
+				"fragment" : "..\\..\\lib\\lldMinGW.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 12,
+				"fragment" : "..\\..\\lib\\lldWasm.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "..\\..\\lib\\lldMachO.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "..\\..\\lib\\lldReaderWriter.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "..\\..\\lib\\lldYAML.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "..\\..\\lib\\lldCore.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 12,
+				"fragment" : "..\\..\\lib\\lldCOFF.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMDebugInfoPDB.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "\"C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community\\DIA SDK\\lib\\diaguids.lib\"",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMLibDriver.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMWindowsManifest.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 12,
+				"fragment" : "..\\..\\lib\\lldCommon.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMOption.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMAArch64CodeGen.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMAArch64AsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMAArch64Disassembler.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMAArch64Desc.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMAArch64Info.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMAArch64Utils.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMAMDGPUCodeGen.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMMIRParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMAMDGPUAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMAMDGPUDisassembler.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMAMDGPUDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMAMDGPUInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMAMDGPUUtils.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMARMCodeGen.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMARMAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMARMDisassembler.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMARMDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMARMInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMARMUtils.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMAVRCodeGen.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMAVRAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMAVRDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMAVRDisassembler.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMAVRInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMBPFCodeGen.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMBPFAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMBPFDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMBPFDisassembler.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMBPFInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMHexagonCodeGen.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMHexagonAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMHexagonDisassembler.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMHexagonDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMHexagonInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMLanaiCodeGen.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMLanaiAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMLanaiDisassembler.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMLanaiDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMLanaiInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMMipsCodeGen.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMMipsAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMMipsDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMMipsDisassembler.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMMipsInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMMSP430CodeGen.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMMSP430AsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMMSP430Desc.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMMSP430Disassembler.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMMSP430Info.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMNVPTXCodeGen.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMNVPTXDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMNVPTXInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMPowerPCCodeGen.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMPowerPCAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMPowerPCDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMPowerPCDisassembler.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMPowerPCInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMRISCVCodeGen.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMRISCVAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMRISCVDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMRISCVDisassembler.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMRISCVInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMRISCVUtils.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMSparcCodeGen.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMSparcAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMSparcDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMSparcDisassembler.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMSparcInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMSystemZCodeGen.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMSystemZAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMSystemZDisassembler.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMSystemZDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMSystemZInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMWebAssemblyCodeGen.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMWebAssemblyAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMWebAssemblyDisassembler.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMWebAssemblyDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMWebAssemblyInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMX86CodeGen.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMCFGuard.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMGlobalISel.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMX86AsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMX86Desc.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMX86Disassembler.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMX86Info.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMX86Utils.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMXCoreCodeGen.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMAsmPrinter.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMDebugInfoDWARF.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMSelectionDAG.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMXCoreDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMXCoreDisassembler.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMMCDisassembler.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMXCoreInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMLTO.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMObjCARCOpts.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMPasses.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMCodeGen.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMTarget.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMCoroutines.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMipo.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMBitWriter.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMScalarOpts.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMVectorize.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMAggressiveInstCombine.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMInstCombine.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMLinker.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMFrontendOpenMP.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMIRReader.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMInstrumentation.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMTransformUtils.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMAnalysis.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMObject.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMBitReader.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMMCParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMMC.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMDebugInfoCodeView.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMDebugInfoMSF.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMTextAPI.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMProfileData.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMCore.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMBinaryFormat.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMRemarks.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMBitstreamReader.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 11,
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMSupport.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "psapi.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "shell32.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "ole32.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "uuid.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "advapi32.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "delayimp.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-delayload:shell32.dll",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-delayload:ole32.dll",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "C:\\Users\\Krystian\\src\\llvm-project\\build\\lib\\LLVMDemangle.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib",
+				"role" : "libraries"
+			}
+		],
+		"language" : "CXX"
+	},
+	"name" : "lld",
+	"nameOnDisk" : "lld.exe",
+	"paths" : 
+	{
+		"build" : "tools/lld",
+		"source" : "tools/lld"
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "Source Files",
+			"sourceIndexes" : 
+			[
+				0
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "tools/lld/lld.cpp",
+			"sourceGroupIndex" : 0
+		}
+	],
+	"type" : "EXECUTABLE"
+}

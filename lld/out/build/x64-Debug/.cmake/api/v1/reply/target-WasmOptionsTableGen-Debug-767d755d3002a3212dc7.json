@@ -1,0 +1,85 @@
+{
+	"backtrace" : 2,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_custom_target",
+			"add_public_tablegen_target"
+		],
+		"files" : 
+		[
+			"C:/Users/Krystian/src/llvm-project/build/lib/cmake/llvm/TableGen.cmake",
+			"wasm/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 1
+			},
+			{
+				"command" : 1,
+				"file" : 1,
+				"line" : 3,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 115,
+				"parent" : 1
+			}
+		]
+	},
+	"folder" : 
+	{
+		"name" : "Tablegenning"
+	},
+	"id" : "WasmOptionsTableGen::@a060a96d00d91701a629",
+	"name" : "WasmOptionsTableGen",
+	"paths" : 
+	{
+		"build" : "wasm",
+		"source" : "wasm"
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "",
+			"sourceIndexes" : 
+			[
+				0
+			]
+		},
+		{
+			"name" : "CMake Rules",
+			"sourceIndexes" : 
+			[
+				1,
+				2
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 2,
+			"isGenerated" : true,
+			"path" : "out/build/x64-Debug/wasm/CMakeFiles/WasmOptionsTableGen",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 0,
+			"isGenerated" : true,
+			"path" : "out/build/x64-Debug/wasm/CMakeFiles/WasmOptionsTableGen.rule",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 0,
+			"isGenerated" : true,
+			"path" : "out/build/x64-Debug/wasm/Options.inc.rule",
+			"sourceGroupIndex" : 1
+		}
+	],
+	"type" : "UTILITY"
+}

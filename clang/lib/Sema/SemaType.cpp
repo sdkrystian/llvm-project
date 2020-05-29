@@ -5999,7 +5999,8 @@ GetTypeSourceInfoForDeclarator(TypeProcessingState &State,
   // that.  This really only applies to C++ conversion functions.
   if (ReturnTypeInfo) {
     TypeLoc TL = ReturnTypeInfo->getTypeLoc();
-    assert(TL.getFullDataSize() == CurrTL.getFullDataSize());
+    if (TL.getFullDataSize() != CurrTL.getFullDataSize())
+      throw std::exception("bad data size");
     memcpy(CurrTL.getOpaqueData(), TL.getOpaqueData(), TL.getFullDataSize());
   } else {
     TypeSpecLocFiller(S, S.Context, State, D.getDeclSpec()).Visit(CurrTL);

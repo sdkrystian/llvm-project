@@ -1,0 +1,69 @@
+// libomp.rc.var
+
+//
+////===----------------------------------------------------------------------===//
+////
+//// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+//// See https://llvm.org/LICENSE.txt for license information.
+//// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+////
+////===----------------------------------------------------------------------===//
+//
+
+#include "winresrc.h"
+#include "kmp_config.h"
+
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US    // English (U.S.) resources
+#pragma code_page(1252)
+
+VS_VERSION_INFO VERSIONINFO
+    // Parts of FILEVERSION and PRODUCTVERSION are 16-bit fields, entire build date yyyymmdd
+    // does not fit into one version part, so we need to split it into yyyy and mmdd:
+    FILEVERSION    5,0,2014,926
+    PRODUCTVERSION 5,0,2014,926
+    FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+    FILEFLAGS      0
+#if KMP_DEBUG
+        | VS_FF_DEBUG
+#endif
+#if 20140926 == 0
+        | VS_FF_PRIVATEBUILD | VS_FF_PRERELEASE
+#endif
+    FILEOS          VOS_NT_WINDOWS32    // Windows* Server* 2003, XP*, 2000, or NT*
+    FILETYPE        VFT_DLL
+    BEGIN
+        BLOCK "StringFileInfo"
+        BEGIN
+            BLOCK "040904b0"            // U.S. English, Unicode (0x04b0 == 1200)
+            BEGIN
+
+                // FileDescription and LegalCopyright should be short.
+                VALUE "FileDescription",  "LLVM* OpenMP* Runtime Library\0"
+                // Following values may be relatively long.
+                VALUE "CompanyName",      "LLVM\0"
+                // VALUE "LegalTrademarks",  "\0"  // Not used for now.
+                VALUE "ProductName",      "LLVM* OpenMP* Runtime Library\0"
+                VALUE "ProductVersion",   "5.0\0"
+                VALUE "FileVersion",      "20140926\0"
+                VALUE "InternalName",     "libomp.dll\0"
+                VALUE "OriginalFilename", "libomp.dll\0"
+                VALUE "Comments",
+                    "LLVM* OpenMP* Performance Library "
+                    "version 5.0.20140926 "
+                    "for Intel(R) 64 architecture built on No_Timestamp.\0"
+#if 20140926 == 0
+                    VALUE "PrivateBuild",
+                        "This is a development build.\0"
+#endif
+                // VALUE "SpecialBuild",     "\0"    // Not used for now.
+
+            END
+        END
+        BLOCK "VarFileInfo"
+        BEGIN
+            VALUE "Translation", 1033, 1200
+            // 1033 -- U.S. English, 1200 -- Unicode
+        END
+    END
+
+// end of file //

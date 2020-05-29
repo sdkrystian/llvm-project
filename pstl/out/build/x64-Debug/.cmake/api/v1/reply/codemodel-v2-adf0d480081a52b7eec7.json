@@ -1,0 +1,636 @@
+{
+	"configurations" : 
+	[
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1
+					],
+					"hasInstallRule" : true,
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.4.3"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						1
+					]
+				},
+				{
+					"build" : "test",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.4.3"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "test",
+					"targetIndexes" : 
+					[
+						0,
+						2,
+						3,
+						4,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						17,
+						18,
+						19,
+						20,
+						21,
+						22,
+						23,
+						24,
+						25,
+						26,
+						27,
+						28,
+						29,
+						30,
+						31,
+						32,
+						33,
+						34,
+						35,
+						36,
+						37,
+						38,
+						39,
+						40,
+						41,
+						42,
+						43,
+						44,
+						45,
+						46,
+						47,
+						48,
+						49,
+						50,
+						51,
+						52,
+						53,
+						54,
+						55,
+						56,
+						57,
+						58,
+						59,
+						60,
+						61,
+						62
+					]
+				}
+			],
+			"name" : "Debug",
+			"projects" : 
+			[
+				{
+					"directoryIndexes" : 
+					[
+						0,
+						1
+					],
+					"name" : "ParallelSTL",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						4,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						17,
+						18,
+						19,
+						20,
+						21,
+						22,
+						23,
+						24,
+						25,
+						26,
+						27,
+						28,
+						29,
+						30,
+						31,
+						32,
+						33,
+						34,
+						35,
+						36,
+						37,
+						38,
+						39,
+						40,
+						41,
+						42,
+						43,
+						44,
+						45,
+						46,
+						47,
+						48,
+						49,
+						50,
+						51,
+						52,
+						53,
+						54,
+						55,
+						56,
+						57,
+						58,
+						59,
+						60,
+						61,
+						62
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 1,
+					"id" : "check-pstl::@36f028580bb02cc8272a",
+					"jsonFile" : "target-check-pstl-Debug-93ec3b37c150ca6044fc.json",
+					"name" : "check-pstl",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "install-pstl::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-install-pstl-Debug-ce2c459fa65b9bfe2c11.json",
+					"name" : "install-pstl",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-build-tests::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-build-tests-Debug-fbf7dbb2ae257ba462bb.json",
+					"name" : "pstl-build-tests",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-pstl-header_inclusion_order_algorithm_0.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-pstl-header_inclusion_order_algorithm_0.pass-Debug-d24ff10916b4a9b026a2.json",
+					"name" : "pstl-pstl-header_inclusion_order_algorithm_0.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-pstl-header_inclusion_order_algorithm_1.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-pstl-header_inclusion_order_algorithm_1.pass-Debug-2d79639da059431d29f7.json",
+					"name" : "pstl-pstl-header_inclusion_order_algorithm_1.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-pstl-header_inclusion_order_memory_0.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-pstl-header_inclusion_order_memory_0.pass-Debug-95f1cee8e4b31e642160.json",
+					"name" : "pstl-pstl-header_inclusion_order_memory_0.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-pstl-header_inclusion_order_memory_1.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-pstl-header_inclusion_order_memory_1.pass-Debug-ffdeca331dbe45b7dd3b.json",
+					"name" : "pstl-pstl-header_inclusion_order_memory_1.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-pstl-header_inclusion_order_numeric_0.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-pstl-header_inclusion_order_numeric_0.pass-Debug-4c03d621a4a1e644342b.json",
+					"name" : "pstl-pstl-header_inclusion_order_numeric_0.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-pstl-header_inclusion_order_numeric_1.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-pstl-header_inclusion_order_numeric_1.pass-Debug-40eb12608ceb64774964.json",
+					"name" : "pstl-pstl-header_inclusion_order_numeric_1.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-pstl-version.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-pstl-version.pass-Debug-7eb4a030a8339b2b6dbf.json",
+					"name" : "pstl-pstl-version.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.merge-inplace_merge.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.merge-inplace_merge.pass-Debug-8e914040f3a271c74c4d.json",
+					"name" : "pstl-std-algorithms-alg.merge-inplace_merge.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.merge-merge.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.merge-merge.pass-Debug-9eb06ca6d750741924e1.json",
+					"name" : "pstl-std-algorithms-alg.merge-merge.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.modifying.operations-alg.copy-copy_if.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.modifying.operations-alg.copy-copy_if.pass-Debug-c3470e528656dbcc2843.json",
+					"name" : "pstl-std-algorithms-alg.modifying.operations-alg.copy-copy_if.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.modifying.operations-alg.partitions-is_partitioned.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.modifying.operations-alg.partitions-is_partitioned.pass-Debug-0ead94d586792c24e8d7.json",
+					"name" : "pstl-std-algorithms-alg.modifying.operations-alg.partitions-is_partitioned.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.modifying.operations-alg.partitions-partition.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.modifying.operations-alg.partitions-partition.pass-Debug-8f4dd9bd245e8d21526b.json",
+					"name" : "pstl-std-algorithms-alg.modifying.operations-alg.partitions-partition.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.modifying.operations-alg.partitions-partition_copy.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.modifying.operations-alg.partitions-partition_copy.pass-Debug-5747537b2f61d54545cd.json",
+					"name" : "pstl-std-algorithms-alg.modifying.operations-alg.partitions-partition_copy.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.modifying.operations-alg.reverse-reverse.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.modifying.operations-alg.reverse-reverse.pass-Debug-78fb9710c09e8d58d308.json",
+					"name" : "pstl-std-algorithms-alg.modifying.operations-alg.reverse-reverse.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.modifying.operations-alg.reverse-reverse_copy.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.modifying.operations-alg.reverse-reverse_copy.pass-Debug-b1588955c5ede2d00035.json",
+					"name" : "pstl-std-algorithms-alg.modifying.operations-alg.reverse-reverse_copy.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.modifying.operations-copy_move.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.modifying.operations-copy_move.pass-Debug-a9cfa1b81de8274531a4.json",
+					"name" : "pstl-std-algorithms-alg.modifying.operations-copy_move.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.modifying.operations-fill.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.modifying.operations-fill.pass-Debug-0abbe85c33516bfb0a6a.json",
+					"name" : "pstl-std-algorithms-alg.modifying.operations-fill.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.modifying.operations-generate.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.modifying.operations-generate.pass-Debug-7f2a77821c5db15075d1.json",
+					"name" : "pstl-std-algorithms-alg.modifying.operations-generate.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.modifying.operations-remove.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.modifying.operations-remove.pass-Debug-5341536b32ed00f7ce6d.json",
+					"name" : "pstl-std-algorithms-alg.modifying.operations-remove.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.modifying.operations-remove_copy.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.modifying.operations-remove_copy.pass-Debug-ef1bf267b6fa4606bdcd.json",
+					"name" : "pstl-std-algorithms-alg.modifying.operations-remove_copy.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.modifying.operations-replace.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.modifying.operations-replace.pass-Debug-ef273e26fa5781ad5ec4.json",
+					"name" : "pstl-std-algorithms-alg.modifying.operations-replace.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.modifying.operations-replace_copy.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.modifying.operations-replace_copy.pass-Debug-a98776192ee7befe6f4f.json",
+					"name" : "pstl-std-algorithms-alg.modifying.operations-replace_copy.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.modifying.operations-rotate.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.modifying.operations-rotate.pass-Debug-bb8fbe96e14161da7d89.json",
+					"name" : "pstl-std-algorithms-alg.modifying.operations-rotate.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.modifying.operations-rotate_copy.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.modifying.operations-rotate_copy.pass-Debug-06c60b1a272118ca1ed0.json",
+					"name" : "pstl-std-algorithms-alg.modifying.operations-rotate_copy.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.modifying.operations-swap_ranges.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.modifying.operations-swap_ranges.pass-Debug-017e76dbae3a3d94b993.json",
+					"name" : "pstl-std-algorithms-alg.modifying.operations-swap_ranges.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.modifying.operations-transform_binary.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.modifying.operations-transform_binary.pass-Debug-0934fdf632746001ca99.json",
+					"name" : "pstl-std-algorithms-alg.modifying.operations-transform_binary.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.modifying.operations-transform_unary.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.modifying.operations-transform_unary.pass-Debug-2b09e70840130a0d5304.json",
+					"name" : "pstl-std-algorithms-alg.modifying.operations-transform_unary.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.modifying.operations-unique.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.modifying.operations-unique.pass-Debug-95e5533da6001e9a7e50.json",
+					"name" : "pstl-std-algorithms-alg.modifying.operations-unique.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.modifying.operations-unique_copy_equal.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.modifying.operations-unique_copy_equal.pass-Debug-21b09613b1534fa54132.json",
+					"name" : "pstl-std-algorithms-alg.modifying.operations-unique_copy_equal.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.nonmodifying-adjacent_find.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.nonmodifying-adjacent_find.pass-Debug-734a973a3c28a375679a.json",
+					"name" : "pstl-std-algorithms-alg.nonmodifying-adjacent_find.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.nonmodifying-all_of.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.nonmodifying-all_of.pass-Debug-d84ed6ee3138adb93746.json",
+					"name" : "pstl-std-algorithms-alg.nonmodifying-all_of.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.nonmodifying-any_of.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.nonmodifying-any_of.pass-Debug-1c00bddd3daf678a84f4.json",
+					"name" : "pstl-std-algorithms-alg.nonmodifying-any_of.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.nonmodifying-count.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.nonmodifying-count.pass-Debug-df3a0aa114151a1daf86.json",
+					"name" : "pstl-std-algorithms-alg.nonmodifying-count.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.nonmodifying-equal.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.nonmodifying-equal.pass-Debug-ce06c12e3e351932c8d8.json",
+					"name" : "pstl-std-algorithms-alg.nonmodifying-equal.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.nonmodifying-find.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.nonmodifying-find.pass-Debug-096ac730d374bb339f0b.json",
+					"name" : "pstl-std-algorithms-alg.nonmodifying-find.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.nonmodifying-find_end.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.nonmodifying-find_end.pass-Debug-c0cb9e8817663bf91d27.json",
+					"name" : "pstl-std-algorithms-alg.nonmodifying-find_end.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.nonmodifying-find_first_of.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.nonmodifying-find_first_of.pass-Debug-18c2431d57f3b1bc21d3.json",
+					"name" : "pstl-std-algorithms-alg.nonmodifying-find_first_of.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.nonmodifying-find_if.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.nonmodifying-find_if.pass-Debug-1c626e8cbb8a568f2847.json",
+					"name" : "pstl-std-algorithms-alg.nonmodifying-find_if.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.nonmodifying-for_each.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.nonmodifying-for_each.pass-Debug-cd56b0fe4d2a67255e21.json",
+					"name" : "pstl-std-algorithms-alg.nonmodifying-for_each.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.nonmodifying-mismatch.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.nonmodifying-mismatch.pass-Debug-ed5c0efc83b2a3a2e77e.json",
+					"name" : "pstl-std-algorithms-alg.nonmodifying-mismatch.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.nonmodifying-none_of.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.nonmodifying-none_of.pass-Debug-760ac956f71a6fd4a5b2.json",
+					"name" : "pstl-std-algorithms-alg.nonmodifying-none_of.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.nonmodifying-nth_element.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.nonmodifying-nth_element.pass-Debug-02739cbd4eecaaeb7a72.json",
+					"name" : "pstl-std-algorithms-alg.nonmodifying-nth_element.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.nonmodifying-search_n.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.nonmodifying-search_n.pass-Debug-05a449467db9e407fc3e.json",
+					"name" : "pstl-std-algorithms-alg.nonmodifying-search_n.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.sorting-alg.heap.operations-is_heap.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.sorting-alg.heap.operations-is_heap.pass-Debug-6f69fc6692a4d5616293.json",
+					"name" : "pstl-std-algorithms-alg.sorting-alg.heap.operations-is_heap.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.sorting-alg.lex.comparison-lexicographical_compare.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.sorting-alg.lex.comparison-lexicographical_compare.pass-Debug-a3414ee4c50846b9dee3.json",
+					"name" : "pstl-std-algorithms-alg.sorting-alg.lex.comparison-lexicographical_compare.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.sorting-alg.min.max-minmax_element.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.sorting-alg.min.max-minmax_element.pass-Debug-91b3588c4c9c90ddf660.json",
+					"name" : "pstl-std-algorithms-alg.sorting-alg.min.max-minmax_element.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.sorting-alg.set.operations-includes.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.sorting-alg.set.operations-includes.pass-Debug-c170304e33096086fa12.json",
+					"name" : "pstl-std-algorithms-alg.sorting-alg.set.operations-includes.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.sorting-alg.set.operations-set.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.sorting-alg.set.operations-set.pass-Debug-40a48b1327e3941df67f.json",
+					"name" : "pstl-std-algorithms-alg.sorting-alg.set.operations-set.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.sorting-is_sorted.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.sorting-is_sorted.pass-Debug-2401c737427982152413.json",
+					"name" : "pstl-std-algorithms-alg.sorting-is_sorted.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.sorting-partial_sort.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.sorting-partial_sort.pass-Debug-c9e34e148bf90cd0b10b.json",
+					"name" : "pstl-std-algorithms-alg.sorting-partial_sort.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.sorting-partial_sort_copy.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.sorting-partial_sort_copy.pass-Debug-2d3b17b8c218ce451f4b.json",
+					"name" : "pstl-std-algorithms-alg.sorting-partial_sort_copy.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-algorithms-alg.sorting-sort.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-algorithms-alg.sorting-sort.pass-Debug-2a3fae490c94533d4dce.json",
+					"name" : "pstl-std-algorithms-alg.sorting-sort.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-numerics-numeric.ops-adjacent_difference.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-numerics-numeric.ops-adjacent_difference.pass-Debug-529af569c10f7a77d93a.json",
+					"name" : "pstl-std-numerics-numeric.ops-adjacent_difference.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-numerics-numeric.ops-reduce.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-numerics-numeric.ops-reduce.pass-Debug-76925486613d1cfb131f.json",
+					"name" : "pstl-std-numerics-numeric.ops-reduce.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-numerics-numeric.ops-scan.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-numerics-numeric.ops-scan.pass-Debug-8182922fcfb4560e4ef2.json",
+					"name" : "pstl-std-numerics-numeric.ops-scan.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-numerics-numeric.ops-transform_reduce.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-numerics-numeric.ops-transform_reduce.pass-Debug-a67a5ecc21ecca2b34aa.json",
+					"name" : "pstl-std-numerics-numeric.ops-transform_reduce.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-numerics-numeric.ops-transform_scan.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-numerics-numeric.ops-transform_scan.pass-Debug-81241bdc4988774eca9e.json",
+					"name" : "pstl-std-numerics-numeric.ops-transform_scan.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-utilities-memory-specialized.algorithms-uninitialized_construct.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-utilities-memory-specialized.algorithms-uninitialized_construct.pass-Debug-690d1f8d14a7fa1a0315.json",
+					"name" : "pstl-std-utilities-memory-specialized.algorithms-uninitialized_construct.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-utilities-memory-specialized.algorithms-uninitialized_copy_move.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-utilities-memory-specialized.algorithms-uninitialized_copy_move.pass-Debug-ccce1152598f9191cad1.json",
+					"name" : "pstl-std-utilities-memory-specialized.algorithms-uninitialized_copy_move.pass",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "pstl-std-utilities-memory-specialized.algorithms-uninitialized_fill_destroy.pass::@36f028580bb02cc8272a",
+					"jsonFile" : "target-pstl-std-utilities-memory-specialized.algorithms-uninitialized_fill_destroy.pass-Debug-870a89c042298e010c95.json",
+					"name" : "pstl-std-utilities-memory-specialized.algorithms-uninitialized_fill_destroy.pass",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "C:/Users/Krystian/src/llvm-project/pstl/out/build/x64-Debug",
+		"source" : "C:/Users/Krystian/src/llvm-project/pstl"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 0
+	}
+}

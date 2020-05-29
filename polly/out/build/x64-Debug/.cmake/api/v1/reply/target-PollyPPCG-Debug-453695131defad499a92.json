@@ -1,0 +1,493 @@
+{
+	"archive" : 
+	{
+		"commandFragments" : 
+		[
+			{
+				"fragment" : "/machine:x64",
+				"role" : "flags"
+			}
+		]
+	},
+	"artifacts" : 
+	[
+		{
+			"path" : "lib/External/PollyPPCG.lib"
+		}
+	],
+	"backtrace" : 2,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_library",
+			"add_polly_library",
+			"install",
+			"target_link_libraries",
+			"target_compile_options",
+			"target_compile_definitions",
+			"add_definitions",
+			"include",
+			"include_directories"
+		],
+		"files" : 
+		[
+			"cmake/polly_macros.cmake",
+			"lib/External/CMakeLists.txt",
+			"C:/Users/Krystian/src/llvm-project/llvm/cmake/modules/HandleLLVMOptions.cmake",
+			"CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 1
+			},
+			{
+				"command" : 1,
+				"file" : 1,
+				"line" : 348,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 23,
+				"parent" : 1
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 45,
+				"parent" : 1
+			},
+			{
+				"command" : 3,
+				"file" : 1,
+				"line" : 352,
+				"parent" : 0
+			},
+			{
+				"command" : 4,
+				"file" : 1,
+				"line" : 368,
+				"parent" : 0
+			},
+			{
+				"command" : 5,
+				"file" : 1,
+				"line" : 379,
+				"parent" : 0
+			},
+			{
+				"file" : 3
+			},
+			{
+				"command" : 7,
+				"file" : 3,
+				"line" : 9,
+				"parent" : 7
+			},
+			{
+				"file" : 2,
+				"parent" : 8
+			},
+			{
+				"command" : 6,
+				"file" : 2,
+				"line" : 401,
+				"parent" : 9
+			},
+			{
+				"command" : 6,
+				"file" : 2,
+				"line" : 390,
+				"parent" : 9
+			},
+			{
+				"command" : 6,
+				"file" : 3,
+				"line" : 163,
+				"parent" : 7
+			},
+			{
+				"command" : 6,
+				"file" : 3,
+				"line" : 89,
+				"parent" : 7
+			},
+			{
+				"command" : 6,
+				"file" : 2,
+				"line" : 779,
+				"parent" : 9
+			},
+			{
+				"command" : 6,
+				"file" : 2,
+				"line" : 780,
+				"parent" : 9
+			},
+			{
+				"command" : 6,
+				"file" : 2,
+				"line" : 781,
+				"parent" : 9
+			},
+			{
+				"command" : 8,
+				"file" : 1,
+				"line" : 341,
+				"parent" : 0
+			},
+			{
+				"command" : 8,
+				"file" : 1,
+				"line" : 171,
+				"parent" : 0
+			},
+			{
+				"command" : 8,
+				"file" : 3,
+				"line" : 137,
+				"parent" : 7
+			},
+			{
+				"command" : 8,
+				"file" : 3,
+				"line" : 13,
+				"parent" : 7
+			}
+		]
+	},
+	"compileGroups" : 
+	[
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "/DWIN32 /D_WINDOWS /W3 /Zc:inline /Zc:strictStrings /Oi -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -fPIC /MDd /Zi /Ob0 /Od /RTC1  "
+				},
+				{
+					"backtrace" : 5,
+					"fragment" : "-wd4018"
+				},
+				{
+					"backtrace" : 5,
+					"fragment" : "-wd4090"
+				},
+				{
+					"backtrace" : 5,
+					"fragment" : "-wd4200"
+				},
+				{
+					"backtrace" : 5,
+					"fragment" : "-wd4201"
+				},
+				{
+					"backtrace" : 5,
+					"fragment" : "-wd4334"
+				},
+				{
+					"backtrace" : 5,
+					"fragment" : "-wd4221"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"backtrace" : 6,
+					"define" : "PATH_MAX=260"
+				},
+				{
+					"backtrace" : 10,
+					"define" : "UNICODE"
+				},
+				{
+					"backtrace" : 11,
+					"define" : "_CRT_NONSTDC_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 11,
+					"define" : "_CRT_NONSTDC_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 11,
+					"define" : "_CRT_SECURE_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 11,
+					"define" : "_CRT_SECURE_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 12,
+					"define" : "_GNU_SOURCE"
+				},
+				{
+					"backtrace" : 13,
+					"define" : "_HAS_EXCEPTIONS=0"
+				},
+				{
+					"backtrace" : 11,
+					"define" : "_SCL_SECURE_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 11,
+					"define" : "_SCL_SECURE_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 10,
+					"define" : "_UNICODE"
+				},
+				{
+					"backtrace" : 14,
+					"define" : "__STDC_CONSTANT_MACROS"
+				},
+				{
+					"backtrace" : 15,
+					"define" : "__STDC_FORMAT_MACROS"
+				},
+				{
+					"backtrace" : 16,
+					"define" : "__STDC_LIMIT_MACROS"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"backtrace" : 17,
+					"path" : "C:/Users/Krystian/src/llvm-project/polly/lib/External/pet/include"
+				},
+				{
+					"backtrace" : 17,
+					"path" : "C:/Users/Krystian/src/llvm-project/polly/lib/External/ppcg/include"
+				},
+				{
+					"backtrace" : 17,
+					"path" : "C:/Users/Krystian/src/llvm-project/polly/lib/External/ppcg/imath"
+				},
+				{
+					"backtrace" : 17,
+					"path" : "C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/lib/External/ppcg"
+				},
+				{
+					"backtrace" : 18,
+					"path" : "C:/Users/Krystian/src/llvm-project/polly/lib/External/isl"
+				},
+				{
+					"backtrace" : 18,
+					"path" : "C:/Users/Krystian/src/llvm-project/polly/lib/External/isl/include"
+				},
+				{
+					"backtrace" : 18,
+					"path" : "C:/Users/Krystian/src/llvm-project/polly/lib/External/isl/imath"
+				},
+				{
+					"backtrace" : 18,
+					"path" : "C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/lib/External/isl"
+				},
+				{
+					"backtrace" : 19,
+					"path" : "C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/include"
+				},
+				{
+					"backtrace" : 19,
+					"path" : "C:/Users/Krystian/src/llvm-project/polly/lib/External"
+				},
+				{
+					"backtrace" : 19,
+					"path" : "C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/lib/External/isl/include"
+				},
+				{
+					"backtrace" : 19,
+					"path" : "C:/Users/Krystian/src/llvm-project/polly/include"
+				},
+				{
+					"backtrace" : 20,
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/include"
+				},
+				{
+					"backtrace" : 20,
+					"path" : "C:/Users/Krystian/src/llvm-project/build/include"
+				}
+			],
+			"language" : "C",
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10,
+				11,
+				12,
+				13,
+				14,
+				15
+			]
+		}
+	],
+	"dependencies" : 
+	[
+		{
+			"backtrace" : 4,
+			"id" : "PollyISL::@d269d558f4347e65268d"
+		}
+	],
+	"folder" : 
+	{
+		"name" : "Polly"
+	},
+	"id" : "PollyPPCG::@d269d558f4347e65268d",
+	"install" : 
+	{
+		"destinations" : 
+		[
+			{
+				"backtrace" : 3,
+				"path" : "lib"
+			}
+		],
+		"prefix" : 
+		{
+			"path" : "C:/Users/Krystian/src/llvm-project/polly/out/install/x64-Debug"
+		}
+	},
+	"name" : "PollyPPCG",
+	"nameOnDisk" : "PollyPPCG.lib",
+	"paths" : 
+	{
+		"build" : "lib/External",
+		"source" : "lib/External"
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "Source Files",
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10,
+				11,
+				12,
+				13,
+				14,
+				15
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "lib/External/ppcg/cuda.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "lib/External/ppcg/cuda_common.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "lib/External/ppcg/external.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "lib/External/ppcg/gpu_array_tile.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "lib/External/ppcg/gpu.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "lib/External/ppcg/gpu_group.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "lib/External/ppcg/gpu_hybrid.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "lib/External/ppcg/gpu_print.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "lib/External/ppcg/gpu_tree.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "lib/External/ppcg/grouping.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "lib/External/ppcg/hybrid.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "lib/External/ppcg/ppcg.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "lib/External/ppcg/ppcg_options.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "lib/External/ppcg/print.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "lib/External/ppcg/schedule.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 2,
+			"compileGroupIndex" : 0,
+			"path" : "lib/External/ppcg/util.c",
+			"sourceGroupIndex" : 0
+		}
+	],
+	"type" : "STATIC_LIBRARY"
+}

@@ -1,0 +1,575 @@
+{
+	"artifacts" : 
+	[
+		{
+			"path" : "runtime/src/libomp.dll"
+		},
+		{
+			"path" : "runtime/src/libomp.dll.lib"
+		},
+		{
+			"path" : "runtime/src/libomp.dll.pdb"
+		}
+	],
+	"backtrace" : 1,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_library",
+			"install",
+			"add_dependencies",
+			"include_directories",
+			"set_source_files_properties"
+		],
+		"files" : 
+		[
+			"runtime/src/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 136,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 292,
+				"parent" : 0
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 184,
+				"parent" : 0
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 176,
+				"parent" : 0
+			},
+			{
+				"command" : 3,
+				"file" : 0,
+				"line" : 42,
+				"parent" : 0
+			},
+			{
+				"command" : 4,
+				"file" : 0,
+				"line" : 192,
+				"parent" : 0
+			}
+		]
+	},
+	"compileGroups" : 
+	[
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "/DWIN32 /D_WINDOWS /W3 /GR /EHsc /MTd /Zi /Ob0 /Od /RTC1   -D _CRT_SECURE_NO_WARNINGS -D _CRT_SECURE_NO_DEPRECATE -D _WINDOWS -D _WINNT -D _WIN32_WINNT=0x0501 -D _USRDLL -D _ITERATOR_DEBUG_LEVEL=0 -D _DEBUG"
+				},
+				{
+					"fragment" : "/GS /EHsc"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"define" : "omp_EXPORTS"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Krystian/src/llvm-project/openmp/out/build/x64-Debug/runtime/src"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Krystian/src/llvm-project/openmp/runtime/src"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Krystian/src/llvm-project/openmp/runtime/src/i18n"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Krystian/src/llvm-project/openmp/runtime/src/include"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Krystian/src/llvm-project/openmp/runtime/src/thirdparty/ittnotify"
+				}
+			],
+			"language" : "CXX",
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10,
+				11,
+				12,
+				13,
+				14,
+				15,
+				16,
+				17,
+				18,
+				19,
+				20,
+				21,
+				22,
+				23,
+				25,
+				26,
+				27,
+				28,
+				29
+			]
+		},
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "/DWIN32 /D_WINDOWS /W3 /GR /EHsc /MTd /Zi /Ob0 /Od /RTC1   -D _CRT_SECURE_NO_WARNINGS -D _CRT_SECURE_NO_DEPRECATE -D _WINDOWS -D _WINNT -D _WIN32_WINNT=0x0501 -D _USRDLL -D _ITERATOR_DEBUG_LEVEL=0 -D _DEBUG"
+				},
+				{
+					"fragment" : "/GS /EHsc"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"backtrace" : 6,
+					"define" : "UNICODE"
+				},
+				{
+					"define" : "omp_EXPORTS"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Krystian/src/llvm-project/openmp/out/build/x64-Debug/runtime/src"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Krystian/src/llvm-project/openmp/runtime/src"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Krystian/src/llvm-project/openmp/runtime/src/i18n"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Krystian/src/llvm-project/openmp/runtime/src/include"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Krystian/src/llvm-project/openmp/runtime/src/thirdparty/ittnotify"
+				}
+			],
+			"language" : "CXX",
+			"sourceIndexes" : 
+			[
+				24
+			]
+		},
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "  -D _CRT_SECURE_NO_WARNINGS -D _CRT_SECURE_NO_DEPRECATE -D _WINDOWS -D _WINNT -D _WIN32_WINNT=0x0501 -D _USRDLL -D _ITERATOR_DEBUG_LEVEL=0 -D _DEBUG"
+				},
+				{
+					"fragment" : " -D_M_AMD64 -DOMPT_SUPPORT=0"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"define" : "omp_EXPORTS"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Krystian/src/llvm-project/openmp/out/build/x64-Debug/runtime/src"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Krystian/src/llvm-project/openmp/runtime/src"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Krystian/src/llvm-project/openmp/runtime/src/i18n"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Krystian/src/llvm-project/openmp/runtime/src/include"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Krystian/src/llvm-project/openmp/runtime/src/thirdparty/ittnotify"
+				}
+			],
+			"language" : "ASM_MASM",
+			"sourceIndexes" : 
+			[
+				30
+			]
+		},
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "-DWIN32 -D_DEBUG   -D _CRT_SECURE_NO_WARNINGS -D _CRT_SECURE_NO_DEPRECATE -D _WINDOWS -D _WINNT -D _WIN32_WINNT=0x0501 -D _USRDLL -D _ITERATOR_DEBUG_LEVEL=0 -D _DEBUG"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"define" : "omp_EXPORTS"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Krystian/src/llvm-project/openmp/out/build/x64-Debug/runtime/src"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Krystian/src/llvm-project/openmp/runtime/src"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Krystian/src/llvm-project/openmp/runtime/src/i18n"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Krystian/src/llvm-project/openmp/runtime/src/include"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "C:/Users/Krystian/src/llvm-project/openmp/runtime/src/thirdparty/ittnotify"
+				}
+			],
+			"language" : "RC",
+			"sourceIndexes" : 
+			[
+				31
+			]
+		}
+	],
+	"dependencies" : 
+	[
+		{
+			"backtrace" : 3,
+			"id" : "libomp-needed-windows-files::@1fea58607f1c6e09f84e"
+		},
+		{
+			"backtrace" : 4,
+			"id" : "libomp-needed-headers::@1fea58607f1c6e09f84e"
+		}
+	],
+	"id" : "omp::@1fea58607f1c6e09f84e",
+	"install" : 
+	{
+		"destinations" : 
+		[
+			{
+				"backtrace" : 2,
+				"path" : "bin"
+			}
+		],
+		"prefix" : 
+		{
+			"path" : "C:/Users/Krystian/src/llvm-project/openmp/out/install/x64-Debug"
+		}
+	},
+	"link" : 
+	{
+		"commandFragments" : 
+		[
+			{
+				"fragment" : "/machine:x64 /debug /INCREMENTAL /DEF:C:/Users/Krystian/src/llvm-project/openmp/out/build/x64-Debug/runtime/src/libomp.def",
+				"role" : "flags"
+			},
+			{
+				"fragment" : "kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib",
+				"role" : "libraries"
+			}
+		],
+		"language" : "C"
+	},
+	"name" : "omp",
+	"nameOnDisk" : "libomp.dll",
+	"paths" : 
+	{
+		"build" : "runtime/src",
+		"source" : "runtime/src"
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "Source Files",
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10,
+				11,
+				12,
+				13,
+				14,
+				15,
+				16,
+				17,
+				18,
+				19,
+				20,
+				21,
+				22,
+				23,
+				24,
+				25,
+				26,
+				27,
+				28,
+				29,
+				31
+			]
+		},
+		{
+			"name" : "",
+			"sourceIndexes" : 
+			[
+				30
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_alloc.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_atomic.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_csupport.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_debug.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_itt.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_environment.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_error.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_global.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_i18n.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_io.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_runtime.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_settings.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_str.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_tasking.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_threadprivate.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_utility.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_barrier.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_wait_release.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_affinity.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_dispatch.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_lock.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_sched.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/z_Windows_NT_util.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/z_Windows_NT-586_util.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 1,
+			"path" : "runtime/src/thirdparty/ittnotify/ittnotify_static.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_taskdeps.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_cancel.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_ftn_cdecl.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_ftn_extra.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "runtime/src/kmp_version.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 2,
+			"path" : "runtime/src/z_Windows_NT-586_asm.asm",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 3,
+			"path" : "out/build/x64-Debug/runtime/src/libomp.rc",
+			"sourceGroupIndex" : 0
+		}
+	],
+	"type" : "SHARED_LIBRARY"
+}

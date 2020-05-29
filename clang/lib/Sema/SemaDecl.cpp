@@ -1296,8 +1296,10 @@ DeclContext *Sema::getContainingDC(DeclContext *DC) {
 }
 
 void Sema::PushDeclContext(Scope *S, DeclContext *DC) {
-  assert(getContainingDC(DC) == CurContext &&
-      "The next DeclContext should be lexically contained in the current one.");
+  if (getContainingDC(DC) != CurContext)
+    throw std::exception("The next DeclContext should be lexically contained in the current one.");
+  //assert(getContainingDC(DC) == CurContext &&
+  //    "The next DeclContext should be lexically contained in the current one.");
   CurContext = DC;
   S->setEntity(DC);
 }

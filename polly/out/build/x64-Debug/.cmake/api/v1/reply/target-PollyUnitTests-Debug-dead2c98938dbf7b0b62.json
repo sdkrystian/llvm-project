@@ -1,0 +1,202 @@
+{
+	"backtrace" : 1,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_custom_target",
+			"add_dependencies",
+			"add_unittest",
+			"add_polly_unittest"
+		],
+		"files" : 
+		[
+			"unittests/CMakeLists.txt",
+			"C:/Users/Krystian/src/llvm-project/llvm/cmake/modules/AddLLVM.cmake",
+			"unittests/Isl/CMakeLists.txt",
+			"unittests/Flatten/CMakeLists.txt",
+			"unittests/DeLICM/CMakeLists.txt",
+			"unittests/ScheduleOptimizer/CMakeLists.txt",
+			"unittests/ScopPassManager/CMakeLists.txt",
+			"unittests/Support/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 1,
+				"parent" : 0
+			},
+			{
+				"file" : 2
+			},
+			{
+				"command" : 3,
+				"file" : 2,
+				"line" : 1,
+				"parent" : 2
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 9,
+				"parent" : 3
+			},
+			{
+				"command" : 1,
+				"file" : 1,
+				"line" : 1341,
+				"parent" : 4
+			},
+			{
+				"file" : 3
+			},
+			{
+				"command" : 3,
+				"file" : 3,
+				"line" : 1,
+				"parent" : 6
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 9,
+				"parent" : 7
+			},
+			{
+				"command" : 1,
+				"file" : 1,
+				"line" : 1341,
+				"parent" : 8
+			},
+			{
+				"file" : 4
+			},
+			{
+				"command" : 3,
+				"file" : 4,
+				"line" : 1,
+				"parent" : 10
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 9,
+				"parent" : 11
+			},
+			{
+				"command" : 1,
+				"file" : 1,
+				"line" : 1341,
+				"parent" : 12
+			},
+			{
+				"file" : 5
+			},
+			{
+				"command" : 3,
+				"file" : 5,
+				"line" : 1,
+				"parent" : 14
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 9,
+				"parent" : 15
+			},
+			{
+				"command" : 1,
+				"file" : 1,
+				"line" : 1341,
+				"parent" : 16
+			},
+			{
+				"file" : 6
+			},
+			{
+				"command" : 3,
+				"file" : 6,
+				"line" : 1,
+				"parent" : 18
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 9,
+				"parent" : 19
+			},
+			{
+				"command" : 1,
+				"file" : 1,
+				"line" : 1341,
+				"parent" : 20
+			},
+			{
+				"file" : 7
+			},
+			{
+				"command" : 3,
+				"file" : 7,
+				"line" : 1,
+				"parent" : 22
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 9,
+				"parent" : 23
+			},
+			{
+				"command" : 1,
+				"file" : 1,
+				"line" : 1341,
+				"parent" : 24
+			}
+		]
+	},
+	"dependencies" : 
+	[
+		{
+			"backtrace" : 5,
+			"id" : "IslTests::@572a3b40cb8ad0596da8"
+		},
+		{
+			"backtrace" : 9,
+			"id" : "FlattenTests::@81875cca89dba4d5797d"
+		},
+		{
+			"backtrace" : 13,
+			"id" : "DeLICMTests::@b9eddfbcaabf6c05bd21"
+		},
+		{
+			"backtrace" : 17,
+			"id" : "ScheduleOptimizerTests::@da76f7a0665176ad6a1e"
+		},
+		{
+			"backtrace" : 21,
+			"id" : "ScopPassManagerTests::@241ae0725df99d19a0a5"
+		},
+		{
+			"backtrace" : 25,
+			"id" : "ISLToolsTests::@85cc75d0e16dacc65c5b"
+		}
+	],
+	"folder" : 
+	{
+		"name" : "Polly"
+	},
+	"id" : "PollyUnitTests::@42060a6318a19e21b55a",
+	"name" : "PollyUnitTests",
+	"paths" : 
+	{
+		"build" : "unittests",
+		"source" : "unittests"
+	},
+	"sources" : [],
+	"type" : "UTILITY"
+}

@@ -1,0 +1,153 @@
+{
+	"artifacts" : 
+	[
+		{
+			"path" : "test/pstl-std-algorithms-alg.modifying.operations-alg.partitions-partition_copy.pass.exe"
+		},
+		{
+			"path" : "test/pstl-std-algorithms-alg.modifying.operations-alg.partitions-partition_copy.pass.pdb"
+		}
+	],
+	"backtrace" : 1,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_executable",
+			"target_compile_options",
+			"target_link_libraries",
+			"target_include_directories"
+		],
+		"files" : 
+		[
+			"test/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 33,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 35,
+				"parent" : 0
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 36,
+				"parent" : 0
+			},
+			{
+				"command" : 3,
+				"file" : 0,
+				"line" : 34,
+				"parent" : 0
+			}
+		]
+	},
+	"compileGroups" : 
+	[
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "/DWIN32 /D_WINDOWS /W3 /GR /EHsc /MDd /Zi /Ob0 /Od /RTC1  "
+				},
+				{
+					"backtrace" : 2,
+					"fragment" : "-Wno-unused-local-typedef"
+				},
+				{
+					"backtrace" : 2,
+					"fragment" : "-Wno-unused-variable"
+				},
+				{
+					"backtrace" : 3,
+					"fragment" : "-Wno-gnu-include-next"
+				},
+				{
+					"fragment" : "-std:c++17"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/Krystian/src/llvm-project/pstl/test"
+				},
+				{
+					"backtrace" : 3,
+					"path" : "C:/Users/Krystian/src/llvm-project/pstl/test/support/stdlib"
+				},
+				{
+					"backtrace" : 3,
+					"path" : "C:/Users/Krystian/src/llvm-project/pstl/include"
+				},
+				{
+					"backtrace" : 3,
+					"path" : "C:/Users/Krystian/src/llvm-project/pstl/out/build/x64-Debug/generated_headers"
+				}
+			],
+			"language" : "CXX",
+			"sourceIndexes" : 
+			[
+				0
+			]
+		}
+	],
+	"id" : "pstl-std-algorithms-alg.modifying.operations-alg.partitions-partition_copy.pass::@36f028580bb02cc8272a",
+	"link" : 
+	{
+		"commandFragments" : 
+		[
+			{
+				"fragment" : "/DWIN32 /D_WINDOWS /W3 /GR /EHsc /MDd /Zi /Ob0 /Od /RTC1",
+				"role" : "flags"
+			},
+			{
+				"fragment" : "/machine:x64 /debug /INCREMENTAL /subsystem:console",
+				"role" : "flags"
+			},
+			{
+				"fragment" : "kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib",
+				"role" : "libraries"
+			}
+		],
+		"language" : "CXX"
+	},
+	"name" : "pstl-std-algorithms-alg.modifying.operations-alg.partitions-partition_copy.pass",
+	"nameOnDisk" : "pstl-std-algorithms-alg.modifying.operations-alg.partitions-partition_copy.pass.exe",
+	"paths" : 
+	{
+		"build" : "test",
+		"source" : "test"
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "Source Files",
+			"sourceIndexes" : 
+			[
+				0
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "test/std/algorithms/alg.modifying.operations/alg.partitions/partition_copy.pass.cpp",
+			"sourceGroupIndex" : 0
+		}
+	],
+	"type" : "EXECUTABLE"
+}

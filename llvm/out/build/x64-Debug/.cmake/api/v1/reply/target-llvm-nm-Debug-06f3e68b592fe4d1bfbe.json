@@ -1,0 +1,1117 @@
+{
+	"artifacts" : 
+	[
+		{
+			"path" : "bin/llvm-nm.exe"
+		},
+		{
+			"path" : "bin/llvm-nm.pdb"
+		}
+	],
+	"backtrace" : 3,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_executable",
+			"add_llvm_executable",
+			"add_llvm_tool",
+			"install",
+			"target_link_libraries",
+			"explicit_llvm_config",
+			"llvm_config",
+			"add_dependencies",
+			"set_property",
+			"llvm_update_compile_flags",
+			"add_definitions",
+			"include",
+			"include_directories",
+			"set_windows_version_resource_properties"
+		],
+		"files" : 
+		[
+			"cmake/modules/AddLLVM.cmake",
+			"tools/llvm-nm/CMakeLists.txt",
+			"cmake/modules/LLVM-Config.cmake",
+			"cmake/modules/HandleLLVMOptions.cmake",
+			"CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 1
+			},
+			{
+				"command" : 2,
+				"file" : 1,
+				"line" : 13,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 1074,
+				"parent" : 1
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 794,
+				"parent" : 2
+			},
+			{
+				"command" : 3,
+				"file" : 0,
+				"line" : 1085,
+				"parent" : 1
+			},
+			{
+				"command" : 6,
+				"file" : 0,
+				"line" : 834,
+				"parent" : 2
+			},
+			{
+				"command" : 5,
+				"file" : 2,
+				"line" : 93,
+				"parent" : 5
+			},
+			{
+				"command" : 4,
+				"file" : 2,
+				"line" : 105,
+				"parent" : 6
+			},
+			{
+				"command" : 7,
+				"file" : 0,
+				"line" : 836,
+				"parent" : 2
+			},
+			{
+				"command" : 9,
+				"file" : 0,
+				"line" : 809,
+				"parent" : 2
+			},
+			{
+				"command" : 8,
+				"file" : 0,
+				"line" : 79,
+				"parent" : 9
+			},
+			{
+				"file" : 4
+			},
+			{
+				"command" : 11,
+				"file" : 4,
+				"line" : 660,
+				"parent" : 11
+			},
+			{
+				"file" : 3,
+				"parent" : 12
+			},
+			{
+				"command" : 10,
+				"file" : 3,
+				"line" : 401,
+				"parent" : 13
+			},
+			{
+				"command" : 10,
+				"file" : 3,
+				"line" : 390,
+				"parent" : 13
+			},
+			{
+				"command" : 10,
+				"file" : 3,
+				"line" : 779,
+				"parent" : 13
+			},
+			{
+				"command" : 10,
+				"file" : 3,
+				"line" : 780,
+				"parent" : 13
+			},
+			{
+				"command" : 10,
+				"file" : 3,
+				"line" : 781,
+				"parent" : 13
+			},
+			{
+				"command" : 12,
+				"file" : 4,
+				"line" : 862,
+				"parent" : 11
+			},
+			{
+				"command" : 13,
+				"file" : 0,
+				"line" : 804,
+				"parent" : 2
+			},
+			{
+				"command" : 8,
+				"file" : 0,
+				"line" : 365,
+				"parent" : 20
+			}
+		]
+	},
+	"compileGroups" : 
+	[
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "/DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 /MDd /Zi /Ob0 /Od /RTC1  "
+				},
+				{
+					"fragment" : " /EHs-c- /GR-"
+				},
+				{
+					"fragment" : "-std:c++14"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"backtrace" : 10,
+					"define" : "GTEST_HAS_RTTI=0"
+				},
+				{
+					"backtrace" : 14,
+					"define" : "UNICODE"
+				},
+				{
+					"backtrace" : 15,
+					"define" : "_CRT_NONSTDC_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 15,
+					"define" : "_CRT_NONSTDC_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 15,
+					"define" : "_CRT_SECURE_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 15,
+					"define" : "_CRT_SECURE_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 10,
+					"define" : "_HAS_EXCEPTIONS=0"
+				},
+				{
+					"backtrace" : 15,
+					"define" : "_SCL_SECURE_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 15,
+					"define" : "_SCL_SECURE_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 14,
+					"define" : "_UNICODE"
+				},
+				{
+					"backtrace" : 16,
+					"define" : "__STDC_CONSTANT_MACROS"
+				},
+				{
+					"backtrace" : 17,
+					"define" : "__STDC_FORMAT_MACROS"
+				},
+				{
+					"backtrace" : 18,
+					"define" : "__STDC_LIMIT_MACROS"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/out/build/x64-Debug/tools/llvm-nm"
+				},
+				{
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/tools/llvm-nm"
+				},
+				{
+					"backtrace" : 19,
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/out/build/x64-Debug/include"
+				},
+				{
+					"backtrace" : 19,
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/include"
+				}
+			],
+			"language" : "CXX",
+			"sourceIndexes" : 
+			[
+				0
+			]
+		},
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "-DWIN32 -D_DEBUG  "
+				},
+				{
+					"fragment" : "/nologo"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"backtrace" : 10,
+					"define" : "GTEST_HAS_RTTI=0"
+				},
+				{
+					"backtrace" : 21,
+					"define" : "RC_FILE_VERSION=\"11.0.0git\""
+				},
+				{
+					"backtrace" : 21,
+					"define" : "RC_INTERNAL_NAME=\"llvm-nm\""
+				},
+				{
+					"backtrace" : 21,
+					"define" : "RC_PRODUCT_NAME=\"LLVM\""
+				},
+				{
+					"backtrace" : 21,
+					"define" : "RC_PRODUCT_VERSION=\"11.0.0git\""
+				},
+				{
+					"backtrace" : 21,
+					"define" : "RC_VERSION_FIELD_1=11"
+				},
+				{
+					"backtrace" : 21,
+					"define" : "RC_VERSION_FIELD_2=0"
+				},
+				{
+					"backtrace" : 21,
+					"define" : "RC_VERSION_FIELD_3=0"
+				},
+				{
+					"backtrace" : 21,
+					"define" : "RC_VERSION_FIELD_4=0"
+				},
+				{
+					"backtrace" : 14,
+					"define" : "UNICODE"
+				},
+				{
+					"backtrace" : 15,
+					"define" : "_CRT_NONSTDC_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 15,
+					"define" : "_CRT_NONSTDC_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 15,
+					"define" : "_CRT_SECURE_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 15,
+					"define" : "_CRT_SECURE_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 10,
+					"define" : "_HAS_EXCEPTIONS=0"
+				},
+				{
+					"backtrace" : 15,
+					"define" : "_SCL_SECURE_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 15,
+					"define" : "_SCL_SECURE_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 14,
+					"define" : "_UNICODE"
+				},
+				{
+					"backtrace" : 16,
+					"define" : "__STDC_CONSTANT_MACROS"
+				},
+				{
+					"backtrace" : 17,
+					"define" : "__STDC_FORMAT_MACROS"
+				},
+				{
+					"backtrace" : 18,
+					"define" : "__STDC_LIMIT_MACROS"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/out/build/x64-Debug/tools/llvm-nm"
+				},
+				{
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/tools/llvm-nm"
+				},
+				{
+					"backtrace" : 19,
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/out/build/x64-Debug/include"
+				},
+				{
+					"backtrace" : 19,
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/include"
+				}
+			],
+			"language" : "RC",
+			"sourceIndexes" : 
+			[
+				1
+			]
+		}
+	],
+	"dependencies" : 
+	[
+		{
+			"backtrace" : 7,
+			"id" : "LLVMDemangle::@3c7ef39cff93a35ba752"
+		},
+		{
+			"backtrace" : 8,
+			"id" : "intrinsics_gen::@6eda0283a7d1115d7bbd"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMSupport::@928d1708d80fe1f55e59"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMCore::@fbfd63cd06ffdf52319f"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMBinaryFormat::@c9b0ef5de2116d71f170"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMBitstreamReader::@95731b79b16df93229d4"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMBitReader::@b3ae57fb53631d19cf66"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMMCParser::@d8f04122018374db0703"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMMC::@9597ad869864cf27958c"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMObject::@642aa1c006d9cde9317d"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMMCDisassembler::@c2d95e4d4d6a2d139337"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMRemarks::@6a63c042d04b6deafc56"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMDebugInfoCodeView::@841a9fddc0a02ad6b960"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMDebugInfoMSF::@bb9873363af6a4074de7"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMAArch64Utils::@0f6f17552fbee7165f0f"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMAArch64Info::@df4b499e4b24b1d89667"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMAArch64AsmParser::@473ff372b44b471aaf60"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMAArch64Desc::@dd9237a5da50169c02cd"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMAMDGPUAsmParser::@a8073320121828d52a00"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMAMDGPUDesc::@c87a6681b5c0f64ac1fa"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMAMDGPUInfo::@70217ea3bd94e537011b"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMAMDGPUUtils::@947f4107bdb61cf477a1"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMARMDesc::@defd2f37e9ecc6977c01"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMARMAsmParser::@185173b8992d2fde753c"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMARMInfo::@eec0221df6560e0026f9"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMARMUtils::@4bdf2c46cd70d1a6de45"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMBPFInfo::@5ae1a339cc9d970ecd56"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMBPFDesc::@416b428d53c7461f84a4"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMAVRAsmParser::@b4e1a4a1375934e2f420"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMAVRInfo::@a8f011b1d6651805b98c"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMAVRDesc::@08a5271d88a9e511e5f0"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMBPFAsmParser::@9f692ad95d48c7e6a9b7"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMNVPTXDesc::@8995c8384e73380ad799"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMHexagonAsmParser::@78ddb7f41b184b8cadf8"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMHexagonDesc::@933971063d902e952c99"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMHexagonInfo::@9d8bfa5e9f9678ec4419"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMLanaiAsmParser::@24db176e2262cf1de7eb"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMLanaiInfo::@054f8d7dd21ff4831b56"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMLanaiDesc::@72a3ee3f55251861671d"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMMipsAsmParser::@a6cefb5b66141b537243"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMMipsInfo::@4605e06c190e996b0704"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMMipsDesc::@98e89b280ef0e0e414eb"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMMSP430Info::@f86fa5b12756501ff278"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMMSP430Desc::@712e29d7688a045e9217"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMMSP430AsmParser::@49043195e86d23aea9a3"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMSystemZAsmParser::@350d6a422570fe572e68"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMSparcInfo::@61157f171f013c4041da"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMSystemZDesc::@648e57ff058c5eed7a37"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMSystemZInfo::@bb63e721e2547e15e148"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMNVPTXInfo::@1a4c3fe68c4b68d128da"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMPowerPCAsmParser::@643ac740627a09b9d1c0"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMPowerPCDesc::@8c85961324efbcd75d6e"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMPowerPCInfo::@044e14eec00abe7709e1"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMRISCVDesc::@e8f253cb593037428ffc"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMRISCVAsmParser::@9f6bb7cde324d1ca9068"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMRISCVUtils::@ea568a4dd17219b31259"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMRISCVInfo::@e643c438b7d3a777f141"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMSparcAsmParser::@eba96feab2277700b82c"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMSparcDesc::@3d7e2ea7c83774e12863"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMXCoreDesc::@c82904ec165f46ea7059"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMXCoreInfo::@e2b72971ad72dfb1012d"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMTextAPI::@e4706a94ab4f7fb58b7f"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMWebAssemblyDesc::@2fcbd9c794db3d3bffeb"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMWebAssemblyAsmParser::@c89d86086894a4e17549"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMX86AsmParser::@ca1a8f49c236f98dc8f8"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMWebAssemblyInfo::@cd3c3dfdcc5ac3084d90"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMX86Desc::@edf9a8e523662514edc3"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMX86Info::@a8de612b6f281ab57bc8"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "LLVMX86Utils::@15e2b00183ef6d83c52b"
+		}
+	],
+	"folder" : 
+	{
+		"name" : "Tools"
+	},
+	"id" : "llvm-nm::@3d6bf72ef684413f1fda",
+	"install" : 
+	{
+		"destinations" : 
+		[
+			{
+				"backtrace" : 4,
+				"path" : "bin"
+			}
+		],
+		"prefix" : 
+		{
+			"path" : "C:/Users/Krystian/src/llvm-project/llvm/out/install/x64-Debug"
+		}
+	},
+	"link" : 
+	{
+		"commandFragments" : 
+		[
+			{
+				"fragment" : "/DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 /MDd /Zi /Ob0 /Od /RTC1",
+				"role" : "flags"
+			},
+			{
+				"fragment" : "/machine:x64 /STACK:10000000 /debug /INCREMENTAL /subsystem:console",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMAArch64AsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMAMDGPUAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMARMAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMAVRAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMBPFAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMHexagonAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMLanaiAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMMipsAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMMSP430AsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMPowerPCAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMRISCVAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMSparcAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMSystemZAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMWebAssemblyAsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMX86AsmParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMAArch64Desc.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMAMDGPUDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMARMDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMAVRDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMBPFDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMHexagonDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMLanaiDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMMipsDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMMSP430Desc.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMNVPTXDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMPowerPCDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMRISCVDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMSparcDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMSystemZDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMWebAssemblyDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMX86Desc.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMXCoreDesc.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMAArch64Info.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMAMDGPUInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMARMInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMAVRInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMBPFInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMHexagonInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMLanaiInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMMipsInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMMSP430Info.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMNVPTXInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMPowerPCInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMRISCVInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMSparcInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMSystemZInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMWebAssemblyInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMX86Info.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMXCoreInfo.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMBinaryFormat.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMCore.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMDemangle.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMObject.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMSupport.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMTextAPI.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "..\\..\\lib\\LLVMAArch64Utils.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "..\\..\\lib\\LLVMAMDGPUUtils.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "..\\..\\lib\\LLVMARMUtils.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "..\\..\\lib\\LLVMRISCVUtils.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "..\\..\\lib\\LLVMMCDisassembler.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "..\\..\\lib\\LLVMX86Utils.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "..\\..\\lib\\LLVMMCParser.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "..\\..\\lib\\LLVMMC.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "..\\..\\lib\\LLVMDebugInfoCodeView.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "..\\..\\lib\\LLVMDebugInfoMSF.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "..\\..\\lib\\LLVMBitReader.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMCore.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMBinaryFormat.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "..\\..\\lib\\LLVMRemarks.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "..\\..\\lib\\LLVMBitstreamReader.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMSupport.lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "..\\..\\lib\\LLVMDemangle.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "psapi.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "shell32.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "ole32.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "uuid.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "advapi32.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "delayimp.lib",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-delayload:shell32.dll",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-delayload:ole32.dll",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib",
+				"role" : "libraries"
+			}
+		],
+		"language" : "CXX"
+	},
+	"name" : "llvm-nm",
+	"nameOnDisk" : "llvm-nm.exe",
+	"paths" : 
+	{
+		"build" : "tools/llvm-nm",
+		"source" : "tools/llvm-nm"
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "Source Files",
+			"sourceIndexes" : 
+			[
+				0
+			]
+		},
+		{
+			"name" : "Resource Files",
+			"sourceIndexes" : 
+			[
+				1
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 3,
+			"compileGroupIndex" : 0,
+			"path" : "tools/llvm-nm/llvm-nm.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 3,
+			"compileGroupIndex" : 1,
+			"path" : "resources/windows_version_resource.rc",
+			"sourceGroupIndex" : 1
+		}
+	],
+	"type" : "EXECUTABLE"
+}

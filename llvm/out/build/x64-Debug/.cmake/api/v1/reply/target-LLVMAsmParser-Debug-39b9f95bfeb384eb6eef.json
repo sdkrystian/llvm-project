@@ -1,0 +1,994 @@
+{
+	"archive" : 
+	{
+		"commandFragments" : 
+		[
+			{
+				"fragment" : "/machine:x64",
+				"role" : "flags"
+			}
+		]
+	},
+	"artifacts" : 
+	[
+		{
+			"path" : "lib/LLVMAsmParser.lib"
+		}
+	],
+	"backtrace" : 4,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_library",
+			"llvm_add_library",
+			"add_llvm_library",
+			"add_llvm_component_library",
+			"install",
+			"target_link_libraries",
+			"add_dependencies",
+			"set_property",
+			"llvm_update_compile_flags",
+			"add_definitions",
+			"include",
+			"include_directories"
+		],
+		"files" : 
+		[
+			"cmake/modules/AddLLVM.cmake",
+			"lib/AsmParser/CMakeLists.txt",
+			"cmake/modules/HandleLLVMOptions.cmake",
+			"CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 1
+			},
+			{
+				"command" : 3,
+				"file" : 1,
+				"line" : 2,
+				"parent" : 0
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 695,
+				"parent" : 1
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 709,
+				"parent" : 2
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 498,
+				"parent" : 3
+			},
+			{
+				"command" : 4,
+				"file" : 0,
+				"line" : 738,
+				"parent" : 2
+			},
+			{
+				"command" : 5,
+				"file" : 0,
+				"line" : 616,
+				"parent" : 3
+			},
+			{
+				"command" : 6,
+				"file" : 0,
+				"line" : 623,
+				"parent" : 3
+			},
+			{
+				"command" : 8,
+				"file" : 0,
+				"line" : 522,
+				"parent" : 3
+			},
+			{
+				"command" : 7,
+				"file" : 0,
+				"line" : 79,
+				"parent" : 8
+			},
+			{
+				"file" : 3
+			},
+			{
+				"command" : 10,
+				"file" : 3,
+				"line" : 660,
+				"parent" : 10
+			},
+			{
+				"file" : 2,
+				"parent" : 11
+			},
+			{
+				"command" : 9,
+				"file" : 2,
+				"line" : 401,
+				"parent" : 12
+			},
+			{
+				"command" : 9,
+				"file" : 2,
+				"line" : 390,
+				"parent" : 12
+			},
+			{
+				"command" : 9,
+				"file" : 2,
+				"line" : 779,
+				"parent" : 12
+			},
+			{
+				"command" : 9,
+				"file" : 2,
+				"line" : 780,
+				"parent" : 12
+			},
+			{
+				"command" : 9,
+				"file" : 2,
+				"line" : 781,
+				"parent" : 12
+			},
+			{
+				"command" : 11,
+				"file" : 3,
+				"line" : 862,
+				"parent" : 10
+			}
+		]
+	},
+	"compileGroups" : 
+	[
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "/DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 /MDd /Zi /Ob0 /Od /RTC1  "
+				},
+				{
+					"fragment" : " /EHs-c- /GR-"
+				},
+				{
+					"fragment" : "-std:c++14"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"backtrace" : 9,
+					"define" : "GTEST_HAS_RTTI=0"
+				},
+				{
+					"backtrace" : 13,
+					"define" : "UNICODE"
+				},
+				{
+					"backtrace" : 14,
+					"define" : "_CRT_NONSTDC_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 14,
+					"define" : "_CRT_NONSTDC_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 14,
+					"define" : "_CRT_SECURE_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 14,
+					"define" : "_CRT_SECURE_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "_HAS_EXCEPTIONS=0"
+				},
+				{
+					"backtrace" : 14,
+					"define" : "_SCL_SECURE_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 14,
+					"define" : "_SCL_SECURE_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 13,
+					"define" : "_UNICODE"
+				},
+				{
+					"backtrace" : 15,
+					"define" : "__STDC_CONSTANT_MACROS"
+				},
+				{
+					"backtrace" : 16,
+					"define" : "__STDC_FORMAT_MACROS"
+				},
+				{
+					"backtrace" : 17,
+					"define" : "__STDC_LIMIT_MACROS"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/out/build/x64-Debug/lib/AsmParser"
+				},
+				{
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/lib/AsmParser"
+				},
+				{
+					"backtrace" : 18,
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/out/build/x64-Debug/include"
+				},
+				{
+					"backtrace" : 18,
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/include"
+				}
+			],
+			"language" : "CXX",
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2
+			]
+		}
+	],
+	"dependencies" : 
+	[
+		{
+			"backtrace" : 6,
+			"id" : "LLVMDemangle::@3c7ef39cff93a35ba752"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "intrinsics_gen::@6eda0283a7d1115d7bbd"
+		},
+		{
+			"backtrace" : 6,
+			"id" : "LLVMSupport::@928d1708d80fe1f55e59"
+		},
+		{
+			"backtrace" : 6,
+			"id" : "LLVMCore::@fbfd63cd06ffdf52319f"
+		},
+		{
+			"backtrace" : 6,
+			"id" : "LLVMBinaryFormat::@c9b0ef5de2116d71f170"
+		},
+		{
+			"backtrace" : 6,
+			"id" : "LLVMBitstreamReader::@95731b79b16df93229d4"
+		},
+		{
+			"backtrace" : 6,
+			"id" : "LLVMRemarks::@6a63c042d04b6deafc56"
+		}
+	],
+	"folder" : 
+	{
+		"name" : "Libraries"
+	},
+	"id" : "LLVMAsmParser::@bfe21dd4a58a6f8872f3",
+	"install" : 
+	{
+		"destinations" : 
+		[
+			{
+				"backtrace" : 5,
+				"path" : "lib"
+			}
+		],
+		"prefix" : 
+		{
+			"path" : "C:/Users/Krystian/src/llvm-project/llvm/out/install/x64-Debug"
+		}
+	},
+	"name" : "LLVMAsmParser",
+	"nameOnDisk" : "LLVMAsmParser.lib",
+	"paths" : 
+	{
+		"build" : "lib/AsmParser",
+		"source" : "lib/AsmParser"
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "Source Files",
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2
+			]
+		},
+		{
+			"name" : "Header Files",
+			"sourceIndexes" : 
+			[
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10,
+				11,
+				12,
+				13,
+				14,
+				15,
+				16,
+				17,
+				18,
+				19,
+				20,
+				21,
+				22,
+				23,
+				24,
+				25,
+				26,
+				27,
+				28,
+				29,
+				30,
+				31,
+				32,
+				33,
+				34,
+				35,
+				36,
+				37,
+				38,
+				39,
+				40,
+				41,
+				42,
+				43,
+				44,
+				45,
+				46,
+				47,
+				48,
+				49,
+				50,
+				51,
+				52,
+				53,
+				54,
+				55,
+				56,
+				57,
+				58,
+				59,
+				60,
+				61,
+				62,
+				63,
+				64,
+				65,
+				66,
+				67,
+				68,
+				69,
+				70,
+				71,
+				72,
+				73,
+				74,
+				75,
+				76,
+				77,
+				78,
+				79,
+				80,
+				81,
+				82,
+				83,
+				84,
+				85,
+				86,
+				87,
+				88,
+				89,
+				90,
+				91,
+				92,
+				93,
+				94,
+				95,
+				96,
+				97,
+				98,
+				99,
+				100,
+				101,
+				102,
+				103,
+				104,
+				105,
+				106,
+				107,
+				108,
+				109,
+				110
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/AsmParser/LLLexer.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/AsmParser/LLParser.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/AsmParser/Parser.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"path" : "lib/AsmParser/LLLexer.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "lib/AsmParser/LLParser.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "lib/AsmParser/LLToken.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/AliasAnalysis.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/AliasAnalysisEvaluator.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/AliasSetTracker.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/AssumptionCache.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/BasicAliasAnalysis.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/BlockFrequencyInfo.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/BlockFrequencyInfoImpl.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/BranchProbabilityInfo.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/CFG.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/CFGPrinter.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/CFLAliasAnalysisUtils.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/CFLAndersAliasAnalysis.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/CFLSteensAliasAnalysis.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/CGSCCPassManager.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/CallGraph.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/CallGraphSCCPass.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/CallPrinter.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/CaptureTracking.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/CmpInstAnalysis.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/CodeMetrics.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/ConstantFolding.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/DDG.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/DOTGraphTraitsPass.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/DemandedBits.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/DependenceAnalysis.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/DependenceGraphBuilder.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/DivergenceAnalysis.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/DomPrinter.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/DomTreeUpdater.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/DominanceFrontier.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/DominanceFrontierImpl.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/EHPersonalities.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/GlobalsModRef.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/GuardUtils.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/IVDescriptors.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/IVUsers.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/IndirectCallPromotionAnalysis.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/IndirectCallVisitor.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/InlineCost.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/InstructionPrecedenceTracking.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/InstructionSimplify.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/Interval.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/IntervalIterator.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/IntervalPartition.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/IteratedDominanceFrontier.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/LazyBlockFrequencyInfo.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/LazyBranchProbabilityInfo.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/LazyCallGraph.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/LazyValueInfo.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/LegacyDivergenceAnalysis.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/Lint.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/Loads.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/LoopAccessAnalysis.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/LoopAnalysisManager.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/LoopCacheAnalysis.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/LoopInfo.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/LoopInfoImpl.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/LoopIterator.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/LoopNestAnalysis.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/LoopPass.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/LoopUnrollAnalyzer.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/MemoryBuiltins.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/MemoryDependenceAnalysis.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/MemoryLocation.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/MemorySSA.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/MemorySSAUpdater.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/ModuleSummaryAnalysis.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/MustExecute.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/ObjCARCAliasAnalysis.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/ObjCARCAnalysisUtils.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/ObjCARCInstKind.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/OptimizationRemarkEmitter.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/OrderedInstructions.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/PHITransAddr.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/Passes.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/PhiValues.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/PostDominators.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/ProfileSummaryInfo.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/PtrUseVisitor.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/RegionInfo.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/RegionInfoImpl.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/RegionIterator.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/RegionPass.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/RegionPrinter.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/ScalarEvolution.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/ScalarEvolutionAliasAnalysis.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/ScalarEvolutionExpander.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/ScalarEvolutionExpressions.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/ScalarEvolutionNormalization.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/ScopedNoAliasAA.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/SparsePropagation.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/StackSafetyAnalysis.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/SyncDependenceAnalysis.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/SyntheticCountsUtils.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/TargetFolder.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/TargetLibraryInfo.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/TargetTransformInfo.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/TargetTransformInfoImpl.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/Trace.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/TypeBasedAliasAnalysis.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/TypeMetadataUtils.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/ValueLattice.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/ValueLatticeUtils.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/ValueTracking.h",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"path" : "include/llvm/Analysis/VectorUtils.h",
+			"sourceGroupIndex" : 1
+		}
+	],
+	"type" : "STATIC_LIBRARY"
+}

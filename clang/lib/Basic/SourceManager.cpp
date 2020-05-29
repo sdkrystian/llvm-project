@@ -915,8 +915,7 @@ FileID SourceManager::getFileIDLocal(unsigned SLocOffset) const {
 FileID SourceManager::getFileIDLoaded(unsigned SLocOffset) const {
   // Sanity checking, otherwise a bug may lead to hanging in release build.
   if (SLocOffset < CurrentLoadedOffset) {
-    assert(0 && "Invalid SLocOffset or bad function choice");
-    return FileID();
+	throw std::exception("bad local offset");
   }
 
   // Essentially the same as the local case, but the loaded array is sorted

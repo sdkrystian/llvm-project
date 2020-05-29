@@ -691,9 +691,9 @@ public:
 
   /// \c true if a defaulted destructor for this class would be deleted.
   bool defaultedDestructorIsDeleted() const {
-    assert((!needsOverloadResolutionForDestructor() ||
-            (data().DeclaredSpecialMembers & SMF_Destructor)) &&
-           "this property has not yet been computed by Sema");
+    if (!(!needsOverloadResolutionForDestructor() ||
+	  (data().DeclaredSpecialMembers & SMF_Destructor)))
+        throw std::exception("this property has not yet been computed by Sema");
     return data().DefaultedDestructorIsDeleted;
   }
 

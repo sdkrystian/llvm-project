@@ -1,0 +1,1523 @@
+{
+	"entries" : 
+	[
+		{
+			"name" : "CMAKE_BUILD_TYPE",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel ..."
+				}
+			],
+			"type" : "STRING",
+			"value" : "Debug"
+		},
+		{
+			"name" : "CMAKE_CACHEFILE_DIR",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "This is the directory where this CMakeCache.txt was created"
+				}
+			],
+			"type" : "INTERNAL",
+			"value" : "c:/Users/Krystian/src/llvm-project/lld/out/build/x64-Debug"
+		},
+		{
+			"name" : "CMAKE_CACHE_MAJOR_VERSION",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Major version of cmake used to create the current loaded cache"
+				}
+			],
+			"type" : "INTERNAL",
+			"value" : "3"
+		},
+		{
+			"name" : "CMAKE_CACHE_MINOR_VERSION",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Minor version of cmake used to create the current loaded cache"
+				}
+			],
+			"type" : "INTERNAL",
+			"value" : "16"
+		},
+		{
+			"name" : "CMAKE_CACHE_PATCH_VERSION",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Patch version of cmake used to create the current loaded cache"
+				}
+			],
+			"type" : "INTERNAL",
+			"value" : "19112601"
+		},
+		{
+			"name" : "CMAKE_COMMAND",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Path to CMake executable."
+				}
+			],
+			"type" : "INTERNAL",
+			"value" : "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe"
+		},
+		{
+			"name" : "CMAKE_CPACK_COMMAND",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Path to cpack program executable."
+				}
+			],
+			"type" : "INTERNAL",
+			"value" : "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cpack.exe"
+		},
+		{
+			"name" : "CMAKE_CTEST_COMMAND",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Path to ctest program executable."
+				}
+			],
+			"type" : "INTERNAL",
+			"value" : "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/ctest.exe"
+		},
+		{
+			"name" : "CMAKE_CXX_COMPILER",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "No help, variable specified on the command line."
+				}
+			],
+			"type" : "FILEPATH",
+			"value" : "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/VC/Tools/MSVC/14.25.28610/bin/HostX64/x64/cl.exe"
+		},
+		{
+			"name" : "CMAKE_CXX_FLAGS",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the CXX compiler during all build types."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/DWIN32 /D_WINDOWS /W3 /GR /EHsc"
+		},
+		{
+			"name" : "CMAKE_CXX_FLAGS_DEBUG",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the CXX compiler during DEBUG builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/MDd /Zi /Ob0 /Od /RTC1"
+		},
+		{
+			"name" : "CMAKE_CXX_FLAGS_MINSIZEREL",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the CXX compiler during MINSIZEREL builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/MD /O1 /Ob1 /DNDEBUG"
+		},
+		{
+			"name" : "CMAKE_CXX_FLAGS_RELEASE",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the CXX compiler during RELEASE builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/MD /O2 /Ob2 /DNDEBUG"
+		},
+		{
+			"name" : "CMAKE_CXX_FLAGS_RELWITHDEBINFO",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the CXX compiler during RELWITHDEBINFO builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/MD /Zi /O2 /Ob1 /DNDEBUG"
+		},
+		{
+			"name" : "CMAKE_CXX_STANDARD_LIBRARIES",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Libraries linked by default with all C++ applications."
+				}
+			],
+			"type" : "STRING",
+			"value" : "kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib"
+		},
+		{
+			"name" : "CMAKE_C_COMPILER",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "No help, variable specified on the command line."
+				}
+			],
+			"type" : "FILEPATH",
+			"value" : "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/VC/Tools/MSVC/14.25.28610/bin/HostX64/x64/cl.exe"
+		},
+		{
+			"name" : "CMAKE_C_FLAGS",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the C compiler during all build types."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/DWIN32 /D_WINDOWS /W3"
+		},
+		{
+			"name" : "CMAKE_C_FLAGS_DEBUG",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the C compiler during DEBUG builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/MDd /Zi /Ob0 /Od /RTC1"
+		},
+		{
+			"name" : "CMAKE_C_FLAGS_MINSIZEREL",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the C compiler during MINSIZEREL builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/MD /O1 /Ob1 /DNDEBUG"
+		},
+		{
+			"name" : "CMAKE_C_FLAGS_RELEASE",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the C compiler during RELEASE builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/MD /O2 /Ob2 /DNDEBUG"
+		},
+		{
+			"name" : "CMAKE_C_FLAGS_RELWITHDEBINFO",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the C compiler during RELWITHDEBINFO builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/MD /Zi /O2 /Ob1 /DNDEBUG"
+		},
+		{
+			"name" : "CMAKE_C_STANDARD_LIBRARIES",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Libraries linked by default with all C applications."
+				}
+			],
+			"type" : "STRING",
+			"value" : "kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib"
+		},
+		{
+			"name" : "CMAKE_EXECUTABLE_FORMAT",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Executable file format"
+				}
+			],
+			"type" : "INTERNAL",
+			"value" : "Unknown"
+		},
+		{
+			"name" : "CMAKE_EXE_LINKER_FLAGS",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the linker during all build types."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/machine:x64"
+		},
+		{
+			"name" : "CMAKE_EXE_LINKER_FLAGS_DEBUG",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the linker during DEBUG builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/debug /INCREMENTAL"
+		},
+		{
+			"name" : "CMAKE_EXE_LINKER_FLAGS_MINSIZEREL",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the linker during MINSIZEREL builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/INCREMENTAL:NO"
+		},
+		{
+			"name" : "CMAKE_EXE_LINKER_FLAGS_RELEASE",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the linker during RELEASE builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/INCREMENTAL:NO"
+		},
+		{
+			"name" : "CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the linker during RELWITHDEBINFO builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/debug /INCREMENTAL"
+		},
+		{
+			"name" : "CMAKE_EXPORT_COMPILE_COMMANDS",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Enable/Disable output of compile commands during generation."
+				}
+			],
+			"type" : "BOOL",
+			"value" : "OFF"
+		},
+		{
+			"name" : "CMAKE_EXTRA_GENERATOR",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Name of external makefile project generator."
+				}
+			],
+			"type" : "INTERNAL",
+			"value" : ""
+		},
+		{
+			"name" : "CMAKE_GENERATOR",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Name of generator."
+				}
+			],
+			"type" : "INTERNAL",
+			"value" : "Ninja"
+		},
+		{
+			"name" : "CMAKE_GENERATOR_INSTANCE",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Generator instance identifier."
+				}
+			],
+			"type" : "INTERNAL",
+			"value" : ""
+		},
+		{
+			"name" : "CMAKE_GENERATOR_PLATFORM",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Name of generator platform."
+				}
+			],
+			"type" : "INTERNAL",
+			"value" : ""
+		},
+		{
+			"name" : "CMAKE_GENERATOR_TOOLSET",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Name of generator toolset."
+				}
+			],
+			"type" : "INTERNAL",
+			"value" : ""
+		},
+		{
+			"name" : "CMAKE_HOME_DIRECTORY",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Source directory with the top level CMakeLists.txt file for this project"
+				}
+			],
+			"type" : "INTERNAL",
+			"value" : "C:/Users/Krystian/src/llvm-project/lld"
+		},
+		{
+			"name" : "CMAKE_INSTALL_PREFIX",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "No help, variable specified on the command line."
+				}
+			],
+			"type" : "PATH",
+			"value" : "C:/Users/Krystian/src/llvm-project/lld/out/install/x64-Debug"
+		},
+		{
+			"name" : "CMAKE_LINKER",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Path to a program."
+				}
+			],
+			"type" : "FILEPATH",
+			"value" : "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/VC/Tools/MSVC/14.25.28610/bin/Hostx64/x64/link.exe"
+		},
+		{
+			"name" : "CMAKE_MAKE_PROGRAM",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "make program"
+				}
+			],
+			"type" : "FILEPATH",
+			"value" : "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe"
+		},
+		{
+			"name" : "CMAKE_MODULE_LINKER_FLAGS",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the linker during the creation of modules during all build types."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/machine:x64"
+		},
+		{
+			"name" : "CMAKE_MODULE_LINKER_FLAGS_DEBUG",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the linker during the creation of modules during DEBUG builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/debug /INCREMENTAL"
+		},
+		{
+			"name" : "CMAKE_MODULE_LINKER_FLAGS_MINSIZEREL",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the linker during the creation of modules during MINSIZEREL builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/INCREMENTAL:NO"
+		},
+		{
+			"name" : "CMAKE_MODULE_LINKER_FLAGS_RELEASE",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the linker during the creation of modules during RELEASE builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/INCREMENTAL:NO"
+		},
+		{
+			"name" : "CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the linker during the creation of modules during RELWITHDEBINFO builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/debug /INCREMENTAL"
+		},
+		{
+			"name" : "CMAKE_MT",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Path to a program."
+				}
+			],
+			"type" : "FILEPATH",
+			"value" : "C:/Program Files (x86)/Windows Kits/10/bin/10.0.18362.0/x64/mt.exe"
+		},
+		{
+			"name" : "CMAKE_NUMBER_OF_MAKEFILES",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "number of local generators"
+				}
+			],
+			"type" : "INTERNAL",
+			"value" : "14"
+		},
+		{
+			"name" : "CMAKE_PLATFORM_INFO_INITIALIZED",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Platform information initialized"
+				}
+			],
+			"type" : "INTERNAL",
+			"value" : "1"
+		},
+		{
+			"name" : "CMAKE_PROJECT_DESCRIPTION",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Value Computed by CMake"
+				}
+			],
+			"type" : "STATIC",
+			"value" : ""
+		},
+		{
+			"name" : "CMAKE_PROJECT_HOMEPAGE_URL",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Value Computed by CMake"
+				}
+			],
+			"type" : "STATIC",
+			"value" : ""
+		},
+		{
+			"name" : "CMAKE_PROJECT_NAME",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Value Computed by CMake"
+				}
+			],
+			"type" : "STATIC",
+			"value" : "lld"
+		},
+		{
+			"name" : "CMAKE_RC_COMPILER",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "RC compiler"
+				}
+			],
+			"type" : "FILEPATH",
+			"value" : "C:/Program Files (x86)/Windows Kits/10/bin/10.0.18362.0/x64/rc.exe"
+		},
+		{
+			"name" : "CMAKE_RC_COMPILER_WORKS",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : ""
+				}
+			],
+			"type" : "INTERNAL",
+			"value" : "1"
+		},
+		{
+			"name" : "CMAKE_RC_FLAGS",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags for Windows Resource Compiler during all build types."
+				}
+			],
+			"type" : "STRING",
+			"value" : "-DWIN32"
+		},
+		{
+			"name" : "CMAKE_RC_FLAGS_DEBUG",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags for Windows Resource Compiler during DEBUG builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : "-D_DEBUG"
+		},
+		{
+			"name" : "CMAKE_RC_FLAGS_MINSIZEREL",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags for Windows Resource Compiler during MINSIZEREL builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : ""
+		},
+		{
+			"name" : "CMAKE_RC_FLAGS_RELEASE",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags for Windows Resource Compiler during RELEASE builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : ""
+		},
+		{
+			"name" : "CMAKE_RC_FLAGS_RELWITHDEBINFO",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags for Windows Resource Compiler during RELWITHDEBINFO builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : ""
+		},
+		{
+			"name" : "CMAKE_ROOT",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Path to CMake installation."
+				}
+			],
+			"type" : "INTERNAL",
+			"value" : "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-3.16"
+		},
+		{
+			"name" : "CMAKE_SHARED_LINKER_FLAGS",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the linker during the creation of shared libraries during all build types."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/machine:x64"
+		},
+		{
+			"name" : "CMAKE_SHARED_LINKER_FLAGS_DEBUG",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the linker during the creation of shared libraries during DEBUG builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/debug /INCREMENTAL"
+		},
+		{
+			"name" : "CMAKE_SHARED_LINKER_FLAGS_MINSIZEREL",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the linker during the creation of shared libraries during MINSIZEREL builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/INCREMENTAL:NO"
+		},
+		{
+			"name" : "CMAKE_SHARED_LINKER_FLAGS_RELEASE",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the linker during the creation of shared libraries during RELEASE builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/INCREMENTAL:NO"
+		},
+		{
+			"name" : "CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the linker during the creation of shared libraries during RELWITHDEBINFO builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/debug /INCREMENTAL"
+		},
+		{
+			"name" : "CMAKE_SKIP_INSTALL_RPATH",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "If set, runtime paths are not added when installing shared libraries, but are added when building."
+				}
+			],
+			"type" : "BOOL",
+			"value" : "NO"
+		},
+		{
+			"name" : "CMAKE_SKIP_RPATH",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "If set, runtime paths are not added when using shared libraries."
+				}
+			],
+			"type" : "BOOL",
+			"value" : "NO"
+		},
+		{
+			"name" : "CMAKE_STATIC_LINKER_FLAGS",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the linker during the creation of static libraries during all build types."
+				}
+			],
+			"type" : "STRING",
+			"value" : "/machine:x64"
+		},
+		{
+			"name" : "CMAKE_STATIC_LINKER_FLAGS_DEBUG",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the linker during the creation of static libraries during DEBUG builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : ""
+		},
+		{
+			"name" : "CMAKE_STATIC_LINKER_FLAGS_MINSIZEREL",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the linker during the creation of static libraries during MINSIZEREL builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : ""
+		},
+		{
+			"name" : "CMAKE_STATIC_LINKER_FLAGS_RELEASE",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the linker during the creation of static libraries during RELEASE builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : ""
+		},
+		{
+			"name" : "CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Flags used by the linker during the creation of static libraries during RELWITHDEBINFO builds."
+				}
+			],
+			"type" : "STRING",
+			"value" : ""
+		},
+		{
+			"name" : "CMAKE_VERBOSE_MAKEFILE",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "If this value is on, makefiles will be generated without the .SILENT directive, and all commands will be echoed to the console during the make.  This is useful for debugging only. With Visual Studio IDE projects all commands are done without /nologo."
+				}
+			],
+			"type" : "BOOL",
+			"value" : "FALSE"
+		},
+		{
+			"name" : "FIND_PACKAGE_MESSAGE_DETAILS_Git",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Details about finding Git"
+				}
+			],
+			"type" : "INTERNAL",
+			"value" : "[C:/Program Files/Git/cmd/git.exe][v2.24.0.windows.1()]"
+		},
+		{
+			"name" : "GIT_EXECUTABLE",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Git command line client"
+				}
+			],
+			"type" : "FILEPATH",
+			"value" : "C:/Program Files/Git/cmd/git.exe"
+		},
+		{
+			"name" : "LLD_BUILD_TOOLS",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Build the lld tools. If OFF, just generate build targets."
+				}
+			],
+			"type" : "BOOL",
+			"value" : "ON"
+		},
+		{
+			"name" : "LLD_USE_VTUNE",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Enable VTune user task tracking."
+				}
+			],
+			"type" : "BOOL",
+			"value" : "OFF"
+		},
+		{
+			"name" : "LLVM_BUILD_INSTRUMENTED",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Build LLVM and tools with PGO instrumentation. May be specified as IR or Frontend"
+				}
+			],
+			"type" : "STRING",
+			"value" : "OFF"
+		},
+		{
+			"name" : "LLVM_BUILD_INSTRUMENTED_COVERAGE",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Build LLVM and tools with Code Coverage instrumentation"
+				}
+			],
+			"type" : "BOOL",
+			"value" : "OFF"
+		},
+		{
+			"name" : "LLVM_CONFIG_HAS_RTTI",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : ""
+				}
+			],
+			"type" : "INTERNAL",
+			"value" : "NO"
+		},
+		{
+			"name" : "LLVM_CONFIG_PATH",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Path to llvm-config binary"
+				}
+			],
+			"type" : "FILEPATH",
+			"value" : "C:/Users/Krystian/src/llvm-project/build/bin/llvm-config.exe"
+		},
+		{
+			"name" : "LLVM_ENABLE_EH",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Enable Exception handling"
+				}
+			],
+			"type" : "BOOL",
+			"value" : "OFF"
+		},
+		{
+			"name" : "LLVM_ENABLE_IDE",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Disable optional build system features that cause problems for IDE generators"
+				}
+			],
+			"type" : "BOOL",
+			"value" : "OFF"
+		},
+		{
+			"name" : "LLVM_ENABLE_IR_PGO",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Build LLVM and tools with IR PGO instrumentation (deprecated)"
+				}
+			],
+			"type" : "BOOL",
+			"value" : "OFF"
+		},
+		{
+			"name" : "LLVM_ENABLE_LTO",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Build LLVM with LTO. May be specified as Thin or Full to use a particular kind of LTO"
+				}
+			],
+			"type" : "STRING",
+			"value" : "OFF"
+		},
+		{
+			"name" : "LLVM_ENABLE_PDB",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "OFF"
+				}
+			],
+			"type" : "BOOL",
+			"value" : "OFF"
+		},
+		{
+			"name" : "LLVM_ENABLE_RTTI",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Enable run time type information"
+				}
+			],
+			"type" : "BOOL",
+			"value" : "OFF"
+		},
+		{
+			"name" : "LLVM_EXPORT_SYMBOLS_FOR_PLUGINS",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Export symbols from LLVM tools so that plugins can import them"
+				}
+			],
+			"type" : "BOOL",
+			"value" : "OFF"
+		},
+		{
+			"name" : "LLVM_FORCE_ENABLE_STATS",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Enable statistics collection for builds that wouldn't normally enable it"
+				}
+			],
+			"type" : "BOOL",
+			"value" : "OFF"
+		},
+		{
+			"name" : "LLVM_MAIN_INCLUDE_DIR",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "path to llvm/include"
+				}
+			],
+			"type" : "PATH",
+			"value" : "C:/Users/Krystian/src/llvm-project/llvm/include"
+		},
+		{
+			"name" : "LLVM_MAIN_SRC_DIR",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Path to LLVM source tree"
+				}
+			],
+			"type" : "PATH",
+			"value" : "C:/Users/Krystian/src/llvm-project/llvm"
+		},
+		{
+			"name" : "LLVM_OBJ_ROOT",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "path to LLVM build tree"
+				}
+			],
+			"type" : "PATH",
+			"value" : "C:/Users/Krystian/src/llvm-project/build"
+		},
+		{
+			"name" : "LLVM_PARALLEL_COMPILE_JOBS",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Define the maximum number of concurrent compilation jobs (Ninja only)."
+				}
+			],
+			"type" : "STRING",
+			"value" : ""
+		},
+		{
+			"name" : "LLVM_PARALLEL_LINK_JOBS",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Define the maximum number of concurrent link jobs (Ninja only)."
+				}
+			],
+			"type" : "STRING",
+			"value" : ""
+		},
+		{
+			"name" : "LLVM_SOURCE_PREFIX",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Use prefix for sources"
+				}
+			],
+			"type" : "STRING",
+			"value" : ""
+		},
+		{
+			"name" : "LLVM_TABLEGEN_EXE",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Path to a program."
+				}
+			],
+			"type" : "FILEPATH",
+			"value" : "C:/Users/Krystian/src/llvm-project/build/bin/llvm-tblgen.exe"
+		},
+		{
+			"name" : "LLVM_USE_NEWPM",
+			"properties" : 
+			[
+				{
+					"name" : "ADVANCED",
+					"value" : "1"
+				},
+				{
+					"name" : "HELPSTRING",
+					"value" : "Build LLVM using the experimental new pass manager"
+				}
+			],
+			"type" : "BOOL",
+			"value" : "OFF"
+		},
+		{
+			"name" : "LLVM_USE_RELATIVE_PATHS_IN_DEBUG_INFO",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Use relative paths in debug info"
+				}
+			],
+			"type" : "BOOL",
+			"value" : "OFF"
+		},
+		{
+			"name" : "LLVM_USE_RELATIVE_PATHS_IN_FILES",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Use relative paths in sources and debug info"
+				}
+			],
+			"type" : "BOOL",
+			"value" : "OFF"
+		},
+		{
+			"name" : "lldCOFF_LIB_DEPENDS",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Dependencies for the target"
+				}
+			],
+			"type" : "STATIC",
+			"value" : "general;lldCommon;general;LLVMAArch64CodeGen;general;LLVMAArch64AsmParser;general;LLVMAArch64Desc;general;LLVMAArch64Disassembler;general;LLVMAArch64Info;general;LLVMAArch64Utils;general;LLVMAMDGPUCodeGen;general;LLVMAMDGPUAsmParser;general;LLVMAMDGPUDesc;general;LLVMAMDGPUDisassembler;general;LLVMAMDGPUInfo;general;LLVMAMDGPUUtils;general;LLVMARMCodeGen;general;LLVMARMAsmParser;general;LLVMARMDesc;general;LLVMARMDisassembler;general;LLVMARMInfo;general;LLVMARMUtils;general;LLVMAVRCodeGen;general;LLVMAVRAsmParser;general;LLVMAVRDesc;general;LLVMAVRDisassembler;general;LLVMAVRInfo;general;LLVMBPFCodeGen;general;LLVMBPFAsmParser;general;LLVMBPFDesc;general;LLVMBPFDisassembler;general;LLVMBPFInfo;general;LLVMHexagonCodeGen;general;LLVMHexagonAsmParser;general;LLVMHexagonDesc;general;LLVMHexagonDisassembler;general;LLVMHexagonInfo;general;LLVMLanaiCodeGen;general;LLVMLanaiAsmParser;general;LLVMLanaiDesc;general;LLVMLanaiDisassembler;general;LLVMLanaiInfo;general;LLVMMipsCodeGen;general;LLVMMipsAsmParser;general;LLVMMipsDesc;general;LLVMMipsDisassembler;general;LLVMMipsInfo;general;LLVMMSP430CodeGen;general;LLVMMSP430AsmParser;general;LLVMMSP430Desc;general;LLVMMSP430Disassembler;general;LLVMMSP430Info;general;LLVMNVPTXCodeGen;general;LLVMNVPTXDesc;general;LLVMNVPTXInfo;general;LLVMPowerPCCodeGen;general;LLVMPowerPCAsmParser;general;LLVMPowerPCDesc;general;LLVMPowerPCDisassembler;general;LLVMPowerPCInfo;general;LLVMRISCVCodeGen;general;LLVMRISCVAsmParser;general;LLVMRISCVDesc;general;LLVMRISCVDisassembler;general;LLVMRISCVInfo;general;LLVMRISCVUtils;general;LLVMSparcCodeGen;general;LLVMSparcAsmParser;general;LLVMSparcDesc;general;LLVMSparcDisassembler;general;LLVMSparcInfo;general;LLVMSystemZCodeGen;general;LLVMSystemZAsmParser;general;LLVMSystemZDesc;general;LLVMSystemZDisassembler;general;LLVMSystemZInfo;general;LLVMWebAssemblyCodeGen;general;LLVMWebAssemblyAsmParser;general;LLVMWebAssemblyDesc;general;LLVMWebAssemblyDisassembler;general;LLVMWebAssemblyInfo;general;LLVMX86CodeGen;general;LLVMX86AsmParser;general;LLVMX86Desc;general;LLVMX86Disassembler;general;LLVMX86Info;general;LLVMX86Utils;general;LLVMXCoreCodeGen;general;LLVMXCoreDesc;general;LLVMXCoreDisassembler;general;LLVMXCoreInfo;general;LLVMBinaryFormat;general;LLVMCore;general;LLVMDebugInfoCodeView;general;LLVMDebugInfoDWARF;general;LLVMDebugInfoMSF;general;LLVMDebugInfoPDB;general;LLVMDemangle;general;LLVMLibDriver;general;LLVMLTO;general;LLVMMC;general;LLVMObject;general;LLVMOption;general;LLVMPasses;general;LLVMSupport;general;LLVMWindowsManifest;"
+		},
+		{
+			"name" : "lldCommon_LIB_DEPENDS",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Dependencies for the target"
+				}
+			],
+			"type" : "STATIC",
+			"value" : "general;LLVMCodeGen;general;LLVMCore;general;LLVMDebugInfoDWARF;general;LLVMDemangle;general;LLVMMC;general;LLVMOption;general;LLVMSupport;general;LLVMTarget;"
+		},
+		{
+			"name" : "lldCore_LIB_DEPENDS",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Dependencies for the target"
+				}
+			],
+			"type" : "STATIC",
+			"value" : "general;LLVMBinaryFormat;general;LLVMMC;general;LLVMSupport;"
+		},
+		{
+			"name" : "lldDriver_LIB_DEPENDS",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Dependencies for the target"
+				}
+			],
+			"type" : "STATIC",
+			"value" : "general;lldCommon;general;lldCore;general;lldMachO;general;lldReaderWriter;general;lldYAML;general;LLVMOption;general;LLVMSupport;"
+		},
+		{
+			"name" : "lldELF_LIB_DEPENDS",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Dependencies for the target"
+				}
+			],
+			"type" : "STATIC",
+			"value" : "general;lldCommon;general;LLVMAArch64CodeGen;general;LLVMAArch64AsmParser;general;LLVMAArch64Desc;general;LLVMAArch64Disassembler;general;LLVMAArch64Info;general;LLVMAArch64Utils;general;LLVMAMDGPUCodeGen;general;LLVMAMDGPUAsmParser;general;LLVMAMDGPUDesc;general;LLVMAMDGPUDisassembler;general;LLVMAMDGPUInfo;general;LLVMAMDGPUUtils;general;LLVMARMCodeGen;general;LLVMARMAsmParser;general;LLVMARMDesc;general;LLVMARMDisassembler;general;LLVMARMInfo;general;LLVMARMUtils;general;LLVMAVRCodeGen;general;LLVMAVRAsmParser;general;LLVMAVRDesc;general;LLVMAVRDisassembler;general;LLVMAVRInfo;general;LLVMBPFCodeGen;general;LLVMBPFAsmParser;general;LLVMBPFDesc;general;LLVMBPFDisassembler;general;LLVMBPFInfo;general;LLVMHexagonCodeGen;general;LLVMHexagonAsmParser;general;LLVMHexagonDesc;general;LLVMHexagonDisassembler;general;LLVMHexagonInfo;general;LLVMLanaiCodeGen;general;LLVMLanaiAsmParser;general;LLVMLanaiDesc;general;LLVMLanaiDisassembler;general;LLVMLanaiInfo;general;LLVMMipsCodeGen;general;LLVMMipsAsmParser;general;LLVMMipsDesc;general;LLVMMipsDisassembler;general;LLVMMipsInfo;general;LLVMMSP430CodeGen;general;LLVMMSP430AsmParser;general;LLVMMSP430Desc;general;LLVMMSP430Disassembler;general;LLVMMSP430Info;general;LLVMNVPTXCodeGen;general;LLVMNVPTXDesc;general;LLVMNVPTXInfo;general;LLVMPowerPCCodeGen;general;LLVMPowerPCAsmParser;general;LLVMPowerPCDesc;general;LLVMPowerPCDisassembler;general;LLVMPowerPCInfo;general;LLVMRISCVCodeGen;general;LLVMRISCVAsmParser;general;LLVMRISCVDesc;general;LLVMRISCVDisassembler;general;LLVMRISCVInfo;general;LLVMRISCVUtils;general;LLVMSparcCodeGen;general;LLVMSparcAsmParser;general;LLVMSparcDesc;general;LLVMSparcDisassembler;general;LLVMSparcInfo;general;LLVMSystemZCodeGen;general;LLVMSystemZAsmParser;general;LLVMSystemZDesc;general;LLVMSystemZDisassembler;general;LLVMSystemZInfo;general;LLVMWebAssemblyCodeGen;general;LLVMWebAssemblyAsmParser;general;LLVMWebAssemblyDesc;general;LLVMWebAssemblyDisassembler;general;LLVMWebAssemblyInfo;general;LLVMX86CodeGen;general;LLVMX86AsmParser;general;LLVMX86Desc;general;LLVMX86Disassembler;general;LLVMX86Info;general;LLVMX86Utils;general;LLVMXCoreCodeGen;general;LLVMXCoreDesc;general;LLVMXCoreDisassembler;general;LLVMXCoreInfo;general;LLVMBinaryFormat;general;LLVMBitWriter;general;LLVMCore;general;LLVMDebugInfoDWARF;general;LLVMDemangle;general;LLVMLTO;general;LLVMMC;general;LLVMObject;general;LLVMOption;general;LLVMPasses;general;LLVMSupport;"
+		},
+		{
+			"name" : "lldMachO_LIB_DEPENDS",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Dependencies for the target"
+				}
+			],
+			"type" : "STATIC",
+			"value" : "general;lldCommon;general;lldCore;general;lldYAML;general;LLVMDebugInfoDWARF;general;LLVMDemangle;general;LLVMObject;general;LLVMSupport;"
+		},
+		{
+			"name" : "lldMinGW_LIB_DEPENDS",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Dependencies for the target"
+				}
+			],
+			"type" : "STATIC",
+			"value" : "general;lldCOFF;general;lldCommon;general;LLVMOption;general;LLVMSupport;"
+		},
+		{
+			"name" : "lldReaderWriter_LIB_DEPENDS",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Dependencies for the target"
+				}
+			],
+			"type" : "STATIC",
+			"value" : "general;lldCore;general;LLVMObject;general;LLVMSupport;"
+		},
+		{
+			"name" : "lldWasm_LIB_DEPENDS",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Dependencies for the target"
+				}
+			],
+			"type" : "STATIC",
+			"value" : "general;lldCommon;general;LLVMAArch64CodeGen;general;LLVMAArch64AsmParser;general;LLVMAArch64Desc;general;LLVMAArch64Disassembler;general;LLVMAArch64Info;general;LLVMAArch64Utils;general;LLVMAMDGPUCodeGen;general;LLVMAMDGPUAsmParser;general;LLVMAMDGPUDesc;general;LLVMAMDGPUDisassembler;general;LLVMAMDGPUInfo;general;LLVMAMDGPUUtils;general;LLVMARMCodeGen;general;LLVMARMAsmParser;general;LLVMARMDesc;general;LLVMARMDisassembler;general;LLVMARMInfo;general;LLVMARMUtils;general;LLVMAVRCodeGen;general;LLVMAVRAsmParser;general;LLVMAVRDesc;general;LLVMAVRDisassembler;general;LLVMAVRInfo;general;LLVMBPFCodeGen;general;LLVMBPFAsmParser;general;LLVMBPFDesc;general;LLVMBPFDisassembler;general;LLVMBPFInfo;general;LLVMHexagonCodeGen;general;LLVMHexagonAsmParser;general;LLVMHexagonDesc;general;LLVMHexagonDisassembler;general;LLVMHexagonInfo;general;LLVMLanaiCodeGen;general;LLVMLanaiAsmParser;general;LLVMLanaiDesc;general;LLVMLanaiDisassembler;general;LLVMLanaiInfo;general;LLVMMipsCodeGen;general;LLVMMipsAsmParser;general;LLVMMipsDesc;general;LLVMMipsDisassembler;general;LLVMMipsInfo;general;LLVMMSP430CodeGen;general;LLVMMSP430AsmParser;general;LLVMMSP430Desc;general;LLVMMSP430Disassembler;general;LLVMMSP430Info;general;LLVMNVPTXCodeGen;general;LLVMNVPTXDesc;general;LLVMNVPTXInfo;general;LLVMPowerPCCodeGen;general;LLVMPowerPCAsmParser;general;LLVMPowerPCDesc;general;LLVMPowerPCDisassembler;general;LLVMPowerPCInfo;general;LLVMRISCVCodeGen;general;LLVMRISCVAsmParser;general;LLVMRISCVDesc;general;LLVMRISCVDisassembler;general;LLVMRISCVInfo;general;LLVMRISCVUtils;general;LLVMSparcCodeGen;general;LLVMSparcAsmParser;general;LLVMSparcDesc;general;LLVMSparcDisassembler;general;LLVMSparcInfo;general;LLVMSystemZCodeGen;general;LLVMSystemZAsmParser;general;LLVMSystemZDesc;general;LLVMSystemZDisassembler;general;LLVMSystemZInfo;general;LLVMWebAssemblyCodeGen;general;LLVMWebAssemblyAsmParser;general;LLVMWebAssemblyDesc;general;LLVMWebAssemblyDisassembler;general;LLVMWebAssemblyInfo;general;LLVMX86CodeGen;general;LLVMX86AsmParser;general;LLVMX86Desc;general;LLVMX86Disassembler;general;LLVMX86Info;general;LLVMX86Utils;general;LLVMXCoreCodeGen;general;LLVMXCoreDesc;general;LLVMXCoreDisassembler;general;LLVMXCoreInfo;general;LLVMBinaryFormat;general;LLVMCore;general;LLVMDemangle;general;LLVMLTO;general;LLVMMC;general;LLVMObject;general;LLVMOption;general;LLVMPasses;general;LLVMSupport;"
+		},
+		{
+			"name" : "lldYAML_LIB_DEPENDS",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Dependencies for the target"
+				}
+			],
+			"type" : "STATIC",
+			"value" : "general;lldCore;general;LLVMSupport;"
+		},
+		{
+			"name" : "lld_BINARY_DIR",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Value Computed by CMake"
+				}
+			],
+			"type" : "STATIC",
+			"value" : "C:/Users/Krystian/src/llvm-project/lld/out/build/x64-Debug"
+		},
+		{
+			"name" : "lld_SOURCE_DIR",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Value Computed by CMake"
+				}
+			],
+			"type" : "STATIC",
+			"value" : "C:/Users/Krystian/src/llvm-project/lld"
+		},
+		{
+			"name" : "macos_signposts_available",
+			"properties" : 
+			[
+				{
+					"name" : "HELPSTRING",
+					"value" : "Result of TRY_COMPILE"
+				}
+			],
+			"type" : "INTERNAL",
+			"value" : "FALSE"
+		}
+	],
+	"kind" : "cache",
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 0
+	}
+}

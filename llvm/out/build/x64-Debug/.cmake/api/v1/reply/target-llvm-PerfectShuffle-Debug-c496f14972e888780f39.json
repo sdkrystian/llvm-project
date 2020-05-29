@@ -1,0 +1,409 @@
+{
+	"artifacts" : 
+	[
+		{
+			"path" : "bin/llvm-PerfectShuffle.exe"
+		},
+		{
+			"path" : "bin/llvm-PerfectShuffle.pdb"
+		}
+	],
+	"backtrace" : 3,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_executable",
+			"add_llvm_executable",
+			"add_llvm_utility",
+			"set_property",
+			"llvm_update_compile_flags",
+			"add_definitions",
+			"include",
+			"include_directories",
+			"set_windows_version_resource_properties"
+		],
+		"files" : 
+		[
+			"cmake/modules/AddLLVM.cmake",
+			"utils/PerfectShuffle/CMakeLists.txt",
+			"cmake/modules/HandleLLVMOptions.cmake",
+			"CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 1
+			},
+			{
+				"command" : 2,
+				"file" : 1,
+				"line" : 1,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 1133,
+				"parent" : 1
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 794,
+				"parent" : 2
+			},
+			{
+				"command" : 4,
+				"file" : 0,
+				"line" : 809,
+				"parent" : 2
+			},
+			{
+				"command" : 3,
+				"file" : 0,
+				"line" : 79,
+				"parent" : 4
+			},
+			{
+				"file" : 3
+			},
+			{
+				"command" : 6,
+				"file" : 3,
+				"line" : 660,
+				"parent" : 6
+			},
+			{
+				"file" : 2,
+				"parent" : 7
+			},
+			{
+				"command" : 5,
+				"file" : 2,
+				"line" : 401,
+				"parent" : 8
+			},
+			{
+				"command" : 5,
+				"file" : 2,
+				"line" : 390,
+				"parent" : 8
+			},
+			{
+				"command" : 5,
+				"file" : 2,
+				"line" : 779,
+				"parent" : 8
+			},
+			{
+				"command" : 5,
+				"file" : 2,
+				"line" : 780,
+				"parent" : 8
+			},
+			{
+				"command" : 5,
+				"file" : 2,
+				"line" : 781,
+				"parent" : 8
+			},
+			{
+				"command" : 7,
+				"file" : 3,
+				"line" : 862,
+				"parent" : 6
+			},
+			{
+				"command" : 8,
+				"file" : 0,
+				"line" : 804,
+				"parent" : 2
+			},
+			{
+				"command" : 3,
+				"file" : 0,
+				"line" : 365,
+				"parent" : 15
+			}
+		]
+	},
+	"compileGroups" : 
+	[
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "/DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 /MDd /Zi /Ob0 /Od /RTC1  "
+				},
+				{
+					"fragment" : " /EHs-c- /GR-"
+				},
+				{
+					"fragment" : "-std:c++14"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"backtrace" : 5,
+					"define" : "GTEST_HAS_RTTI=0"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "UNICODE"
+				},
+				{
+					"backtrace" : 10,
+					"define" : "_CRT_NONSTDC_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 10,
+					"define" : "_CRT_NONSTDC_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 10,
+					"define" : "_CRT_SECURE_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 10,
+					"define" : "_CRT_SECURE_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 5,
+					"define" : "_HAS_EXCEPTIONS=0"
+				},
+				{
+					"backtrace" : 10,
+					"define" : "_SCL_SECURE_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 10,
+					"define" : "_SCL_SECURE_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "_UNICODE"
+				},
+				{
+					"backtrace" : 11,
+					"define" : "__STDC_CONSTANT_MACROS"
+				},
+				{
+					"backtrace" : 12,
+					"define" : "__STDC_FORMAT_MACROS"
+				},
+				{
+					"backtrace" : 13,
+					"define" : "__STDC_LIMIT_MACROS"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/out/build/x64-Debug/utils/PerfectShuffle"
+				},
+				{
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/utils/PerfectShuffle"
+				},
+				{
+					"backtrace" : 14,
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/out/build/x64-Debug/include"
+				},
+				{
+					"backtrace" : 14,
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/include"
+				}
+			],
+			"language" : "CXX",
+			"sourceIndexes" : 
+			[
+				0
+			]
+		},
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "-DWIN32 -D_DEBUG  "
+				},
+				{
+					"fragment" : "/nologo"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"backtrace" : 5,
+					"define" : "GTEST_HAS_RTTI=0"
+				},
+				{
+					"backtrace" : 16,
+					"define" : "RC_FILE_VERSION=\"11.0.0git\""
+				},
+				{
+					"backtrace" : 16,
+					"define" : "RC_INTERNAL_NAME=\"llvm-PerfectShuffle\""
+				},
+				{
+					"backtrace" : 16,
+					"define" : "RC_PRODUCT_NAME=\"LLVM\""
+				},
+				{
+					"backtrace" : 16,
+					"define" : "RC_PRODUCT_VERSION=\"11.0.0git\""
+				},
+				{
+					"backtrace" : 16,
+					"define" : "RC_VERSION_FIELD_1=11"
+				},
+				{
+					"backtrace" : 16,
+					"define" : "RC_VERSION_FIELD_2=0"
+				},
+				{
+					"backtrace" : 16,
+					"define" : "RC_VERSION_FIELD_3=0"
+				},
+				{
+					"backtrace" : 16,
+					"define" : "RC_VERSION_FIELD_4=0"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "UNICODE"
+				},
+				{
+					"backtrace" : 10,
+					"define" : "_CRT_NONSTDC_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 10,
+					"define" : "_CRT_NONSTDC_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 10,
+					"define" : "_CRT_SECURE_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 10,
+					"define" : "_CRT_SECURE_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 5,
+					"define" : "_HAS_EXCEPTIONS=0"
+				},
+				{
+					"backtrace" : 10,
+					"define" : "_SCL_SECURE_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 10,
+					"define" : "_SCL_SECURE_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "_UNICODE"
+				},
+				{
+					"backtrace" : 11,
+					"define" : "__STDC_CONSTANT_MACROS"
+				},
+				{
+					"backtrace" : 12,
+					"define" : "__STDC_FORMAT_MACROS"
+				},
+				{
+					"backtrace" : 13,
+					"define" : "__STDC_LIMIT_MACROS"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/out/build/x64-Debug/utils/PerfectShuffle"
+				},
+				{
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/utils/PerfectShuffle"
+				},
+				{
+					"backtrace" : 14,
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/out/build/x64-Debug/include"
+				},
+				{
+					"backtrace" : 14,
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/include"
+				}
+			],
+			"language" : "RC",
+			"sourceIndexes" : 
+			[
+				1
+			]
+		}
+	],
+	"folder" : 
+	{
+		"name" : "Utils"
+	},
+	"id" : "llvm-PerfectShuffle::@60646a9e7bfe6468b576",
+	"link" : 
+	{
+		"commandFragments" : 
+		[
+			{
+				"fragment" : "/DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 /MDd /Zi /Ob0 /Od /RTC1",
+				"role" : "flags"
+			},
+			{
+				"fragment" : "/machine:x64 /STACK:10000000 /debug /INCREMENTAL /subsystem:console",
+				"role" : "flags"
+			},
+			{
+				"fragment" : "kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib",
+				"role" : "libraries"
+			}
+		],
+		"language" : "CXX"
+	},
+	"name" : "llvm-PerfectShuffle",
+	"nameOnDisk" : "llvm-PerfectShuffle.exe",
+	"paths" : 
+	{
+		"build" : "utils/PerfectShuffle",
+		"source" : "utils/PerfectShuffle"
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "Source Files",
+			"sourceIndexes" : 
+			[
+				0
+			]
+		},
+		{
+			"name" : "Resource Files",
+			"sourceIndexes" : 
+			[
+				1
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 3,
+			"compileGroupIndex" : 0,
+			"path" : "utils/PerfectShuffle/PerfectShuffle.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 3,
+			"compileGroupIndex" : 1,
+			"path" : "resources/windows_version_resource.rc",
+			"sourceGroupIndex" : 1
+		}
+	],
+	"type" : "EXECUTABLE"
+}

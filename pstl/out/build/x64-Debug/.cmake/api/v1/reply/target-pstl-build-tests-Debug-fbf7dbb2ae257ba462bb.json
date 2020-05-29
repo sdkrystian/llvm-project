@@ -1,0 +1,639 @@
+{
+	"backtrace" : 1,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_custom_target",
+			"add_dependencies"
+		],
+		"files" : 
+		[
+			"test/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 12,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 40,
+				"parent" : 0
+			}
+		]
+	},
+	"dependencies" : 
+	[
+		{
+			"backtrace" : 2,
+			"id" : "pstl-std-algorithms-alg.nonmodifying-adjacent_find.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "pstl-pstl-header_inclusion_order_algorithm_1.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 4,
+			"id" : "pstl-std-algorithms-alg.nonmodifying-any_of.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 5,
+			"id" : "pstl-std-algorithms-alg.modifying.operations-copy_move.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 6,
+			"id" : "pstl-pstl-header_inclusion_order_numeric_0.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 7,
+			"id" : "pstl-std-algorithms-alg.modifying.operations-alg.partitions-is_partitioned.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 8,
+			"id" : "pstl-std-algorithms-alg.modifying.operations-swap_ranges.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 9,
+			"id" : "pstl-std-algorithms-alg.merge-inplace_merge.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "pstl-std-algorithms-alg.modifying.operations-alg.reverse-reverse.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 11,
+			"id" : "pstl-std-numerics-numeric.ops-adjacent_difference.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 12,
+			"id" : "pstl-std-algorithms-alg.modifying.operations-fill.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 13,
+			"id" : "pstl-pstl-header_inclusion_order_memory_0.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 14,
+			"id" : "pstl-std-algorithms-alg.merge-merge.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 15,
+			"id" : "pstl-std-algorithms-alg.modifying.operations-remove.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 16,
+			"id" : "pstl-std-numerics-numeric.ops-transform_scan.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 17,
+			"id" : "pstl-std-algorithms-alg.sorting-partial_sort.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 18,
+			"id" : "pstl-std-algorithms-alg.modifying.operations-alg.reverse-reverse_copy.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 19,
+			"id" : "pstl-pstl-header_inclusion_order_memory_1.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 20,
+			"id" : "pstl-pstl-header_inclusion_order_algorithm_0.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 21,
+			"id" : "pstl-pstl-version.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 22,
+			"id" : "pstl-std-algorithms-alg.modifying.operations-alg.copy-copy_if.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 23,
+			"id" : "pstl-std-algorithms-alg.modifying.operations-replace.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 24,
+			"id" : "pstl-pstl-header_inclusion_order_numeric_1.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 25,
+			"id" : "pstl-std-algorithms-alg.sorting-is_sorted.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 26,
+			"id" : "pstl-std-algorithms-alg.sorting-alg.heap.operations-is_heap.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 27,
+			"id" : "pstl-std-algorithms-alg.modifying.operations-alg.partitions-partition.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 28,
+			"id" : "pstl-std-algorithms-alg.sorting-partial_sort_copy.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 29,
+			"id" : "pstl-std-algorithms-alg.modifying.operations-alg.partitions-partition_copy.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 30,
+			"id" : "pstl-std-utilities-memory-specialized.algorithms-uninitialized_copy_move.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 31,
+			"id" : "pstl-std-numerics-numeric.ops-reduce.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 32,
+			"id" : "pstl-std-algorithms-alg.nonmodifying-count.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 33,
+			"id" : "pstl-std-algorithms-alg.modifying.operations-replace_copy.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 34,
+			"id" : "pstl-std-algorithms-alg.modifying.operations-transform_binary.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 35,
+			"id" : "pstl-std-algorithms-alg.modifying.operations-unique.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 36,
+			"id" : "pstl-std-algorithms-alg.nonmodifying-all_of.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 37,
+			"id" : "pstl-std-algorithms-alg.modifying.operations-rotate_copy.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 38,
+			"id" : "pstl-std-algorithms-alg.modifying.operations-remove_copy.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 39,
+			"id" : "pstl-std-algorithms-alg.nonmodifying-nth_element.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 40,
+			"id" : "pstl-std-utilities-memory-specialized.algorithms-uninitialized_construct.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 41,
+			"id" : "pstl-std-algorithms-alg.nonmodifying-for_each.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 42,
+			"id" : "pstl-std-algorithms-alg.modifying.operations-rotate.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 43,
+			"id" : "pstl-std-algorithms-alg.nonmodifying-find_if.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 44,
+			"id" : "pstl-std-algorithms-alg.nonmodifying-mismatch.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 45,
+			"id" : "pstl-std-algorithms-alg.nonmodifying-none_of.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 46,
+			"id" : "pstl-std-algorithms-alg.sorting-alg.lex.comparison-lexicographical_compare.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 47,
+			"id" : "pstl-std-algorithms-alg.modifying.operations-transform_unary.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 48,
+			"id" : "pstl-std-algorithms-alg.nonmodifying-search_n.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 49,
+			"id" : "pstl-std-algorithms-alg.modifying.operations-generate.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 50,
+			"id" : "pstl-std-algorithms-alg.nonmodifying-find.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 51,
+			"id" : "pstl-std-algorithms-alg.modifying.operations-unique_copy_equal.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 52,
+			"id" : "pstl-std-algorithms-alg.nonmodifying-equal.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 53,
+			"id" : "pstl-std-algorithms-alg.sorting-alg.min.max-minmax_element.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 54,
+			"id" : "pstl-std-algorithms-alg.nonmodifying-find_end.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 55,
+			"id" : "pstl-std-algorithms-alg.nonmodifying-find_first_of.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 56,
+			"id" : "pstl-std-algorithms-alg.sorting-alg.set.operations-includes.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 57,
+			"id" : "pstl-std-algorithms-alg.sorting-sort.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 58,
+			"id" : "pstl-std-algorithms-alg.sorting-alg.set.operations-set.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 59,
+			"id" : "pstl-std-utilities-memory-specialized.algorithms-uninitialized_fill_destroy.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 60,
+			"id" : "pstl-std-numerics-numeric.ops-scan.pass::@36f028580bb02cc8272a"
+		},
+		{
+			"backtrace" : 61,
+			"id" : "pstl-std-numerics-numeric.ops-transform_reduce.pass::@36f028580bb02cc8272a"
+		}
+	],
+	"id" : "pstl-build-tests::@36f028580bb02cc8272a",
+	"name" : "pstl-build-tests",
+	"paths" : 
+	{
+		"build" : "test",
+		"source" : "test"
+	},
+	"sources" : [],
+	"type" : "UTILITY"
+}

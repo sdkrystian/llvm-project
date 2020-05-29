@@ -1,0 +1,512 @@
+Checking whether the ASM compiler is GNU using "--version" did not match "(GNU assembler)|(GCC)|(Free Software Foundation)":
+Microsoft (R) C/C++ Optimizing Compiler Version 19.25.28611 for x64
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+cl : Command line warning D9002 : ignoring unknown option '--version'
+cl : Command line error D8003 : missing source filename
+Checking whether the ASM compiler is Clang using "--version" did not match "(clang version)":
+Microsoft (R) C/C++ Optimizing Compiler Version 19.25.28611 for x64
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+cl : Command line warning D9002 : ignoring unknown option '--version'
+cl : Command line error D8003 : missing source filename
+Checking whether the ASM compiler is AppleClang using "--version" did not match "(Apple LLVM version)":
+Microsoft (R) C/C++ Optimizing Compiler Version 19.25.28611 for x64
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+cl : Command line warning D9002 : ignoring unknown option '--version'
+cl : Command line error D8003 : missing source filename
+Checking whether the ASM compiler is ARMClang using "--version" did not match "armclang":
+Microsoft (R) C/C++ Optimizing Compiler Version 19.25.28611 for x64
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+cl : Command line warning D9002 : ignoring unknown option '--version'
+cl : Command line error D8003 : missing source filename
+Checking whether the ASM compiler is HP using "-V" did not match "HP C":
+Microsoft (R) C/C++ Optimizing Compiler Version 19.25.28611 for x64
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+cl : Command line error D8004 : '/V' requires an argument
+Checking whether the ASM compiler is Intel using "--version" did not match "(ICC)":
+Microsoft (R) C/C++ Optimizing Compiler Version 19.25.28611 for x64
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+cl : Command line warning D9002 : ignoring unknown option '--version'
+cl : Command line error D8003 : missing source filename
+Checking whether the ASM compiler is SunPro using "-V" did not match "Sun C":
+Microsoft (R) C/C++ Optimizing Compiler Version 19.25.28611 for x64
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+cl : Command line error D8004 : '/V' requires an argument
+Checking whether the ASM compiler is XL using "-qversion" did not match "XL C":
+Microsoft (R) C/C++ Optimizing Compiler Version 19.25.28611 for x64
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+cl : Command line warning D9002 : ignoring unknown option '-qversion'
+cl : Command line error D8003 : missing source filename
+Determining if the os_signpost_interval_begin exist failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_37d94 && [1/2] Building C object CMakeFiles\cmTC_37d94.dir\CheckSymbolExists.c.obj
+FAILED: CMakeFiles/cmTC_37d94.dir/CheckSymbolExists.c.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\HostX64\x64\cl.exe  /nologo   /DWIN32 /D_WINDOWS /Zc:inline /Zc:strictStrings /Oi /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238  /MDd /Zi /Ob0 /Od /RTC1 /showIncludes /FoCMakeFiles\cmTC_37d94.dir\CheckSymbolExists.c.obj /FdCMakeFiles\cmTC_37d94.dir\ /FS -c CheckSymbolExists.c
+CheckSymbolExists.c(2): fatal error C1083: Cannot open include file: 'os/signpost.h': No such file or directory
+ninja: build stopped: subcommand failed.
+
+
+File C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp/CheckSymbolExists.c:
+/* */
+#include <os/signpost.h>
+
+int main(int argc, char** argv)
+{
+  (void)argv;
+#ifndef os_signpost_interval_begin
+  return ((int*)(&os_signpost_interval_begin))[argc];
+#else
+  (void)argc;
+  return 0;
+#endif
+}
+Determining if the function fopen exists in the c failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_d89ed && [1/2] Building C object CMakeFiles\cmTC_d89ed.dir\CheckFunctionExists.c.obj
+[2/2] Linking C executable cmTC_d89ed.exe
+FAILED: cmTC_d89ed.exe 
+cmd.exe /C "cd . && "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E vs_link_exe --intdir=CMakeFiles\cmTC_d89ed.dir --rc=C:\PROGRA~2\WI3CF2~1\10\bin\100183~1.0\x64\rc.exe --mt=C:\PROGRA~2\WI3CF2~1\10\bin\100183~1.0\x64\mt.exe --manifests  -- C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\link.exe /nologo CMakeFiles\cmTC_d89ed.dir\CheckFunctionExists.c.obj  /out:cmTC_d89ed.exe /implib:cmTC_d89ed.lib /pdb:cmTC_d89ed.pdb /version:0.0  /machine:x64 /STACK:10000000  /debug /INCREMENTAL /subsystem:console  c.lib  kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib && cd ."
+LINK Pass 1: command "C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\link.exe /nologo CMakeFiles\cmTC_d89ed.dir\CheckFunctionExists.c.obj /out:cmTC_d89ed.exe /implib:cmTC_d89ed.lib /pdb:cmTC_d89ed.pdb /version:0.0 /machine:x64 /STACK:10000000 /debug /INCREMENTAL /subsystem:console c.lib kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTFILE:CMakeFiles\cmTC_d89ed.dir/intermediate.manifest CMakeFiles\cmTC_d89ed.dir/manifest.res" failed (exit code 1104) with the following output:
+LINK : fatal error LNK1104: cannot open file 'c.lib'
+ninja: build stopped: subcommand failed.
+
+
+
+Determining if the function __gcc_personality_v0 exists in the gcc_s failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_3d62b && [1/2] Building C object CMakeFiles\cmTC_3d62b.dir\CheckFunctionExists.c.obj
+[2/2] Linking C executable cmTC_3d62b.exe
+FAILED: cmTC_3d62b.exe 
+cmd.exe /C "cd . && "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E vs_link_exe --intdir=CMakeFiles\cmTC_3d62b.dir --rc=C:\PROGRA~2\WI3CF2~1\10\bin\100183~1.0\x64\rc.exe --mt=C:\PROGRA~2\WI3CF2~1\10\bin\100183~1.0\x64\mt.exe --manifests  -- C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\link.exe /nologo CMakeFiles\cmTC_3d62b.dir\CheckFunctionExists.c.obj  /out:cmTC_3d62b.exe /implib:cmTC_3d62b.lib /pdb:cmTC_3d62b.pdb /version:0.0  /machine:x64 /STACK:10000000  /debug /INCREMENTAL /subsystem:console  gcc_s.lib  kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib && cd ."
+LINK Pass 1: command "C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\link.exe /nologo CMakeFiles\cmTC_3d62b.dir\CheckFunctionExists.c.obj /out:cmTC_3d62b.exe /implib:cmTC_3d62b.lib /pdb:cmTC_3d62b.pdb /version:0.0 /machine:x64 /STACK:10000000 /debug /INCREMENTAL /subsystem:console gcc_s.lib kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTFILE:CMakeFiles\cmTC_3d62b.dir/intermediate.manifest CMakeFiles\cmTC_3d62b.dir/manifest.res" failed (exit code 1104) with the following output:
+LINK : fatal error LNK1104: cannot open file 'gcc_s.lib'
+ninja: build stopped: subcommand failed.
+
+
+
+Determining if the function __absvdi2 exists in the gcc failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_118f7 && [1/2] Building C object CMakeFiles\cmTC_118f7.dir\CheckFunctionExists.c.obj
+[2/2] Linking C executable cmTC_118f7.exe
+FAILED: cmTC_118f7.exe 
+cmd.exe /C "cd . && "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E vs_link_exe --intdir=CMakeFiles\cmTC_118f7.dir --rc=C:\PROGRA~2\WI3CF2~1\10\bin\100183~1.0\x64\rc.exe --mt=C:\PROGRA~2\WI3CF2~1\10\bin\100183~1.0\x64\mt.exe --manifests  -- C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\link.exe /nologo CMakeFiles\cmTC_118f7.dir\CheckFunctionExists.c.obj  /out:cmTC_118f7.exe /implib:cmTC_118f7.lib /pdb:cmTC_118f7.pdb /version:0.0  /machine:x64 /STACK:10000000  /debug /INCREMENTAL /subsystem:console  gcc.lib  kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib && cd ."
+LINK Pass 1: command "C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\link.exe /nologo CMakeFiles\cmTC_118f7.dir\CheckFunctionExists.c.obj /out:cmTC_118f7.exe /implib:cmTC_118f7.lib /pdb:cmTC_118f7.pdb /version:0.0 /machine:x64 /STACK:10000000 /debug /INCREMENTAL /subsystem:console gcc.lib kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTFILE:CMakeFiles\cmTC_118f7.dir/intermediate.manifest CMakeFiles\cmTC_118f7.dir/manifest.res" failed (exit code 1104) with the following output:
+LINK : fatal error LNK1104: cannot open file 'gcc.lib'
+ninja: build stopped: subcommand failed.
+
+
+
+Performing C SOURCE FILE Test LIBUNWIND_HAS_NODEFAULTLIBS_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_989de && [1/2] Building C object CMakeFiles\cmTC_989de.dir\src.c.obj
+cl : Command line warning D9002 : ignoring unknown option '-nodefaultlibs'
+[2/2] Linking C executable cmTC_989de.exe
+
+
+Source file was:
+int main(void) { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_HAS_NOSTDINCXX_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_38f34 && [1/2] Building CXX object CMakeFiles\cmTC_38f34.dir\src.cxx.obj
+cl : Command line warning D9002 : ignoring unknown option '-nostdinc++'
+[2/2] Linking CXX executable cmTC_38f34.exe
+
+
+Source file was:
+int main() { return 0; }
+Determining if the __arm__ exist failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_a6a93 && [1/2] Building C object CMakeFiles\cmTC_a6a93.dir\CheckSymbolExists.c.obj
+FAILED: CMakeFiles/cmTC_a6a93.dir/CheckSymbolExists.c.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\HostX64\x64\cl.exe  /nologo   /DWIN32 /D_WINDOWS /Zc:inline /Zc:strictStrings /Oi /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238  /MDd /Zi /Ob0 /Od /RTC1 /showIncludes /FoCMakeFiles\cmTC_a6a93.dir\CheckSymbolExists.c.obj /FdCMakeFiles\cmTC_a6a93.dir\ /FS -c CheckSymbolExists.c
+CheckSymbolExists.c(7): error C2065: '__arm__': undeclared identifier
+ninja: build stopped: subcommand failed.
+
+
+File C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp/CheckSymbolExists.c:
+/* */
+
+int main(int argc, char** argv)
+{
+  (void)argv;
+#ifndef __arm__
+  return ((int*)(&__arm__))[argc];
+#else
+  (void)argc;
+  return 0;
+#endif
+}
+Determining if the __USING_SJLJ_EXCEPTIONS__ exist failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_e1b67 && [1/2] Building C object CMakeFiles\cmTC_e1b67.dir\CheckSymbolExists.c.obj
+FAILED: CMakeFiles/cmTC_e1b67.dir/CheckSymbolExists.c.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\HostX64\x64\cl.exe  /nologo   /DWIN32 /D_WINDOWS /Zc:inline /Zc:strictStrings /Oi /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238  /MDd /Zi /Ob0 /Od /RTC1 /showIncludes /FoCMakeFiles\cmTC_e1b67.dir\CheckSymbolExists.c.obj /FdCMakeFiles\cmTC_e1b67.dir\ /FS -c CheckSymbolExists.c
+CheckSymbolExists.c(7): error C2065: '__USING_SJLJ_EXCEPTIONS__': undeclared identifier
+ninja: build stopped: subcommand failed.
+
+
+File C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp/CheckSymbolExists.c:
+/* */
+
+int main(int argc, char** argv)
+{
+  (void)argv;
+#ifndef __USING_SJLJ_EXCEPTIONS__
+  return ((int*)(&__USING_SJLJ_EXCEPTIONS__))[argc];
+#else
+  (void)argc;
+  return 0;
+#endif
+}
+Determining if the __ARM_DWARF_EH__ exist failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_96e81 && [1/2] Building C object CMakeFiles\cmTC_96e81.dir\CheckSymbolExists.c.obj
+FAILED: CMakeFiles/cmTC_96e81.dir/CheckSymbolExists.c.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\HostX64\x64\cl.exe  /nologo   /DWIN32 /D_WINDOWS /Zc:inline /Zc:strictStrings /Oi /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238  /MDd /Zi /Ob0 /Od /RTC1 /showIncludes /FoCMakeFiles\cmTC_96e81.dir\CheckSymbolExists.c.obj /FdCMakeFiles\cmTC_96e81.dir\ /FS -c CheckSymbolExists.c
+CheckSymbolExists.c(7): error C2065: '__ARM_DWARF_EH__': undeclared identifier
+ninja: build stopped: subcommand failed.
+
+
+File C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp/CheckSymbolExists.c:
+/* */
+
+int main(int argc, char** argv)
+{
+  (void)argv;
+#ifndef __ARM_DWARF_EH__
+  return ((int*)(&__ARM_DWARF_EH__))[argc];
+#else
+  (void)argc;
+  return 0;
+#endif
+}
+Determining if the function dladdr exists in the dl failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_5b935 && [1/2] Building C object CMakeFiles\cmTC_5b935.dir\CheckFunctionExists.c.obj
+[2/2] Linking C executable cmTC_5b935.exe
+FAILED: cmTC_5b935.exe 
+cmd.exe /C "cd . && "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E vs_link_exe --intdir=CMakeFiles\cmTC_5b935.dir --rc=C:\PROGRA~2\WI3CF2~1\10\bin\100183~1.0\x64\rc.exe --mt=C:\PROGRA~2\WI3CF2~1\10\bin\100183~1.0\x64\mt.exe --manifests  -- C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\link.exe /nologo CMakeFiles\cmTC_5b935.dir\CheckFunctionExists.c.obj  /out:cmTC_5b935.exe /implib:cmTC_5b935.lib /pdb:cmTC_5b935.pdb /version:0.0  /machine:x64 /STACK:10000000  /debug /INCREMENTAL /subsystem:console  dl.lib  kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib && cd ."
+LINK Pass 1: command "C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\link.exe /nologo CMakeFiles\cmTC_5b935.dir\CheckFunctionExists.c.obj /out:cmTC_5b935.exe /implib:cmTC_5b935.lib /pdb:cmTC_5b935.pdb /version:0.0 /machine:x64 /STACK:10000000 /debug /INCREMENTAL /subsystem:console dl.lib kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTFILE:CMakeFiles\cmTC_5b935.dir/intermediate.manifest CMakeFiles\cmTC_5b935.dir/manifest.res" failed (exit code 1104) with the following output:
+LINK : fatal error LNK1104: cannot open file 'dl.lib'
+ninja: build stopped: subcommand failed.
+
+
+
+Determining if the function pthread_once exists in the pthread failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_532f1 && [1/2] Building C object CMakeFiles\cmTC_532f1.dir\CheckFunctionExists.c.obj
+[2/2] Linking C executable cmTC_532f1.exe
+FAILED: cmTC_532f1.exe 
+cmd.exe /C "cd . && "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E vs_link_exe --intdir=CMakeFiles\cmTC_532f1.dir --rc=C:\PROGRA~2\WI3CF2~1\10\bin\100183~1.0\x64\rc.exe --mt=C:\PROGRA~2\WI3CF2~1\10\bin\100183~1.0\x64\mt.exe --manifests  -- C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\link.exe /nologo CMakeFiles\cmTC_532f1.dir\CheckFunctionExists.c.obj  /out:cmTC_532f1.exe /implib:cmTC_532f1.lib /pdb:cmTC_532f1.pdb /version:0.0  /machine:x64 /STACK:10000000  /debug /INCREMENTAL /subsystem:console  pthread.lib  kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib && cd ."
+LINK Pass 1: command "C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\link.exe /nologo CMakeFiles\cmTC_532f1.dir\CheckFunctionExists.c.obj /out:cmTC_532f1.exe /implib:cmTC_532f1.lib /pdb:cmTC_532f1.pdb /version:0.0 /machine:x64 /STACK:10000000 /debug /INCREMENTAL /subsystem:console pthread.lib kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTFILE:CMakeFiles\cmTC_532f1.dir/intermediate.manifest CMakeFiles\cmTC_532f1.dir/manifest.res" failed (exit code 1104) with the following output:
+LINK : fatal error LNK1104: cannot open file 'pthread.lib'
+ninja: build stopped: subcommand failed.
+
+
+
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_WERROR_EQ_RETURN_TYPE_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_e2864 && [1/2] Building CXX object CMakeFiles\cmTC_e2864.dir\src.cxx.obj
+FAILED: CMakeFiles/cmTC_e2864.dir/src.cxx.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\cl.exe  /nologo /TP   /DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -DLIBUNWIND_SUPPORTS_WERROR_EQ_RETURN_TYPE_FLAG /MDd /Zi /Ob0 /Od /RTC1   -Werror=return-type /showIncludes /FoCMakeFiles\cmTC_e2864.dir\src.cxx.obj /FdCMakeFiles\cmTC_e2864.dir\ /FS -c src.cxx
+cl : Command line error D8021 : invalid numeric argument '/Werror=return-type'
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_W_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_51b00 && [1/2] Building CXX object CMakeFiles\cmTC_51b00.dir\src.cxx.obj
+FAILED: CMakeFiles/cmTC_51b00.dir/src.cxx.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\cl.exe  /nologo /TP   /DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -DLIBUNWIND_SUPPORTS_W_FLAG /MDd /Zi /Ob0 /Od /RTC1   -W /showIncludes /FoCMakeFiles\cmTC_51b00.dir\src.cxx.obj /FdCMakeFiles\cmTC_51b00.dir\ /FS -c src.cxx
+cl : Command line error D8004 : '/W' requires an argument
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_WCHAR_SUBSCRIPTS_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_55ff6 && [1/2] Building CXX object CMakeFiles\cmTC_55ff6.dir\src.cxx.obj
+FAILED: CMakeFiles/cmTC_55ff6.dir/src.cxx.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\cl.exe  /nologo /TP   /DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -DLIBUNWIND_SUPPORTS_WCHAR_SUBSCRIPTS_FLAG /MDd /Zi /Ob0 /Od /RTC1   -Wchar-subscripts /showIncludes /FoCMakeFiles\cmTC_55ff6.dir\src.cxx.obj /FdCMakeFiles\cmTC_55ff6.dir\ /FS -c src.cxx
+cl : Command line error D8021 : invalid numeric argument '/Wchar-subscripts'
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_WCONVERSION_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_6adc3 && [1/2] Building CXX object CMakeFiles\cmTC_6adc3.dir\src.cxx.obj
+FAILED: CMakeFiles/cmTC_6adc3.dir/src.cxx.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\cl.exe  /nologo /TP   /DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -DLIBUNWIND_SUPPORTS_WCONVERSION_FLAG /MDd /Zi /Ob0 /Od /RTC1   -Wconversion /showIncludes /FoCMakeFiles\cmTC_6adc3.dir\src.cxx.obj /FdCMakeFiles\cmTC_6adc3.dir\ /FS -c src.cxx
+cl : Command line error D8021 : invalid numeric argument '/Wconversion'
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_WMISMATCHED_TAGS_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_f0b3e && [1/2] Building CXX object CMakeFiles\cmTC_f0b3e.dir\src.cxx.obj
+FAILED: CMakeFiles/cmTC_f0b3e.dir/src.cxx.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\cl.exe  /nologo /TP   /DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -DLIBUNWIND_SUPPORTS_WMISMATCHED_TAGS_FLAG /MDd /Zi /Ob0 /Od /RTC1   -Wmismatched-tags /showIncludes /FoCMakeFiles\cmTC_f0b3e.dir\src.cxx.obj /FdCMakeFiles\cmTC_f0b3e.dir\ /FS -c src.cxx
+cl : Command line error D8021 : invalid numeric argument '/Wmismatched-tags'
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_WMISSING_BRACES_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_ad974 && [1/2] Building CXX object CMakeFiles\cmTC_ad974.dir\src.cxx.obj
+FAILED: CMakeFiles/cmTC_ad974.dir/src.cxx.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\cl.exe  /nologo /TP   /DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -DLIBUNWIND_SUPPORTS_WMISSING_BRACES_FLAG /MDd /Zi /Ob0 /Od /RTC1   -Wmissing-braces /showIncludes /FoCMakeFiles\cmTC_ad974.dir\src.cxx.obj /FdCMakeFiles\cmTC_ad974.dir\ /FS -c src.cxx
+cl : Command line error D8021 : invalid numeric argument '/Wmissing-braces'
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_WNEWLINE_EOF_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_c682a && [1/2] Building CXX object CMakeFiles\cmTC_c682a.dir\src.cxx.obj
+FAILED: CMakeFiles/cmTC_c682a.dir/src.cxx.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\cl.exe  /nologo /TP   /DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -DLIBUNWIND_SUPPORTS_WNEWLINE_EOF_FLAG /MDd /Zi /Ob0 /Od /RTC1   -Wnewline-eof /showIncludes /FoCMakeFiles\cmTC_c682a.dir\src.cxx.obj /FdCMakeFiles\cmTC_c682a.dir\ /FS -c src.cxx
+cl : Command line error D8021 : invalid numeric argument '/Wnewline-eof'
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_WNO_UNUSED_FUNCTION_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_eb9a9 && [1/2] Building CXX object CMakeFiles\cmTC_eb9a9.dir\src.cxx.obj
+FAILED: CMakeFiles/cmTC_eb9a9.dir/src.cxx.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\cl.exe  /nologo /TP   /DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -DLIBUNWIND_SUPPORTS_WNO_UNUSED_FUNCTION_FLAG /MDd /Zi /Ob0 /Od /RTC1   -Wno-unused-function /showIncludes /FoCMakeFiles\cmTC_eb9a9.dir\src.cxx.obj /FdCMakeFiles\cmTC_eb9a9.dir\ /FS -c src.cxx
+cl : Command line error D8021 : invalid numeric argument '/Wno-unused-function'
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_WSHADOW_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_2599b && [1/2] Building CXX object CMakeFiles\cmTC_2599b.dir\src.cxx.obj
+FAILED: CMakeFiles/cmTC_2599b.dir/src.cxx.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\cl.exe  /nologo /TP   /DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -DLIBUNWIND_SUPPORTS_WSHADOW_FLAG /MDd /Zi /Ob0 /Od /RTC1   -Wshadow /showIncludes /FoCMakeFiles\cmTC_2599b.dir\src.cxx.obj /FdCMakeFiles\cmTC_2599b.dir\ /FS -c src.cxx
+cl : Command line error D8021 : invalid numeric argument '/Wshadow'
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_WSHORTEN_64_TO_32_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_5e898 && [1/2] Building CXX object CMakeFiles\cmTC_5e898.dir\src.cxx.obj
+FAILED: CMakeFiles/cmTC_5e898.dir/src.cxx.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\cl.exe  /nologo /TP   /DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -DLIBUNWIND_SUPPORTS_WSHORTEN_64_TO_32_FLAG /MDd /Zi /Ob0 /Od /RTC1   -Wshorten-64-to-32 /showIncludes /FoCMakeFiles\cmTC_5e898.dir\src.cxx.obj /FdCMakeFiles\cmTC_5e898.dir\ /FS -c src.cxx
+cl : Command line error D8021 : invalid numeric argument '/Wshorten-64-to-32'
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_WSIGN_COMPARE_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_041b5 && [1/2] Building CXX object CMakeFiles\cmTC_041b5.dir\src.cxx.obj
+FAILED: CMakeFiles/cmTC_041b5.dir/src.cxx.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\cl.exe  /nologo /TP   /DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -DLIBUNWIND_SUPPORTS_WSIGN_COMPARE_FLAG /MDd /Zi /Ob0 /Od /RTC1   -Wsign-compare /showIncludes /FoCMakeFiles\cmTC_041b5.dir\src.cxx.obj /FdCMakeFiles\cmTC_041b5.dir\ /FS -c src.cxx
+cl : Command line error D8021 : invalid numeric argument '/Wsign-compare'
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_WSIGN_CONVERSION_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_25864 && [1/2] Building CXX object CMakeFiles\cmTC_25864.dir\src.cxx.obj
+FAILED: CMakeFiles/cmTC_25864.dir/src.cxx.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\cl.exe  /nologo /TP   /DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -DLIBUNWIND_SUPPORTS_WSIGN_CONVERSION_FLAG /MDd /Zi /Ob0 /Od /RTC1   -Wsign-conversion /showIncludes /FoCMakeFiles\cmTC_25864.dir\src.cxx.obj /FdCMakeFiles\cmTC_25864.dir\ /FS -c src.cxx
+cl : Command line error D8021 : invalid numeric argument '/Wsign-conversion'
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_WSTRICT_ALIASING_EQ_2_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_4bf5a && [1/2] Building CXX object CMakeFiles\cmTC_4bf5a.dir\src.cxx.obj
+FAILED: CMakeFiles/cmTC_4bf5a.dir/src.cxx.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\cl.exe  /nologo /TP   /DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -DLIBUNWIND_SUPPORTS_WSTRICT_ALIASING_EQ_2_FLAG /MDd /Zi /Ob0 /Od /RTC1   -Wstrict-aliasing=2 /showIncludes /FoCMakeFiles\cmTC_4bf5a.dir\src.cxx.obj /FdCMakeFiles\cmTC_4bf5a.dir\ /FS -c src.cxx
+cl : Command line error D8021 : invalid numeric argument '/Wstrict-aliasing=2'
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_WSTRICT_OVERFLOW_EQ_4_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_23434 && [1/2] Building CXX object CMakeFiles\cmTC_23434.dir\src.cxx.obj
+FAILED: CMakeFiles/cmTC_23434.dir/src.cxx.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\cl.exe  /nologo /TP   /DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -DLIBUNWIND_SUPPORTS_WSTRICT_OVERFLOW_EQ_4_FLAG /MDd /Zi /Ob0 /Od /RTC1   -Wstrict-overflow=4 /showIncludes /FoCMakeFiles\cmTC_23434.dir\src.cxx.obj /FdCMakeFiles\cmTC_23434.dir\ /FS -c src.cxx
+cl : Command line error D8021 : invalid numeric argument '/Wstrict-overflow=4'
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_WUNUSED_PARAMETER_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_248c8 && [1/2] Building CXX object CMakeFiles\cmTC_248c8.dir\src.cxx.obj
+FAILED: CMakeFiles/cmTC_248c8.dir/src.cxx.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\cl.exe  /nologo /TP   /DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -DLIBUNWIND_SUPPORTS_WUNUSED_PARAMETER_FLAG /MDd /Zi /Ob0 /Od /RTC1   -Wunused-parameter /showIncludes /FoCMakeFiles\cmTC_248c8.dir\src.cxx.obj /FdCMakeFiles\cmTC_248c8.dir\ /FS -c src.cxx
+cl : Command line error D8021 : invalid numeric argument '/Wunused-parameter'
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_WUNUSED_VARIABLE_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_1a3e5 && [1/2] Building CXX object CMakeFiles\cmTC_1a3e5.dir\src.cxx.obj
+FAILED: CMakeFiles/cmTC_1a3e5.dir/src.cxx.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\cl.exe  /nologo /TP   /DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -DLIBUNWIND_SUPPORTS_WUNUSED_VARIABLE_FLAG /MDd /Zi /Ob0 /Od /RTC1   -Wunused-variable /showIncludes /FoCMakeFiles\cmTC_1a3e5.dir\src.cxx.obj /FdCMakeFiles\cmTC_1a3e5.dir\ /FS -c src.cxx
+cl : Command line error D8021 : invalid numeric argument '/Wunused-variable'
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_WWRITE_STRINGS_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_1b19c && [1/2] Building CXX object CMakeFiles\cmTC_1b19c.dir\src.cxx.obj
+FAILED: CMakeFiles/cmTC_1b19c.dir/src.cxx.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\cl.exe  /nologo /TP   /DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -DLIBUNWIND_SUPPORTS_WWRITE_STRINGS_FLAG /MDd /Zi /Ob0 /Od /RTC1   -Wwrite-strings /showIncludes /FoCMakeFiles\cmTC_1b19c.dir\src.cxx.obj /FdCMakeFiles\cmTC_1b19c.dir\ /FS -c src.cxx
+cl : Command line error D8021 : invalid numeric argument '/Wwrite-strings'
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_WUNDEF_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_663f8 && [1/2] Building CXX object CMakeFiles\cmTC_663f8.dir\src.cxx.obj
+FAILED: CMakeFiles/cmTC_663f8.dir/src.cxx.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\cl.exe  /nologo /TP   /DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -DLIBUNWIND_SUPPORTS_WUNDEF_FLAG /MDd /Zi /Ob0 /Od /RTC1   -Wundef /showIncludes /FoCMakeFiles\cmTC_663f8.dir\src.cxx.obj /FdCMakeFiles\cmTC_663f8.dir\ /FS -c src.cxx
+cl : Command line error D8021 : invalid numeric argument '/Wundef'
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_WNO_ERROR_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_7757b && [1/2] Building CXX object CMakeFiles\cmTC_7757b.dir\src.cxx.obj
+FAILED: CMakeFiles/cmTC_7757b.dir/src.cxx.obj 
+C:\PROGRA~2\MICROS~1\2019\COMMUN~1\VC\Tools\MSVC\1425~1.286\bin\Hostx64\x64\cl.exe  /nologo /TP   /DWIN32 /D_WINDOWS   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast /W4 -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 -DLIBUNWIND_SUPPORTS_WNO_ERROR_FLAG /MDd /Zi /Ob0 /Od /RTC1   -Wno-error /showIncludes /FoCMakeFiles\cmTC_7757b.dir\src.cxx.obj /FdCMakeFiles\cmTC_7757b.dir\ /FS -c src.cxx
+cl : Command line error D8021 : invalid numeric argument '/Wno-error'
+ninja: build stopped: subcommand failed.
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_PEDANTIC_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_be4f4 && [1/2] Building CXX object CMakeFiles\cmTC_be4f4.dir\src.cxx.obj
+cl : Command line warning D9002 : ignoring unknown option '-pedantic'
+[2/2] Linking CXX executable cmTC_be4f4.exe
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_FSTRICT_ALIASING_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_390b2 && [1/2] Building CXX object CMakeFiles\cmTC_390b2.dir\src.cxx.obj
+cl : Command line warning D9002 : ignoring unknown option '-fstrict-aliasing'
+[2/2] Linking CXX executable cmTC_390b2.exe
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_FUNWIND_TABLES_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_97d96 && [1/2] Building CXX object CMakeFiles\cmTC_97d96.dir\src.cxx.obj
+cl : Command line warning D9002 : ignoring unknown option '-funwind-tables'
+[2/2] Linking CXX static library cmTC_97d96.lib
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_FNO_EXCEPTIONS_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_cbfc3 && [1/2] Building CXX object CMakeFiles\cmTC_cbfc3.dir\src.cxx.obj
+cl : Command line warning D9002 : ignoring unknown option '-fno-exceptions'
+[2/2] Linking CXX executable cmTC_cbfc3.exe
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_FNO_RTTI_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_a3f59 && [1/2] Building CXX object CMakeFiles\cmTC_a3f59.dir\src.cxx.obj
+cl : Command line warning D9002 : ignoring unknown option '-fno-rtti'
+[2/2] Linking CXX executable cmTC_a3f59.exe
+
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test LIBUNWIND_SUPPORTS_NODEFAULTLIBS_FLAG failed with the following output:
+Change Dir: C:/Users/Krystian/src/llvm-project/libunwind/out/build/x64-Debug/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_d16d2 && [1/2] Building CXX object CMakeFiles\cmTC_d16d2.dir\src.cxx.obj
+cl : Command line warning D9002 : ignoring unknown option '-nodefaultlibs'
+[2/2] Linking CXX executable cmTC_d16d2.exe
+
+
+Source file was:
+int main() { return 0; }

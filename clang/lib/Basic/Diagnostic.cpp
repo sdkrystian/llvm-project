@@ -179,8 +179,9 @@ void DiagnosticsEngine::DiagStateMap::append(SourceManager &SrcMgr,
        Offset = F->ParentOffset, F = F->Parent) {
     F->HasLocalTransitions = true;
     auto &Last = F->StateTransitions.back();
-    assert(Last.Offset <= Offset && "state transitions added out of order");
-
+    if (Last.Offset > Offset)
+      throw std::exception("state transitions added out of order");
+    //assert(Last.Offset <= Offset && "state transitions added out of order");
     if (Last.Offset == Offset) {
       if (Last.State == State)
         break;

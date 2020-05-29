@@ -1,0 +1,787 @@
+{
+	"artifacts" : 
+	[
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Analysis/DependenceInfo.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Analysis/PolyhedralInfo.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Analysis/ScopDetection.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Analysis/ScopDetectionDiagnostic.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Analysis/ScopInfo.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Analysis/ScopBuilder.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Analysis/ScopGraphPrinter.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Analysis/ScopPass.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Analysis/PruneUnprofitable.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/CodeGen/BlockGenerators.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/CodeGen/IslAst.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/CodeGen/IslExprBuilder.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/CodeGen/IslNodeBuilder.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/CodeGen/CodeGeneration.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/CodeGen/LoopGenerators.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/CodeGen/LoopGeneratorsGOMP.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/CodeGen/LoopGeneratorsKMP.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/CodeGen/IRBuilder.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/CodeGen/Utils.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/CodeGen/RuntimeDebugBuilder.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/CodeGen/CodegenCleanup.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/CodeGen/PerfMonitor.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Exchange/JSONExporter.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Support/GICHelper.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Support/SCEVAffinator.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Support/SCEVValidator.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Support/RegisterPasses.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Support/ScopHelper.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Support/ScopLocation.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Support/ISLTools.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Support/DumpModulePass.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Support/VirtualInstruction.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Transform/Canonicalization.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Transform/CodePreparation.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Transform/DeadCodeElimination.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Transform/ScheduleOptimizer.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Transform/ScheduleTreeTransform.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Transform/FlattenSchedule.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Transform/FlattenAlgo.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Transform/ForwardOpTree.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Transform/DeLICM.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Transform/ZoneAlgo.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Transform/Simplify.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Transform/MaximalStaticExpansion.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Transform/RewriteByReferenceParameters.cpp.obj"
+		},
+		{
+			"path" : "lib/CMakeFiles/obj.Polly.dir/Transform/ScopInliner.cpp.obj"
+		}
+	],
+	"backtrace" : 4,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_library",
+			"llvm_add_library",
+			"add_llvm_library",
+			"add_llvm_pass_plugin",
+			"add_dependencies",
+			"set_property",
+			"llvm_update_compile_flags",
+			"add_definitions",
+			"include",
+			"include_directories"
+		],
+		"files" : 
+		[
+			"C:/Users/Krystian/src/llvm-project/llvm/cmake/modules/AddLLVM.cmake",
+			"lib/CMakeLists.txt",
+			"C:/Users/Krystian/src/llvm-project/llvm/cmake/modules/HandleLLVMOptions.cmake",
+			"CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 1
+			},
+			{
+				"command" : 3,
+				"file" : 1,
+				"line" : 26,
+				"parent" : 0
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 896,
+				"parent" : 1
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 709,
+				"parent" : 2
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 455,
+				"parent" : 3
+			},
+			{
+				"command" : 4,
+				"file" : 1,
+				"line" : 178,
+				"parent" : 0
+			},
+			{
+				"command" : 6,
+				"file" : 0,
+				"line" : 458,
+				"parent" : 3
+			},
+			{
+				"command" : 5,
+				"file" : 0,
+				"line" : 79,
+				"parent" : 6
+			},
+			{
+				"file" : 3
+			},
+			{
+				"command" : 8,
+				"file" : 3,
+				"line" : 9,
+				"parent" : 8
+			},
+			{
+				"file" : 2,
+				"parent" : 9
+			},
+			{
+				"command" : 7,
+				"file" : 2,
+				"line" : 401,
+				"parent" : 10
+			},
+			{
+				"command" : 7,
+				"file" : 2,
+				"line" : 390,
+				"parent" : 10
+			},
+			{
+				"command" : 7,
+				"file" : 3,
+				"line" : 163,
+				"parent" : 8
+			},
+			{
+				"command" : 7,
+				"file" : 2,
+				"line" : 779,
+				"parent" : 10
+			},
+			{
+				"command" : 7,
+				"file" : 2,
+				"line" : 780,
+				"parent" : 10
+			},
+			{
+				"command" : 7,
+				"file" : 2,
+				"line" : 781,
+				"parent" : 10
+			},
+			{
+				"command" : 9,
+				"file" : 3,
+				"line" : 137,
+				"parent" : 8
+			},
+			{
+				"command" : 9,
+				"file" : 3,
+				"line" : 13,
+				"parent" : 8
+			}
+		]
+	},
+	"compileGroups" : 
+	[
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "/DWIN32 /D_WINDOWS /W3   /Zc:inline /Zc:strictStrings /Oi /Zc:rvalueCast -wd4141 -wd4146 -wd4244 -wd4267 -wd4291 -wd4351 -wd4456 -wd4457 -wd4458 -wd4459 -wd4503 -wd4624 -wd4722 -wd4100 -wd4127 -wd4512 -wd4505 -wd4610 -wd4510 -wd4702 -wd4245 -wd4706 -wd4310 -wd4701 -wd4703 -wd4389 -wd4611 -wd4805 -wd4204 -wd4577 -wd4091 -wd4592 -wd4319 -wd4709 -wd4324 -w14062 -we4238 /EHs-c- /MDd /Zi /Ob0 /Od /RTC1  "
+				},
+				{
+					"fragment" : " /EHs-c- /GR-"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"backtrace" : 7,
+					"define" : "GTEST_HAS_RTTI=0"
+				},
+				{
+					"backtrace" : 11,
+					"define" : "UNICODE"
+				},
+				{
+					"backtrace" : 12,
+					"define" : "_CRT_NONSTDC_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 12,
+					"define" : "_CRT_NONSTDC_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 12,
+					"define" : "_CRT_SECURE_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 12,
+					"define" : "_CRT_SECURE_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 13,
+					"define" : "_GNU_SOURCE"
+				},
+				{
+					"backtrace" : 7,
+					"define" : "_HAS_EXCEPTIONS=0"
+				},
+				{
+					"backtrace" : 12,
+					"define" : "_SCL_SECURE_NO_DEPRECATE"
+				},
+				{
+					"backtrace" : 12,
+					"define" : "_SCL_SECURE_NO_WARNINGS"
+				},
+				{
+					"backtrace" : 11,
+					"define" : "_UNICODE"
+				},
+				{
+					"backtrace" : 14,
+					"define" : "__STDC_CONSTANT_MACROS"
+				},
+				{
+					"backtrace" : 15,
+					"define" : "__STDC_FORMAT_MACROS"
+				},
+				{
+					"backtrace" : 16,
+					"define" : "__STDC_LIMIT_MACROS"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"backtrace" : 17,
+					"path" : "C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/include"
+				},
+				{
+					"backtrace" : 17,
+					"path" : "C:/Users/Krystian/src/llvm-project/polly/lib/External"
+				},
+				{
+					"backtrace" : 17,
+					"path" : "C:/Users/Krystian/src/llvm-project/polly/lib/External/pet/include"
+				},
+				{
+					"backtrace" : 17,
+					"path" : "C:/Users/Krystian/src/llvm-project/polly/lib/External/isl/include"
+				},
+				{
+					"backtrace" : 17,
+					"path" : "C:/Users/Krystian/src/llvm-project/polly/out/build/x64-Debug/lib/External/isl/include"
+				},
+				{
+					"backtrace" : 17,
+					"path" : "C:/Users/Krystian/src/llvm-project/polly/include"
+				},
+				{
+					"backtrace" : 18,
+					"path" : "C:/Users/Krystian/src/llvm-project/llvm/include"
+				},
+				{
+					"backtrace" : 18,
+					"path" : "C:/Users/Krystian/src/llvm-project/build/include"
+				}
+			],
+			"language" : "CXX",
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10,
+				11,
+				12,
+				13,
+				14,
+				15,
+				16,
+				17,
+				18,
+				19,
+				20,
+				21,
+				22,
+				23,
+				24,
+				25,
+				26,
+				27,
+				28,
+				29,
+				30,
+				31,
+				32,
+				33,
+				34,
+				35,
+				36,
+				37,
+				38,
+				39,
+				40,
+				41,
+				42,
+				43,
+				44,
+				45
+			]
+		}
+	],
+	"dependencies" : 
+	[
+		{
+			"backtrace" : 5,
+			"id" : "intrinsics_gen::@6890427a1f51a3e7e1df"
+		}
+	],
+	"folder" : 
+	{
+		"name" : "Polly"
+	},
+	"id" : "obj.Polly::@306ed2d68c6501e8728f",
+	"name" : "obj.Polly",
+	"paths" : 
+	{
+		"build" : "lib",
+		"source" : "lib"
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "Source Files",
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10,
+				11,
+				12,
+				13,
+				14,
+				15,
+				16,
+				17,
+				18,
+				19,
+				20,
+				21,
+				22,
+				23,
+				24,
+				25,
+				26,
+				27,
+				28,
+				29,
+				30,
+				31,
+				32,
+				33,
+				34,
+				35,
+				36,
+				37,
+				38,
+				39,
+				40,
+				41,
+				42,
+				43,
+				44,
+				45
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Analysis/DependenceInfo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Analysis/PolyhedralInfo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Analysis/ScopDetection.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Analysis/ScopDetectionDiagnostic.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Analysis/ScopInfo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Analysis/ScopBuilder.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Analysis/ScopGraphPrinter.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Analysis/ScopPass.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Analysis/PruneUnprofitable.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/CodeGen/BlockGenerators.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/CodeGen/IslAst.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/CodeGen/IslExprBuilder.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/CodeGen/IslNodeBuilder.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/CodeGen/CodeGeneration.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/CodeGen/LoopGenerators.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/CodeGen/LoopGeneratorsGOMP.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/CodeGen/LoopGeneratorsKMP.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/CodeGen/IRBuilder.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/CodeGen/Utils.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/CodeGen/RuntimeDebugBuilder.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/CodeGen/CodegenCleanup.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/CodeGen/PerfMonitor.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Exchange/JSONExporter.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Support/GICHelper.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Support/SCEVAffinator.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Support/SCEVValidator.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Support/RegisterPasses.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Support/ScopHelper.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Support/ScopLocation.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Support/ISLTools.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Support/DumpModulePass.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Support/VirtualInstruction.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Transform/Canonicalization.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Transform/CodePreparation.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Transform/DeadCodeElimination.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Transform/ScheduleOptimizer.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Transform/ScheduleTreeTransform.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Transform/FlattenSchedule.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Transform/FlattenAlgo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Transform/ForwardOpTree.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Transform/DeLICM.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Transform/ZoneAlgo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Transform/Simplify.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Transform/MaximalStaticExpansion.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Transform/RewriteByReferenceParameters.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"compileGroupIndex" : 0,
+			"path" : "lib/Transform/ScopInliner.cpp",
+			"sourceGroupIndex" : 0
+		}
+	],
+	"type" : "OBJECT_LIBRARY"
+}

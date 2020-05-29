@@ -85,7 +85,8 @@ ASTNodeKind ASTNodeKind::getFromNode(const Decl &D) {
 #define ABSTRACT_DECL(D)
 #include "clang/AST/DeclNodes.inc"
   };
-  llvm_unreachable("invalid decl kind");
+  throw std::exception("invalid");
+  // llvm_unreachable("invalid decl kind");
 }
 
 ASTNodeKind ASTNodeKind::getFromNode(const Stmt &S) {
@@ -96,7 +97,8 @@ ASTNodeKind ASTNodeKind::getFromNode(const Stmt &S) {
 #define ABSTRACT_STMT(S)
 #include "clang/AST/StmtNodes.inc"
   }
-  llvm_unreachable("invalid stmt kind");
+  throw std::exception("invalid");
+  //llvm_unreachable("invalid stmt kind");
 }
 
 ASTNodeKind ASTNodeKind::getFromNode(const Type &T) {
@@ -106,7 +108,8 @@ ASTNodeKind ASTNodeKind::getFromNode(const Type &T) {
 #define ABSTRACT_TYPE(Class, Base)
 #include "clang/AST/TypeNodes.inc"
   }
-  llvm_unreachable("invalid type kind");
+  throw std::exception("invalid");
+  //llvm_unreachable("invalid type kind");
  }
 
 ASTNodeKind ASTNodeKind::getFromNode(const OMPClause &C) {
@@ -119,9 +122,11 @@ ASTNodeKind ASTNodeKind::getFromNode(const OMPClause &C) {
   case OMPC_device_type:
   case OMPC_match:
   case OMPC_unknown:
-    llvm_unreachable("unexpected OpenMP clause kind");
+    throw std::exception("invalid");
+    //llvm_unreachable("unexpected OpenMP clause kind");
   }
-  llvm_unreachable("invalid stmt kind");
+  throw std::exception("invalid");
+  //llvm_unreachable("invalid stmt kind");
 }
 
 void DynTypedNode::print(llvm::raw_ostream &OS,
