@@ -393,6 +393,10 @@ CXX20_KEYWORD(constinit             , 0)
 // Not a CXX20_KEYWORD because it is disabled by -fno-char8_t.
 KEYWORD(char8_t                     , CHAR8SUPPORT)
 
+// KRYSTIAN TODO:
+// make this a normal keyword and add a flag to enable it
+KEYWORD(rank                        , KEYCXX)
+
 // C11 Extension
 KEYWORD(_Float16                    , KEYALL)
 

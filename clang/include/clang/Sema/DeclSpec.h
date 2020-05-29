@@ -1362,6 +1362,16 @@ struct DeclaratorChunk {
     /// type specified.
     UnionParsedType TrailingReturnType;
 
+    unsigned hasRankSpec : 1;
+
+    /// The beginning location of the exception specification, if any.
+    unsigned RankSpecLocBeg;
+
+    /// The end location of the exception specification, if any.
+    unsigned RankSpecLocEnd;
+
+    Expr* RankExpr;
+
     /// Reset the parameter list to having zero parameters.
     ///
     /// This is used in various places for error recovery.
@@ -1430,6 +1440,18 @@ struct DeclaratorChunk {
 
     SourceRange getExceptionSpecRange() const {
       return SourceRange(getExceptionSpecLocBeg(), getExceptionSpecLocEnd());
+    }
+
+    SourceLocation getRankSpecLocBeg() const {
+      return SourceLocation::getFromRawEncoding(RankSpecLocBeg);
+    }
+
+    SourceLocation getRankSpecLocEnd() const {
+      return SourceLocation::getFromRawEncoding(RankSpecLocEnd);
+    }
+
+    SourceRange getRankSpecRange() const {
+      return SourceRange(getRankSpecLocBeg(), getRankSpecLocEnd());
     }
 
     /// Retrieve the location of the ref-qualifier, if any.
@@ -1630,6 +1652,10 @@ struct DeclaratorChunk {
                                      SourceLocation LocalRangeBegin,
                                      SourceLocation LocalRangeEnd,
                                      Declarator &TheDeclarator,
+                                     // KRYSTIAN: rank-specifier info
+                                     bool HasRankSpecifier,
+                                     SourceRange RankSpecifierRange,
+                                     Expr* RankExpr,
                                      TypeResult TrailingReturnType =
                                                     TypeResult(),
                                      DeclSpec *MethodQualifiers = nullptr);

@@ -180,6 +180,10 @@ DeclaratorChunk DeclaratorChunk::getFunction(bool hasProto,
                                              SourceLocation LocalRangeBegin,
                                              SourceLocation LocalRangeEnd,
                                              Declarator &TheDeclarator,
+                                             // KRYSTIAN: rank-specifier info
+                                             bool HasRankSpecifier,
+                                             SourceRange RankSpecifierRange,
+                                             Expr* RankExpr,
                                              TypeResult TrailingReturnType,
                                              DeclSpec *MethodQualifiers) {
   assert(!(MethodQualifiers && MethodQualifiers->getTypeQualifiers() & DeclSpec::TQ_atomic) &&
@@ -210,6 +214,13 @@ DeclaratorChunk DeclaratorChunk::getFunction(bool hasProto,
   I.Fun.HasTrailingReturnType   = TrailingReturnType.isUsable() ||
                                   TrailingReturnType.isInvalid();
   I.Fun.TrailingReturnType      = TrailingReturnType.get();
+
+  // KRYSTIAN: store rank-specifier information
+  I.Fun.hasRankSpec             = HasRankSpecifier;
+  I.Fun.RankExpr                = RankExpr;
+  I.Fun.RankSpecLocBeg          = RankSpecifierRange.getBegin().getRawEncoding();
+  I.Fun.RankSpecLocEnd          = RankSpecifierRange.getEnd().getRawEncoding();
+
   I.Fun.MethodQualifiers        = nullptr;
   I.Fun.QualAttrFactory         = nullptr;
 

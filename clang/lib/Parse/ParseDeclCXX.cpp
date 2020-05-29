@@ -3807,6 +3807,29 @@ ExceptionSpecificationType Parser::ParseDynamicExceptionSpecification(
   return Exceptions.empty() ? EST_DynamicNone : EST_Dynamic;
 }
 
+bool
+Parser::ParseTiebreakerRank(
+  SourceRange& TiebreakerRange,
+  ExprResult& TiebreakerExpr)
+{
+  // consume the rank keyword
+  SourceLocation KeywordLoc = ConsumeToken();
+  if (Tok.is(tok::l_paren)) 
+  {
+    BalancedDelimiterTracker TrackParen(*this, tok::l_paren);
+    TrackParen.consumeOpen();
+    TiebreakerExpr = ParseConstantExpression();
+    TrackParen.consumeClose();
+    TiebreakerRange = SourceRange(KeywordLoc, 
+      TrackParen.getCloseLocation());
+    return true;
+  }
+  // no opening paren found, emmit diagnostic
+  Diag(Tok, diag::err_expected_lparen_after) << "rank";
+  TiebreakerRange = SourceRange(KeywordLoc, KeywordLoc);
+  return false;
+}
+
 /// ParseTrailingReturnType - Parse a trailing return type on a new-style
 /// function declaration.
 TypeResult Parser::ParseTrailingReturnType(SourceRange &Range,

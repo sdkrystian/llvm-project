@@ -1923,6 +1923,13 @@ private:
                                   SmallVectorImpl<SourceRange> &Ranges);
 
   //===--------------------------------------------------------------------===//
+  // KRYSTIAN: rank-specifier
+  
+  bool ParseTiebreakerRank(
+    SourceRange& TiebreakerRange,
+    ExprResult& TiebreakerExpr);
+
+  //===--------------------------------------------------------------------===//
   // C++0x 8: Function declaration trailing-return-type
   TypeResult ParseTrailingReturnType(SourceRange &Range,
                                      bool MayBeFollowedByDirectInit);

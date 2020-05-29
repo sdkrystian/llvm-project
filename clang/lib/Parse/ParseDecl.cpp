@@ -6499,6 +6499,12 @@ void Parser::ParseFunctionDeclarator(Declarator &D,
   SmallVector<SourceRange, 2> DynamicExceptionRanges;
   ExprResult NoexceptExpr;
   CachedTokens *ExceptionSpecTokens = nullptr;
+
+  // KRYSTIAN: Store rank-specifier related information
+  bool hasRankSpecifier = false;
+  SourceRange RankSpecifierRange;
+  ExprResult RankSpecifierExpr = nullptr;
+
   ParsedAttributesWithRange FnAttrs(AttrFactory);
   TypeResult TrailingReturnType;
 
@@ -6593,6 +6599,16 @@ void Parser::ParseFunctionDeclarator(Declarator &D,
       if (ESpecType != EST_None)
         EndLoc = ESpecRange.getEnd();
 
+      // KRYSTIAN: Parse a rank-specifier
+      // If the rank keyword is present, 
+      // parse it and continue.
+      if (Tok.is(tok::kw_rank))
+      {
+        hasRankSpecifier =
+          ParseTiebreakerRank(RankSpecifierRange, RankSpecifierExpr);
+        EndLoc = RankSpecifierRange.getEnd();
+      }
+
       // Parse attribute-specifier-seq[opt]. Per DR 979 and DR 1297, this goes
       // after the exception-specification.
       MaybeParseCXX11Attributes(FnAttrs);
@@ -6639,8 +6655,12 @@ void Parser::ParseFunctionDeclarator(Declarator &D,
                     DynamicExceptionRanges.data(), DynamicExceptions.size(),
                     NoexceptExpr.isUsable() ? NoexceptExpr.get() : nullptr,
                     ExceptionSpecTokens, DeclsInPrototype, StartLoc,
-                    LocalEndLoc, D, TrailingReturnType, &DS),
-                std::move(FnAttrs), EndLoc);
+                    LocalEndLoc, D,
+                    // KRYSTIAN: rank-specifier info
+                    hasRankSpecifier, RankSpecifierRange,
+                    hasRankSpecifier && RankSpecifierExpr.isUsable() ? 
+                      RankSpecifierExpr.get() : nullptr,
+                    TrailingReturnType, &DS), std::move(FnAttrs), EndLoc);
 }
 
 /// ParseRefQualifier - Parses a member function ref-qualifier. Returns
