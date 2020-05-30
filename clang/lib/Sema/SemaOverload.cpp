@@ -9600,6 +9600,17 @@ bool clang::isBetterOverloadCandidate(
           isa<CXXConstructorDecl>(Cand2.Function))
     return isa<CXXConstructorDecl>(Cand1.Function);
 
+  // KRYSTIAN: If neither function is otherwise better than the other,
+  // the one with a higher rank is better
+  if (S.getLangOpts().CPlusPlus && Cand1.Function && Cand2.Function &&
+      Cand1.Function->hasPrototype() && Cand2.Function->hasPrototype()) 
+  {
+    auto* FProto1 = cast<FunctionProtoType>(Cand1.Function->getFunctionType());
+    auto* FProto2 = cast<FunctionProtoType>(Cand2.Function->getFunctionType());
+    if (FProto1->getTiebreakerRank() > FProto2->getTiebreakerRank())
+      return true;
+  }
+
   //    -- F1 is a non-template function and F2 is a function template
   //       specialization, or, if not that,
   bool Cand1IsSpecialization = Cand1.Function &&
@@ -9702,17 +9713,6 @@ bool clang::isBetterOverloadCandidate(
     Comparison Cmp = compareEnableIfAttrs(S, Cand1.Function, Cand2.Function);
     if (Cmp != Comparison::Equal)
       return Cmp == Comparison::Better;
-  }
-
-  // KRYSTIAN: If neither function is otherwise better than the other,
-  // the one with a higher rank is better
-  if (S.getLangOpts().CPlusPlus && Cand1.Function && Cand2.Function &&
-      Cand1.Function->hasPrototype() && Cand2.Function->hasPrototype()) 
-  {
-    auto* FProto1 = cast<FunctionProtoType>(Cand1.Function->getFunctionType());
-    auto* FProto2 = cast<FunctionProtoType>(Cand2.Function->getFunctionType());
-    if (FProto1->getTiebreakerRank() > FProto2->getTiebreakerRank())
-      return true;
   }
 
   if (S.getLangOpts().CUDA && Cand1.Function && Cand2.Function) {
