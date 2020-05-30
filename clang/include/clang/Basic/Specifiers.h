@@ -21,6 +21,13 @@
 
 namespace clang {
 
+  enum class RankSpecKind
+  {
+    Evaluated,
+    Dependent,
+    None
+  };
+
   /// Define the meaning of possible values of the kind in ExplicitSpecifier.
   enum class ExplicitSpecKind : unsigned {
     ResolvedFalse,

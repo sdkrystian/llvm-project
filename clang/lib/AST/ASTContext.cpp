@@ -3988,6 +3988,7 @@ QualType ASTContext::getFunctionTypeInternal(
     const FunctionProtoType::ExtProtoInfo &EPI, bool OnlyWantCanonical) const {
   size_t NumArgs = ArgArray.size();
 
+  // KRYSTIAN FIXME: we need to ensure that the ranking is carried properly
   // Unique functions, to guarantee there is only one function of a particular
   // structure.
   llvm::FoldingSetNodeID ID;

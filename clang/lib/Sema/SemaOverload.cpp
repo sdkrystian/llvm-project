@@ -9704,6 +9704,17 @@ bool clang::isBetterOverloadCandidate(
       return Cmp == Comparison::Better;
   }
 
+  // KRYSTIAN: If neither function is otherwise better than the other,
+  // the one with a higher rank is better
+  if (S.getLangOpts().CPlusPlus && Cand1.Function && Cand2.Function &&
+      Cand1.Function->hasPrototype() && Cand2.Function->hasPrototype()) 
+  {
+    auto* FProto1 = cast<FunctionProtoType>(Cand1.Function->getFunctionType());
+    auto* FProto2 = cast<FunctionProtoType>(Cand2.Function->getFunctionType());
+    if (FProto1->getTiebreakerRank() > FProto2->getTiebreakerRank())
+      return true;
+  }
+
   if (S.getLangOpts().CUDA && Cand1.Function && Cand2.Function) {
     FunctionDecl *Caller = dyn_cast<FunctionDecl>(S.CurContext);
     return S.IdentifyCUDAPreference(Caller, Cand1.Function) >

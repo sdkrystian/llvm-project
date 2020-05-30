@@ -5756,6 +5756,32 @@ QualType TreeTransform<Derived>::TransformFunctionProtoType(
   if (TransformExceptionSpec(EPI.ExceptionSpec, EPIChanged))
     return QualType();
 
+  // KRYSTIAN: transform the rank-specifier operand
+  auto& RI = EPI.RankInfo;
+  if (RI.isDependent())
+  {
+    EnterExpressionEvaluationContext Unevaluated(
+      getSema(), Sema::ExpressionEvaluationContext::ConstantEvaluated);
+    ExprResult RankExpr = getDerived().TransformExpr(RI.RankExpr);
+    // KRYSTIAN TODO: decide what to do with invalid expressions
+    if (RankExpr.isInvalid())
+      return QualType();
+    // KRYSTIAN TODO: move this out into a function
+    if (!RankExpr.get()->isValueDependent())
+    {
+      llvm::APSInt Rank(getSema().Context.getTypeSize(getSema().Context.getSizeType()));
+      if (getSema().VerifyIntegerConstantExpression(
+        RankExpr.get(), &Rank).isInvalid())
+          return QualType();
+      // expression is valid, store the result
+      RI.Kind = RankSpecKind::Evaluated;
+      RI.Rank = Rank.getExtValue();
+    }
+    else
+      RI.RankExpr = RankExpr.get();
+    EPIChanged = true;
+  }
+
   // Handle extended parameter information.
   if (auto NewExtParamInfos =
         ExtParamInfos.getPointerOrNull(ParamTypes.size())) {

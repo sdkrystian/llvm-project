@@ -6501,9 +6501,10 @@ void Parser::ParseFunctionDeclarator(Declarator &D,
   CachedTokens *ExceptionSpecTokens = nullptr;
 
   // KRYSTIAN: Store rank-specifier related information
-  bool hasRankSpecifier = false;
+  std::size_t TiebreakerRank = 0;
   SourceRange RankSpecifierRange;
-  ExprResult RankSpecifierExpr = nullptr;
+  ExprResult RankSpecifierExpr(true);
+  RankSpecKind RankKind = RankSpecKind::None;
 
   ParsedAttributesWithRange FnAttrs(AttrFactory);
   TypeResult TrailingReturnType;
@@ -6604,8 +6605,8 @@ void Parser::ParseFunctionDeclarator(Declarator &D,
       // parse it and continue.
       if (Tok.is(tok::kw_rank))
       {
-        hasRankSpecifier =
-          ParseTiebreakerRank(RankSpecifierRange, RankSpecifierExpr);
+        TiebreakerRank =
+          ParseTiebreakerRank(RankSpecifierRange, RankSpecifierExpr, RankKind);
         EndLoc = RankSpecifierRange.getEnd();
       }
 
@@ -6657,9 +6658,8 @@ void Parser::ParseFunctionDeclarator(Declarator &D,
                     ExceptionSpecTokens, DeclsInPrototype, StartLoc,
                     LocalEndLoc, D,
                     // KRYSTIAN: rank-specifier info
-                    hasRankSpecifier, RankSpecifierRange,
-                    hasRankSpecifier && RankSpecifierExpr.isUsable() ? 
-                      RankSpecifierExpr.get() : nullptr,
+                    RankKind, TiebreakerRank, 
+                    RankSpecifierExpr.get(), RankSpecifierRange,
                     TrailingReturnType, &DS), std::move(FnAttrs), EndLoc);
 }
 

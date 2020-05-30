@@ -1387,7 +1387,8 @@ ExprResult Parser::ParseLambdaExpressionAfterIntroducer(
                       NoexceptExpr.isUsable() ? NoexceptExpr.get() : nullptr,
                       /*ExceptionSpecTokens*/ nullptr,
                       /*DeclsInPrototype=*/None, LParenLoc, FunLocalRangeEnd, D,
-                      TrailingReturnType, &DS),
+                      // KRYSTIAN TODO: lambda support
+                      RankSpecKind::None, 0, nullptr, SourceRange(), TrailingReturnType, &DS),
                   std::move(Attr), DeclEndLoc);
 
     // Parse requires-clause[opt].
@@ -1468,6 +1469,8 @@ ExprResult Parser::ParseLambdaExpressionAfterIntroducer(
                       /*NoexceptExpr=*/nullptr,
                       /*ExceptionSpecTokens=*/nullptr,
                       /*DeclsInPrototype=*/None, DeclLoc, DeclEndLoc, D,
+                      // KRYSTIAN TODO: lambda support
+                      RankSpecKind::None, 0, nullptr, SourceRange(),
                       TrailingReturnType),
                   std::move(Attr), DeclEndLoc);
 

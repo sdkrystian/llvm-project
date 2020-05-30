@@ -3807,27 +3807,44 @@ ExceptionSpecificationType Parser::ParseDynamicExceptionSpecification(
   return Exceptions.empty() ? EST_DynamicNone : EST_Dynamic;
 }
 
-bool
+size_t
 Parser::ParseTiebreakerRank(
   SourceRange& TiebreakerRange,
-  ExprResult& TiebreakerExpr)
+  ExprResult& RankExpr,
+  RankSpecKind& Kind)
 {
   // consume the rank keyword
   SourceLocation KeywordLoc = ConsumeToken();
-  if (Tok.is(tok::l_paren)) 
+  TiebreakerRange = SourceRange(KeywordLoc, KeywordLoc);
+  if (Tok.is(tok::l_paren))
   {
     BalancedDelimiterTracker TrackParen(*this, tok::l_paren);
     TrackParen.consumeOpen();
-    TiebreakerExpr = ParseConstantExpression();
+    RankExpr = ParseConstantExpression();
     TrackParen.consumeClose();
-    TiebreakerRange = SourceRange(KeywordLoc, 
-      TrackParen.getCloseLocation());
-    return true;
+    // this expression is invalid, ignore it
+    // KRYSTIAN TODO: decide what to do with invalid expressions
+    if (RankExpr.isInvalid())
+      return 0;
+    TiebreakerRange = SourceRange(KeywordLoc, TrackParen.getCloseLocation());
+    // expression is dependent, we can't do anything here
+    if (RankExpr.get()->isValueDependent())
+    {
+      Kind = RankSpecKind::Dependent;
+      return 0;
+    }
+    // if it's non-dependent, evaluate it
+    llvm::APSInt Rank(Actions.Context.getTypeSize(Actions.Context.getSizeType()));
+    if (!Actions.VerifyIntegerConstantExpression(
+      RankExpr.get(), &Rank).isInvalid())
+    {
+      Kind = RankSpecKind::Evaluated;
+      return Rank.getExtValue();
+    }
   }
   // no opening paren found, emmit diagnostic
   Diag(Tok, diag::err_expected_lparen_after) << "rank";
-  TiebreakerRange = SourceRange(KeywordLoc, KeywordLoc);
-  return false;
+  return 0;
 }
 
 /// ParseTrailingReturnType - Parse a trailing return type on a new-style

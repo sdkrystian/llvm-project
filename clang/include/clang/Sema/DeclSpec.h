@@ -1362,15 +1362,12 @@ struct DeclaratorChunk {
     /// type specified.
     UnionParsedType TrailingReturnType;
 
-    unsigned hasRankSpec : 1;
-
-    /// The beginning location of the exception specification, if any.
-    unsigned RankSpecLocBeg;
-
-    /// The end location of the exception specification, if any.
-    unsigned RankSpecLocEnd;
-
+    RankSpecKind RankKind;
+    size_t TiebreakerRank;
     Expr* RankExpr;
+
+    unsigned RankSpecLocBeg;
+    unsigned RankSpecLocEnd;
 
     /// Reset the parameter list to having zero parameters.
     ///
@@ -1653,11 +1650,11 @@ struct DeclaratorChunk {
                                      SourceLocation LocalRangeEnd,
                                      Declarator &TheDeclarator,
                                      // KRYSTIAN: rank-specifier info
-                                     bool HasRankSpecifier,
-                                     SourceRange RankSpecifierRange,
-                                     Expr* RankExpr,
-                                     TypeResult TrailingReturnType =
-                                                    TypeResult(),
+                                     RankSpecKind RankKind = RankSpecKind::None,
+                                     size_t TiebreakerRank = 0,
+                                     Expr* RankExpr = nullptr,
+                                     SourceRange RankSpecifierRange = SourceRange(),
+                                     TypeResult TrailingReturnType = TypeResult(),
                                      DeclSpec *MethodQualifiers = nullptr);
 
   /// Return a DeclaratorChunk for a block.

@@ -1925,9 +1925,10 @@ private:
   //===--------------------------------------------------------------------===//
   // KRYSTIAN: rank-specifier
   
-  bool ParseTiebreakerRank(
+  size_t ParseTiebreakerRank(
     SourceRange& TiebreakerRange,
-    ExprResult& TiebreakerExpr);
+    ExprResult& TiebreakerExpr,
+    RankSpecKind& Kind);
 
   //===--------------------------------------------------------------------===//
   // C++0x 8: Function declaration trailing-return-type

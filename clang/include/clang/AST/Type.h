@@ -3771,6 +3771,39 @@ public:
   /// because TrailingObjects cannot handle repeated types.
   struct ExceptionType { QualType Type; };
 
+  struct RankSpecInfo
+  {
+    RankSpecKind Kind = RankSpecKind::None;
+    size_t Rank = 0;
+    Expr* RankExpr = nullptr;
+
+    bool isDependent() const
+    {
+      return Kind == RankSpecKind::Dependent;
+    }
+
+    bool hasRankSpecifier() const
+    {
+      return Kind != RankSpecKind::None;
+    }
+
+    size_t getRank()
+    {
+      return Rank;
+    }
+
+    RankSpecInfo(const RankSpecInfo&) = default;
+    RankSpecInfo& operator=(const RankSpecInfo&) = default;
+    RankSpecInfo() = default;
+
+    RankSpecInfo(RankSpecKind RSK, size_t Ranking, Expr* RExpr = nullptr)
+      : Kind(RSK), Rank(Ranking) 
+    {
+      if (isDependent())
+        RankExpr = RExpr;
+    }
+  };
+
   /// A simple holder for various uncommon bits which do not fit in
   /// FunctionTypeBitfields. Aligned to alignof(void *) to maintain the
   /// alignment of subsequent objects in TrailingObjects. You must update
@@ -3780,6 +3813,7 @@ public:
     /// A whole unsigned is not needed here and according to
     /// [implimits] 8 bits would be enough here.
     unsigned NumExceptionType;
+    RankSpecInfo RankInfo;
   };
 
 protected:
@@ -3957,16 +3991,17 @@ public:
     FunctionType::ExtInfo ExtInfo;
     bool Variadic : 1;
     bool HasTrailingReturn : 1;
+    FunctionType::RankSpecInfo RankInfo;
     Qualifiers TypeQuals;
     RefQualifierKind RefQualifier = RQ_None;
     ExceptionSpecInfo ExceptionSpec;
     const ExtParameterInfo *ExtParameterInfos = nullptr;
     SourceLocation EllipsisLoc;
 
-    ExtProtoInfo() : Variadic(false), HasTrailingReturn(false) {}
+    ExtProtoInfo() : Variadic(false), HasTrailingReturn(false) { }
 
     ExtProtoInfo(CallingConv CC)
-        : ExtInfo(CC), Variadic(false), HasTrailingReturn(false) {}
+        : ExtInfo(CC), Variadic(false), HasTrailingReturn(false) { }
 
     ExtProtoInfo withExceptionSpec(const ExceptionSpecInfo &ESI) {
       ExtProtoInfo Result(*this);
@@ -4067,12 +4102,12 @@ private:
   static bool hasExtraBitfields(ExceptionSpecificationType EST) {
     // If the exception spec type is EST_Dynamic then we have > 0 exception
     // types and the exact number is stored in FunctionTypeExtraBitfields.
-    return EST == EST_Dynamic;
+    return true;
   }
 
   /// Whether the trailing FunctionTypeExtraBitfields is present.
   bool hasExtraBitfields() const {
-    return hasExtraBitfields(getExceptionSpecType());
+    return true;
   }
 
   bool hasExtQualifiers() const {
@@ -4095,6 +4130,7 @@ public:
     ExtProtoInfo EPI;
     EPI.ExtInfo = getExtInfo();
     EPI.Variadic = isVariadic();
+    EPI.RankInfo = getRankInfo(); 
     EPI.EllipsisLoc = getEllipsisLoc();
     EPI.HasTrailingReturn = hasTrailingReturn();
     EPI.ExceptionSpec = getExceptionSpecInfo();
@@ -4220,7 +4256,17 @@ public:
   /// Whether this function prototype has a trailing return type.
   bool hasTrailingReturn() const { return FunctionTypeBits.HasTrailingReturn; }
 
-  Qualifiers getMethodQuals() const {
+  FunctionType::RankSpecInfo getRankInfo() const
+  {
+    return getTrailingObjects<FunctionTypeExtraBitfields>()->RankInfo;
+  }
+
+  bool hasRankSpecifier() const { return getRankInfo().hasRankSpecifier(); }
+
+  size_t getTiebreakerRank() const { return getRankInfo().Rank; }
+
+  Qualifiers getMethodQuals() const 
+  {
     if (hasExtQualifiers())
       return *getTrailingObjects<Qualifiers>();
     else

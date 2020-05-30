@@ -3099,6 +3099,10 @@ FunctionProtoType::FunctionProtoType(QualType result, ArrayRef<QualType> params,
   FunctionTypeBits.Variadic = epi.Variadic;
   FunctionTypeBits.HasTrailingReturn = epi.HasTrailingReturn;
 
+  // KRYSTIAN TODO: We can eliminate this
+  // when the rank expression is dependent
+  getTrailingObjects<FunctionTypeExtraBitfields>()->RankInfo = epi.RankInfo;
+  
   // Fill in the extra trailing bitfields if present.
   if (hasExtraBitfields(epi.ExceptionSpec.Type)) {
     auto &ExtraBits = *getTrailingObjects<FunctionTypeExtraBitfields>();
