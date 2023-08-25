@@ -2668,8 +2668,7 @@ void Sema::DeclareImplicitDeductionGuides(TemplateDecl *Template,
     auto *FTD = dyn_cast<FunctionTemplateDecl>(D);
     auto *CD =
         dyn_cast_or_null<CXXConstructorDecl>(FTD ? FTD->getTemplatedDecl() : D);
-    // Class-scope explicit specializations (MS extension) do not result in
-    // deduction guides.
+    // Class-scope explicit specializations do not result in deduction guides.
     if (!CD || (!FTD && CD->isFunctionTemplateSpecialization()))
       continue;
 
@@ -9327,10 +9326,9 @@ Sema::CheckSpecializationInstantiationRedecl(SourceLocation NewLoc,
 ///
 /// There really isn't any useful analysis we can do here, so we
 /// just store the information.
-bool
-Sema::CheckDependentFunctionTemplateSpecialization(FunctionDecl *FD,
-                   const TemplateArgumentListInfo &ExplicitTemplateArgs,
-                                                   LookupResult &Previous) {
+bool Sema::CheckDependentFunctionTemplateSpecialization(
+    FunctionDecl *FD, const TemplateArgumentListInfo *ExplicitTemplateArgs,
+    LookupResult &Previous, bool IsFriend) {
   // Remove anything from Previous that isn't a function template in
   // the correct context.
   DeclContext *FDLookupContext = FD->getDeclContext()->getRedeclContext();
@@ -9355,12 +9353,14 @@ Sema::CheckDependentFunctionTemplateSpecialization(FunctionDecl *FD,
   F.done();
 
   if (Previous.empty()) {
-    Diag(FD->getLocation(),
-         diag::err_dependent_function_template_spec_no_match);
+    Diag(FD->getLocation(), diag::err_dependent_function_template_spec_no_match)
+        << IsFriend;
+    unsigned Note =
+        IsFriend
+            ? diag::note_dependent_friend_function_template_spec_discard_reason
+            : diag::note_dependent_function_template_spec_discard_reason;
     for (auto &P : DiscardedCandidates)
-      Diag(P.second->getLocation(),
-           diag::note_dependent_function_template_spec_discard_reason)
-          << P.first;
+      Diag(P.second->getLocation(), Note) << P.first;
     return true;
   }
 
@@ -9393,7 +9393,7 @@ Sema::CheckDependentFunctionTemplateSpecialization(FunctionDecl *FD,
 /// befriending a function template specialization.
 bool Sema::CheckFunctionTemplateSpecialization(
     FunctionDecl *FD, TemplateArgumentListInfo *ExplicitTemplateArgs,
-    LookupResult &Previous, bool QualifiedFriend) {
+    LookupResult &Previous, bool IsDefinition, bool QualifiedFriend) {
   // The set of function template specializations that could match this
   // explicit function template specialization.
   UnresolvedSet<8> Candidates;
@@ -9561,8 +9561,16 @@ bool Sema::CheckFunctionTemplateSpecialization(
     return true;
 
   // Mark the prior declaration as an explicit specialization, so that later
-  // clients know that this is an explicit specialization.
-  if (!isFriend) {
+  // clients know that this is an explicit specialization. Friend functions
+  // definitions declared with an explicit template argument list act as
+  // psuedo explicit specializations.
+  #if 0
+  const FunctionDecl* Definition = nullptr;
+  if (!isFriend || FD->isDefined(Definition,
+                                 /*CheckForPendingFriendDefinition*/true)) {
+  #else
+  if (!isFriend || IsDefinition) {
+  #endif
     // Since explicit specializations do not inherit '=delete' from their
     // primary function template - check if the 'specialization' that was
     // implicitly generated (during template argument deduction for partial

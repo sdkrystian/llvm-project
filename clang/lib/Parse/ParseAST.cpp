@@ -173,8 +173,8 @@ void clang::ParseAST(Sema &S, bool PrintStats, bool SkipFunctionBodies) {
   for (Decl *D : S.WeakTopLevelDecls())
     Consumer->HandleTopLevelDecl(DeclGroupRef(D));
 
+  auto TU = S.getASTContext().getTranslationUnitDecl();
   Consumer->HandleTranslationUnit(S.getASTContext());
-
   // Finalize the template instantiation observer chain.
   // FIXME: This (and init.) should be done in the Sema class, but because
   // Sema does not have a reliable "Finalize" function (it has a

@@ -67,7 +67,7 @@ AST_MATCHER_P(CallExpr, hasLastArgument,
 // function had parameters defined (this is useful to check if there is only one
 // variadic argument).
 AST_MATCHER(CXXMemberCallExpr, hasSameNumArgsAsDeclNumParams) {
-  if (Node.getMethodDecl()->isFunctionTemplateSpecialization())
+  if (Node.getMethodDecl()->getPrimaryTemplate())
     return Node.getNumArgs() == Node.getMethodDecl()
                                     ->getPrimaryTemplate()
                                     ->getTemplatedDecl()

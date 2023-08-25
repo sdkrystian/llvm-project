@@ -1746,7 +1746,8 @@ static bool
 hasAcceptableMemberSpecialization(Sema &S, const NamedDecl *D,
                                   llvm::SmallVectorImpl<Module *> *Modules,
                                   Sema::AcceptableKind Kind) {
-  assert(isa<CXXRecordDecl>(D->getDeclContext()) &&
+  // assert(isa<CXXRecordDecl>(D->getDeclContext()) &&
+  assert(isa<CXXRecordDecl>(D->getLexicalDeclContext()) &&
          "not a member specialization");
   return hasAcceptableDeclarationImpl(
       S, D, Modules,

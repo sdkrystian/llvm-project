@@ -1868,7 +1868,9 @@ TemplateDeclInstantiator::VisitFunctionTemplateDecl(FunctionTemplateDecl *D) {
   TemplateParameterList *InstParams = SubstTemplateParams(TempParams);
   if (!InstParams)
     return nullptr;
-
+  assert((!D->getTemplatedDecl() ||
+      (D == D->getTemplatedDecl()->getDescribedTemplate())) &&
+      "mismatched templated function/described template");
   FunctionDecl *Instantiated = nullptr;
   if (CXXMethodDecl *DMethod = dyn_cast<CXXMethodDecl>(D->getTemplatedDecl()))
     Instantiated = cast_or_null<FunctionDecl>(VisitCXXMethodDecl(DMethod,
@@ -2239,30 +2241,34 @@ Decl *TemplateDeclInstantiator::VisitFunctionDecl(
       D->isLocalExternDecl() ? Sema::ForExternalRedeclaration
                              : SemaRef.forRedeclarationInCurContext());
 
-  if (DependentFunctionTemplateSpecializationInfo *Info
+  if (DependentFunctionTemplateSpecializationInfo *DFTSI
         = D->getDependentSpecializationInfo()) {
-    assert(isFriend && "non-friend has dependent specialization info?");
+    assert(isFriend && "dependent specialization info on"
+                       " non-member non-friend function?");
 
     // Instantiate the explicit template arguments.
-    TemplateArgumentListInfo ExplicitArgs(Info->getLAngleLoc(),
-                                          Info->getRAngleLoc());
-    if (SemaRef.SubstTemplateArguments(Info->arguments(), TemplateArgs,
-                                       ExplicitArgs))
-      return nullptr;
+    TemplateArgumentListInfo ExplicitArgs;
+    if (const auto *ArgsWritten = DFTSI->TemplateArgumentsAsWritten) {
+      ExplicitArgs.setLAngleLoc(ArgsWritten->getLAngleLoc());
+      ExplicitArgs.setRAngleLoc(ArgsWritten->getRAngleLoc());
+      if (SemaRef.SubstTemplateArguments(ArgsWritten->arguments(), TemplateArgs,
+                                         ExplicitArgs))
+        return nullptr;
+    }
 
-    // Map the candidate templates to their instantiations.
-    for (unsigned I = 0, E = Info->getNumTemplates(); I != E; ++I) {
-      Decl *Temp = SemaRef.FindInstantiatedDecl(D->getLocation(),
-                                                Info->getTemplate(I),
-                                                TemplateArgs);
-      if (!Temp) return nullptr;
-
-      Previous.addDecl(cast<FunctionTemplateDecl>(Temp));
+    // Map the candidates for the primary template to their instantiations.
+    for (FunctionTemplateDecl *FTD : DFTSI->getCandidates()) {
+      if (NamedDecl* ND = SemaRef.FindInstantiatedDecl(
+          D->getLocation(), FTD, TemplateArgs))
+        Previous.addDecl(ND);
+      else
+        return nullptr;
     }
 
     if (SemaRef.CheckFunctionTemplateSpecialization(Function,
-                                                    &ExplicitArgs,
-                                                    Previous))
+                                            &ExplicitArgs,
+                                            Previous,
+                                            D->isThisDeclarationADefinition()))
       Function->setInvalidDecl();
 
     IsExplicitSpecialization = true;
@@ -2279,8 +2285,9 @@ Decl *TemplateDeclInstantiator::VisitFunctionDecl(
       return nullptr;
 
     if (SemaRef.CheckFunctionTemplateSpecialization(Function,
-                                                    &ExplicitArgs,
-                                                    Previous))
+                                            &ExplicitArgs,
+                                            Previous,
+                                            D->isThisDeclarationADefinition()))
       Function->setInvalidDecl();
 
     IsExplicitSpecialization = true;
@@ -2303,7 +2310,7 @@ Decl *TemplateDeclInstantiator::VisitFunctionDecl(
     if (isFriend && !QualifierLoc) {
       SemaRef.FilterLookupForScope(Previous, DC, /*Scope=*/ nullptr,
                                    /*ConsiderLinkage=*/ true,
-                                   QualifierLoc.hasQualifier());
+                                   /*AllowInlineNamespace*/false);
     }
   }
 
@@ -2396,8 +2403,6 @@ Decl *TemplateDeclInstantiator::VisitFunctionDecl(
 
 Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
     CXXMethodDecl *D, TemplateParameterList *TemplateParams,
-    std::optional<const ASTTemplateArgumentListInfo *>
-        ClassScopeSpecializationArgs,
     RewriteKind FunctionRewriteKind) {
   FunctionTemplateDecl *FunctionTemplate = D->getDescribedFunctionTemplate();
   if (FunctionTemplate && !TemplateParams) {
@@ -2625,18 +2630,37 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
 
   bool IsExplicitSpecialization = false;
 
+  #if 0
+
+
+  if (D->isFunctionTemplateSpecialization()) {
+    // A friend function specialization always has an argument list.
+    TemplateArgumentListInfo TemplateArgsWritten;
+    if (const auto *ArgsWritten = D->getTemplateSpecializationArgsAsWritten()) {
+      TemplateArgsWritten.setLAngleLoc(ArgsWritten->getLAngleLoc());
+      TemplateArgsWritten.setRAngleLoc(ArgsWritten->getRAngleLoc());
+      if (SemaRef.SubstTemplateArguments(ArgsWritten->arguments(), TemplateArgs,
+                                         TemplateArgsWritten))
+        return nullptr;
+    }
+  }
+  #endif
+
+  #if 0
   // If the name of this function was written as a template-id, instantiate
   // the explicit template arguments.
-  if (DependentFunctionTemplateSpecializationInfo *Info
-        = D->getDependentSpecializationInfo()) {
-    assert(isFriend && "non-friend has dependent specialization info?");
+  if (DependentFunctionTemplateSpecializationInfo *Info =
+          D->getDependentSpecializationInfo()) {
 
     // Instantiate the explicit template arguments.
-    TemplateArgumentListInfo ExplicitArgs(Info->getLAngleLoc(),
-                                          Info->getRAngleLoc());
-    if (SemaRef.SubstTemplateArguments(Info->arguments(), TemplateArgs,
-                                       ExplicitArgs))
-      return nullptr;
+    TemplateArgumentListInfo ExplicitArgs;
+    if (const auto *ArgsWritten = Info->TemplateArgumentsAsWritten) {
+      ExplicitArgs.setLAngleLoc(ArgsWritten->getLAngleLoc());
+      ExplicitArgs.setRAngleLoc(ArgsWritten->getRAngleLoc());
+      if (SemaRef.SubstTemplateArguments(ArgsWritten->arguments(), TemplateArgs,
+                                         ExplicitArgs))
+        return nullptr;
+    }
 
     // Map the candidate templates to their instantiations.
     for (unsigned I = 0, E = Info->getNumTemplates(); I != E; ++I) {
@@ -2655,8 +2679,7 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
 
     IsExplicitSpecialization = true;
   } else if (const ASTTemplateArgumentListInfo *Info =
-                 ClassScopeSpecializationArgs.value_or(
-                     D->getTemplateSpecializationArgsAsWritten())) {
+                 D->getTemplateSpecializationArgsAsWritten()) {
     SemaRef.LookupQualifiedName(Previous, DC);
 
     TemplateArgumentListInfo ExplicitArgs(Info->getLAngleLoc(),
@@ -2671,16 +2694,14 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
       Method->setInvalidDecl();
 
     IsExplicitSpecialization = true;
-  } else if (ClassScopeSpecializationArgs) {
-    // Class-scope explicit specialization written without explicit template
-    // arguments.
-    SemaRef.LookupQualifiedName(Previous, DC);
-    if (SemaRef.CheckFunctionTemplateSpecialization(Method, nullptr, Previous))
-      Method->setInvalidDecl();
-
-    IsExplicitSpecialization = true;
   } else if (!FunctionTemplate || TemplateParams || isFriend) {
-    SemaRef.LookupQualifiedName(Previous, Record);
+    assert((!FunctionTemplate || TemplateParams) &&
+        "function template without template parameters?");
+    assert((FunctionTemplate || !TemplateParams) &&
+        "template parameters without function template?");
+
+    assert(DC == Record);
+    SemaRef.LookupQualifiedName(Previous, DC);
 
     // In C++, the previous declaration we find might be a tag type
     // (class or enum). In this case, the new declaration will hide the
@@ -2689,6 +2710,85 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
     if (Previous.isSingleTagDecl())
       Previous.clear();
   }
+  #else
+  // Substitute any explicitly specified template arguments.
+  TemplateArgumentListInfo TemplateArgsWritten;
+  if (const auto *ArgsWritten = D->getTemplateSpecializationArgsAsWritten()) {
+    TemplateArgsWritten.setLAngleLoc(ArgsWritten->getLAngleLoc());
+    TemplateArgsWritten.setRAngleLoc(ArgsWritten->getRAngleLoc());
+    if (SemaRef.SubstTemplateArguments(ArgsWritten->arguments(), TemplateArgs,
+                                       TemplateArgsWritten))
+      return nullptr;
+  }
+
+  // If the name of this function was written as a template-id, instantiate
+  // the explicit template arguments.
+  if (DependentFunctionTemplateSpecializationInfo *DFTSI =
+          D->getDependentSpecializationInfo()) {
+    IsExplicitSpecialization = true;
+
+    // Map the candidates for the primary template to their instantiations.
+    for (FunctionTemplateDecl *FTD : DFTSI->getCandidates()) {
+      if (NamedDecl* ND = SemaRef.FindInstantiatedDecl(
+          D->getLocation(), FTD, TemplateArgs))
+        Previous.addDecl(ND);
+      else
+        return nullptr;
+    }
+  #if 1
+  } else if (const ASTTemplateArgumentListInfo *Info =
+                 D->getTemplateSpecializationArgsAsWritten()) {
+    IsExplicitSpecialization = true;
+    SemaRef.LookupQualifiedName(Previous, DC);
+  } else if (!FunctionTemplate || TemplateParams || isFriend) {
+    assert((!FunctionTemplate || TemplateParams) &&
+        "function template without template parameters?");
+    assert((FunctionTemplate || !TemplateParams) &&
+        "template parameters without function template?");
+
+    assert(DC == Record);
+    SemaRef.LookupQualifiedName(Previous, DC);
+
+    // In C++, the previous declaration we find might be a tag type
+    // (class or enum). In this case, the new declaration will hide the
+    // tag type. Note that this does not apply if we're declaring a
+    // typedef (C++ [dcl.typedef]p4).
+    if (Previous.isSingleTagDecl())
+      Previous.clear();
+  }
+  #else
+  } else {
+    assert(!FunctionTemplate || TemplateParams || isFriend ||
+        (D->getTemplateSpecializationInfo() &&
+            D->getTemplateSpecializationArgsAsWritten()));
+    SemaRef.LookupQualifiedName(Previous, DC);
+
+    if (FunctionTemplateSpecializationInfo *FTSI =
+        D->getTemplateSpecializationInfo()) {
+      IsExplicitSpecialization = FTSI->isExplicitSpecialization();
+      assert(IsExplicitSpecialization == !!FTSI->TemplateArgumentsAsWritten &&
+          "non-dependent explicit specialization must have"
+          " explicit template arguments");
+    } else {
+      // In C++, the previous declaration we find might be a tag type
+      // (class or enum). In this case, the new declaration will hide the
+      // tag type. Note that this does not apply if we're declaring a
+      // typedef (C++ [dcl.typedef]p4).
+      if (Previous.isSingleTagDecl())
+        Previous.clear();
+    }
+  }
+  #endif
+
+  if (IsExplicitSpecialization) {
+    if (SemaRef.CheckFunctionTemplateSpecialization(Method,
+                                            &TemplateArgsWritten,
+                                            Previous,
+                                            D->isThisDeclarationADefinition()))
+      Method->setInvalidDecl();
+  }
+
+  #endif
 
   // Per [temp.inst], default arguments in member functions of local classes
   // are instantiated along with the member function declaration. For example:
@@ -3502,13 +3602,6 @@ Decl *TemplateDeclInstantiator::VisitUsingPackDecl(UsingPackDecl *D) {
   return NewD;
 }
 
-Decl *TemplateDeclInstantiator::VisitClassScopeFunctionSpecializationDecl(
-    ClassScopeFunctionSpecializationDecl *Decl) {
-  CXXMethodDecl *OldFD = Decl->getSpecialization();
-  return cast_or_null<CXXMethodDecl>(
-      VisitCXXMethodDecl(OldFD, nullptr, Decl->getTemplateArgsAsWritten()));
-}
-
 Decl *TemplateDeclInstantiator::VisitOMPThreadPrivateDecl(
                                      OMPThreadPrivateDecl *D) {
   SmallVector<Expr *, 5> Vars;
@@ -4086,7 +4179,7 @@ FunctionDecl *Sema::SubstSpaceshipAsEqualEqual(CXXRecordDecl *RD,
   Decl *R;
   if (auto *MD = dyn_cast<CXXMethodDecl>(Spaceship)) {
     R = Instantiator.VisitCXXMethodDecl(
-        MD, nullptr, std::nullopt,
+        MD, nullptr,
         TemplateDeclInstantiator::RewriteKind::RewriteSpaceshipAsEqualEqual);
   } else {
     assert(Spaceship->getFriendObjectKind() &&
@@ -4841,6 +4934,9 @@ void Sema::InstantiateFunctionDefinition(SourceLocation PointOfInstantiation,
   if (Function->isInvalidDecl() || isa<CXXDeductionGuideDecl>(Function))
     return;
 
+  // Dependent specializations should be resolved at this point.
+  assert(! Function->getDependentSpecializationInfo() &&
+      "instantiating dependent function specialization?");
   // Never instantiate an explicit specialization except if it is a class scope
   // explicit specialization.
   TemplateSpecializationKind TSK =

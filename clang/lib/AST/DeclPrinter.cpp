@@ -671,8 +671,10 @@ void DeclPrinter::VisitFunctionDecl(FunctionDecl *D) {
       !D->isFunctionTemplateSpecialization())
     prettyPrintPragmas(D);
 
-  if (D->isFunctionTemplateSpecialization())
-    Out << "template<> ";
+  if (D->isFunctionTemplateSpecialization()) {
+    if (!D->getFriendObjectKind())
+      Out << "template<> ";
+  }
   else if (!D->getDescribedFunctionTemplate()) {
     for (unsigned I = 0, NumTemplateParams = D->getNumTemplateParameterLists();
          I < NumTemplateParams; ++I)

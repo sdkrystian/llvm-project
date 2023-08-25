@@ -428,6 +428,8 @@ public:
   void VisitFunctionDecl(const FunctionDecl *D) {
     if (const auto *FTSI = D->getTemplateSpecializationInfo())
       dumpTemplateArgumentList(*FTSI->TemplateArguments);
+    else if (const auto *DFTSI = D->getDependentSpecializationInfo())
+      dumpASTTemplateArgumentListInfo(DFTSI->TemplateArgumentsAsWritten);
 
     if (D->param_begin())
       for (const auto *Parameter : D->parameters())
@@ -578,11 +580,6 @@ public:
     dumpTemplateParameters(D->getTemplateParameters());
   }
 
-  void VisitClassScopeFunctionSpecializationDecl(
-      const ClassScopeFunctionSpecializationDecl *D) {
-    Visit(D->getSpecialization());
-    dumpASTTemplateArgumentListInfo(D->getTemplateArgsAsWritten());
-  }
   void VisitVarTemplateDecl(const VarTemplateDecl *D) { dumpTemplateDecl(D); }
 
   void VisitBuiltinTemplateDecl(const BuiltinTemplateDecl *D) {
