@@ -4126,7 +4126,7 @@ FunctionDecl::setFunctionTemplateSpecialization(ASTContext &C,
 void
 FunctionDecl::setDependentTemplateSpecialization(ASTContext &Context,
                                     const UnresolvedSetImpl &Templates,
-                             const TemplateArgumentListInfo &TemplateArgs) {
+                             const TemplateArgumentListInfo *TemplateArgs) {
   assert(TemplateOrSpecialization.isNull());
   DependentFunctionTemplateSpecializationInfo *Info =
       DependentFunctionTemplateSpecializationInfo::Create(Context, Templates,
@@ -4143,27 +4143,33 @@ FunctionDecl::getDependentSpecializationInfo() const {
 DependentFunctionTemplateSpecializationInfo *
 DependentFunctionTemplateSpecializationInfo::Create(
     ASTContext &Context, const UnresolvedSetImpl &Ts,
-    const TemplateArgumentListInfo &TArgs) {
+    const TemplateArgumentListInfo *TArgs) {
   void *Buffer = Context.Allocate(
       totalSizeToAlloc<TemplateArgumentLoc, FunctionTemplateDecl *>(
-          TArgs.size(), Ts.size()));
+          (TArgs ? TArgs->size() : 0), Ts.size()));
   return new (Buffer) DependentFunctionTemplateSpecializationInfo(Ts, TArgs);
 }
 
 DependentFunctionTemplateSpecializationInfo::
 DependentFunctionTemplateSpecializationInfo(const UnresolvedSetImpl &Ts,
-                                      const TemplateArgumentListInfo &TArgs)
-  : AngleLocs(TArgs.getLAngleLoc(), TArgs.getRAngleLoc()) {
+                                      const TemplateArgumentListInfo *TArgs) {
+  if (TArgs) {
+    AngleLocs.setBegin(TArgs->getLAngleLoc());
+    AngleLocs.setEnd(TArgs->getRAngleLoc());
+
+    NumArgs = TArgs->size();
+
+    TemplateArgumentLoc *ArgsArray = getTrailingObjects<TemplateArgumentLoc>();
+    for (unsigned I = 0, E = NumArgs; I != E; ++I)
+      new (&ArgsArray[I]) TemplateArgumentLoc((*TArgs)[I]);
+  }
+
   NumTemplates = Ts.size();
-  NumArgs = TArgs.size();
 
   FunctionTemplateDecl **TsArray = getTrailingObjects<FunctionTemplateDecl *>();
   for (unsigned I = 0, E = Ts.size(); I != E; ++I)
     TsArray[I] = cast<FunctionTemplateDecl>(Ts[I]->getUnderlyingDecl());
 
-  TemplateArgumentLoc *ArgsArray = getTrailingObjects<TemplateArgumentLoc>();
-  for (unsigned I = 0, E = TArgs.size(); I != E; ++I)
-    new (&ArgsArray[I]) TemplateArgumentLoc(TArgs[I]);
 }
 
 TemplateSpecializationKind FunctionDecl::getTemplateSpecializationKind() const {

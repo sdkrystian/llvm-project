@@ -700,7 +700,7 @@ class DependentFunctionTemplateSpecializationInfo final
   unsigned NumTemplates;
 
   /// The number of template arguments.
-  unsigned NumArgs;
+  unsigned NumArgs = 0;
 
   /// The locations of the left and right angle brackets.
   SourceRange AngleLocs;
@@ -714,14 +714,14 @@ class DependentFunctionTemplateSpecializationInfo final
 
   DependentFunctionTemplateSpecializationInfo(
                                  const UnresolvedSetImpl &Templates,
-                                 const TemplateArgumentListInfo &TemplateArgs);
+                                 const TemplateArgumentListInfo *TemplateArgs);
 
 public:
   friend TrailingObjects;
 
   static DependentFunctionTemplateSpecializationInfo *
   Create(ASTContext &Context, const UnresolvedSetImpl &Templates,
-         const TemplateArgumentListInfo &TemplateArgs);
+         const TemplateArgumentListInfo *TemplateArgs);
 
   /// Returns the number of function templates that this might
   /// be a specialization of.

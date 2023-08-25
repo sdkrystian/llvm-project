@@ -3267,7 +3267,7 @@ Error ASTNodeImporter::ImportTemplateInformation(
       return Err;
 
     ToFD->setDependentTemplateSpecialization(Importer.getToContext(),
-                                             TemplDecls, ToTAInfo);
+                                             TemplDecls, &ToTAInfo);
     return Error::success();
   }
   }

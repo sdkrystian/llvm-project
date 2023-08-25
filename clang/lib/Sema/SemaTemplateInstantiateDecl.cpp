@@ -2241,7 +2241,7 @@ Decl *TemplateDeclInstantiator::VisitFunctionDecl(
 
   if (DependentFunctionTemplateSpecializationInfo *Info
         = D->getDependentSpecializationInfo()) {
-    assert(isFriend && "non-friend has dependent specialization info?");
+    // assert(isFriend && "non-friend has dependent specialization info?");
 
     // Instantiate the explicit template arguments.
     TemplateArgumentListInfo ExplicitArgs(Info->getLAngleLoc(),
@@ -2396,8 +2396,6 @@ Decl *TemplateDeclInstantiator::VisitFunctionDecl(
 
 Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
     CXXMethodDecl *D, TemplateParameterList *TemplateParams,
-    std::optional<const ASTTemplateArgumentListInfo *>
-        ClassScopeSpecializationArgs,
     RewriteKind FunctionRewriteKind) {
   FunctionTemplateDecl *FunctionTemplate = D->getDescribedFunctionTemplate();
   if (FunctionTemplate && !TemplateParams) {
@@ -2626,7 +2624,7 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
   // the explicit template arguments.
   if (DependentFunctionTemplateSpecializationInfo *Info
         = D->getDependentSpecializationInfo()) {
-    assert(isFriend && "non-friend has dependent specialization info?");
+    // assert(isFriend && "non-friend has dependent specialization info?");
 
     // Instantiate the explicit template arguments.
     TemplateArgumentListInfo ExplicitArgs(Info->getLAngleLoc(),
@@ -2652,8 +2650,7 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
 
     IsExplicitSpecialization = true;
   } else if (const ASTTemplateArgumentListInfo *Info =
-                 ClassScopeSpecializationArgs.value_or(
-                     D->getTemplateSpecializationArgsAsWritten())) {
+                 D->getTemplateSpecializationArgsAsWritten()) {
     SemaRef.LookupQualifiedName(Previous, DC);
 
     TemplateArgumentListInfo ExplicitArgs(Info->getLAngleLoc(),
@@ -2668,7 +2665,9 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
       Method->setInvalidDecl();
 
     IsExplicitSpecialization = true;
-  } else if (ClassScopeSpecializationArgs) {
+  }
+  #if 0
+  else if (ClassScopeSpecializationArgs) {
     // Class-scope explicit specialization written without explicit template
     // arguments.
     SemaRef.LookupQualifiedName(Previous, DC);
@@ -2686,6 +2685,7 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
     if (Previous.isSingleTagDecl())
       Previous.clear();
   }
+  #endif
 
   // Per [temp.inst], default arguments in member functions of local classes
   // are instantiated along with the member function declaration. For example:
@@ -3501,9 +3501,12 @@ Decl *TemplateDeclInstantiator::VisitUsingPackDecl(UsingPackDecl *D) {
 
 Decl *TemplateDeclInstantiator::VisitClassScopeFunctionSpecializationDecl(
     ClassScopeFunctionSpecializationDecl *Decl) {
-  CXXMethodDecl *OldFD = Decl->getSpecialization();
-  return cast_or_null<CXXMethodDecl>(
-      VisitCXXMethodDecl(OldFD, nullptr, Decl->getTemplateArgsAsWritten()));
+  llvm_unreachable("ClassScopeFunctionSpecializationDecl is unused");
+  #if 0
+    CXXMethodDecl *OldFD = Decl->getSpecialization();
+    return cast_or_null<CXXMethodDecl>(
+        VisitCXXMethodDecl(OldFD, nullptr, Decl->getTemplateArgsAsWritten()));
+  #endif
 }
 
 Decl *TemplateDeclInstantiator::VisitOMPThreadPrivateDecl(
@@ -4083,7 +4086,7 @@ FunctionDecl *Sema::SubstSpaceshipAsEqualEqual(CXXRecordDecl *RD,
   Decl *R;
   if (auto *MD = dyn_cast<CXXMethodDecl>(Spaceship)) {
     R = Instantiator.VisitCXXMethodDecl(
-        MD, nullptr, std::nullopt,
+        MD, nullptr,
         TemplateDeclInstantiator::RewriteKind::RewriteSpaceshipAsEqualEqual);
   } else {
     assert(Spaceship->getFriendObjectKind() &&

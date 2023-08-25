@@ -1029,7 +1029,7 @@ void ASTDeclReader::VisitFunctionDecl(FunctionDecl *FD) {
     TemplArgs.setRAngleLoc(readSourceLocation());
 
     FD->setDependentTemplateSpecialization(Reader.getContext(),
-                                           TemplDecls, TemplArgs);
+                                           TemplDecls, &TemplArgs);
     // These are not merged; we don't need to merge redeclarations of dependent
     // template friends.
     break;

@@ -8401,8 +8401,9 @@ public:
                                          bool &SuppressNew);
 
   bool CheckDependentFunctionTemplateSpecialization(FunctionDecl *FD,
-                    const TemplateArgumentListInfo &ExplicitTemplateArgs,
-                                                    LookupResult &Previous);
+                    const TemplateArgumentListInfo *ExplicitTemplateArgs,
+                                                    LookupResult &Previous,
+                                                    bool IsFriend);
 
   bool CheckFunctionTemplateSpecialization(
       FunctionDecl *FD, TemplateArgumentListInfo *ExplicitTemplateArgs,

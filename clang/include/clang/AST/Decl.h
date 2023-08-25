@@ -2900,7 +2900,7 @@ public:
   /// dependent function template specialization.
   void setDependentTemplateSpecialization(ASTContext &Context,
                              const UnresolvedSetImpl &Templates,
-                      const TemplateArgumentListInfo &TemplateArgs);
+                      const TemplateArgumentListInfo *TemplateArgs);
 
   DependentFunctionTemplateSpecializationInfo *
   getDependentSpecializationInfo() const;

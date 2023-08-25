@@ -10479,13 +10479,21 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
              TemplateArgs.arguments()))) {
       assert(HasExplicitTemplateArgs &&
              "friend function specialization without template args");
-      if (CheckDependentFunctionTemplateSpecialization(NewFD, TemplateArgs,
-                                                       Previous))
+      if (CheckDependentFunctionTemplateSpecialization(NewFD, &TemplateArgs,
+                                                       Previous, true))
         NewFD->setInvalidDecl();
     } else if (isFunctionTemplateSpecialization) {
       if (CurContext->isDependentContext() && CurContext->isRecord()
           && !isFriend) {
+
+        if (CheckDependentFunctionTemplateSpecialization(
+            NewFD, (HasExplicitTemplateArgs ? &TemplateArgs : nullptr),
+            Previous, false))
+          NewFD->setInvalidDecl();
+        #if 0
         isDependentClassScopeExplicitSpecialization = true;
+        #endif
+
       } else if (!NewFD->isInvalidDecl() &&
                  CheckFunctionTemplateSpecialization(
                      NewFD, (HasExplicitTemplateArgs ? &TemplateArgs : nullptr),
@@ -10838,6 +10846,8 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
   // The actual specialization will be postponed to template instatiation
   // time via the ClassScopeFunctionSpecializationDecl node.
   if (isDependentClassScopeExplicitSpecialization) {
+    llvm_unreachable("ClassScopeFunctionSpecializationDecl is unused");
+    #if 0
     ClassScopeFunctionSpecializationDecl *NewSpec =
                          ClassScopeFunctionSpecializationDecl::Create(
                                 Context, CurContext, NewFD->getLocation(),
@@ -10845,6 +10855,7 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
                                 HasExplicitTemplateArgs, TemplateArgs);
     CurContext->addDecl(NewSpec);
     AddToScope = false;
+    #endif
   }
 
   // Diagnose availability attributes. Availability cannot be used on functions

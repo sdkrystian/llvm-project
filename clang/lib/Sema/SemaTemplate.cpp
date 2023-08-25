@@ -9323,8 +9323,9 @@ Sema::CheckSpecializationInstantiationRedecl(SourceLocation NewLoc,
 /// just store the information.
 bool
 Sema::CheckDependentFunctionTemplateSpecialization(FunctionDecl *FD,
-                   const TemplateArgumentListInfo &ExplicitTemplateArgs,
-                                                   LookupResult &Previous) {
+                   const TemplateArgumentListInfo *ExplicitTemplateArgs,
+                                                   LookupResult &Previous,
+                                                   bool IsFriend) {
   // Remove anything from Previous that isn't a function template in
   // the correct context.
   DeclContext *FDLookupContext = FD->getDeclContext()->getRedeclContext();
