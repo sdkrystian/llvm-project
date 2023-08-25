@@ -17701,6 +17701,18 @@ NamedDecl *Sema::ActOnFriendFunctionDecl(Scope *S, Declarator &D,
 
     DCScope = getScopeForDeclContext(S, DC);
 
+    if (isTemplateId && D.isFunctionDefinition()) {
+      // C++ [class.friend]p6:
+      //   A function may be defined in a friend declaration of a class if and
+      //   only if the class is a non-local class (9.8) and the function name
+      //   is unqualified.
+      //
+      // Since a template-id is not a name, a friend declaration naming
+      // a function template specialization cannot be a definition.
+      Diag(D.getName().getBeginLoc(), diag::err_friend_specialization_def);
+
+    }
+
   //   - There's a non-dependent scope specifier, in which case we
   //     compute it and do a previous lookup there for a function
   //     or function template.

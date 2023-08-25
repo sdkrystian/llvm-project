@@ -1633,6 +1633,9 @@ def err_no_matching_local_friend_suggest : Error<
   "no matching function %0 found in local scope; did you mean %3?">;
 def err_partial_specialization_friend : Error<
   "partial specialization cannot be declared as a friend">;
+def err_friend_specialization_def : Error<
+  "friend declaration naming a function template specialization "
+  "cannot be a definition">;
 def err_qualified_friend_def : Error<
   "friend function definition cannot be qualified with '%0'">;
 def err_friend_def_in_local_class : Error<
@@ -5195,8 +5198,8 @@ def err_specialization_after_instantiation : Error<
   "explicit specialization of %0 after instantiation">;
 def note_instantiation_required_here : Note<
   "%select{implicit|explicit}0 instantiation first required here">;
-def err_template_spec_friend : Error<
-  "template specialization declaration cannot be a friend">;
+def err_explicit_specialization_friend : Error<
+  "explicit specialization declaration cannot be a friend">;
 def err_template_spec_default_arg : Error<
   "default argument not permitted on an explicit "
   "%select{instantiation|specialization}0 of function %1">;
@@ -5210,11 +5213,14 @@ def err_explicit_specialization_inconsistent_storage_class : Error<
   "'%select{none|extern|static|__private_extern__|auto|register}0'">;
 def err_dependent_function_template_spec_no_match : Error<
   "no candidate function template was found for dependent"
-  " friend function template specialization">;
-def note_dependent_function_template_spec_discard_reason : Note<
+  " %select{member|friend}0 function template specialization">;
+def note_dependent_friend_function_template_spec_discard_reason : Note<
   "candidate ignored: %select{not a function template"
   "|not a member of the enclosing namespace;"
   " did you mean to explicitly qualify the specialization?}0">;
+def note_dependent_function_template_spec_discard_reason : Note<
+  "candidate ignored: %select{not a function template"
+  "|not a member of the enclosing class template}0">;
 
 // C++ class template specializations and out-of-line definitions
 def err_template_spec_needs_header : Error<
@@ -5609,9 +5615,9 @@ def err_unexpanded_parameter_pack : Error<
   "%select{expression|base type|declaration type|data member type|bit-field "
   "size|static assertion|fixed underlying type|enumerator value|"
   "using declaration|friend declaration|qualifier|initializer|default argument|"
-  "non-type template parameter type|exception type|partial specialization|"
-  "__if_exists name|__if_not_exists name|lambda|block|type constraint|"
-  "requirement|requires clause}0 "
+  "non-type template parameter type|exception type|explicit specialization|"
+  "partial specialization|__if_exists name|__if_not_exists name|lambda|block|"
+  "type constraint|requirement|requires clause}0 "
   "contains%plural{0: an|:}1 unexpanded parameter pack"
   "%plural{0:|1: %2|2:s %2 and %3|:s %2, %3, ...}1">;
 

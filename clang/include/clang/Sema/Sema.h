@@ -8428,13 +8428,13 @@ public:
                                          SourceLocation PrevPtOfInstantiation,
                                          bool &SuppressNew);
 
-  bool CheckDependentFunctionTemplateSpecialization(FunctionDecl *FD,
-                    const TemplateArgumentListInfo &ExplicitTemplateArgs,
-                                                    LookupResult &Previous);
+  bool CheckDependentFunctionTemplateSpecialization(
+      FunctionDecl *FD, const TemplateArgumentListInfo *ExplicitTemplateArgs,
+      LookupResult &Previous);
 
   bool CheckFunctionTemplateSpecialization(
       FunctionDecl *FD, TemplateArgumentListInfo *ExplicitTemplateArgs,
-      LookupResult &Previous, bool QualifiedFriend = false);
+      LookupResult &Previous, bool IsDefinition, bool QualifiedFriend = false);
   bool CheckMemberSpecialization(NamedDecl *Member, LookupResult &Previous);
   void CompleteMemberSpecialization(NamedDecl *Member, LookupResult &Previous);
 
@@ -8787,6 +8787,9 @@ public:
 
     /// The type of an exception.
     UPPC_ExceptionType,
+
+    /// Explicit specialization.
+    UPPC_ExplicitSpecialization,
 
     /// Partial specialization.
     UPPC_PartialSpecialization,

@@ -1222,8 +1222,10 @@ Sema::CheckOverload(Scope *S, FunctionDecl *New, const LookupResult &Old,
       !New->getType()->isDependentType()) {
     LookupResult TemplateSpecResult(LookupResult::Temporary, Old);
     TemplateSpecResult.addAllDecls(Old);
+    const FunctionDecl* Definition = nullptr;
     if (CheckFunctionTemplateSpecialization(New, nullptr, TemplateSpecResult,
-                                            /*QualifiedFriend*/true)) {
+           New->isDefined(Definition, /*CheckForPendingFriendDefinition*/true),
+           /*QualifiedFriend*/true)) {
       New->setInvalidDecl();
       return Ovl_Overload;
     }

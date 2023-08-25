@@ -3991,9 +3991,11 @@ bool Sema::MergeFunctionDecl(FunctionDecl *New, NamedDecl *&OldD, Scope *S,
       // Preserve triviality.
       NewMethod->setTrivial(OldMethod->isTrivial());
 
-      // MSVC allows explicit template specialization at class scope:
-      // 2 CXXMethodDecls referring to the same function will be injected.
-      // We don't want a redeclaration error.
+      // FIXME: Class scope function template explicit specializations result
+      // in 2 CXXMethodDecls being created and later merged: the original one,
+      // and a function template specialization created by template argument
+      // deduction. There is no good way to distinguish them for the purposes
+      // of checking redeclarations. For now, we will allow redeclarations.
       bool IsClassScopeExplicitSpecialization =
                               OldMethod->isFunctionTemplateSpecialization() &&
                               NewMethod->isFunctionTemplateSpecialization();
@@ -9772,10 +9774,9 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
   bool isFriend = false;
   FunctionTemplateDecl *FunctionTemplate = nullptr;
   bool isMemberSpecialization = false;
+  bool isDependentSpecialization = false;
   bool isFunctionTemplateSpecialization = false;
-
-  bool isDependentClassScopeExplicitSpecialization = false;
-  bool HasExplicitTemplateArgs = false;
+  bool hasExplicitTemplateArgs = false;
   TemplateArgumentListInfo TemplateArgs;
 
   bool isVirtualOkay = false;
@@ -9846,10 +9847,21 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
     }
 
     SetNestedNameSpecifier(*this, NewFD, D);
-    isMemberSpecialization = false;
-    isFunctionTemplateSpecialization = false;
     if (D.isInvalidType())
       NewFD->setInvalidDecl();
+
+    // If the declarator is a template-id, translate the parser's template
+    // argument list into our AST format.
+    if (D.getName().getKind() == UnqualifiedIdKind::IK_TemplateId) {
+      hasExplicitTemplateArgs = true;
+      TemplateIdAnnotation *TemplateId = D.getName().TemplateId;
+      TemplateArgs.setLAngleLoc(TemplateId->LAngleLoc);
+      TemplateArgs.setRAngleLoc(TemplateId->RAngleLoc);
+      ASTTemplateArgsPtr TemplateArgsPtr(TemplateId->getTemplateArgs(),
+                                         TemplateId->NumArgs);
+      translateTemplateArguments(TemplateArgsPtr,
+                                 TemplateArgs);
+    }
 
     // Match up the template parameter lists with the scope specifier, then
     // determine whether we have a template or a template specialization.
@@ -9877,6 +9889,16 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
           NewFD->setInvalidDecl();
         }
 
+        // Function templates cannot be partially specialized.
+        if (hasExplicitTemplateArgs) {
+          Diag(D.getIdentifierLoc(), diag::err_function_template_partial_spec)
+              << SourceRange(TemplateArgs.getLAngleLoc(),
+                             TemplateArgs.getRAngleLoc());
+          NewFD->setInvalidDecl();
+          // Recover by ignoring the template argument list.
+          hasExplicitTemplateArgs = false;
+        }
+
         // If we're adding a template to a dependent context, we may need to
         // rebuilding some of the types used within the template parameter list,
         // now that we know what the current instantiation is.
@@ -9902,10 +9924,17 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
       } else {
         // This is a function template specialization.
         isFunctionTemplateSpecialization = true;
+
+        assert(!isFriend && "Explicit specialization is a friend?");
+        // if (!isFriend && CurContext->isDependentContext())
+        if (CurContext->isDependentContext())
+          isDependentSpecialization = true;
+
         // For source fidelity, store all the template param lists.
-        if (TemplateParamLists.size() > 0)
+        if (!TemplateParamLists.empty())
           NewFD->setTemplateParameterListsInfo(Context, TemplateParamLists);
 
+        #if 0
         // C++0x [temp.expl.spec]p20 forbids "template<> friend void foo(int);".
         if (isFriend) {
           // We want to remove the "template<>", found here.
@@ -9916,20 +9945,69 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
           // the friend declaration will refer to an untemplated decl,
           // and clearly the user wants a template specialization.  So
           // we need to insert '<>' after the name.
+          #if 0
           SourceLocation InsertLoc;
           if (D.getName().getKind() != UnqualifiedIdKind::IK_TemplateId) {
             InsertLoc = D.getName().getSourceRange().getEnd();
             InsertLoc = getLocForEndOfToken(InsertLoc);
           }
-
           Diag(D.getIdentifierLoc(), diag::err_template_spec_decl_friend)
             << Name << RemoveRange
             << FixItHint::CreateRemoval(RemoveRange)
             << FixItHint::CreateInsertion(InsertLoc, "<>");
+          #else
+
+          auto DB = Diag(D.getIdentifierLoc(),
+              diag::err_template_spec_decl_friend)
+                  << Name << RemoveRange
+                  << FixItHint::CreateRemoval(RemoveRange);
+
+          if (!hasExplicitTemplateArgs) {
+            SourceLocation NameEndLoc = D.getName().getEndLoc();
+            DB << FixItHint::CreateInsertion(NameEndLoc, "<>");
+
+            // The user wrote something like:
+            //   template <> friend void foo(int);
+            // Recover by treating it as if the user wrote:
+            //   friend void foo<>(int);
+            hasExplicitTemplateArgs = true;
+            TemplateArgs.setLAngleLoc(NameEndLoc);
+            TemplateArgs.setRAngleLoc(NameEndLoc);
+          }
+          #endif
+
           Invalid = true;
         }
+        #endif
       }
+    #if 0
     } else {
+      if (!TemplateParamLists.empty()) {
+        // We declaring a member specialization of a non-template member.
+        // Check that we can declare a it here.
+        if (isMemberSpecialization &&
+            CheckTemplateDeclScope(S, TemplateParamLists.back()))
+          NewFD->setInvalidDecl();
+
+        // For source fidelity, store all the template param lists.
+        NewFD->setTemplateParameterListsInfo(Context, TemplateParamLists);
+      }
+
+      // If this is a non-template friend function declaration and
+      // an explicit template arguments list is present, we are
+      // befriending an implicit specialization of a function template.
+      if (isFriend && hasExplicitTemplateArgs) {
+        isFunctionTemplateSpecialization = true;
+        // If any of the template arguments are instantiation dependent,
+        // then this is a dependent specialization.
+        if (TemplateSpecializationType::
+                anyInstantiationDependentTemplateArguments(
+                    TemplateArgs.arguments()))
+          isDependentSpecialization = true;
+      }
+
+
+    #if 0
       // Check that we can declare a template here.
       if (!TemplateParamLists.empty() && isMemberSpecialization &&
           CheckTemplateDeclScope(S, TemplateParamLists.back()))
@@ -9940,6 +10018,40 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
       if (TemplateParamLists.size() > 0)
         // For source fidelity, store all the template param lists.
         NewFD->setTemplateParameterListsInfo(Context, TemplateParamLists);
+    #endif
+    }
+    #else
+    // } else if (isMemberSpecialization) {
+    } else if (!TemplateParamLists.empty()) {
+      // We declaring a member specialization of a non-template
+      // member function. Check if we can declare it here.
+      if (isMemberSpecialization && CheckTemplateDeclScope(
+          S, TemplateParamLists.back()))
+        NewFD->setInvalidDecl();
+
+      // For source fidelity, store all the template param lists.
+      NewFD->setTemplateParameterListsInfo(Context, TemplateParamLists);
+    }
+    #endif
+
+    // If this is a non-template friend function declaration and
+    // an explicit template arguments list is present, we are
+    // befriending an implicit specialization of a function template.
+    if (isFriend && hasExplicitTemplateArgs) {
+      isFunctionTemplateSpecialization = true;
+      // If any of the template arguments are instantiation dependent,
+      // then this is a dependent specialization.
+      if (TemplateSpecializationType::
+              anyInstantiationDependentTemplateArguments(
+                  TemplateArgs.arguments()))
+        isDependentSpecialization = true;
+    }
+
+    // Check for unexpanded parameter packs in the template arguments list.
+    for (const auto& TemplateArg : TemplateArgs.arguments()) {
+      if (DiagnoseUnexpandedParameterPack(
+          TemplateArg, UPPC_ExplicitSpecialization))
+        Invalid = true;
     }
 
     if (Invalid) {
@@ -10101,15 +10213,15 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
       break;
     }
 
-    if (isa<CXXMethodDecl>(NewFD) && DC == CurContext &&
-        D.isFunctionDefinition() && !isInline) {
+    if (isa<CXXMethodDecl>(NewFD) && DC == CurContext) {
       // Pre C++20 [class.mfct]p2:
       //   A member function may be defined (8.4) in its class definition, in
       //   which case it is an inline member function (7.1.2)
       // Post C++20 [class.mfct]p1:
       //   If a member function is attached to the global module and is defined
       //   in its class definition, it is inline.
-      NewFD->setImplicitlyInline(ImplicitInlineCXX20);
+      if (D.isFunctionDefinition() && !isInline)
+        NewFD->setImplicitlyInline(ImplicitInlineCXX20);
     }
 
     if (SC == SC_Static && isa<CXXMethodDecl>(NewFD) &&
@@ -10393,6 +10505,7 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
            diag::ext_operator_new_delete_declared_inline)
         << NewFD->getDeclName();
 
+    #if 0
     // If the declarator is a template-id, translate the parser's template
     // argument list into our AST format.
     if (D.getName().getKind() == UnqualifiedIdKind::IK_TemplateId) {
@@ -10404,22 +10517,28 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
       translateTemplateArguments(TemplateArgsPtr,
                                  TemplateArgs);
 
-      HasExplicitTemplateArgs = true;
+      hasExplicitTemplateArgs = true;
 
       if (NewFD->isInvalidDecl()) {
-        HasExplicitTemplateArgs = false;
+        hasExplicitTemplateArgs = false;
       } else if (FunctionTemplate) {
         // Function template with explicit template arguments.
         Diag(D.getIdentifierLoc(), diag::err_function_template_partial_spec)
           << SourceRange(TemplateId->LAngleLoc, TemplateId->RAngleLoc);
 
-        HasExplicitTemplateArgs = false;
-      } else {
-        assert((isFunctionTemplateSpecialization ||
-                D.getDeclSpec().isFriendSpecified()) &&
-               "should have a 'template<>' for this decl");
+        hasExplicitTemplateArgs = false;
+      } else if (isFriend) {
         // "friend void foo<>(int);" is an implicit specialization decl.
         isFunctionTemplateSpecialization = true;
+        // If any of the template arguments are instantiation dependent,
+        // then this is a dependent specialization.
+        if (TemplateSpecializationType::
+                anyInstantiationDependentTemplateArguments(
+                    TemplateArgs.arguments()))
+          isDependentSpecialization = true;
+      } else {
+        assert(isFunctionTemplateSpecialization &&
+               "should have a 'template<>' for this decl");
       }
     } else if (isFriend && isFunctionTemplateSpecialization) {
       // This combination is only possible in a recovery case;  the user
@@ -10428,10 +10547,11 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
       // which we're recovering from as if the user had written:
       //   friend void foo<>(int);
       // Go ahead and fake up a template id.
-      HasExplicitTemplateArgs = true;
+      hasExplicitTemplateArgs = true;
       TemplateArgs.setLAngleLoc(D.getIdentifierLoc());
       TemplateArgs.setRAngleLoc(D.getIdentifierLoc());
     }
+    #endif
 
     // We do not add HD attributes to specializations here because
     // they may have different constexpr-ness compared to their
@@ -10442,47 +10562,52 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
     if (getLangOpts().CUDA && !isFunctionTemplateSpecialization)
       maybeAddCUDAHostDeviceAttrs(NewFD, Previous);
 
-    // If it's a friend (and only if it's a friend), it's possible
-    // that either the specialized function type or the specialized
-    // template is dependent, and therefore matching will fail.  In
-    // this case, don't check the specialization yet.
-    if (isFunctionTemplateSpecialization && isFriend &&
-        (NewFD->getType()->isDependentType() || DC->isDependentContext() ||
-         TemplateSpecializationType::anyInstantiationDependentTemplateArguments(
-             TemplateArgs.arguments()))) {
-      assert(HasExplicitTemplateArgs &&
-             "friend function specialization without template args");
-      if (CheckDependentFunctionTemplateSpecialization(NewFD, TemplateArgs,
-                                                       Previous))
-        NewFD->setInvalidDecl();
-    } else if (isFunctionTemplateSpecialization) {
-      if (CurContext->isDependentContext() && CurContext->isRecord()
-          && !isFriend) {
-        isDependentClassScopeExplicitSpecialization = true;
-      } else if (!NewFD->isInvalidDecl() &&
-                 CheckFunctionTemplateSpecialization(
-                     NewFD, (HasExplicitTemplateArgs ? &TemplateArgs : nullptr),
-                     Previous))
-        NewFD->setInvalidDecl();
+    // Handle explict specializations of function templates
+    // and friend function declarations with an explicit
+    // template argument list.
+    if (isFunctionTemplateSpecialization) {
+      // If this is a friend function declaration, this is
+      // also a dependent specialization if its DeclContext
+      // is dependent, or if its type is dependent.
+      if (isFriend &&
+          (DC->isDependentContext() || NewFD->getType()->isDependentType()))
+        isDependentSpecialization = true;
+
+      TemplateArgumentListInfo *ExplicitTemplateArgs =
+          hasExplicitTemplateArgs ? &TemplateArgs : nullptr;
+      if (isDependentSpecialization) {
+        // If it's a dependent specialization, it may not be possible
+        // to determine the primary template (for explicit specializations)
+        // or befriended declaration (for friends) until the enclosing
+        // template is instantiated. In such cases, we store the declarations
+        // found by name lookup and defer resolution until instantiation.
+        if (CheckDependentFunctionTemplateSpecialization(
+                NewFD, ExplicitTemplateArgs, Previous))
+          NewFD->setInvalidDecl();
+      } else if (!NewFD->isInvalidDecl()) {
+        if (CheckFunctionTemplateSpecialization(
+                NewFD, ExplicitTemplateArgs, Previous,
+                D.isFunctionDefinition()))
+          NewFD->setInvalidDecl();
+      }
 
       // C++ [dcl.stc]p1:
       //   A storage-class-specifier shall not be specified in an explicit
       //   specialization (14.7.3)
-      FunctionTemplateSpecializationInfo *Info =
-          NewFD->getTemplateSpecializationInfo();
-      if (Info && SC != SC_None) {
-        if (SC != Info->getTemplate()->getTemplatedDecl()->getStorageClass())
-          Diag(NewFD->getLocation(),
-               diag::err_explicit_specialization_inconsistent_storage_class)
-            << SC
-            << FixItHint::CreateRemoval(
-                                      D.getDeclSpec().getStorageClassSpecLoc());
-
-        else
-          Diag(NewFD->getLocation(),
-               diag::ext_explicit_specialization_storage_class)
-            << FixItHint::CreateRemoval(
-                                      D.getDeclSpec().getStorageClassSpecLoc());
+      // FIXME: This check needs to happen for member specializations too.
+      if (!isFriend && SC != SC_None) {
+        StorageClass PrimarySC = SC;
+        if (FunctionTemplateDecl *Primary = NewFD->getPrimaryTemplate())
+          PrimarySC = Primary->getTemplatedDecl()->getStorageClass();
+        auto DB = Diag(
+            NewFD->getLocation(),
+            SC != PrimarySC
+                ? diag::err_explicit_specialization_inconsistent_storage_class
+                : diag::ext_explicit_specialization_storage_class);
+        if (SC != PrimarySC)
+          DB << SC;
+        DB << FixItHint::CreateRemoval(
+            D.getDeclSpec().getStorageClassSpecLoc());
       }
     } else if (isMemberSpecialization && isa<CXXMethodDecl>(NewFD)) {
       if (CheckMemberSpecialization(NewFD, Previous))
@@ -10490,21 +10615,19 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
     }
 
     // Perform semantic checking on the function declaration.
-    if (!isDependentClassScopeExplicitSpecialization) {
-      if (!NewFD->isInvalidDecl() && NewFD->isMain())
-        CheckMain(NewFD, D.getDeclSpec());
+    if (!NewFD->isInvalidDecl() && NewFD->isMain())
+      CheckMain(NewFD, D.getDeclSpec());
 
-      if (!NewFD->isInvalidDecl() && NewFD->isMSVCRTEntryPoint())
-        CheckMSVCRTEntryPoint(NewFD);
+    if (!NewFD->isInvalidDecl() && NewFD->isMSVCRTEntryPoint())
+      CheckMSVCRTEntryPoint(NewFD);
 
-      if (!NewFD->isInvalidDecl())
-        D.setRedeclaration(CheckFunctionDeclaration(S, NewFD, Previous,
-                                                    isMemberSpecialization,
-                                                    D.isFunctionDefinition()));
-      else if (!Previous.empty())
-        // Recover gracefully from an invalid redeclaration.
-        D.setRedeclaration(true);
-    }
+    if (!NewFD->isInvalidDecl())
+      D.setRedeclaration(CheckFunctionDeclaration(S, NewFD, Previous,
+                                                  isMemberSpecialization,
+                                                  D.isFunctionDefinition()));
+    else if (!Previous.empty())
+      // Recover gracefully from an invalid redeclaration.
+      D.setRedeclaration(true);
 
     assert((NewFD->isInvalidDecl() || NewFD->isMultiVersion() ||
             !D.isRedeclaration() ||
@@ -10814,19 +10937,6 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
         D.setInvalidType();
       }
     }
-  }
-
-  // Here we have an function template explicit specialization at class scope.
-  // The actual specialization will be postponed to template instatiation
-  // time via the ClassScopeFunctionSpecializationDecl node.
-  if (isDependentClassScopeExplicitSpecialization) {
-    ClassScopeFunctionSpecializationDecl *NewSpec =
-                         ClassScopeFunctionSpecializationDecl::Create(
-                                Context, CurContext, NewFD->getLocation(),
-                                cast<CXXMethodDecl>(NewFD),
-                                HasExplicitTemplateArgs, TemplateArgs);
-    CurContext->addDecl(NewSpec);
-    AddToScope = false;
   }
 
   // Diagnose availability attributes. Availability cannot be used on functions
@@ -12040,6 +12150,10 @@ bool Sema::CheckFunctionDeclaration(Scope *S, FunctionDecl *NewFD,
           !(isa<CXXMethodDecl>(NewFD) && NewFD->isTemplated()) &&
           // Don't complain about instantiations, they've already had these
           // rules + others enforced.
+          // FIXME: This is broken for explicit specializations of
+          // dependent member function templates. We should be using
+          // getTemplateSpecializationKindForInstantiation, but this alone does
+          // not fix trailing requires-clauses for such declarations.
           !NewFD->isTemplateInstantiation()) {
         Diag(TRC->getBeginLoc(), diag::err_constrained_non_templated_function);
       }

@@ -185,14 +185,11 @@ namespace SameSignatureAfterInstantiation {
 
 namespace PR22040 {
   template <typename T> struct Foobar {
-    template <> void bazqux(typename T::type) {}  // expected-error 2{{cannot be used prior to '::' because it has no members}}
+    template <> void bazqux(T) {}  // expected-error {{no candidate function template was found for dependent member function template specialization}}
   };
 
   void test() {
-    // FIXME: we should suppress the "no member" errors
-    Foobar<void>::bazqux();  // expected-error{{no member named 'bazqux' in }}  expected-note{{in instantiation of template class }}
-    Foobar<int>::bazqux();  // expected-error{{no member named 'bazqux' in }}  expected-note{{in instantiation of template class }}
-    Foobar<int>::bazqux(3);  // expected-error{{no member named 'bazqux' in }}
+    Foobar<int>::bazqux(1);
   }
 }
 

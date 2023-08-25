@@ -77,7 +77,7 @@ namespace PR41607 {
     template<> static inline constexpr int b<> = N;
 
     template<typename...> static constexpr int f();
-    template<> static constexpr int f() {
+    template<> static constexpr int f() { // expected-warning {{explicit specialization cannot have a storage class}}
       return N;
     }
   };

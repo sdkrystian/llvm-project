@@ -2668,8 +2668,7 @@ void Sema::DeclareImplicitDeductionGuides(TemplateDecl *Template,
     auto *FTD = dyn_cast<FunctionTemplateDecl>(D);
     auto *CD =
         dyn_cast_or_null<CXXConstructorDecl>(FTD ? FTD->getTemplatedDecl() : D);
-    // Class-scope explicit specializations (MS extension) do not result in
-    // deduction guides.
+    // Class-scope explicit specializations do not result in deduction guides.
     if (!CD || (!FTD && CD->isFunctionTemplateSpecialization()))
       continue;
 
@@ -3368,8 +3367,10 @@ TemplateParameterList *Sema::MatchTemplateParametersToScopeSpecifier(
   //   template<> for each enclosing class template that is
   //   explicitly specialized.
   bool SawNonEmptyTemplateParameterList = false;
+  bool SawEmptyTemplateParameterList = false;
 
   auto CheckExplicitSpecialization = [&](SourceRange Range, bool Recovery) {
+    #if 0
     if (SawNonEmptyTemplateParameterList) {
       if (!SuppressDiagnostic)
         Diag(DeclLoc, diag::err_specialize_member_of_template)
@@ -3378,6 +3379,25 @@ TemplateParameterList *Sema::MatchTemplateParametersToScopeSpecifier(
       IsMemberSpecialization = false;
       return true;
     }
+    #endif
+
+    if (!SawNonEmptyTemplateParameterList && !IsFriend)
+      return false;
+
+    if (!SuppressDiagnostic) {
+      if (SawNonEmptyTemplateParameterList) {
+        Diag(DeclLoc, diag::err_specialize_member_of_template)
+          << !Recovery << Range;
+      }
+      if (IsFriend) {
+        Diag(DeclLoc, diag::err_explicit_specialization_friend)
+          << Range;
+      }
+    }
+    Invalid = true;
+    IsMemberSpecialization = false;
+    return true;
+
 
     return false;
   };
@@ -3471,6 +3491,7 @@ TemplateParameterList *Sema::MatchTemplateParametersToScopeSpecifier(
     //   are not explicitly specialized as well.
     if (ParamIdx < ParamLists.size()) {
       if (ParamLists[ParamIdx]->size() == 0) {
+        SawEmptyTemplateParameterList = true;
         if (CheckExplicitSpecialization(ParamLists[ParamIdx]->getSourceRange(),
                                         false))
           return nullptr;
@@ -4553,7 +4574,9 @@ DeclResult Sema::ActOnVarTemplateSpecialization(
   // Check for unexpanded parameter packs in any of the template arguments.
   for (unsigned I = 0, N = TemplateArgs.size(); I != N; ++I)
     if (DiagnoseUnexpandedParameterPack(TemplateArgs[I],
-                                        UPPC_PartialSpecialization))
+                                        IsPartialSpecialization ?
+                                            UPPC_PartialSpecialization :
+                                            UPPC_ExplicitSpecialization))
       return true;
 
   // Check that the template argument list is well-formed for this
@@ -8699,12 +8722,14 @@ DeclResult Sema::ActOnClassTemplateSpecialization(
       }
     }
   } else if (TemplateParams) {
+    #if 0
     if (TUK == TUK_Friend)
       Diag(KWLoc, diag::err_template_spec_friend)
         << FixItHint::CreateRemoval(
                                 SourceRange(TemplateParams->getTemplateLoc(),
                                             TemplateParams->getRAngleLoc()))
         << SourceRange(LAngleLoc, RAngleLoc);
+    #endif
   } else {
     assert(TUK == TUK_Friend && "should have a 'template<>' for this decl");
   }
@@ -8732,7 +8757,9 @@ DeclResult Sema::ActOnClassTemplateSpecialization(
   // Check for unexpanded parameter packs in any of the template arguments.
   for (unsigned I = 0, N = TemplateArgs.size(); I != N; ++I)
     if (DiagnoseUnexpandedParameterPack(TemplateArgs[I],
-                                        UPPC_PartialSpecialization))
+                                        isPartialSpecialization ?
+                                            UPPC_PartialSpecialization :
+                                            UPPC_ExplicitSpecialization))
       return true;
 
   // Check that the template argument list is well-formed for this
@@ -9327,10 +9354,9 @@ Sema::CheckSpecializationInstantiationRedecl(SourceLocation NewLoc,
 ///
 /// There really isn't any useful analysis we can do here, so we
 /// just store the information.
-bool
-Sema::CheckDependentFunctionTemplateSpecialization(FunctionDecl *FD,
-                   const TemplateArgumentListInfo &ExplicitTemplateArgs,
-                                                   LookupResult &Previous) {
+bool Sema::CheckDependentFunctionTemplateSpecialization(
+    FunctionDecl *FD, const TemplateArgumentListInfo *ExplicitTemplateArgs,
+    LookupResult &Previous) {
   // Remove anything from Previous that isn't a function template in
   // the correct context.
   DeclContext *FDLookupContext = FD->getDeclContext()->getRedeclContext();
@@ -9354,13 +9380,17 @@ Sema::CheckDependentFunctionTemplateSpecialization(FunctionDecl *FD,
   }
   F.done();
 
+  bool isFriend = FD->getFriendObjectKind() != Decl::FOK_None;
+
   if (Previous.empty()) {
-    Diag(FD->getLocation(),
-         diag::err_dependent_function_template_spec_no_match);
+    Diag(FD->getLocation(), diag::err_dependent_function_template_spec_no_match)
+        << isFriend;
+    unsigned Note =
+        isFriend
+            ? diag::note_dependent_friend_function_template_spec_discard_reason
+            : diag::note_dependent_function_template_spec_discard_reason;
     for (auto &P : DiscardedCandidates)
-      Diag(P.second->getLocation(),
-           diag::note_dependent_function_template_spec_discard_reason)
-          << P.first;
+      Diag(P.second->getLocation(), Note) << P.first;
     return true;
   }
 
@@ -9393,7 +9423,7 @@ Sema::CheckDependentFunctionTemplateSpecialization(FunctionDecl *FD,
 /// befriending a function template specialization.
 bool Sema::CheckFunctionTemplateSpecialization(
     FunctionDecl *FD, TemplateArgumentListInfo *ExplicitTemplateArgs,
-    LookupResult &Previous, bool QualifiedFriend) {
+    LookupResult &Previous, bool IsDefinition, bool QualifiedFriend) {
   // The set of function template specializations that could match this
   // explicit function template specialization.
   UnresolvedSet<8> Candidates;
@@ -9561,8 +9591,18 @@ bool Sema::CheckFunctionTemplateSpecialization(
     return true;
 
   // Mark the prior declaration as an explicit specialization, so that later
-  // clients know that this is an explicit specialization.
+  // clients know that this is an explicit specialization. Friend functions
+  // definitions declared with an explicit template argument list act as
+  // psuedo explicit specializations.
+  #if 1
   if (!isFriend) {
+  #elif 1
+  const FunctionDecl* Definition = nullptr;
+  if (!isFriend || FD->isDefined(Definition,
+                                 /*CheckForPendingFriendDefinition*/true)) {
+  #elif 1
+  if (!isFriend || IsDefinition) {
+  #endif
     // Since explicit specializations do not inherit '=delete' from their
     // primary function template - check if the 'specialization' that was
     // implicitly generated (during template argument deduction for partial
