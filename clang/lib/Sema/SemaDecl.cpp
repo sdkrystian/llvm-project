@@ -10521,6 +10521,11 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
     }
     #else
     if (isFunctionTemplateSpecialization) {
+      // If it's a friend, or if it's an explicit specialization of a
+      // member function template of a class template, it's possible,
+      // that either the specialized function type or the specialized
+      // template is dependent, and therefore matching will fail.  In
+      // this case, don't check the specialization yet.
       bool isDependentSpecialization;
       if (isFriend) {
         isDependentSpecialization =
