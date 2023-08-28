@@ -9351,7 +9351,8 @@ Sema::CheckDependentFunctionTemplateSpecialization(FunctionDecl *FD,
 
   if (Previous.empty()) {
     Diag(FD->getLocation(),
-         diag::err_dependent_function_template_spec_no_match);
+         diag::err_dependent_function_template_spec_no_match)
+        << IsFriend;
     for (auto &P : DiscardedCandidates)
       Diag(P.second->getLocation(),
            diag::note_dependent_function_template_spec_discard_reason)

@@ -9773,8 +9773,6 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
   FunctionTemplateDecl *FunctionTemplate = nullptr;
   bool isMemberSpecialization = false;
   bool isFunctionTemplateSpecialization = false;
-
-  bool isDependentClassScopeExplicitSpecialization = false;
   bool HasExplicitTemplateArgs = false;
   TemplateArgumentListInfo TemplateArgs;
 
@@ -10469,6 +10467,7 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
     if (getLangOpts().CUDA && !isFunctionTemplateSpecialization)
       maybeAddCUDAHostDeviceAttrs(NewFD, Previous);
 
+    #if 0
     // If it's a friend (and only if it's a friend), it's possible
     // that either the specialized function type or the specialized
     // template is dependent, and therefore matching will fail.  In
@@ -10479,8 +10478,9 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
              TemplateArgs.arguments()))) {
       assert(HasExplicitTemplateArgs &&
              "friend function specialization without template args");
-      if (CheckDependentFunctionTemplateSpecialization(NewFD, &TemplateArgs,
-                                                       Previous, true))
+      if (CheckDependentFunctionTemplateSpecialization(
+          NewFD, &TemplateArgs,
+          Previous, /*IsFriend=*/true))
         NewFD->setInvalidDecl();
     } else if (isFunctionTemplateSpecialization) {
       if (CurContext->isDependentContext() && CurContext->isRecord()
@@ -10488,12 +10488,8 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
 
         if (CheckDependentFunctionTemplateSpecialization(
             NewFD, (HasExplicitTemplateArgs ? &TemplateArgs : nullptr),
-            Previous, false))
+            Previous, /*IsFriend=*/false))
           NewFD->setInvalidDecl();
-        #if 0
-        isDependentClassScopeExplicitSpecialization = true;
-        #endif
-
       } else if (!NewFD->isInvalidDecl() &&
                  CheckFunctionTemplateSpecialization(
                      NewFD, (HasExplicitTemplateArgs ? &TemplateArgs : nullptr),
@@ -10523,23 +10519,71 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
       if (CheckMemberSpecialization(NewFD, Previous))
           NewFD->setInvalidDecl();
     }
+    #else
+    if (isFunctionTemplateSpecialization) {
+      bool isDependentSpecialization;
+      if (isFriend) {
+        isDependentSpecialization =
+            NewFD->getType()->isDependentType() || DC->isDependentContext() ||
+            TemplateSpecializationType::anyInstantiationDependentTemplateArguments(
+              TemplateArgs.arguments());
+        assert(!isDependentSpecialization || HasExplicitTemplateArgs &&
+          "friend function specialization without template args");
+      } else {
+        isDependentSpecialization =
+            CurContext->isDependentContext() && CurContext->isRecord();
+      }
+
+      TemplateArgumentListInfo *ExplicitTemplateArgs =
+          HasExplicitTemplateArgs ? &TemplateArgs : nullptr;
+      if (isDependentSpecialization) {
+        if (CheckDependentFunctionTemplateSpecialization(
+            NewFD, ExplicitTemplateArgs, Previous, isFriend))
+          NewFD->setInvalidDecl();
+      } else if (!NewFD->isInvalidDecl()) {
+        if (CheckFunctionTemplateSpecialization(
+            NewFD, ExplicitTemplateArgs, Previous))
+          NewFD->setInvalidDecl();
+        // C++ [dcl.stc]p1:
+        //   A storage-class-specifier shall not be specified in an explicit
+        //   specialization (14.7.3)
+        FunctionTemplateSpecializationInfo *Info =
+            NewFD->getTemplateSpecializationInfo();
+        if (Info && SC != SC_None) {
+          if (SC != Info->getTemplate()->getTemplatedDecl()->getStorageClass())
+            Diag(NewFD->getLocation(),
+                 diag::err_explicit_specialization_inconsistent_storage_class)
+              << SC
+              << FixItHint::CreateRemoval(
+                                        D.getDeclSpec().getStorageClassSpecLoc());
+
+          else
+            Diag(NewFD->getLocation(),
+                 diag::ext_explicit_specialization_storage_class)
+              << FixItHint::CreateRemoval(
+                                        D.getDeclSpec().getStorageClassSpecLoc());
+        }
+      }
+    } else if (isMemberSpecialization && isa<CXXMethodDecl>(NewFD)) {
+      if (CheckMemberSpecialization(NewFD, Previous))
+          NewFD->setInvalidDecl();
+    }
+    #endif
 
     // Perform semantic checking on the function declaration.
-    if (!isDependentClassScopeExplicitSpecialization) {
-      if (!NewFD->isInvalidDecl() && NewFD->isMain())
-        CheckMain(NewFD, D.getDeclSpec());
+    if (!NewFD->isInvalidDecl() && NewFD->isMain())
+      CheckMain(NewFD, D.getDeclSpec());
 
-      if (!NewFD->isInvalidDecl() && NewFD->isMSVCRTEntryPoint())
-        CheckMSVCRTEntryPoint(NewFD);
+    if (!NewFD->isInvalidDecl() && NewFD->isMSVCRTEntryPoint())
+      CheckMSVCRTEntryPoint(NewFD);
 
-      if (!NewFD->isInvalidDecl())
-        D.setRedeclaration(CheckFunctionDeclaration(S, NewFD, Previous,
-                                                    isMemberSpecialization,
-                                                    D.isFunctionDefinition()));
-      else if (!Previous.empty())
-        // Recover gracefully from an invalid redeclaration.
-        D.setRedeclaration(true);
-    }
+    if (!NewFD->isInvalidDecl())
+      D.setRedeclaration(CheckFunctionDeclaration(S, NewFD, Previous,
+                                                  isMemberSpecialization,
+                                                  D.isFunctionDefinition()));
+    else if (!Previous.empty())
+      // Recover gracefully from an invalid redeclaration.
+      D.setRedeclaration(true);
 
     assert((NewFD->isInvalidDecl() || NewFD->isMultiVersion() ||
             !D.isRedeclaration() ||
@@ -10840,22 +10884,6 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
         D.setInvalidType();
       }
     }
-  }
-
-  // Here we have an function template explicit specialization at class scope.
-  // The actual specialization will be postponed to template instatiation
-  // time via the ClassScopeFunctionSpecializationDecl node.
-  if (isDependentClassScopeExplicitSpecialization) {
-    llvm_unreachable("ClassScopeFunctionSpecializationDecl is unused");
-    #if 0
-    ClassScopeFunctionSpecializationDecl *NewSpec =
-                         ClassScopeFunctionSpecializationDecl::Create(
-                                Context, CurContext, NewFD->getLocation(),
-                                cast<CXXMethodDecl>(NewFD),
-                                HasExplicitTemplateArgs, TemplateArgs);
-    CurContext->addDecl(NewSpec);
-    AddToScope = false;
-    #endif
   }
 
   // Diagnose availability attributes. Availability cannot be used on functions

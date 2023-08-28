@@ -572,11 +572,6 @@ public:
     dumpTemplateParameters(D->getTemplateParameters());
   }
 
-  void VisitClassScopeFunctionSpecializationDecl(
-      const ClassScopeFunctionSpecializationDecl *D) {
-    Visit(D->getSpecialization());
-    dumpASTTemplateArgumentListInfo(D->getTemplateArgsAsWritten());
-  }
   void VisitVarTemplateDecl(const VarTemplateDecl *D) { dumpTemplateDecl(D); }
 
   void VisitBuiltinTemplateDecl(const BuiltinTemplateDecl *D) {

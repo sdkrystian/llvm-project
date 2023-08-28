@@ -2241,7 +2241,8 @@ Decl *TemplateDeclInstantiator::VisitFunctionDecl(
 
   if (DependentFunctionTemplateSpecializationInfo *Info
         = D->getDependentSpecializationInfo()) {
-    // assert(isFriend && "non-friend has dependent specialization info?");
+    assert(isFriend && "dependent specialization info on"
+        " non-member non-friend function?");
 
     // Instantiate the explicit template arguments.
     TemplateArgumentListInfo ExplicitArgs(Info->getLAngleLoc(),
@@ -2665,16 +2666,6 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
       Method->setInvalidDecl();
 
     IsExplicitSpecialization = true;
-  }
-  #if 0
-  else if (ClassScopeSpecializationArgs) {
-    // Class-scope explicit specialization written without explicit template
-    // arguments.
-    SemaRef.LookupQualifiedName(Previous, DC);
-    if (SemaRef.CheckFunctionTemplateSpecialization(Method, nullptr, Previous))
-      Method->setInvalidDecl();
-
-    IsExplicitSpecialization = true;
   } else if (!FunctionTemplate || TemplateParams || isFriend) {
     SemaRef.LookupQualifiedName(Previous, Record);
 
@@ -2685,7 +2676,6 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
     if (Previous.isSingleTagDecl())
       Previous.clear();
   }
-  #endif
 
   // Per [temp.inst], default arguments in member functions of local classes
   // are instantiated along with the member function declaration. For example:
@@ -3497,16 +3487,6 @@ Decl *TemplateDeclInstantiator::VisitUsingPackDecl(UsingPackDecl *D) {
   if (isDeclWithinFunction(D))
     SemaRef.CurrentInstantiationScope->InstantiatedLocal(D, NewD);
   return NewD;
-}
-
-Decl *TemplateDeclInstantiator::VisitClassScopeFunctionSpecializationDecl(
-    ClassScopeFunctionSpecializationDecl *Decl) {
-  llvm_unreachable("ClassScopeFunctionSpecializationDecl is unused");
-  #if 0
-    CXXMethodDecl *OldFD = Decl->getSpecialization();
-    return cast_or_null<CXXMethodDecl>(
-        VisitCXXMethodDecl(OldFD, nullptr, Decl->getTemplateArgsAsWritten()));
-  #endif
 }
 
 Decl *TemplateDeclInstantiator::VisitOMPThreadPrivateDecl(
