@@ -6399,3 +6399,24 @@ bool hasDeducibleTemplateParameters(Sema &S,
 
   return Deduced.any();
 }
+
+Sema::TemplateDeductionResult DeduceArgumentsByTypeMatch(
+    Sema &S, TemplateParameterList *TemplateParams, QualType P, QualType A,
+    TemplateDeductionInfo &Info,
+    SmallVectorImpl<DeducedTemplateArgument> &Deduced) {
+  return DeduceTemplateArgumentsByTypeMatch(
+      S, TemplateParams, P,A, Info, Deduced,
+      TDF_TopLevelParameterTypeList | TDF_AllowCompatibleFunctionType);
+}
+
+Sema::TemplateDeductionResult ConvertDeducedArguments(
+    Sema &S, FunctionTemplateDecl *Template, bool IsDeduced,
+    SmallVectorImpl<DeducedTemplateArgument> &Deduced,
+    TemplateDeductionInfo &Info,
+    SmallVectorImpl<TemplateArgument> &SugaredBuilder,
+    SmallVectorImpl<TemplateArgument> &CanonicalBuilder,
+    LocalInstantiationScope *CurrentInstantiationScope,
+    unsigned NumAlreadyConverted) {
+    return ConvertDeducedTemplateArguments(S, Template, IsDeduced, Deduced,
+    Info, SugaredBuilder, CanonicalBuilder, CurrentInstantiationScope, NumAlreadyConverted);
+}

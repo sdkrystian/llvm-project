@@ -9365,6 +9365,207 @@ Sema::CheckDependentFunctionTemplateSpecialization(FunctionDecl *FD,
   return false;
 }
 
+
+
+
+
+
+Sema::TemplateDeductionResult DeduceArgumentsByTypeMatch(
+    Sema &S, TemplateParameterList *TemplateParams, QualType P, QualType A,
+    TemplateDeductionInfo &Info,
+    SmallVectorImpl<DeducedTemplateArgument> &Deduced);
+
+Sema::TemplateDeductionResult ConvertDeducedArguments(
+    Sema &S, FunctionTemplateDecl *Template, bool IsDeduced,
+    SmallVectorImpl<DeducedTemplateArgument> &Deduced,
+    TemplateDeductionInfo &Info,
+    SmallVectorImpl<TemplateArgument> &SugaredBuilder,
+    SmallVectorImpl<TemplateArgument> &CanonicalBuilder,
+    LocalInstantiationScope *CurrentInstantiationScope,
+    unsigned NumAlreadyConverted);
+
+
+static Sema::TemplateDeductionResult DeduceExplicitSpecializationArguments(
+    Sema& SemaRef,
+    FunctionTemplateDecl *FunctionTemplate,
+    TemplateArgumentListInfo *ExplicitTemplateArgs,
+    QualType ArgFunctionType,
+    TemplateDeductionInfo &Info) {
+  if (FunctionTemplate->isInvalidDecl())
+    return Sema::TDK_Invalid;
+
+  FunctionDecl *Function = FunctionTemplate->getTemplatedDecl();
+  TemplateParameterList *TemplateParams =
+    FunctionTemplate->getTemplateParameters();
+  QualType FunctionType = Function->getType();
+
+  // Substitute any explicit template arguments.
+  LocalInstantiationScope InstScope(SemaRef);
+  SmallVector<DeducedTemplateArgument, 4> Deduced;
+  unsigned NumExplicitlySpecified = 0;
+  SmallVector<QualType, 4> ParamTypes;
+  if (ExplicitTemplateArgs) {
+    Sema::TemplateDeductionResult Result;
+    SemaRef.runWithSufficientStackSpace(Info.getLocation(), [&] {
+      Result = SemaRef.SubstituteExplicitTemplateArguments(
+          FunctionTemplate, *ExplicitTemplateArgs, Deduced, ParamTypes,
+          &FunctionType, Info);
+    });
+    if (Result)
+      return Result;
+
+    NumExplicitlySpecified = Deduced.size();
+  }
+
+  // When taking the address of a function, we require convertibility of
+  // the resulting function type. Otherwise, we allow arbitrary mismatches
+  // of calling convention and noreturn.
+  ArgFunctionType = SemaRef.adjustCCAndNoReturn(ArgFunctionType, FunctionType,
+                                        /*AdjustExceptionSpec*/false);
+
+  // Unevaluated SFINAE context.
+  EnterExpressionEvaluationContext Unevaluated(
+      SemaRef, Sema::ExpressionEvaluationContext::Unevaluated);
+  Sema::SFINAETrap Trap(SemaRef);
+
+  Deduced.resize(TemplateParams->size());
+
+  // If the function has a deduced return type, substitute it for a dependent
+  // type so that we treat it as a non-deduced context in what follows.
+  bool HasDeducedReturnType = false;
+  if (SemaRef.getLangOpts().CPlusPlus14 &&
+      Function->getReturnType()->getContainedAutoType()) {
+    FunctionType = SemaRef.SubstAutoTypeDependent(FunctionType);
+    HasDeducedReturnType = true;
+  }
+
+
+
+  if (!ArgFunctionType.isNull() && !FunctionType.isNull()) {
+    // Deduce template arguments from the function type.
+    if (Sema::TemplateDeductionResult Result =
+        DeduceArgumentsByTypeMatch(SemaRef, TemplateParams,
+                                   FunctionType, ArgFunctionType,
+                                   Info, Deduced))
+      return Result;
+  }
+
+  {
+    // Unevaluated SFINAE context.
+    EnterExpressionEvaluationContext Unevaluated(
+        SemaRef, Sema::ExpressionEvaluationContext::Unevaluated);
+    Sema::SFINAETrap Trap(SemaRef);
+
+    // Enter a new template instantiation context while we instantiate the
+    // actual function declaration.
+    SmallVector<TemplateArgument, 4> DeducedArgs(Deduced.begin(), Deduced.end());
+    Sema::InstantiatingTemplate Inst(
+        SemaRef, Info.getLocation(), FunctionTemplate, DeducedArgs,
+        Sema::CodeSynthesisContext::DeducedTemplateArgumentSubstitution, Info);
+    if (Inst.isInvalid())
+      return Sema::TDK_InstantiationDepth;
+
+    Sema::ContextRAII SavedContext(SemaRef, FunctionTemplate->getTemplatedDecl());
+
+    // C++ [temp.deduct.type]p2:
+    //   [...] or if any template argument remains neither deduced nor
+    //   explicitly specified, template argument deduction fails.
+    SmallVector<TemplateArgument, 4> SugaredBuilder, CanonicalBuilder;
+    if (auto Result = ConvertDeducedArguments(
+            SemaRef, FunctionTemplate, /*IsDeduced*/ true, Deduced, Info,
+            SugaredBuilder, CanonicalBuilder, &InstScope,
+            NumExplicitlySpecified))
+      return Result;
+
+    // Form the template argument list from the deduced template arguments.
+    TemplateArgumentList *SugaredDeducedArgumentList =
+        TemplateArgumentList::CreateCopy(SemaRef.Context, SugaredBuilder);
+    TemplateArgumentList *CanonicalDeducedArgumentList =
+        TemplateArgumentList::CreateCopy(SemaRef.Context, CanonicalBuilder);
+    Info.reset(SugaredDeducedArgumentList, CanonicalDeducedArgumentList);
+
+
+    MultiLevelTemplateArgumentList SubstArgs(FunctionTemplate,
+      CanonicalDeducedArgumentList->asArray(), /*Final=*/true);
+    QualType SubstType = SemaRef.SubstType(FunctionType, SubstArgs,
+        Info.getLocation(), FunctionTemplate->getDeclName());
+
+    // If the function has a dependent exception specification, resolve it now,
+    // so we can check that the exception specification matches.
+    auto *SubstFPT =
+        SubstType->castAs<FunctionProtoType>();
+    if (SemaRef.getLangOpts().CPlusPlus17 &&
+        isUnresolvedExceptionSpec(SubstFPT->getExceptionSpecType()) &&
+        !SemaRef.ResolveExceptionSpec(Info.getLocation(), SubstFPT))
+      return Sema::TDK_MiscellaneousDeductionFailure;
+
+    ArgFunctionType = SemaRef.adjustCCAndNoReturn(ArgFunctionType, SubstType,
+                                                  /*AdjustExceptionSpec*/false);
+
+    // Revert placeholder types in the return type back to undeduced types
+    if (HasDeducedReturnType) {
+      SubstType = SemaRef.SubstAutoType(SubstType, QualType());
+      ArgFunctionType = SemaRef.SubstAutoType(ArgFunctionType, QualType());
+    }
+
+    if (!ArgFunctionType.isNull()) {
+      if (!SemaRef.Context.hasSameType(SubstType, ArgFunctionType)) {
+        Info.FirstArg = TemplateArgument(SubstType);
+        Info.SecondArg = TemplateArgument(ArgFunctionType);
+        return Sema::TDK_NonDeducedMismatch;
+      }
+    }
+
+
+
+    // C++2a [temp.deduct]p5
+    //   [...] When all template arguments have been deduced [...] all uses of
+    //   template parameters [...] are replaced with the corresponding deduced
+    //   or default argument values.
+    //   [...] If the function template has associated constraints
+    //   ([temp.constr.decl]), those constraints are checked for satisfaction
+    //   ([temp.constr.constr]). If the constraints are not satisfied, type
+    //   deduction fails.
+  #if 0
+    SemaRef.CheckInstantiatedFunctionTemplateConstraints
+    if (CheckInstantiatedFunctionTemplateConstraints(
+            Info.getLocation(), Specialization, CanonicalBuilder,
+            Info.AssociatedConstraintsSatisfaction))
+      return TDK_MiscellaneousDeductionFailure;
+
+    if (!Info.AssociatedConstraintsSatisfaction.IsSatisfied) {
+      Info.reset(Info.takeSugared(),
+                 TemplateArgumentList::CreateCopy(Context, CanonicalBuilder));
+      return TDK_ConstraintsNotSatisfied;
+    }
+  #endif
+
+
+  #if 0
+    // If we suppressed any diagnostics while performing template argument
+    // deduction, and if we haven't already instantiated this declaration,
+    // keep track of these diagnostics. They'll be emitted if this specialization
+    // is actually used.
+    if (Info.diag_begin() != Info.diag_end()) {
+      SuppressedDiagnosticsMap::iterator
+        Pos = SuppressedDiagnostics.find(Specialization->getCanonicalDecl());
+      if (Pos == SuppressedDiagnostics.end())
+          SuppressedDiagnostics[Specialization->getCanonicalDecl()]
+            .append(Info.diag_begin(), Info.diag_end());
+    }
+  #endif
+
+    //return TDK_Success;
+  }
+
+
+
+
+
+
+  return Sema::TDK_Success;
+}
+
 /// Perform semantic analysis for the given function template
 /// specialization.
 ///
@@ -9432,6 +9633,35 @@ bool Sema::CheckFunctionTemplateSpecialization(
       if (ExplicitTemplateArgs)
         Args = *ExplicitTemplateArgs;
 
+      {
+
+        TemplateDeductionInfo Info(FailedCandidates.getLocation());
+        if (TemplateDeductionResult TDK =
+            DeduceExplicitSpecializationArguments(
+                *this, cast<FunctionTemplateDecl>(FunTmpl->getFirstDecl()),
+                ExplicitTemplateArgs ? &Args : nullptr,
+                FT, Info)) {
+          // failed
+          llvm::outs() << "    no match!\n";
+        } else {
+          llvm::outs() << "    match!\n";
+
+#if 0
+          } else if (FunctionTemplate) {
+    // Record this function template specialization.
+    ArrayRef<TemplateArgument> Innermost = TemplateArgs.getInnermost();
+    Method->setFunctionTemplateSpecialization(FunctionTemplate,
+                         TemplateArgumentList::CreateCopy(SemaRef.Context,
+                                                          Innermost),
+                                              /*InsertPos=*/nullptr);
+  } else if (!isFriend) {
+    // Record that this is an instantiation of a member function.
+    Method->setInstantiationOfMemberFunction(D, TSK_ImplicitInstantiation);
+  }
+#endif
+        }
+
+      }
       // C++ [temp.expl.spec]p11:
       //   A trailing template-argument can be left unspecified in the
       //   template-id naming an explicit function template specialization
@@ -9579,6 +9809,9 @@ bool Sema::CheckFunctionTemplateSpecialization(
     // FIXME: We need an update record for this AST mutation.
     SpecInfo->setTemplateSpecializationKind(TSK_ExplicitSpecialization);
     MarkUnusedFileScopedDecl(Specialization);
+
+    if (auto* RC = FD->getTrailingRequiresClause())
+      Specialization->setTrailingRequiresClause(RC);
   }
 
   // Turn the given function declaration into a function template

@@ -3997,6 +3997,15 @@ bool Sema::MergeFunctionDecl(FunctionDecl *New, NamedDecl *&OldD, Scope *S,
       bool IsClassScopeExplicitSpecialization =
                               OldMethod->isFunctionTemplateSpecialization() &&
                               NewMethod->isFunctionTemplateSpecialization();
+      bool IsDependentSpecialization =
+                              OldMethod->getDependentSpecializationInfo() &&
+                              NewMethod->getDependentSpecializationInfo();
+      const FunctionDecl *OldMethodInstFrom =
+        OldMethod->getFirstDecl();
+      const FunctionDecl *NewMethodInstFrom =
+        NewMethod->getFirstDecl();
+      assert(OldMethodInstFrom || NewMethodInstFrom || OldMethod != NewMethod);
+
       bool isFriend = NewMethod->getFriendObjectKind();
 
       if (!isFriend && NewMethod->getLexicalDeclContext()->isRecord() &&
@@ -9772,6 +9781,7 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
   bool isFriend = false;
   FunctionTemplateDecl *FunctionTemplate = nullptr;
   bool isMemberSpecialization = false;
+  bool isDependentSpecialization = false;
   bool isFunctionTemplateSpecialization = false;
   bool HasExplicitTemplateArgs = false;
   TemplateArgumentListInfo TemplateArgs;
@@ -10099,15 +10109,20 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
       break;
     }
 
-    if (isa<CXXMethodDecl>(NewFD) && DC == CurContext &&
-        D.isFunctionDefinition() && !isInline) {
+    if (isa<CXXMethodDecl>(NewFD) && DC == CurContext) {
       // Pre C++20 [class.mfct]p2:
       //   A member function may be defined (8.4) in its class definition, in
       //   which case it is an inline member function (7.1.2)
       // Post C++20 [class.mfct]p1:
       //   If a member function is attached to the global module and is defined
       //   in its class definition, it is inline.
-      NewFD->setImplicitlyInline(ImplicitInlineCXX20);
+      if (D.isFunctionDefinition() && !isInline)
+        NewFD->setImplicitlyInline(ImplicitInlineCXX20);
+
+      // An explicit specialization of a function template declared within
+      // the definition of a class template is a dependent specialization.
+      if(isFunctionTemplateSpecialization && DC->isDependentContext())
+        isDependentSpecialization = true;
     }
 
     if (SC == SC_Static && isa<CXXMethodDecl>(NewFD) &&
@@ -10439,12 +10454,17 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
           << SourceRange(TemplateId->LAngleLoc, TemplateId->RAngleLoc);
 
         HasExplicitTemplateArgs = false;
-      } else {
-        assert((isFunctionTemplateSpecialization ||
-                D.getDeclSpec().isFriendSpecified()) &&
-               "should have a 'template<>' for this decl");
+      } else if (isFriend) {
         // "friend void foo<>(int);" is an implicit specialization decl.
         isFunctionTemplateSpecialization = true;
+        // If any of the template arguments are instantiation dependent,
+        // then this is a dependent specialization.
+        if (TemplateSpecializationType::anyInstantiationDependentTemplateArguments(
+            TemplateArgs.arguments()))
+          isDependentSpecialization = true;
+      } else {
+        assert(isFunctionTemplateSpecialization &&
+            "should have a 'template<>' for this decl");
       }
     } else if (isFriend && isFunctionTemplateSpecialization) {
       // This combination is only possible in a recovery case;  the user
@@ -10467,48 +10487,44 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
     if (getLangOpts().CUDA && !isFunctionTemplateSpecialization)
       maybeAddCUDAHostDeviceAttrs(NewFD, Previous);
 
-    #if 0
-    // If it's a friend (and only if it's a friend), it's possible
-    // that either the specialized function type or the specialized
-    // template is dependent, and therefore matching will fail.  In
-    // this case, don't check the specialization yet.
-    if (isFunctionTemplateSpecialization && isFriend &&
-        (NewFD->getType()->isDependentType() || DC->isDependentContext() ||
-         TemplateSpecializationType::anyInstantiationDependentTemplateArguments(
-             TemplateArgs.arguments()))) {
-      assert(HasExplicitTemplateArgs &&
-             "friend function specialization without template args");
-      if (CheckDependentFunctionTemplateSpecialization(
-          NewFD, &TemplateArgs,
-          Previous, /*IsFriend=*/true))
-        NewFD->setInvalidDecl();
-    } else if (isFunctionTemplateSpecialization) {
-      if (CurContext->isDependentContext() && CurContext->isRecord()
-          && !isFriend) {
+    if (isFunctionTemplateSpecialization) {
+      // If this is a friend specialization declaration,
+      // this is also a dependent specialization if its
+      // DeclContext is dependent, or if its type is dependent.
+      if (isFriend && (DC->isDependentContext() ||
+          NewFD->getType()->isDependentType()))
+        isDependentSpecialization = true;
 
+      TemplateArgumentListInfo *ExplicitTemplateArgs =
+          HasExplicitTemplateArgs ? &TemplateArgs : nullptr;
+      if (isDependentSpecialization) {
+        // If it's a friend, or if it's an explicit specialization of a
+        // member function template of a class template, it's possible,
+        // that either the specialized function type or the specialized
+        // template is dependent, and therefore matching will fail.  In
+        // this case, don't check the specialization yet.
         if (CheckDependentFunctionTemplateSpecialization(
-            NewFD, (HasExplicitTemplateArgs ? &TemplateArgs : nullptr),
-            Previous, /*IsFriend=*/false))
+            NewFD, ExplicitTemplateArgs, Previous, isFriend))
           NewFD->setInvalidDecl();
-      } else if (!NewFD->isInvalidDecl() &&
-                 CheckFunctionTemplateSpecialization(
-                     NewFD, (HasExplicitTemplateArgs ? &TemplateArgs : nullptr),
-                     Previous))
-        NewFD->setInvalidDecl();
+      } else if (!NewFD->isInvalidDecl()) {
+        if (CheckFunctionTemplateSpecialization(
+            NewFD, ExplicitTemplateArgs, Previous))
+          NewFD->setInvalidDecl();
+      }
 
       // C++ [dcl.stc]p1:
       //   A storage-class-specifier shall not be specified in an explicit
       //   specialization (14.7.3)
-      FunctionTemplateSpecializationInfo *Info =
-          NewFD->getTemplateSpecializationInfo();
-      if (Info && SC != SC_None) {
-        if (SC != Info->getTemplate()->getTemplatedDecl()->getStorageClass())
+      if (!isFriend && SC != SC_None) {
+        FunctionTemplateSpecializationInfo *Info =
+            NewFD->getTemplateSpecializationInfo();
+        if (Info &&
+            SC != Info->getTemplate()->getTemplatedDecl()->getStorageClass())
           Diag(NewFD->getLocation(),
                diag::err_explicit_specialization_inconsistent_storage_class)
             << SC
             << FixItHint::CreateRemoval(
                                       D.getDeclSpec().getStorageClassSpecLoc());
-
         else
           Diag(NewFD->getLocation(),
                diag::ext_explicit_specialization_storage_class)
@@ -10519,61 +10535,6 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
       if (CheckMemberSpecialization(NewFD, Previous))
           NewFD->setInvalidDecl();
     }
-    #else
-    if (isFunctionTemplateSpecialization) {
-      // If it's a friend, or if it's an explicit specialization of a
-      // member function template of a class template, it's possible,
-      // that either the specialized function type or the specialized
-      // template is dependent, and therefore matching will fail.  In
-      // this case, don't check the specialization yet.
-      bool isDependentSpecialization;
-      if (isFriend) {
-        isDependentSpecialization =
-            NewFD->getType()->isDependentType() || DC->isDependentContext() ||
-            TemplateSpecializationType::anyInstantiationDependentTemplateArguments(
-              TemplateArgs.arguments());
-        assert(!isDependentSpecialization || HasExplicitTemplateArgs &&
-          "friend function specialization without template args");
-      } else {
-        isDependentSpecialization =
-            CurContext->isDependentContext() && CurContext->isRecord();
-      }
-
-      TemplateArgumentListInfo *ExplicitTemplateArgs =
-          HasExplicitTemplateArgs ? &TemplateArgs : nullptr;
-      if (isDependentSpecialization) {
-        if (CheckDependentFunctionTemplateSpecialization(
-            NewFD, ExplicitTemplateArgs, Previous, isFriend))
-          NewFD->setInvalidDecl();
-      } else if (!NewFD->isInvalidDecl()) {
-        if (CheckFunctionTemplateSpecialization(
-            NewFD, ExplicitTemplateArgs, Previous))
-          NewFD->setInvalidDecl();
-        // C++ [dcl.stc]p1:
-        //   A storage-class-specifier shall not be specified in an explicit
-        //   specialization (14.7.3)
-        FunctionTemplateSpecializationInfo *Info =
-            NewFD->getTemplateSpecializationInfo();
-        if (Info && SC != SC_None) {
-          if (SC != Info->getTemplate()->getTemplatedDecl()->getStorageClass())
-            Diag(NewFD->getLocation(),
-                 diag::err_explicit_specialization_inconsistent_storage_class)
-              << SC
-              << FixItHint::CreateRemoval(
-                                        D.getDeclSpec().getStorageClassSpecLoc());
-
-          else
-            Diag(NewFD->getLocation(),
-                 diag::ext_explicit_specialization_storage_class)
-              << FixItHint::CreateRemoval(
-                                        D.getDeclSpec().getStorageClassSpecLoc());
-        }
-      }
-    } else if (isMemberSpecialization && isa<CXXMethodDecl>(NewFD)) {
-      if (CheckMemberSpecialization(NewFD, Previous))
-          NewFD->setInvalidDecl();
-    }
-    #endif
 
     // Perform semantic checking on the function declaration.
     if (!NewFD->isInvalidDecl() && NewFD->isMain())
@@ -12100,7 +12061,8 @@ bool Sema::CheckFunctionDeclaration(Scope *S, FunctionDecl *NewFD,
           !(isa<CXXMethodDecl>(NewFD) && NewFD->isTemplated()) &&
           // Don't complain about instantiations, they've already had these
           // rules + others enforced.
-          !NewFD->isTemplateInstantiation()) {
+          !clang::isTemplateInstantiation(
+              NewFD->getTemplateSpecializationKindForInstantiation())) {
         Diag(TRC->getBeginLoc(), diag::err_constrained_non_templated_function);
       }
     }

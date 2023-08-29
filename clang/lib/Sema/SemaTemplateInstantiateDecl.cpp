@@ -2623,9 +2623,8 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
 
   // If the name of this function was written as a template-id, instantiate
   // the explicit template arguments.
-  if (DependentFunctionTemplateSpecializationInfo *Info
-        = D->getDependentSpecializationInfo()) {
-    // assert(isFriend && "non-friend has dependent specialization info?");
+  if (DependentFunctionTemplateSpecializationInfo *Info =
+      D->getDependentSpecializationInfo()) {
 
     // Instantiate the explicit template arguments.
     TemplateArgumentListInfo ExplicitArgs(Info->getLAngleLoc(),
@@ -2633,6 +2632,17 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
     if (SemaRef.SubstTemplateArguments(Info->arguments(), TemplateArgs,
                                        ExplicitArgs))
       return nullptr;
+
+    // If the dependent specialization is constrained,
+    // ignore the declaration if the constraint aren't satisfied.
+    if (Method->getTrailingRequiresClause()) {
+      ConstraintSatisfaction Satisfaction;
+      if (SemaRef.CheckFunctionConstraints(Method, Satisfaction,
+          Method->getLocation(), /*ForOverloadResolution*/ true))
+        return nullptr;
+      if (!Satisfaction.IsSatisfied)
+        return nullptr;
+    }
 
     // Map the candidate templates to their instantiations.
     for (unsigned I = 0, E = Info->getNumTemplates(); I != E; ++I) {
@@ -2742,6 +2752,7 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
   // FIXME: Is this necessary?
   if (IsExplicitSpecialization && !isFriend)
     SemaRef.CompleteMemberSpecialization(Method, Previous);
+
 
   // If the method is a special member function, we need to mark it as
   // ineligible so that Owner->addDecl() won't mark the class as non trivial.
