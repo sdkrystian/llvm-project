@@ -9221,6 +9221,13 @@ public:
 
   TemplateDeductionResult
   DeduceTemplateArguments(FunctionTemplateDecl *FunctionTemplate,
+                          FunctionDecl* Specialized,
+                          TemplateArgumentListInfo *ExplicitTemplateArgs,
+                          TemplateArgumentList *&DeducedTemplateArgs,
+                          sema::TemplateDeductionInfo &Info);
+
+  TemplateDeductionResult
+  DeduceTemplateArguments(FunctionTemplateDecl *FunctionTemplate,
                           QualType ToType,
                           CXXConversionDecl *&Specialization,
                           sema::TemplateDeductionInfo &Info);
@@ -9296,6 +9303,16 @@ public:
       unsigned NumCallArguments2, bool Reversed = false);
   UnresolvedSetIterator
   getMostSpecialized(UnresolvedSetIterator SBegin, UnresolvedSetIterator SEnd,
+                     TemplateSpecCandidateSet &FailedCandidates,
+                     SourceLocation Loc,
+                     const PartialDiagnostic &NoneDiag,
+                     const PartialDiagnostic &AmbigDiag,
+                     const PartialDiagnostic &CandidateDiag,
+                     bool Complain = true, QualType TargetType = QualType());
+
+  UnresolvedSetIterator
+  getMostSpecializedTemplate(UnresolvedSetIterator SBegin,
+                     UnresolvedSetIterator SEnd,
                      TemplateSpecCandidateSet &FailedCandidates,
                      SourceLocation Loc,
                      const PartialDiagnostic &NoneDiag,

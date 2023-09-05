@@ -1230,8 +1230,10 @@ Sema::CheckOverload(Scope *S, FunctionDecl *New, const LookupResult &Old,
       return Ovl_Overload;
     }
 
-    Match = TemplateSpecResult.getAsSingle<FunctionDecl>();
-    return Ovl_Match;
+    // if (!TemplateSpecResult.empty()) {
+      Match = TemplateSpecResult.getAsSingle<FunctionDecl>();
+      return Ovl_Match;
+    // }
   }
 
   return Ovl_Overload;

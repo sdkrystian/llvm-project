@@ -4001,8 +4001,12 @@ bool Sema::MergeFunctionDecl(FunctionDecl *New, NamedDecl *&OldD, Scope *S,
                               NewMethod->isFunctionTemplateSpecialization();
       bool isFriend = NewMethod->getFriendObjectKind();
 
+      #if 0
       if (!isFriend && NewMethod->getLexicalDeclContext()->isRecord() &&
           !IsClassScopeExplicitSpecialization) {
+      #else
+      if (!isFriend && NewMethod->getLexicalDeclContext()->isRecord()) {
+      #endif
         //    -- Member function declarations with the same name and the
         //       same parameter types cannot be overloaded if any of them
         //       is a static member function declaration.
@@ -9736,6 +9740,30 @@ static bool isStdBuiltin(ASTContext &Ctx, FunctionDecl *FD,
   }
 }
 
+static void FilterLookupForFriendOrSpecialization(Declarator &D,
+                                                  FunctionDecl *FD,
+                                                  LookupResult &Previous,
+                                                  UnresolvedSetImpl& Failed,
+                                                  bool IsFriend,
+                                                  bool IsSpecialization) {
+
+  LookupResult::Filter F = Previous.makeFilter();
+  //Previous.
+  auto* LookupContext = FD->getDeclContext()->getRedeclContext();
+  while (F.hasNext()) {
+    NamedDecl *ND = F.next();
+    NamedDecl *Underlying = ND->getUnderlyingDecl();
+    if (!isa<FunctionTemplateDecl>(Underlying) ||
+        !LookupContext->InEnclosingNamespaceSetOf(
+            Underlying->getDeclContext()->getRedeclContext())) {
+      Failed.addDecl(ND);
+      F.erase();
+    }
+  }
+
+  F.done();
+}
+
 NamedDecl*
 Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
                               TypeSourceInfo *TInfo, LookupResult &Previous,
@@ -10421,6 +10449,8 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
 
         HasExplicitTemplateArgs = false;
       } else if (isFriend) {
+        // FIXME: [dcl.meaning] p1 technically prohibits this, but there is an
+        // active core issue suggesting it should be allowed; see CWG2671.
         // "friend void foo<>(int);" is an implicit specialization decl.
         isFunctionTemplateSpecialization = true;
         // If any of the template arguments are instantiation dependent,
@@ -10564,7 +10594,8 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
 
     if (NewFD->isInvalidDecl()) {
       // Ignore all the rest of this.
-    } else if (!D.isRedeclaration()) {
+    } else if (!D.isRedeclaration() && !isFunctionTemplateSpecialization) {
+    // } else if (!D.isRedeclaration()) {
       struct ActOnFDArgs ExtraArgs = { S, D, TemplateParamLists,
                                        AddToScope };
       // Fake up an access specifier if it's supposed to be a class member.

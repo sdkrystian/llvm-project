@@ -9391,6 +9391,7 @@ bool Sema::CheckDependentFunctionTemplateSpecialization(
 /// \param QualifiedFriend whether this is a lookup for a qualified friend
 /// declaration with no explicit template argument list that might be
 /// befriending a function template specialization.
+#if 0
 bool Sema::CheckFunctionTemplateSpecialization(
     FunctionDecl *FD, TemplateArgumentListInfo *ExplicitTemplateArgs,
     LookupResult &Previous, bool IsDefinition, bool QualifiedFriend) {
@@ -9618,6 +9619,293 @@ bool Sema::CheckFunctionTemplateSpecialization(
   Previous.addDecl(Specialization);
   return false;
 }
+#else
+
+
+bool Sema::CheckFunctionTemplateSpecialization(
+    FunctionDecl *FD, TemplateArgumentListInfo *ExplicitTemplateArgs,
+    LookupResult &Previous, bool IsDefinition, bool QualifiedFriend) {
+  // The set of function template specializations that could match this
+  // explicit function template specialization.
+  UnresolvedSet<8> Candidates;
+  TemplateSpecCandidateSet FailedCandidates(FD->getLocation(),
+                                            /*ForTakingAddress=*/false);
+
+  llvm::SmallDenseMap<const FunctionTemplateDecl *, TemplateArgumentList *, 8>
+      ConvertedTemplateArgs;
+
+  DeclContext *FDLookupContext = FD->getDeclContext()->getRedeclContext();
+  for (LookupResult::iterator I = Previous.begin(), E = Previous.end();
+         I != E; ++I) {
+    NamedDecl *Ovl = (*I)->getUnderlyingDecl();
+    if (FunctionTemplateDecl *Template = dyn_cast<FunctionTemplateDecl>(Ovl)) {
+      // Only consider templates found within the same semantic lookup scope as
+      // FD.
+      if (!FDLookupContext->InEnclosingNamespaceSetOf(
+                                Ovl->getDeclContext()->getRedeclContext()))
+        continue;
+
+      #if 0
+      // When matching a constexpr member function template specialization
+      // against the primary template, we don't yet know whether the
+      // specialization has an implicit 'const' (because we don't know whether
+      // it will be a static member function until we know which template it
+      // specializes), so adjust it now assuming it specializes this template.
+      QualType FT = FD->getType();
+      if (FD->isConstexpr()) {
+        CXXMethodDecl *OldMD =
+          dyn_cast<CXXMethodDecl>(Template->getTemplatedDecl());
+        if (OldMD && OldMD->isConst()) {
+          const FunctionProtoType *FPT = FT->castAs<FunctionProtoType>();
+          FunctionProtoType::ExtProtoInfo EPI = FPT->getExtProtoInfo();
+          EPI.TypeQuals.addConst();
+          FT = Context.getFunctionType(FPT->getReturnType(),
+                                       FPT->getParamTypes(), EPI);
+        }
+      }
+      #endif
+
+      TemplateArgumentListInfo Args;
+      if (ExplicitTemplateArgs)
+        Args = *ExplicitTemplateArgs;
+
+      // C++ [temp.expl.spec]p11:
+      //   A trailing template-argument can be left unspecified in the
+      //   template-id naming an explicit function template specialization
+      //   provided it can be deduced from the function argument type.
+      // Perform template argument deduction to determine whether we may be
+      // specializing this template.
+      // FIXME: It is somewhat wasteful to build
+      TemplateDeductionInfo Info(FailedCandidates.getLocation());
+      TemplateArgumentList *DeducedArgs = nullptr;
+      #if 0
+      if (TemplateDeductionResult TDK = DeduceTemplateArguments(
+              cast<FunctionTemplateDecl>(Template->getFirstDecl()),
+              ExplicitTemplateArgs ? &Args : nullptr,
+              DeducedArgs, FT, Info)) {
+      #else
+      if (TemplateDeductionResult TDK = DeduceTemplateArguments(
+              cast<FunctionTemplateDecl>(Template->getFirstDecl()),
+              FD,
+              ExplicitTemplateArgs ? &Args : nullptr,
+              DeducedArgs, Info)) {
+
+      #endif
+        // Template argument deduction failed; record why it failed, so
+        // that we can provide nifty diagnostics.
+        FailedCandidates.addCandidate().set(
+            I.getPair(), Template->getTemplatedDecl(),
+            MakeDeductionFailureInfo(Context, TDK, Info));
+        (void)TDK;
+        continue;
+      }
+
+      // Target attributes are part of the cuda function signature, so
+      // the deduced template's cuda target must match that of the
+      // specialization.  Given that C++ template deduction does not
+      // take target attributes into account, we reject candidates
+      // here that have a different target.
+      if (LangOpts.CUDA &&
+          IdentifyCUDATarget(Template->getTemplatedDecl(),
+                             /* IgnoreImplicitHDAttr = */ true) !=
+              IdentifyCUDATarget(FD, /* IgnoreImplicitHDAttr = */ true)) {
+        FailedCandidates.addCandidate().set(
+            I.getPair(), Template->getTemplatedDecl(),
+            MakeDeductionFailureInfo(Context, TDK_CUDATargetMismatch, Info));
+        continue;
+      }
+
+      // Record this candidate.
+      ConvertedTemplateArgs[Template] = DeducedArgs;
+      Candidates.addDecl(Template, I.getAccess());
+    }
+  }
+
+  // For a qualified friend declaration (with no explicit marker to indicate
+  // that a template specialization was intended), note all (template and
+  // non-template) candidates.
+  if (QualifiedFriend && Candidates.empty()) {
+    Diag(FD->getLocation(), diag::err_qualified_friend_no_match)
+        << FD->getDeclName() << FDLookupContext;
+    // FIXME: We should form a single candidate list and diagnose all
+    // candidates at once, to get proper sorting and limiting.
+    for (auto *OldND : Previous) {
+      if (auto *OldFD = dyn_cast<FunctionTemplateDecl>(OldND->getUnderlyingDecl()))
+        NoteOverloadCandidate(OldND, OldFD->getTemplatedDecl(), CRK_None, FD->getType(), false);
+    }
+    FailedCandidates.NoteCandidates(*this, FD->getLocation());
+    return true;
+  }
+
+  // Find the most specialized function template.
+  UnresolvedSetIterator Result = getMostSpecializedTemplate(
+      Candidates.begin(), Candidates.end(), FailedCandidates, FD->getLocation(),
+      PDiag(diag::err_function_template_spec_no_match) << FD->getDeclName(),
+      PDiag(diag::err_function_template_spec_ambiguous)
+          << FD->getDeclName() << (ExplicitTemplateArgs != nullptr),
+      PDiag(diag::note_function_template_spec_matched));
+
+  if (Result == Candidates.end())
+    return true;
+
+  // If this is a friend declaration, then we're only declaring an explicit
+  // specialization if it's also a definition.
+  // FIXME: Should we really allow these pseudo-explicit specializations
+  // introduced by friend function definitions? [temp.expl.spec] p19 states:
+  //   An explicit specialization declaration shall not be a friend
+  //   declaration.
+  bool isFriend = (FD->getFriendObjectKind() != Decl::FOK_None);
+  TemplateSpecializationKind TSK = !isFriend || IsDefinition ?
+      TSK_ExplicitSpecialization : TSK_ImplicitInstantiation;
+
+  // Ignore access information;  it doesn't figure into redeclaration checking.
+  // FunctionDecl *Specialization = cast<FunctionDecl>(*Result);
+  auto *Primary = cast<FunctionTemplateDecl>(*Result);
+  auto *DeducedArgs = ConvertedTemplateArgs[Primary];
+  assert(DeducedArgs && "missing function template specialization arguments?");
+  void* InsertPos = nullptr;
+  auto *PrevFD = Primary->findSpecialization(DeducedArgs->asArray(), InsertPos);
+  FD->setFunctionTemplateSpecialization(
+      Primary,
+      DeducedArgs,
+      /*InsertPos*/nullptr,
+      // InsertPos,
+      TSK,
+      /*TemplateArgsAsWritten*/nullptr);
+
+  // If the primary template is a static member function, then this is
+  // also a static member function.
+  if (auto *Method = dyn_cast<CXXMethodDecl>(Primary->getTemplatedDecl())) {
+    auto *NewMethod = cast<CXXMethodDecl>(FD);
+    // We don't check isStatic because this will already be implicitly static
+    // if it's an implicitly static overloaded operator.
+    if (Method->getStorageClass() == SC_Static)
+      NewMethod->setStorageClass(SC_Static);
+  }
+
+  // Primary->findSpecialization()
+  // FunctionTemplateSpecializationInfo *SpecInfo
+  //   = Specialization->getTemplateSpecializationInfo();
+  // assert(SpecInfo && "Function template specialization info missing?");
+
+  // Note: do not overwrite location info if previous template
+  // specialization kind was explicit.
+  #if 0
+  TemplateSpecializationKind TSK = SpecInfo->getTemplateSpecializationKind();
+  if (TSK == TSK_Undeclared || TSK == TSK_ImplicitInstantiation) {
+    Specialization->setLocation(FD->getLocation());
+    Specialization->setLexicalDeclContext(FD->getLexicalDeclContext());
+    // C++11 [dcl.constexpr]p1: An explicit specialization of a constexpr
+    // function can differ from the template declaration with respect to
+    // the constexpr specifier.
+    // FIXME: We need an update record for this AST mutation.
+    // FIXME: What if there are multiple such prior declarations (for instance,
+    // from different modules)?
+    Specialization->setConstexprKind(FD->getConstexprKind());
+  }
+  #endif
+
+  // FIXME: Check if the prior specialization has a point of instantiation.
+  // If so, we have run afoul of .
+
+  // Check the scope of this explicit specialization.
+  if (!isFriend &&
+      CheckTemplateSpecializationScope(*this,
+                                       Primary,
+                                       FD, FD->getLocation(),
+                                       false))
+    return true;
+
+  // C++ [temp.expl.spec]p6:
+  //   If a template, a member template or the member of a class template is
+  //   explicitly specialized then that specialization shall be declared
+  //   before the first use of that specialization that would cause an implicit
+  //   instantiation to take place, in every translation unit in which such a
+  //   use occurs; no diagnostic is required.
+  bool HasNoEffect = false;
+  if (!isFriend && PrevFD &&
+      CheckSpecializationInstantiationRedecl(FD->getLocation(),
+                                             TSK,
+                                             PrevFD,
+                                     PrevFD->getTemplateSpecializationKind(),
+                                           PrevFD->getPointOfInstantiation(),
+                                             HasNoEffect))
+    return true;
+  #if 0
+
+  // Mark the prior declaration as an explicit specialization, so that later
+  // clients know that this is an explicit specialization. Friend functions
+  // definitions declared with an explicit template argument list act as
+  // psuedo explicit specializations.
+  #if 0
+  const FunctionDecl* Definition = nullptr;
+  if (!isFriend || FD->isDefined(Definition,
+                                 /*CheckForPendingFriendDefinition*/true)) {
+  #else
+  if (!isFriend || IsDefinition) {
+  #endif
+    // Since explicit specializations do not inherit '=delete' from their
+    // primary function template - check if the 'specialization' that was
+    // implicitly generated (during template argument deduction for partial
+    // ordering) from the most specialized of all the function templates that
+    // 'FD' could have been specializing, has a 'deleted' definition.  If so,
+    // first check that it was implicitly generated during template argument
+    // deduction by making sure it wasn't referenced, and then reset the deleted
+    // flag to not-deleted, so that we can inherit that information from 'FD'.
+    if (Specialization->isDeleted() && !SpecInfo->isExplicitSpecialization() &&
+        !Specialization->getCanonicalDecl()->isReferenced()) {
+      // FIXME: This assert will not hold in the presence of modules.
+      assert(
+          Specialization->getCanonicalDecl() == Specialization &&
+          "This must be the only existing declaration of this specialization");
+      // FIXME: We need an update record for this AST mutation.
+      Specialization->setDeletedAsWritten(false);
+    }
+    // FIXME: We need an update record for this AST mutation.
+    SpecInfo->setTemplateSpecializationKind(TSK_ExplicitSpecialization);
+    MarkUnusedFileScopedDecl(Specialization);
+  }
+
+  // Turn the given function declaration into a function template
+  // specialization, with the template arguments from the previous
+  // specialization.
+  // Take copies of (semantic and syntactic) template argument lists.
+  const TemplateArgumentList* TemplArgs = new (Context)
+    TemplateArgumentList(Specialization->getTemplateSpecializationArgs());
+  FD->setFunctionTemplateSpecialization(
+      Specialization->getPrimaryTemplate(), TemplArgs, /*InsertPos=*/nullptr,
+      SpecInfo->getTemplateSpecializationKind(),
+      ExplicitTemplateArgs ? &ConvertedTemplateArgs[Specialization] : nullptr);
+  #endif
+  // A function template specialization inherits the target attributes
+  // of its template.  (We require the attributes explicitly in the
+  // code to match, but a template may have implicit attributes by
+  // virtue e.g. of being constexpr, and it passes these implicit
+  // attributes on to its specializations.)
+  if (LangOpts.CUDA)
+    inheritCUDATargetAttrs(FD, *Primary);
+
+  // The "previous declaration" for this function template specialization is
+  // the prior function template specialization.
+  #if 0
+  Previous.clear();
+  Previous.addDecl(Specialization);
+  #endif
+  if (isFriend)
+    FD->setAccess(AS_public);
+  else
+    FD->setAccess(Primary->getAccess());
+
+  Previous.clear();
+  if (PrevFD)
+    Previous.addDecl(PrevFD);
+  return false;
+}
+
+
+#endif
+
+
 
 /// Perform semantic analysis for the given non-template member
 /// specialization.

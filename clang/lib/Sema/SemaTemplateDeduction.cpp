@@ -3056,6 +3056,207 @@ static Sema::TemplateDeductionResult FinishTemplateArgumentDeduction(
   return Sema::TDK_Success;
 }
 
+static bool addSpecializationParamsToScope(Sema& S,
+                                        FunctionDecl* Specialized,
+                                        FunctionTemplateDecl* FunctionTemplate,
+                                        const MultiLevelTemplateArgumentList& MLTAL,
+                                        LocalInstantiationScope& Scope) {
+  FunctionDecl* Pattern = FunctionTemplate->getTemplatedDecl();
+
+
+
+  // Get parameters from the new type info.
+  TypeSourceInfo *OldTInfo = Pattern->getTypeSourceInfo();
+  TypeSourceInfo *NewTInfo = Specialized->getTypeSourceInfo();
+  TypeLoc OldTL = OldTInfo->getTypeLoc().IgnoreParens();
+  TypeLoc NewTL = NewTInfo->getTypeLoc().IgnoreParens();
+  FunctionProtoTypeLoc OldProtoLoc = OldTL.getAs<FunctionProtoTypeLoc>();
+  FunctionProtoTypeLoc NewProtoLoc = NewTL.castAs<FunctionProtoTypeLoc>();
+
+  unsigned NewIdx = 0;
+  for (unsigned OldIdx = 0, NumOldParams = OldProtoLoc.getNumParams();
+       OldIdx != NumOldParams; ++OldIdx) {
+    ParmVarDecl *OldParam = OldProtoLoc.getParam(OldIdx);
+    if (!OldParam)
+      return true;
+
+    std::optional<unsigned> NumArgumentsInExpansion;
+    if (OldParam->isParameterPack())
+      NumArgumentsInExpansion =
+          S.getNumArgumentsInExpansion(OldParam->getType(), MLTAL);
+    if (!NumArgumentsInExpansion) {
+      // Simple case: normal parameter, or a parameter pack that's
+      // instantiated to a (still-dependent) parameter pack.
+      ParmVarDecl *NewParam = NewProtoLoc.getParam(NewIdx++);
+      Scope.InstantiatedLocal(OldParam, NewParam);
+    } else {
+      // Parameter pack expansion: make the instantiation an argument pack.
+      Scope.MakeInstantiatedLocalArgPack(OldParam);
+      for (unsigned I = 0; I != *NumArgumentsInExpansion; ++I) {
+        ParmVarDecl *NewParam = NewProtoLoc.getParam(NewIdx++);
+        Scope.InstantiatedLocalPackArg(OldParam, NewParam);
+      }
+    }
+  }
+  return false;
+}
+
+
+/// Complete template argument deduction for a function template.
+static Sema::TemplateDeductionResult FinishTemplateArgumentDeduction(
+    Sema &S, FunctionDecl *Specialized, FunctionTemplateDecl *Template,
+    SmallVectorImpl<DeducedTemplateArgument> &Deduced,
+    TemplateArgumentList *&TemplateArgs,
+    QualType &SpecializationType,
+    TemplateDeductionInfo &Info) {
+  // Unevaluated SFINAE context.
+  EnterExpressionEvaluationContext Unevaluated(
+      S, Sema::ExpressionEvaluationContext::Unevaluated);
+  Sema::SFINAETrap Trap(S);
+
+  FunctionDecl* Function = Template->getTemplatedDecl();
+  Sema::ContextRAII SavedContext(S, Function);
+
+  SmallVector<TemplateArgument, 4> DeducedArgs(Deduced.begin(),
+                                               Deduced.end());
+  Sema::InstantiatingTemplate Inst(
+      S, Info.getLocation(), Template, DeducedArgs,
+      Sema::CodeSynthesisContext::DeducedTemplateArgumentSubstitution, Info);
+  if (Inst.isInvalid())
+    return Sema::TDK_InstantiationDepth;
+
+  // C++ [temp.deduct.type]p2:
+  //   [...] or if any template argument remains neither deduced nor
+  //   explicitly specified, template argument deduction fails.
+  SmallVector<TemplateArgument, 4> SugaredBuilder, CanonicalBuilder;
+  if (auto Result = ConvertDeducedTemplateArguments(
+          S, Template, /*IsDeduced*/ false, Deduced, Info,
+          SugaredBuilder, CanonicalBuilder,
+          /*CurrentInstantiationScope=*/nullptr,
+          /*NumAlreadyConverted=*/0U, /*PartialOverloading=*/false))
+    return Result;
+
+  if (Trap.hasErrorOccurred())
+    return Sema::TDK_SubstitutionFailure;
+
+  #if 0
+  TemplateArgumentList DeducedTAL{TemplateArgumentList::OnStack,
+                                  CanonicalBuilder};
+  MultiLevelTemplateArgumentList MLTAL = S.getTemplateInstantiationArgs(
+      Template, /*Final=*/false,
+      /*InnerMost=*/&DeducedTAL,
+      /*RelativeToPrimary=*/true, /*Pattern=*/
+      nullptr, /*ForConstraintInstantiation=*/true);
+  #endif
+  // if (Template->getFriendObjectKind() == Decl::FOK)
+  //   Owner = Template->getLexicalDeclContext();
+  #if 0
+  FunctionDecl *FD = FunctionTemplate->getTemplatedDecl();
+  // additional check for inline friend,
+  // ```
+  //   template <class F1> int foo(F1 X);
+  //   template <int A1> struct A {
+  //     template <class F1> friend int foo(F1 X) { return A1; }
+  //   };
+  //   template struct A<1>;
+  //   int a = foo(1.0);
+  // ```
+  const FunctionDecl *FunctionFriend;
+  if (FD->getFriendObjectKind() == Decl::FriendObjectKind::FOK_None &&
+      FD->isDefined(FunctionFriend, /*CheckForPendingFriendDefinition*/ true) &&
+      FunctionFriend->getFriendObjectKind() != Decl::FriendObjectKind::FOK_None) {
+
+    Owner = const_cast<DeclContext*>(FunctionFriend->getLexicalDeclContext());
+  }
+  #endif
+  LocalInstantiationScope Scope(S);
+  MultiLevelTemplateArgumentList MLTAL(Template,
+                                       CanonicalBuilder,
+                                       /*Final=*/true);
+  // Substitute the deduced template arguments into the function template
+  // declaration to produce the function template specialization.
+  DeclContext *Owner = Template->getDeclContext();
+  if (Template->getFriendObjectKind())
+    Owner = Template->getLexicalDeclContext();
+  // additional check for inline friend,
+  // ```
+  //   template <class F1> int foo(F1 X);
+  //   template <int A1> struct A {
+  //     template <class F1> friend int foo(F1 X) { return A1; }
+  //   };
+  //   template struct A<1>;
+  //   int a = foo(1.0);
+  // ```
+  const FunctionDecl *Friend;
+  if (Function->getFriendObjectKind() == Decl::FriendObjectKind::FOK_None &&
+      Function->isDefined(Friend, /*CheckForPendingFriendDefinition*/ true) &&
+      Friend->getFriendObjectKind() != Decl::FriendObjectKind::FOK_None) {
+    Function = const_cast<FunctionDecl *>(Friend);
+    Owner = Function->getLexicalDeclContext();
+  }
+
+  TypeSourceInfo* SubstTSI = nullptr;
+  SmallVector<ParmVarDecl *, 4> Params;
+  TemplateDeclInstantiator Instantiator(S, Owner, MLTAL);
+  S.runWithSufficientStackSpace(Function->getLocation(), [&] {
+    SubstTSI = Instantiator.SubstFunctionType(Function, Params);
+  });
+  if (!SubstTSI)
+    return Sema::TDK_SubstitutionFailure;
+
+  // Check constraint satisfaction.
+  if (auto Result = CheckDeducedArgumentConstraints(S, Template, SugaredBuilder,
+                                                    CanonicalBuilder, Info))
+    return Result;
+
+  // In C++1z onwards, exception specifications are part of the function type,
+  // so substitution into the type must also substitute into the exception
+  // specification.
+  auto *FPT = SubstTSI->getType()->castAs<FunctionProtoType>();
+  auto EPI = FPT->getExtProtoInfo();
+  SmallVector<QualType, 4> ExceptionStorage;
+  if (S.getLangOpts().CPlusPlus17 &&
+      S.SubstExceptionSpec(Function->getLocation(), EPI.ExceptionSpec,
+                         ExceptionStorage, MLTAL))
+    return Sema::TDK_SubstitutionFailure;
+
+  SmallVector<QualType, 4> ParamTypes(FPT->param_types());
+  SpecializationType = S.BuildFunctionType(FPT->getReturnType(),
+                                    ParamTypes,
+                                    Function->getLocation(),
+                                    Function->getDeclName(),
+                                    EPI);
+  if (SpecializationType.isNull() || Trap.hasErrorOccurred())
+    return Sema::TDK_SubstitutionFailure;
+
+  #if 0
+  if (S.getLangOpts().CPlusPlus17 &&
+      isUnresolvedExceptionSpec(FPT->getExceptionSpecType()) &&
+      !S.ResolveExceptionSpec(Info.getLocation(), FPT))
+    return Sema::TDK_MiscellaneousDeductionFailure;
+  #endif
+
+
+  #if 0
+  // MultiLevelTemplateArgumentList Args(Template, SugaredOutput,
+  //                                     /*Final=*/true);
+  if (addSpecializationParamsToScope(S, Specialized, Template, MLTAL, Scope))
+    return Sema::TDK_SubstitutionFailure;
+  #endif
+
+
+
+  #if 0
+  assert(!isUnresolvedExceptionSpec(
+      SubstitutedTSI->getType()->castAs<FunctionProtoType>()->getExceptionSpecType()));
+  SpecializationType = SubstitutedTSI;
+  #endif
+
+  TemplateArgs = TemplateArgumentList::CreateCopy(S.Context, CanonicalBuilder);
+
+  return Sema::TDK_Success;
+}
+
 /// Perform template argument deduction to determine whether
 /// the given template arguments match the given class template
 /// partial specialization per C++ [temp.class.spec.match].
@@ -3178,6 +3379,104 @@ static bool isSimpleTemplateIdType(QualType T) {
   return false;
 }
 
+static Sema::TemplateDeductionResult SubstituteDeducedTemplateArguments(
+                             Sema& S,
+                             FunctionTemplateDecl* FunctionTemplate,
+                             FunctionDecl* Function,
+                             TemplateArgumentList* TemplateArgs,
+                             SmallVectorImpl<QualType> &ParamTypes,
+                             SmallVectorImpl<ParmVarDecl *> *OutParams = nullptr,
+                             QualType* FunctionType = nullptr) {
+  Sema::SFINAETrap Trap(S);
+
+  const FunctionProtoType *Proto
+    = Function->getType()->getAs<FunctionProtoType>();
+  assert(Proto && "Function template does not have a prototype?");
+
+  // Isolate our substituted parameters from our caller.
+  LocalInstantiationScope InstScope(S, /*MergeWithOuterScope*/true);
+
+  Sema::ExtParameterInfoBuilder ExtParamInfos;
+
+  MultiLevelTemplateArgumentList MLTAL(FunctionTemplate,
+                                       TemplateArgs->asArray(),
+                                       /*Final=*/true);
+
+  // Instantiate the types of each of the function parameters given the
+  // explicitly-specified template arguments. If the function has a trailing
+  // return type, substitute it after the arguments to ensure we substitute
+  // in lexical order.
+  if (Proto->hasTrailingReturn()) {
+    if (S.SubstParmTypes(Function->getLocation(), Function->parameters(),
+                       Proto->getExtParameterInfosOrNull(), MLTAL, ParamTypes,
+                       OutParams, ExtParamInfos))
+      return Sema::TDK_SubstitutionFailure;
+  }
+
+  // Instantiate the return type.
+  QualType ResultType;
+  {
+    // C++11 [expr.prim.general]p3:
+    //   If a declaration declares a member function or member function
+    //   template of a class X, the expression this is a prvalue of type
+    //   "pointer to cv-qualifier-seq X" between the optional cv-qualifer-seq
+    //   and the end of the function-definition, member-declarator, or
+    //   declarator.
+    Qualifiers ThisTypeQuals;
+    CXXRecordDecl *ThisContext = nullptr;
+    if (CXXMethodDecl *Method = dyn_cast<CXXMethodDecl>(Function)) {
+      ThisContext = Method->getParent();
+      ThisTypeQuals = Method->getMethodQualifiers();
+    }
+
+    Sema::CXXThisScopeRAII ThisScope(S, ThisContext, ThisTypeQuals,
+                               S.getLangOpts().CPlusPlus11);
+
+    ResultType =
+        S.SubstType(Proto->getReturnType(), MLTAL,
+                  Function->getTypeSpecStartLoc(), Function->getDeclName());
+    if (ResultType.isNull() || Trap.hasErrorOccurred())
+      return Sema::TDK_SubstitutionFailure;
+    // CUDA: Kernel function must have 'void' return type.
+    if (S.getLangOpts().CUDA)
+      if (Function->hasAttr<CUDAGlobalAttr>() && !ResultType->isVoidType()) {
+        S.Diag(Function->getLocation(), diag::err_kern_type_not_void_return)
+            << Function->getType() << Function->getSourceRange();
+        return Sema::TDK_SubstitutionFailure;
+      }
+  }
+
+  // Instantiate the types of each of the function parameters given the
+  // explicitly-specified template arguments if we didn't do so earlier.
+  if (!Proto->hasTrailingReturn() &&
+      S.SubstParmTypes(Function->getLocation(), Function->parameters(),
+                     Proto->getExtParameterInfosOrNull(), MLTAL, ParamTypes,
+                     OutParams, ExtParamInfos))
+    return Sema::TDK_SubstitutionFailure;
+
+  if (FunctionType) {
+    auto EPI = Proto->getExtProtoInfo();
+    EPI.ExtParameterInfos = ExtParamInfos.getPointerOrNull(ParamTypes.size());
+
+    // In C++1z onwards, exception specifications are part of the function type,
+    // so substitution into the type must also substitute into the exception
+    // specification.
+    SmallVector<QualType, 4> ExceptionStorage;
+    if (S.getLangOpts().CPlusPlus17 &&
+        S.SubstExceptionSpec(Function->getLocation(), EPI.ExceptionSpec,
+                           ExceptionStorage, MLTAL))
+      return Sema::TDK_SubstitutionFailure;
+
+    *FunctionType = S.BuildFunctionType(ResultType, ParamTypes,
+                                      Function->getLocation(),
+                                      Function->getDeclName(),
+                                      EPI);
+    if (FunctionType->isNull() || Trap.hasErrorOccurred())
+      return Sema::TDK_SubstitutionFailure;
+  }
+  return Sema::TDK_Success;
+}
+
 /// Substitute the explicitly-provided template arguments into the
 /// given function template according to C++ [temp.arg.explicit].
 ///
@@ -3292,6 +3591,7 @@ Sema::TemplateDeductionResult Sema::SubstituteExplicitTemplateArguments(
     }
   }
 
+  #if 0
   const FunctionProtoType *Proto
     = Function->getType()->getAs<FunctionProtoType>();
   assert(Proto && "Function template does not have a prototype?");
@@ -3377,6 +3677,14 @@ Sema::TemplateDeductionResult Sema::SubstituteExplicitTemplateArguments(
     if (FunctionType->isNull() || Trap.hasErrorOccurred())
       return TDK_SubstitutionFailure;
   }
+  #else
+  if(auto Result = SubstituteDeducedTemplateArguments(*this,
+                                              FunctionTemplate, Function,
+                                              SugaredExplicitArgumentList,
+                                              ParamTypes, nullptr,
+                                              FunctionType))
+    return Result;
+  #endif
 
   // C++ [temp.arg.explicit]p2:
   //   Trailing template arguments that can be deduced (14.8.2) may be
@@ -4456,6 +4764,573 @@ Sema::TemplateDeductionResult Sema::DeduceTemplateArguments(
   return TDK_Success;
 }
 
+Sema::TemplateDeductionResult Sema::DeduceTemplateArguments(
+    FunctionTemplateDecl *FunctionTemplate,
+    FunctionDecl* Specialized,
+    TemplateArgumentListInfo *ExplicitTemplateArgs,
+    TemplateArgumentList *&DeducedTemplateArgs,
+    TemplateDeductionInfo &Info) {
+
+#if 0
+
+// Sema::TemplateDeductionResult Sema::DeduceTemplateArguments(
+//     FunctionTemplateDecl *FunctionTemplate,
+//     TemplateArgumentListInfo *ExplicitTemplateArgs,
+//     TemplateArgumentList *&DeducedTemplateArgs,
+//     QualType ArgFunctionType,
+//     TemplateDeductionInfo &Info) {
+
+
+  if (FunctionTemplate->isInvalidDecl())
+    return TDK_Invalid;
+
+  FunctionDecl *Function = FunctionTemplate->getTemplatedDecl();
+  TemplateParameterList *TemplateParams
+    = FunctionTemplate->getTemplateParameters();
+
+  QualType FunctionType = Function->getType();
+  QualType ArgFunctionType = Specialized->getType();
+
+  Qualifiers MethodQuals;
+  if (CXXMethodDecl *Method = dyn_cast<CXXMethodDecl>(Function)) {
+    MethodQuals = Method->getMethodQualifiers();
+    // Constexpr non-static member function are implicitly const before C++14.
+    // Add the implicit const if and only if the function template we are
+    // deducing arguments from is a non-static member function.
+    if (!getLangOpts().CPlusPlus14 &&
+        !Method->isStatic() &&
+        Specialized->isConstexpr()) {
+      const FunctionProtoType *FPT = ArgFunctionType->castAs<FunctionProtoType>();
+      FunctionProtoType::ExtProtoInfo EPI = FPT->getExtProtoInfo();
+      EPI.TypeQuals.addConst();
+      ArgFunctionType = Context.getFunctionType(
+          FPT->getReturnType(), FPT->getParamTypes(), EPI);
+    }
+  }
+
+  // Substitute any explicit template arguments.
+  LocalInstantiationScope InstScope(*this);
+  SmallVector<DeducedTemplateArgument, 4> Deduced;
+  unsigned NumExplicitlySpecified = 0;
+  SmallVector<QualType, 4> ParamTypes;
+  if (ExplicitTemplateArgs) {
+    TemplateDeductionResult Result;
+    runWithSufficientStackSpace(Info.getLocation(), [&] {
+      Result = SubstituteExplicitTemplateArguments(
+          FunctionTemplate, *ExplicitTemplateArgs, Deduced, ParamTypes,
+          &FunctionType, Info);
+    });
+    if (Result)
+      return Result;
+
+    NumExplicitlySpecified = Deduced.size();
+  }
+
+  // Allow arbitrary mismatches of calling convention and noreturn.
+  ArgFunctionType = adjustCCAndNoReturn(ArgFunctionType, FunctionType,
+                                        /*AdjustExceptionSpec*/false);
+
+  // Unevaluated SFINAE context.
+  EnterExpressionEvaluationContext Unevaluated(
+      *this, Sema::ExpressionEvaluationContext::Unevaluated);
+  SFINAETrap Trap(*this);
+
+  Deduced.resize(TemplateParams->size());
+
+  // If the function has a deduced return type, substitute it for a dependent
+  // type so that we treat it as a non-deduced context in what follows.
+  bool HasDeducedReturnType = false;
+  if (getLangOpts().CPlusPlus14 &&
+      Function->getReturnType()->getContainedAutoType()) {
+    FunctionType = SubstAutoTypeDependent(FunctionType);
+    HasDeducedReturnType = true;
+  }
+
+  if (!ArgFunctionType.isNull() && !FunctionType.isNull()) {
+    unsigned TDF =
+        TDF_TopLevelParameterTypeList | TDF_AllowCompatibleFunctionType;
+    // Deduce template arguments from the function type.
+    if (TemplateDeductionResult Result
+          = DeduceTemplateArgumentsByTypeMatch(*this, TemplateParams,
+                                               FunctionType, ArgFunctionType,
+                                               Info, Deduced, TDF))
+      return Result;
+  }
+
+  #if 0
+  TemplateDeductionResult Result;
+  runWithSufficientStackSpace(Info.getLocation(), [&] {
+    Result = FinishTemplateArgumentDeduction(FunctionTemplate, Deduced,
+                                             NumExplicitlySpecified,
+                                             Specialization, Info);
+  });
+  if (Result)
+    return Result;
+  #endif
+
+  TypeSourceInfo* SubstTSI = nullptr;
+  {
+    // Unevaluated SFINAE context.
+    EnterExpressionEvaluationContext Unevaluated(
+        *this, Sema::ExpressionEvaluationContext::Unevaluated);
+    SFINAETrap Trap(*this);
+
+    // Enter a new template instantiation context while we instantiate the
+    // actual function declaration.
+    SmallVector<TemplateArgument, 4> DeducedArgs(Deduced.begin(), Deduced.end());
+    InstantiatingTemplate Inst(
+        *this, Info.getLocation(), FunctionTemplate, DeducedArgs,
+        CodeSynthesisContext::DeducedTemplateArgumentSubstitution, Info);
+    if (Inst.isInvalid())
+      return TDK_InstantiationDepth;
+
+    ContextRAII SavedContext(*this, FunctionTemplate->getTemplatedDecl());
+
+    // C++ [temp.deduct.type]p2:
+    //   [...] or if any template argument remains neither deduced nor
+    //   explicitly specified, template argument deduction fails.
+    SmallVector<TemplateArgument, 4> SugaredBuilder, CanonicalBuilder;
+    if (auto Result = ConvertDeducedTemplateArguments(
+            *this, FunctionTemplate, /*IsDeduced*/ true, Deduced, Info,
+            SugaredBuilder, CanonicalBuilder, CurrentInstantiationScope,
+            NumExplicitlySpecified, false))
+      return Result;
+
+    // Form the template argument list from the deduced template arguments.
+    TemplateArgumentList *SugaredDeducedArgumentList =
+        TemplateArgumentList::CreateCopy(Context, SugaredBuilder);
+    TemplateArgumentList *CanonicalDeducedArgumentList =
+        TemplateArgumentList::CreateCopy(Context, CanonicalBuilder);
+    Info.reset(SugaredDeducedArgumentList, CanonicalDeducedArgumentList);
+
+    // Substitute the deduced template arguments into the function template
+    // declaration to produce the function template specialization.
+    DeclContext *Owner = FunctionTemplate->getDeclContext();
+    if (FunctionTemplate->getFriendObjectKind())
+      Owner = FunctionTemplate->getLexicalDeclContext();
+    #if 0
+    FunctionDecl *FD = FunctionTemplate->getTemplatedDecl();
+    // additional check for inline friend,
+    // ```
+    //   template <class F1> int foo(F1 X);
+    //   template <int A1> struct A {
+    //     template <class F1> friend int foo(F1 X) { return A1; }
+    //   };
+    //   template struct A<1>;
+    //   int a = foo(1.0);
+    // ```
+    const FunctionDecl *FunctionFriend;
+    if (FD->getFriendObjectKind() == Decl::FriendObjectKind::FOK_None &&
+        FD->isDefined(FunctionFriend, /*CheckForPendingFriendDefinition*/ true) &&
+        FunctionFriend->getFriendObjectKind() != Decl::FriendObjectKind::FOK_None) {
+
+      Owner = const_cast<DeclContext*>(FunctionFriend->getLexicalDeclContext());
+    }
+    #endif
+    MultiLevelTemplateArgumentList SubstArgs(
+        FunctionTemplate, CanonicalDeducedArgumentList->asArray(),
+        /*Final=*/false);
+
+    #if 0
+    SubstTSI = SubstFunctionDeclType(
+      Function->getTypeSourceInfo(), SubstArgs, Function->getTypeSpecStartLoc(), Function->getDeclName(),
+      dyn_cast_or_null<CXXRecordDecl>(Owner), MethodQuals, true);
+    #elif 0
+      SubstTSI = SubstType(Function->getTypeSourceInfo(), SubstArgs,
+          Info.getLocation(), Function->getDeclName());
+    #elif 1
+    SmallVector<ParmVarDecl *, 4> Params;
+    {
+      TemplateDeclInstantiator Instantiator(*this, Owner, SubstArgs);
+      runWithSufficientStackSpace(Function->getLocation(), [&] {
+        SubstTSI = Instantiator.SubstFunctionType(Function, Params);
+      });
+    }
+    #endif
+    if(!SubstTSI || Trap.hasErrorOccurred())
+      return TDK_SubstitutionFailure;
+
+    // Function->getTypeSourceInfo()->
+    // Context.getTrivialTypeSourceInfo(FunctionType)
+    // SubstFunctionDeclType()
+
+    // C++2a [temp.deduct]p5
+    //   [...] When all template arguments have been deduced [...] all uses of
+    //   template parameters [...] are replaced with the corresponding deduced
+    //   or default argument values.
+    //   [...] If the function template has associated constraints
+    //   ([temp.constr.decl]), those constraints are checked for satisfaction
+    //   ([temp.constr.constr]). If the constraints are not satisfied, type
+    //   deduction fails.
+
+    #if 0
+    {
+      TemplateArgumentList StackTemplateArgs(TemplateArgumentList::OnStack,
+                                             CanonicalDeducedArgumentList->asArray());
+      // Setup the context/ThisScope for the case where we are needing to
+      // re-instantiate constraints outside of normal instantiation.
+      DeclContext *NewContext = FunctionTemplate->getDeclContext();
+
+      // If this template is in a template, make sure we extract the templated
+      // decl.
+      if (auto *TD = dyn_cast<TemplateDecl>(NewContext))
+        NewContext = Decl::castToDeclContext(TD->getTemplatedDecl());
+      auto *RD = dyn_cast<CXXRecordDecl>(NewContext);
+
+      Qualifiers ThisQuals;
+      if (const auto *Method =
+              dyn_cast_or_null<CXXMethodDecl>(FunctionTemplate->getTemplatedDecl()))
+        ThisQuals = Method->getMethodQualifiers();
+
+      ContextRAII Context(*this, NewContext);
+      CXXThisScopeRAII(*this, RD, ThisQuals, RD != nullptr);
+
+      MultiLevelTemplateArgumentList MLTAL = getTemplateInstantiationArgs(
+          FunctionTemplate, /*Final=*/false, &StackTemplateArgs,
+          /*RelativeToPrimary=*/true,
+          /*Pattern=*/nullptr,
+          /*ForConceptInstantiation=*/true);
+      if (EnsureTemplateArgumentListConstraints(
+              FunctionTemplate, MLTAL,
+              SourceRange(Info.getLocation(),
+                  ExplicitTemplateArgs ?
+                      ExplicitTemplateArgs->getRAngleLoc() :
+                      Info.getLocation()))) {
+
+        return TDK_ConstraintsNotSatisfied;
+      }
+    }
+    #elif 1
+    {
+      // Setup the context/ThisScope for the case where we are needing to
+      // re-instantiate constraints outside of normal instantiation.
+      DeclContext *NewContext = FunctionTemplate->getDeclContext();
+
+      // If this template is in a template, make sure we extract the templated
+      // decl.
+      if (auto *TD = dyn_cast<TemplateDecl>(NewContext))
+        NewContext = Decl::castToDeclContext(TD->getTemplatedDecl());
+      auto *RD = dyn_cast<CXXRecordDecl>(NewContext);
+
+      ContextRAII Context(*this, NewContext);
+      CXXThisScopeRAII(*this, RD, MethodQuals, RD != nullptr);
+
+      // if (EnsureTemplateArgumentListConstraints(FunctionTemplate, SubstArgs,
+      //     ))
+      if (EnsureTemplateArgumentListConstraints(
+              FunctionTemplate, SubstArgs,
+              SourceRange(Info.getLocation(),
+                  ExplicitTemplateArgs ?
+                      ExplicitTemplateArgs->getRAngleLoc() :
+                      Info.getLocation()))) {
+
+        return TDK_ConstraintsNotSatisfied;
+      }
+    }
+    #elif 0
+    {
+      // Note - code synthesis context for the constraints check is created
+      // inside CheckConstraintsSatisfaction.
+      SmallVector<const Expr *, 3> TemplateAC;
+      FunctionTemplate->getAssociatedConstraints(TemplateAC);
+      if (TemplateAC.empty()) {
+        Info.AssociatedConstraintsSatisfaction.IsSatisfied = true;
+
+      } else {
+
+      // Enter the scope of this instantiation. We don't use
+      // PushDeclContext because we don't have a scope.
+      Sema::ContextRAII savedContext(*this, Function);
+      LocalInstantiationScope Scope(*this);
+
+      if (SetupConstraintScope(Function, SubstArgs.getInnermost(), SubstArgs, Scope))
+        return TDK_MiscellaneousDeductionFailure;
+      // std::optional<MultiLevelTemplateArgumentList> MLTAL =
+      //     SetupConstraintCheckingTemplateArgumentsAndScope(Function, SubstArgs.getInnermost(),
+      //                                                     Scope);
+
+      // if (!MLTAL)
+      //   return TDK_MiscellaneousDeductionFailure;
+
+      Qualifiers ThisQuals;
+      CXXRecordDecl *Record = nullptr;
+      if (auto *Method = dyn_cast<CXXMethodDecl>(Function)) {
+        ThisQuals = Method->getMethodQualifiers();
+        Record = Method->getParent();
+      }
+      CXXThisScopeRAII ThisScope(*this, Record, ThisQuals, Record != nullptr);
+      FunctionScopeRAII FuncScope(*this);
+
+      if (isLambdaCallOperator(Function)) {
+        LambdaScopeInfo *LSI = RebuildLambdaScopeInfo(cast<CXXMethodDecl>(Function));
+        LSI->AfterParameterList = false;
+      } else {
+        FuncScope.disable();
+      }
+
+      llvm::SmallVector<Expr *, 1> Converted;
+      if (CheckConstraintSatisfaction(FunctionTemplate, TemplateAC, Converted, SubstArgs,
+                                         Info.getLocation(), Info.AssociatedConstraintsSatisfaction))
+        return TDK_MiscellaneousDeductionFailure;
+
+      if (!Info.AssociatedConstraintsSatisfaction.IsSatisfied) {
+        Info.reset(Info.takeSugared(),
+                   TemplateArgumentList::CreateCopy(Context, CanonicalBuilder));
+        return TDK_ConstraintsNotSatisfied;
+      }
+      }
+    }
+
+    #endif
+
+    #if 0
+      if (CheckInstantiatedFunctionTemplateConstraints(
+              Info.getLocation(), Specialization, CanonicalBuilder,
+              Info.AssociatedConstraintsSatisfaction))
+        return TDK_MiscellaneousDeductionFailure;
+
+      if (!Info.AssociatedConstraintsSatisfaction.IsSatisfied) {
+        Info.reset(Info.takeSugared(),
+                   TemplateArgumentList::CreateCopy(Context, CanonicalBuilder));
+        return TDK_ConstraintsNotSatisfied;
+      }
+    #endif
+
+    DeducedTemplateArgs = Info.takeCanonical();
+  }
+
+  // If the function has a dependent exception specification, resolve it now,
+  // so we can check that the exception specification matches.
+  auto *SpecializationFPT =
+      SubstTSI->getType()->castAs<FunctionProtoType>();
+  if (getLangOpts().CPlusPlus17 &&
+      isUnresolvedExceptionSpec(SpecializationFPT->getExceptionSpecType()) &&
+      !ResolveExceptionSpec(Info.getLocation(), SpecializationFPT))
+    return TDK_MiscellaneousDeductionFailure;
+
+  // Adjust the exception specification of the argument to match the
+  // substituted and resolved type we just formed. (Calling convention and
+  // noreturn can't be dependent, so we don't actually need this for them
+  // right now.)
+  QualType SpecializationType = SubstTSI->getType();
+  ArgFunctionType = adjustCCAndNoReturn(ArgFunctionType, SpecializationType,
+                                        /*AdjustExceptionSpec*/true);
+
+  // Revert placeholder types in the return type back to undeduced types so
+  // that the comparison below compares the declared return types.
+  if (HasDeducedReturnType) {
+    SpecializationType = SubstAutoType(SpecializationType, QualType());
+    ArgFunctionType = SubstAutoType(ArgFunctionType, QualType());
+  }
+
+  // If the requested function type does not match the actual type of the
+  // specialization with respect to arguments of compatible pointer to function
+  // types, template argument deduction fails.
+  if (!ArgFunctionType.isNull()) {
+    if (!Context.hasSameType(SpecializationType, ArgFunctionType)) {
+      Info.FirstArg = TemplateArgument(SpecializationType);
+      Info.SecondArg = TemplateArgument(ArgFunctionType);
+      return TDK_NonDeducedMismatch;
+    }
+  }
+
+  return TDK_Success;
+
+#endif
+
+
+  if (FunctionTemplate->isInvalidDecl())
+    return TDK_Invalid;
+
+  FunctionDecl *Function = FunctionTemplate->getTemplatedDecl();
+  TemplateParameterList *TemplateParams
+    = FunctionTemplate->getTemplateParameters();
+
+  QualType FunctionType = Function->getType();
+  QualType ArgFunctionType = Specialized->getType();
+
+  Qualifiers MethodQuals;
+  if (CXXMethodDecl *Method = dyn_cast<CXXMethodDecl>(Function)) {
+    MethodQuals = Method->getMethodQualifiers();
+    // Constexpr non-static member function are implicitly const before C++14.
+    // Add the implicit const if and only if the function template we are
+    // deducing arguments from is a non-static member function.
+    if (!getLangOpts().CPlusPlus14 &&
+        !Method->isStatic() &&
+        Specialized->isConstexpr()) {
+      const FunctionProtoType *FPT = ArgFunctionType->castAs<FunctionProtoType>();
+      FunctionProtoType::ExtProtoInfo EPI = FPT->getExtProtoInfo();
+      EPI.TypeQuals.addConst();
+      ArgFunctionType = Context.getFunctionType(
+          FPT->getReturnType(), FPT->getParamTypes(), EPI);
+    }
+  }
+
+  // Substitute any explicit template arguments.
+  LocalInstantiationScope InstScope(*this);
+  SmallVector<DeducedTemplateArgument, 4> Deduced;
+  unsigned NumExplicitlySpecified = 0;
+  SmallVector<QualType, 4> ParamTypes;
+  if (ExplicitTemplateArgs) {
+    TemplateDeductionResult Result;
+    runWithSufficientStackSpace(Info.getLocation(), [&] {
+      Result = SubstituteExplicitTemplateArguments(
+          FunctionTemplate, *ExplicitTemplateArgs, Deduced, ParamTypes,
+          &FunctionType, Info);
+    });
+    if (Result)
+      return Result;
+
+    NumExplicitlySpecified = Deduced.size();
+  }
+
+  // Allow arbitrary mismatches of calling convention and noreturn.
+  ArgFunctionType = adjustCCAndNoReturn(ArgFunctionType, FunctionType,
+                                        /*AdjustExceptionSpec*/false);
+
+  // Unevaluated SFINAE context.
+  EnterExpressionEvaluationContext Unevaluated(
+      *this, Sema::ExpressionEvaluationContext::Unevaluated);
+  SFINAETrap Trap(*this);
+
+  Deduced.resize(TemplateParams->size());
+
+  // If the function has a deduced return type, substitute it for a dependent
+  // type so that we treat it as a non-deduced context in what follows.
+  bool HasDeducedReturnType = false;
+  if (getLangOpts().CPlusPlus14 &&
+      Function->getReturnType()->getContainedAutoType()) {
+    FunctionType = SubstAutoTypeDependent(FunctionType);
+    HasDeducedReturnType = true;
+  }
+
+  if (!ArgFunctionType.isNull() && !FunctionType.isNull()) {
+    unsigned TDF =
+        TDF_TopLevelParameterTypeList | TDF_AllowCompatibleFunctionType;
+    // Deduce template arguments from the function type.
+    if (TemplateDeductionResult Result
+          = DeduceTemplateArgumentsByTypeMatch(*this, TemplateParams,
+                                               FunctionType, ArgFunctionType,
+                                               Info, Deduced, TDF))
+      return Result;
+  }
+
+  #if 0
+  SmallVector<TemplateArgument, 4> SugaredConverted, CanonicalConverted;
+  if (CheckTemplateArgumentList(FunctionTemplate, Specialized->getNameInfo().getLoc(),
+      TemplateArgs, false, SugaredConverted, CanonicalConverted,
+      /*UpdateArgsWithConversions=*/true))
+  #elif 1
+  TemplateArgumentList* TemplateArgs = nullptr;
+  QualType SpecializationType = QualType();
+  if (auto Result = ::FinishTemplateArgumentDeduction(*this,
+                              Specialized, FunctionTemplate, Deduced,
+                              TemplateArgs, SpecializationType, Info))
+    return Result;
+
+  #elif 0
+    {
+      SmallVector<ParmVarDecl *, 4> Params;
+      TemplateDeclInstantiator Instantiator(*this, Owner, SubstArgs);
+      runWithSufficientStackSpace(Function->getLocation(), [&] {
+        SubstTSI = Instantiator.SubstFunctionType(Function, Params);
+      });
+    }
+
+    if(!SubstTSI || Trap.hasErrorOccurred())
+      return TDK_SubstitutionFailure;
+  TemplateDeductionResult Result;
+  TemplateArgumentList* TemplateArgs = nullptr;
+  runWithSufficientStackSpace(Info.getLocation(), [&] {
+    Result = ::FinishTemplateArgumentDeduction(*this,
+                                               Specialized,
+                                               FunctionTemplate,
+                                               Deduced,
+                                               TemplateArgs,
+                                               Info);
+
+  });
+  if (Result)
+    return Result;
+  #elif 1
+  #endif
+
+
+  #if 0
+  assert(TemplateArgs &&
+      "Deduction did not create template argument list?");
+  QualType SpecializationType = FunctionType;
+  SmallVector<QualType, 4> SpecParamTypes;
+  SmallVector<ParmVarDecl*, 4> SpecParams;
+
+  InstantiatingTemplate Inst(
+      *this, Info.getLocation(), FunctionTemplate, TemplateArgs->asArray(),
+      CodeSynthesisContext::DeducedTemplateArgumentSubstitution, Info);
+  if (Inst.isInvalid())
+    return TDK_InstantiationDepth;
+
+  LocalInstantiationScope SubstScope(*this);
+  if(auto Result = SubstituteDeducedTemplateArguments(*this,
+                                              FunctionTemplate,
+                                              Function,
+                                              TemplateArgs,
+                                              SpecParamTypes,
+                                              &SpecParams,
+                                              &SpecializationType))
+    return Result;
+  // If the function has a dependent exception specification, resolve it now,
+  // so we can check that the exception specification matches.
+  #endif
+  #if 0
+  auto *SpecializationFPT =
+      SpecializationType->castAs<FunctionProtoType>();
+  if (getLangOpts().CPlusPlus17 &&
+      isUnresolvedExceptionSpec(SpecializationFPT->getExceptionSpecType()) &&
+      !ResolveExceptionSpec(Info.getLocation(), SpecializationFPT))
+    return TDK_MiscellaneousDeductionFailure;
+  #endif
+
+  // Adjust the exception specification of the argument to match the
+  // substituted and resolved type we just formed. (Calling convention and
+  // noreturn can't be dependent, so we don't actually need this for them
+  // right now.)
+  // QualType SpecializationType = SubstTSI->getType();
+  ArgFunctionType = adjustCCAndNoReturn(ArgFunctionType, SpecializationType,
+                                        /*AdjustExceptionSpec*/true);
+
+  // Revert placeholder types in the return type back to undeduced types so
+  // that the comparison below compares the declared return types.
+  if (HasDeducedReturnType) {
+    SpecializationType = SubstAutoType(SpecializationType, QualType());
+    ArgFunctionType = SubstAutoType(ArgFunctionType, QualType());
+  }
+
+  // If the requested function type does not match the actual type of the
+  // specialization with respect to arguments of compatible pointer to function
+  // types, template argument deduction fails.
+  if (!ArgFunctionType.isNull()) {
+    if (!Context.hasSameType(SpecializationType, ArgFunctionType)) {
+      Info.FirstArg = TemplateArgument(SpecializationType);
+      Info.SecondArg = TemplateArgument(ArgFunctionType);
+      return TDK_NonDeducedMismatch;
+    }
+  }
+
+  DeducedTemplateArgs = TemplateArgs;
+  return TDK_Success;
+
+
+
+
+
+}
+
+
+
+
+
+
+
 /// Deduce template arguments for a templated conversion
 /// function (C++ [temp.deduct.conv]) and, if successful, produce a
 /// conversion function template specialization.
@@ -5506,6 +6381,102 @@ UnresolvedSetIterator Sema::getMostSpecialized(
 
   return SpecEnd;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+UnresolvedSetIterator Sema::getMostSpecializedTemplate(
+    UnresolvedSetIterator SpecBegin, UnresolvedSetIterator SpecEnd,
+    TemplateSpecCandidateSet &FailedCandidates,
+    SourceLocation Loc, const PartialDiagnostic &NoneDiag,
+    const PartialDiagnostic &AmbigDiag, const PartialDiagnostic &CandidateDiag,
+    bool Complain, QualType TargetType) {
+  if (SpecBegin == SpecEnd) {
+    if (Complain) {
+      Diag(Loc, NoneDiag);
+      FailedCandidates.NoteCandidates(*this, Loc);
+    }
+    return SpecEnd;
+  }
+
+  if (SpecBegin + 1 == SpecEnd)
+    return SpecBegin;
+
+  // Find the function template that is better than all of the templates it
+  // has been compared to.
+  UnresolvedSetIterator Best = SpecBegin;
+  auto *BestTemplate = cast<FunctionTemplateDecl>(*Best);
+  for (UnresolvedSetIterator I = SpecBegin + 1; I != SpecEnd; ++I) {
+    auto *Challenger = cast<FunctionTemplateDecl>(*I);
+    assert(Challenger && "Not a function template specialization?");
+    if (isSameTemplate(getMoreSpecializedTemplate(BestTemplate, Challenger,
+                                                  Loc, TPOC_Other, 0, 0),
+                       Challenger)) {
+      Best = I;
+      BestTemplate = Challenger;
+    }
+  }
+
+  // Make sure that the "best" function template is more specialized than all
+  // of the others.
+  bool Ambiguous = false;
+  for (UnresolvedSetIterator I = SpecBegin; I != SpecEnd; ++I) {
+    auto *Challenger = cast<FunctionTemplateDecl >(*I);
+    if (I != Best &&
+        !isSameTemplate(getMoreSpecializedTemplate(BestTemplate, Challenger,
+                                                   Loc, TPOC_Other, 0, 0),
+                        BestTemplate)) {
+      Ambiguous = true;
+      break;
+    }
+  }
+
+  if (!Ambiguous) {
+    // We found an answer. Return it.
+    return Best;
+  }
+
+  // Diagnose the ambiguity.
+  if (Complain) {
+    Diag(Loc, AmbigDiag);
+
+#if 0
+    // FIXME: Can we order the candidates in some sane way?
+    for (UnresolvedSetIterator I = SpecBegin; I != SpecEnd; ++I) {
+      PartialDiagnostic PD = CandidateDiag;
+      const auto *FD = cast<FunctionDecl>(*I);
+      PD << FD << getTemplateArgumentBindingsText(
+                      FD->getPrimaryTemplate()->getTemplateParameters(),
+                      *FD->getTemplateSpecializationArgs());
+      if (!TargetType.isNull())
+        HandleFunctionTypeMismatch(PD, FD->getType(), TargetType);
+      Diag((*I)->getLocation(), PD);
+    }
+#endif
+  }
+
+  return SpecEnd;
+}
+
+
+
+
+
+
+
+
 
 /// Determine whether one partial specialization, P1, is at least as
 /// specialized than another, P2.
