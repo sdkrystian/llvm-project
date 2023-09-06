@@ -10150,11 +10150,15 @@ public:
                             const MultiLevelTemplateArgumentList &TemplateArgs,
                             SourceLocation Loc, DeclarationName Entity);
 
+  TypeSourceInfo *
+  SubstFunctionType(FunctionDecl *D,
+                    const MultiLevelTemplateArgumentList &TemplateArgs,
+                    bool EvaluateConstraints = true);
+
   TypeSourceInfo *SubstFunctionDeclType(
       TypeSourceInfo *T, const MultiLevelTemplateArgumentList &TemplateArgs,
       SourceLocation Loc, DeclarationName Entity, CXXRecordDecl *ThisContext,
-      Qualifiers ThisTypeQuals, bool EvaluateConstraints = true,
-      bool InstantiateExceptionSpec = false);
+      Qualifiers ThisTypeQuals, bool EvaluateConstraints = true);
   void SubstExceptionSpec(FunctionDecl *New, const FunctionProtoType *Proto,
                           const MultiLevelTemplateArgumentList &Args);
   bool SubstExceptionSpec(SourceLocation Loc,

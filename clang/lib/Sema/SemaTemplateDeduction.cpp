@@ -3091,9 +3091,6 @@ static Sema::TemplateDeductionResult FinishTemplateArgumentDeduction(
   if (Trap.hasErrorOccurred())
     return Sema::TDK_SubstitutionFailure;
 
-  LocalInstantiationScope InstantiationScope(S);
-  MultiLevelTemplateArgumentList MLTAL(
-      Template, CanonicalBuilder, /*Final=*/true);
   // Substitute the deduced template arguments into the function template
   // declaration to produce the function template specialization.
   DeclContext *Owner = Template->getDeclContext();
@@ -3116,21 +3113,28 @@ static Sema::TemplateDeductionResult FinishTemplateArgumentDeduction(
     Owner = Function->getLexicalDeclContext();
   }
 
-  TypeSourceInfo* SpecializationTSI = nullptr;
+  LocalInstantiationScope Scope(S);
+  MultiLevelTemplateArgumentList MLTAL(
+      Template, CanonicalBuilder, /*Final=*/true);
+
+  TypeSourceInfo* SpecializationTSI = S.SubstFunctionType(
+        Function, MLTAL, /*EvaluateConstraints*/false);
+
+  #if 0
   TemplateDeclInstantiator Instantiator(S, Owner, MLTAL);
   Instantiator.setEvaluateConstraints(false);
-
   S.runWithSufficientStackSpace(Function->getLocation(), [&] {
     SmallVector<ParmVarDecl *, 4> Params;
     SpecializationTSI = Instantiator.SubstFunctionType(Function, Params,
         /*InstantiateExceptionSpec*/S.getLangOpts().CPlusPlus17);
   });
+  #endif
   if (!SpecializationTSI)
     return Sema::TDK_SubstitutionFailure;
 
   // Check constraint satisfaction.
-  if (auto Result = CheckDeducedArgumentConstraints(S, Template, SugaredBuilder,
-                                                    CanonicalBuilder, Info))
+  if (auto Result = CheckDeducedArgumentConstraints(
+      S, Template, SugaredBuilder, CanonicalBuilder, Info))
     return Result;
 
   #if 0
@@ -4655,7 +4659,7 @@ Sema::TemplateDeductionResult Sema::DeduceTemplateArguments(
   QualType SpecializationType;
   runWithSufficientStackSpace(Info.getLocation(), [&] {
     Result = ::FinishTemplateArgumentDeduction(*this,
-      FunctionTemplate, Deduced, Info, TemplateArgs, SpecializationType);
+        FunctionTemplate, Deduced, Info, TemplateArgs, SpecializationType);
   });
   if (Result)
     return Result;

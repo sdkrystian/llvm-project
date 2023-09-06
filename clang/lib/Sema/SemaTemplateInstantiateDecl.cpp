@@ -4510,8 +4510,7 @@ TemplateDeclInstantiator::InstantiateVarTemplatePartialSpecialization(
 
 TypeSourceInfo*
 TemplateDeclInstantiator::SubstFunctionType(FunctionDecl *D,
-                              SmallVectorImpl<ParmVarDecl *> &Params,
-                              bool InstantiateExceptionSpec) {
+                              SmallVectorImpl<ParmVarDecl *> &Params) {
   TypeSourceInfo *OldTInfo = D->getTypeSourceInfo();
   assert(OldTInfo && "substituting function without type source info");
   assert(Params.empty() && "parameter vector is non-empty at start");
@@ -4524,9 +4523,8 @@ TemplateDeclInstantiator::SubstFunctionType(FunctionDecl *D,
   }
 
   TypeSourceInfo *NewTInfo = SemaRef.SubstFunctionDeclType(
-      OldTInfo, TemplateArgs, D->getTypeSpecStartLoc(),
-      D->getDeclName(), ThisContext, ThisTypeQuals,
-      EvaluateConstraints, InstantiateExceptionSpec);
+      OldTInfo, TemplateArgs, D->getTypeSpecStartLoc(), D->getDeclName(),
+      ThisContext, ThisTypeQuals, EvaluateConstraints);
   if (!NewTInfo)
     return nullptr;
 

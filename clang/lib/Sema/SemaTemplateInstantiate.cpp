@@ -2607,6 +2607,60 @@ static bool NeedsInstantiationAsFunctionType(TypeSourceInfo *T) {
   return false;
 }
 
+/// Instantiates the full type of a FunctionDecl (including exception
+/// specification after C++17). No local instantiation scope is created
+/// so that instantiated parameter mappings can be subsequently used when
+/// checking for constraint satisfaction.
+TypeSourceInfo *
+Sema::SubstFunctionType(FunctionDecl *D,
+                        const MultiLevelTemplateArgumentList &TemplateArgs,
+                        bool EvaluateConstraints) {
+  assert(!CodeSynthesisContexts.empty() &&
+         "Cannot perform an instantiation without some context on the "
+         "instantiation stack");
+  assert(CurrentInstantiationScope &&
+         "Cannot instantiate function type without a"
+         "local instantiation scope");
+
+  TypeSourceInfo *TSI = D->getTypeSourceInfo();
+  assert(TSI && "FunctionDecl missing TypeSourceInfo");
+  if (!NeedsInstantiationAsFunctionType(TSI))
+    return TSI;
+
+  TypeLoc TL = TSI->getTypeLoc().IgnoreParens();
+  TypeLocBuilder TLB;
+  TLB.reserve(TL.getFullDataSize());
+
+  CXXRecordDecl *ThisContext = nullptr;
+  Qualifiers ThisQuals;
+  if (auto *Method = dyn_cast<CXXMethodDecl>(D)) {
+    ThisContext = cast<CXXRecordDecl>(Method->getDeclContext());
+    ThisQuals = Method->getMethodQualifiers();
+  }
+
+  TemplateInstantiator Instantiator(
+      *this, TemplateArgs, D->getLocation(), D->getDeclName());
+  Instantiator.setEvaluateConstraints(EvaluateConstraints);
+
+  QualType Result = Instantiator.inherited::TransformFunctionProtoType(
+      TLB, TL.getAs<FunctionProtoTypeLoc>(), ThisContext, ThisQuals,
+      [&](FunctionProtoType::ExceptionSpecInfo &ESI, bool &Changed) {
+        // Exception specification is part of the type after C++17
+        // FIXME: Set the exception specification to EST_Uninstantiated here,
+        // instead of rebuilding the function type again later.
+        if(!getLangOpts().CPlusPlus17)
+          return false;
+        SmallVector<QualType, 4> ExceptionStorage;
+        return Instantiator.TransformExceptionSpec(
+            D->getLocation(), ESI, ExceptionStorage, Changed);
+      });
+
+  if (Result.isNull())
+    return nullptr;
+
+  return TLB.getTypeSourceInfo(Context, Result);
+}
+
 /// A form of SubstType intended specifically for instantiating the
 /// type of a FunctionDecl.  Its purpose is solely to force the
 /// instantiation of default-argument expressions and to avoid
@@ -2617,8 +2671,7 @@ TypeSourceInfo *Sema::SubstFunctionDeclType(TypeSourceInfo *T,
                                 DeclarationName Entity,
                                 CXXRecordDecl *ThisContext,
                                 Qualifiers ThisTypeQuals,
-                                bool EvaluateConstraints,
-                                bool InstantiateExceptionSpec) {
+                                bool EvaluateConstraints) {
   assert(!CodeSynthesisContexts.empty() &&
          "Cannot perform an instantiation without some context on the "
          "instantiation stack");
@@ -2638,20 +2691,15 @@ TypeSourceInfo *Sema::SubstFunctionDeclType(TypeSourceInfo *T,
 
   if (FunctionProtoTypeLoc Proto =
           TL.IgnoreParens().getAs<FunctionProtoTypeLoc>()) {
+    // Instantiate the type, other than its exception specification. The
+    // exception specification is instantiated in InitFunctionInstantiation
+    // once we've built the FunctionDecl.
+    // FIXME: Set the exception specification to EST_Uninstantiated here,
+    // instead of rebuilding the function type again later.
     Result = Instantiator.TransformFunctionProtoType(
         TLB, Proto, ThisContext, ThisTypeQuals,
-        [&](FunctionProtoType::ExceptionSpecInfo &ESI, bool &Changed) {
-          // Only instantiate the exception specification if requested.
-          // InitFunctionInstantiation instantiates the exception specification
-          // once we've built a FunctionDecl.
-          // FIXME: Set the exception specification to EST_Uninstantiated here,
-          // instead of rebuilding the function type again later.
-          if(!InstantiateExceptionSpec)
-            return false;
-          SmallVector<QualType, 4> ExceptionStorage;
-          return Instantiator.TransformExceptionSpec(
-              TL.getBeginLoc(), ESI, ExceptionStorage, Changed);
-        });
+        [](FunctionProtoType::ExceptionSpecInfo &ESI,
+           bool &Changed) { return false; });
   } else {
     Result = Instantiator.TransformType(TLB, TL);
   }
