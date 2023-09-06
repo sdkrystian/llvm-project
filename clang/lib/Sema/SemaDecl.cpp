@@ -9740,29 +9740,76 @@ static bool isStdBuiltin(ASTContext &Ctx, FunctionDecl *FD,
   }
 }
 
-static void FilterLookupForFriendOrSpecialization(Declarator &D,
-                                                  FunctionDecl *FD,
-                                                  LookupResult &Previous,
-                                                  UnresolvedSetImpl& Failed,
-                                                  bool IsFriend,
-                                                  bool IsSpecialization) {
+static void FilterLookupForFriendFunction(Sema& S,
+                                  Declarator &D,
+                                  LookupResult &Previous,
+                                  // UnresolvedSetImpl& Failed,
+                                  bool HasExplicitTemplateArgs) {
+  // C++ [dcl.meaning]p2:
+  //   If the declaration is a friend declaration:
+  //     - The declarator does not bind a name.
+  //     - If the id-expression E in the declarator-id of the declarator is
+  //       a qualified-id or a template-id:
+  //       - If the friend declaration is not a template declaration,
+  //         then in the lookup for the terminal name of E:
+  //         - if the unqualified-id in E is a template-id,
+  //           all function declarations are discarded;
+  //         - otherwise, if the declarator corresponds to any declaration
+  //           found of a non-template function, all function template
+  //           declarations are discarded;
+  //         - each remaining function template is replaced with the
+  //           specialization chosen by deduction from the friend declaration
+  //           or discarded if deduction fails.
+  bool AllowFunctions = true;
+  bool AllowFunctionTemplates = true;
 
+  if (HasExplicitTemplateArgs) {
+    AllowFunctions = false;
+  } else if (D.getCXXScopeSpec().isNotEmpty()) {
+
+    // We have a (potentially valid) qualified-id. If we find any
+    // non-template functions, discard all function templates.
+    auto First = llvm::find_if(Previous, [](const NamedDecl *ND) {
+        return isa<FunctionDecl>(ND->getUnderlyingDecl());
+      });
+    if (First != Previous.end() && isa<FunctionDecl>(
+        First->getUnderlyingDecl()))
+      AllowFunctionTemplates = false;
+  } else {
+    // Does not contain a template-id or a qualified-id.
+    // In such cases, we have nothing to do.
+    return;
+  }
   LookupResult::Filter F = Previous.makeFilter();
-  //Previous.
-  auto* LookupContext = FD->getDeclContext()->getRedeclContext();
+  // auto* LookupContext = FD->getDeclContext()->getRedeclContext();
   while (F.hasNext()) {
     NamedDecl *ND = F.next();
     NamedDecl *Underlying = ND->getUnderlyingDecl();
+    #if 0
     if (!isa<FunctionTemplateDecl>(Underlying) ||
         !LookupContext->InEnclosingNamespaceSetOf(
             Underlying->getDeclContext()->getRedeclContext())) {
       Failed.addDecl(ND);
       F.erase();
     }
+    #endif
+    if (!AllowFunctionTemplates && isa<FunctionTemplateDecl>(Underlying)) {
+      // Failed.addDecl(ND);
+      F.erase();
+      continue;
+    }
+
+    if (!AllowFunctions && isa<FunctionDecl>(Underlying)) {
+      // Failed.addDecl(ND);
+      F.erase();
+      continue;
+    }
+
   }
 
   F.done();
 }
+
 
 NamedDecl*
 Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
@@ -10483,6 +10530,11 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
     // in the CheckFunctionTemplateSpecialization() call below.
     if (getLangOpts().CUDA && !isFunctionTemplateSpecialization)
       maybeAddCUDAHostDeviceAttrs(NewFD, Previous);
+
+    if (isFriend) {
+      FilterLookupForFriendFunction(*this,
+          D, Previous, HasExplicitTemplateArgs);
+    }
 
     // Handle explict specializations of function templates
     // and friend function declarations with an explicit

@@ -687,7 +687,8 @@ enum class TemplateSubstitutionKind : char {
 
     // Helper functions for instantiating methods.
     TypeSourceInfo *SubstFunctionType(FunctionDecl *D,
-                             SmallVectorImpl<ParmVarDecl *> &Params);
+                             SmallVectorImpl<ParmVarDecl *> &Params,
+                             bool InstantiateExceptionSpec = false);
     bool InitFunctionInstantiation(FunctionDecl *New, FunctionDecl *Tmpl);
     bool InitMethodInstantiation(CXXMethodDecl *New, CXXMethodDecl *Tmpl);
 

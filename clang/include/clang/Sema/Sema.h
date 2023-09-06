@@ -10153,7 +10153,8 @@ public:
   TypeSourceInfo *SubstFunctionDeclType(
       TypeSourceInfo *T, const MultiLevelTemplateArgumentList &TemplateArgs,
       SourceLocation Loc, DeclarationName Entity, CXXRecordDecl *ThisContext,
-      Qualifiers ThisTypeQuals, bool EvaluateConstraints = true);
+      Qualifiers ThisTypeQuals, bool EvaluateConstraints = true,
+      bool InstantiateExceptionSpec = false);
   void SubstExceptionSpec(FunctionDecl *New, const FunctionProtoType *Proto,
                           const MultiLevelTemplateArgumentList &Args);
   bool SubstExceptionSpec(SourceLocation Loc,

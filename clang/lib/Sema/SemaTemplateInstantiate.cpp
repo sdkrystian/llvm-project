@@ -2617,7 +2617,8 @@ TypeSourceInfo *Sema::SubstFunctionDeclType(TypeSourceInfo *T,
                                 DeclarationName Entity,
                                 CXXRecordDecl *ThisContext,
                                 Qualifiers ThisTypeQuals,
-                                bool EvaluateConstraints) {
+                                bool EvaluateConstraints,
+                                bool InstantiateExceptionSpec) {
   assert(!CodeSynthesisContexts.empty() &&
          "Cannot perform an instantiation without some context on the "
          "instantiation stack");
@@ -2637,15 +2638,20 @@ TypeSourceInfo *Sema::SubstFunctionDeclType(TypeSourceInfo *T,
 
   if (FunctionProtoTypeLoc Proto =
           TL.IgnoreParens().getAs<FunctionProtoTypeLoc>()) {
-    // Instantiate the type, other than its exception specification. The
-    // exception specification is instantiated in InitFunctionInstantiation
-    // once we've built the FunctionDecl.
-    // FIXME: Set the exception specification to EST_Uninstantiated here,
-    // instead of rebuilding the function type again later.
     Result = Instantiator.TransformFunctionProtoType(
         TLB, Proto, ThisContext, ThisTypeQuals,
-        [](FunctionProtoType::ExceptionSpecInfo &ESI,
-           bool &Changed) { return false; });
+        [&](FunctionProtoType::ExceptionSpecInfo &ESI, bool &Changed) {
+          // Only instantiate the exception specification if requested.
+          // InitFunctionInstantiation instantiates the exception specification
+          // once we've built a FunctionDecl.
+          // FIXME: Set the exception specification to EST_Uninstantiated here,
+          // instead of rebuilding the function type again later.
+          if(!InstantiateExceptionSpec)
+            return false;
+          SmallVector<QualType, 4> ExceptionStorage;
+          return Instantiator.TransformExceptionSpec(
+              TL.getBeginLoc(), ESI, ExceptionStorage, Changed);
+        });
   } else {
     Result = Instantiator.TransformType(TLB, TL);
   }
