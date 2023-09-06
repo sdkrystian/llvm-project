@@ -7567,7 +7567,8 @@ public:
   bool CheckFunctionConstraints(const FunctionDecl *FD,
                                 ConstraintSatisfaction &Satisfaction,
                                 SourceLocation UsageLoc = SourceLocation(),
-                                bool ForOverloadResolution = false);
+                                bool ForOverloadResolution = false,
+                                bool SkipSpecializations = true);
 
   /// \brief Ensure that the given template arguments satisfy the constraints
   /// associated with the given template, emitting a diagnostic if they do not.

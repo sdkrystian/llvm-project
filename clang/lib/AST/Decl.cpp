@@ -4187,11 +4187,17 @@ TemplateSpecializationKind FunctionDecl::getTemplateSpecializationKind() const {
           TemplateOrSpecialization.dyn_cast<MemberSpecializationInfo *>())
     return MSInfo->getTemplateSpecializationKind();
 
+  #if 1
+  if (TemplateOrSpecialization.is<
+          DependentFunctionTemplateSpecializationInfo *>() &&
+      !(getFriendObjectKind() && isThisDeclarationADefinition()))
+    return TSK_ExplicitSpecialization;
+  #else
   // A dependent function template specialization is an explicit specialization.
   if (TemplateOrSpecialization.is<
           DependentFunctionTemplateSpecializationInfo *>())
     return TSK_ExplicitSpecialization;
-
+  #endif
   return TSK_Undeclared;
 }
 
@@ -4231,10 +4237,10 @@ FunctionDecl::getTemplateSpecializationKindForInstantiation() const {
           TemplateOrSpecialization.dyn_cast<MemberSpecializationInfo *>())
     return MSInfo->getTemplateSpecializationKind();
 
-  #if 0
+  #if 1
   if (TemplateOrSpecialization.is<
           DependentFunctionTemplateSpecializationInfo *>() &&
-      (!getFriendObjectKind()))
+      !(getFriendObjectKind() && isThisDeclarationADefinition()))
     return TSK_ExplicitSpecialization;
   #else
   if (TemplateOrSpecialization.is<

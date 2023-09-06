@@ -1155,7 +1155,14 @@ Sema::CheckOverload(Scope *S, FunctionDecl *New, const LookupResult &Old,
       !New->getFriendObjectKind();
 
     if (FunctionDecl *OldF = OldD->getAsFunction()) {
-      if (!IsOverload(New, OldF, UseMemberUsingDeclRules)) {
+      // If either function is an explicit specialization,
+      // ignore the trailing requires clause.
+      bool ConsiderRequiresClauses =
+          New->getTemplateSpecializationKind() != TSK_ExplicitSpecialization &&
+          OldF->getTemplateSpecializationKind() != TSK_ExplicitSpecialization;
+
+      if (!IsOverload(New, OldF, UseMemberUsingDeclRules,
+          /*ConsiderCudaAttrs*/true, ConsiderRequiresClauses)) {
         if (UseMemberUsingDeclRules && OldIsUsingDecl) {
           HideUsingShadowDecl(S, cast<UsingShadowDecl>(*I));
           continue;

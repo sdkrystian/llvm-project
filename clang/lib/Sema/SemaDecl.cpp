@@ -12129,7 +12129,8 @@ bool Sema::CheckFunctionDeclaration(Scope *S, FunctionDecl *NewFD,
           // dependent member function templates. We should be using
           // getTemplateSpecializationKindForInstantiation, but this alone does
           // not fix trailing requires-clauses for such declarations.
-          !NewFD->isTemplateInstantiation()) {
+          !clang::isTemplateInstantiation(
+              NewFD->getTemplateSpecializationKindForInstantiation())) {
         Diag(TRC->getBeginLoc(), diag::err_constrained_non_templated_function);
       }
     }

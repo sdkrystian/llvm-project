@@ -654,14 +654,27 @@ Sema::SetupConstraintCheckingTemplateArgumentsAndScope(
 bool Sema::CheckFunctionConstraints(const FunctionDecl *FD,
                                     ConstraintSatisfaction &Satisfaction,
                                     SourceLocation UsageLoc,
-                                    bool ForOverloadResolution) {
+                                    bool ForOverloadResolution,
+                                    bool SkipSpecializations) {
   // Don't check constraints if the function is dependent. Also don't check if
   // this is a function template specialization, as the call to
-  // CheckinstantiatedFunctionTemplateConstraints after this will check it
+  // CheckInstantiatedFunctionTemplateConstraints after this will check it
   // better.
+  #if 0
   if (FD->isDependentContext() ||
       FD->getTemplatedKind() ==
           FunctionDecl::TK_FunctionTemplateSpecialization) {
+  #elif 0
+  if (FD->isDependentContext() ||
+      (SkipSpecializations && FD->getTemplatedKind() ==
+          FunctionDecl::TK_FunctionTemplateSpecialization)) {
+  #else
+  if (FD->isDependentContext() ||
+      (FD->getTemplatedKind() ==
+          FunctionDecl::TK_FunctionTemplateSpecialization &&
+      clang::isTemplateInstantiation(
+          FD->getTemplateSpecializationKind()))) {
+   #endif
     Satisfaction.IsSatisfied = true;
     return false;
   }
@@ -868,6 +881,11 @@ bool Sema::CheckInstantiatedFunctionTemplateConstraints(
   // inside CheckConstraintsSatisfaction.
   SmallVector<const Expr *, 3> TemplateAC;
   Template->getAssociatedConstraints(TemplateAC);
+  #if 0
+  if (Decl->getTemplateSpecializationKind() == TSK_ExplicitSpecialization) {
+      Decl->getAssociatedConstraints(TemplateAC);
+  }
+  #endif
   if (TemplateAC.empty()) {
     Satisfaction.IsSatisfied = true;
     return false;
