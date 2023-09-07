@@ -2631,30 +2631,34 @@ Sema::SubstFunctionType(FunctionDecl *D,
   TypeLocBuilder TLB;
   TLB.reserve(TL.getFullDataSize());
 
-  CXXRecordDecl *ThisContext = nullptr;
-  Qualifiers ThisQuals;
-  if (auto *Method = dyn_cast<CXXMethodDecl>(D)) {
-    ThisContext = cast<CXXRecordDecl>(Method->getDeclContext());
-    ThisQuals = Method->getMethodQualifiers();
-  }
-
   TemplateInstantiator Instantiator(
       *this, TemplateArgs, D->getLocation(), D->getDeclName());
   Instantiator.setEvaluateConstraints(EvaluateConstraints);
 
-  QualType Result = Instantiator.inherited::TransformFunctionProtoType(
-      TLB, TL.getAs<FunctionProtoTypeLoc>(), ThisContext, ThisQuals,
-      [&](FunctionProtoType::ExceptionSpecInfo &ESI, bool &Changed) {
-        // Exception specification is part of the type after C++17
-        // FIXME: Set the exception specification to EST_Uninstantiated here,
-        // instead of rebuilding the function type again later.
-        if(!getLangOpts().CPlusPlus17)
-          return false;
-        SmallVector<QualType, 4> ExceptionStorage;
-        return Instantiator.TransformExceptionSpec(
-            D->getLocation(), ESI, ExceptionStorage, Changed);
-      });
+  QualType Result;
+  if (auto FPTL = TL.getAs<FunctionProtoTypeLoc>()) {
+    CXXRecordDecl *ThisContext = nullptr;
+    Qualifiers ThisQuals;
+    if (auto *Method = dyn_cast<CXXMethodDecl>(D)) {
+      ThisContext = cast<CXXRecordDecl>(Method->getDeclContext());
+      ThisQuals = Method->getMethodQualifiers();
+    }
 
+    Result = Instantiator.inherited::TransformFunctionProtoType(
+        TLB, FPTL, ThisContext, ThisQuals,
+        [&](FunctionProtoType::ExceptionSpecInfo &ESI, bool &Changed) {
+          // Exception specification is part of the type after C++17
+          // FIXME: Set the exception specification to EST_Uninstantiated here,
+          // instead of rebuilding the function type again later.
+          if(!getLangOpts().CPlusPlus17)
+            return false;
+          SmallVector<QualType, 4> ExceptionStorage;
+          return Instantiator.TransformExceptionSpec(
+              D->getLocation(), ESI, ExceptionStorage, Changed);
+        });
+  } else {
+    Result = Instantiator.TransformType(TLB, TL);
+  }
   if (Result.isNull())
     return nullptr;
 

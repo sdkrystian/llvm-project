@@ -10531,11 +10531,12 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
     if (getLangOpts().CUDA && !isFunctionTemplateSpecialization)
       maybeAddCUDAHostDeviceAttrs(NewFD, Previous);
 
+    #if 0
     if (isFriend) {
       FilterLookupForFriendFunction(*this,
           D, Previous, HasExplicitTemplateArgs);
     }
-
+    #endif
     // Handle explict specializations of function templates
     // and friend function declarations with an explicit
     // template argument list.

@@ -9391,10 +9391,10 @@ bool Sema::CheckDependentFunctionTemplateSpecialization(
 /// \param QualifiedFriend whether this is a lookup for a qualified friend
 /// declaration with no explicit template argument list that might be
 /// befriending a function template specialization.
-#if 0
 bool Sema::CheckFunctionTemplateSpecialization(
     FunctionDecl *FD, TemplateArgumentListInfo *ExplicitTemplateArgs,
     LookupResult &Previous, bool IsDefinition, bool QualifiedFriend) {
+#if 0
   // The set of function template specializations that could match this
   // explicit function template specialization.
   UnresolvedSet<8> Candidates;
@@ -9619,19 +9619,17 @@ bool Sema::CheckFunctionTemplateSpecialization(
   Previous.addDecl(Specialization);
   return false;
 }
+
+
 #else
-
-
-bool Sema::CheckFunctionTemplateSpecialization(
-    FunctionDecl *FD, TemplateArgumentListInfo *ExplicitTemplateArgs,
-    LookupResult &Previous, bool IsDefinition, bool QualifiedFriend) {
   // The set of function template specializations that could match this
   // explicit function template specialization.
   UnresolvedSet<8> Candidates;
   TemplateSpecCandidateSet FailedCandidates(FD->getLocation(),
                                             /*ForTakingAddress=*/false);
 
-  llvm::SmallDenseMap<const FunctionTemplateDecl *, TemplateArgumentList *, 8>
+  llvm::SmallDenseMap<const FunctionTemplateDecl *,
+      std::pair<TemplateArgumentList *, TypeSourceInfo *>, 8>
       ConvertedTemplateArgs;
 
   DeclContext *FDLookupContext = FD->getDeclContext()->getRedeclContext();
@@ -9678,6 +9676,7 @@ bool Sema::CheckFunctionTemplateSpecialization(
       // FIXME: It is somewhat wasteful to build
       TemplateDeductionInfo Info(FailedCandidates.getLocation());
       TemplateArgumentList *DeducedArgs = nullptr;
+      TypeSourceInfo *DeducedType = nullptr;
       #if 0
       if (TemplateDeductionResult TDK = DeduceTemplateArguments(
               cast<FunctionTemplateDecl>(Template->getFirstDecl()),
@@ -9688,7 +9687,7 @@ bool Sema::CheckFunctionTemplateSpecialization(
               cast<FunctionTemplateDecl>(Template->getFirstDecl()),
               FD,
               ExplicitTemplateArgs ? &Args : nullptr,
-              DeducedArgs, Info)) {
+              DeducedArgs, DeducedType, Info)) {
 
       #endif
         // Template argument deduction failed; record why it failed, so
@@ -9716,7 +9715,8 @@ bool Sema::CheckFunctionTemplateSpecialization(
       }
 
       // Record this candidate.
-      ConvertedTemplateArgs[Template] = DeducedArgs;
+      ConvertedTemplateArgs[Template] =
+          std::make_pair(DeducedArgs, DeducedType);
       Candidates.addDecl(Template, I.getAccess());
     }
   }
@@ -9761,7 +9761,7 @@ bool Sema::CheckFunctionTemplateSpecialization(
   // Ignore access information;  it doesn't figure into redeclaration checking.
   // FunctionDecl *Specialization = cast<FunctionDecl>(*Result);
   auto *Primary = cast<FunctionTemplateDecl>(*Result);
-  auto *DeducedArgs = ConvertedTemplateArgs[Primary];
+  auto *DeducedArgs = ConvertedTemplateArgs[Primary].first;
   assert(DeducedArgs && "missing function template specialization arguments?");
   void* InsertPos = nullptr;
   auto *PrevFD = Primary->findSpecialization(DeducedArgs->asArray(), InsertPos);
@@ -9783,6 +9783,27 @@ bool Sema::CheckFunctionTemplateSpecialization(
       NewMethod->setStorageClass(SC_Static);
   }
 
+  auto *DeducedType = ConvertedTemplateArgs[Primary].second;
+  auto FPT = DeducedType->getTypeLoc().getAs<FunctionProtoTypeLoc>();
+  assert(FPT.getNumParams() == FD->getNumParams() &&
+      "Mismatched number of function parameters");
+  for (unsigned Idx = 0; Idx < FPT.getNumParams(); ++Idx) {
+    auto *OldParm = FPT.getParam(Idx);
+    auto *NewParm = FD->getParamDecl(Idx);
+    if (!OldParm->hasDefaultArg())
+      continue;
+
+    if (OldParm->hasUninstantiatedDefaultArg()) {
+      NewParm->setUninstantiatedDefaultArg(
+          OldParm->getUninstantiatedDefaultArg());
+    } else if (OldParm->hasUnparsedDefaultArg()) {
+      NewParm->setUnparsedDefaultArg();
+      UnparsedDefaultArgLocs[NewParm] = OldParm->getBeginLoc();
+    } else {
+      NewParm->setDefaultArg(OldParm->getDefaultArg());
+    }
+    NewParm->setHasInheritedDefaultArg();
+  }
   // Primary->findSpecialization()
   // FunctionTemplateSpecializationInfo *SpecInfo
   //   = Specialization->getTemplateSpecializationInfo();
@@ -9900,10 +9921,10 @@ bool Sema::CheckFunctionTemplateSpecialization(
   if (PrevFD)
     Previous.addDecl(PrevFD);
   return false;
+#endif
 }
 
 
-#endif
 
 
 

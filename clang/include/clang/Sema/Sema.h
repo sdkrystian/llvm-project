@@ -9225,6 +9225,7 @@ public:
                           FunctionDecl* Specialized,
                           TemplateArgumentListInfo *ExplicitTemplateArgs,
                           TemplateArgumentList *&DeducedTemplateArgs,
+                          TypeSourceInfo *&DeducedType,
                           sema::TemplateDeductionInfo &Info);
 
   TemplateDeductionResult

@@ -3062,7 +3062,7 @@ static Sema::TemplateDeductionResult FinishTemplateArgumentDeduction(
     SmallVectorImpl<DeducedTemplateArgument> &Deduced,
     TemplateDeductionInfo &Info,
     TemplateArgumentList *&TemplateArgs,
-    QualType &SpecializationType) {
+    TypeSourceInfo *&DeducedType) {
   // Unevaluated SFINAE context.
   EnterExpressionEvaluationContext Unevaluated(
       S, Sema::ExpressionEvaluationContext::Unevaluated);
@@ -3114,11 +3114,19 @@ static Sema::TemplateDeductionResult FinishTemplateArgumentDeduction(
   }
 
   LocalInstantiationScope Scope(S);
+  #if 0
   MultiLevelTemplateArgumentList MLTAL(
       Template, CanonicalBuilder, /*Final=*/true);
 
   TypeSourceInfo* SpecializationTSI = S.SubstFunctionType(
         Function, MLTAL, /*EvaluateConstraints*/false);
+  #else
+  MultiLevelTemplateArgumentList MLTAL(
+      Template, CanonicalBuilder, /*Final=*/true);
+
+  TypeSourceInfo* SpecializationTSI = S.SubstFunctionType(
+        Function, MLTAL, /*EvaluateConstraints*/false);
+  #endif
 
   #if 0
   TemplateDeclInstantiator Instantiator(S, Owner, MLTAL);
@@ -3168,10 +3176,10 @@ static Sema::TemplateDeductionResult FinishTemplateArgumentDeduction(
   if (Trap.hasErrorOccurred())
     return Sema::TDK_SubstitutionFailure;
 
-  SpecializationType = SpecializationTSI->getType();
+  DeducedType = SpecializationTSI;
   #endif
 
-  TemplateArgs = TemplateArgumentList::CreateCopy(S.Context, CanonicalBuilder);
+  TemplateArgs = TemplateArgumentList::CreateCopy(S.Context, SugaredBuilder);
 
   return Sema::TDK_Success;
 }
@@ -4581,6 +4589,7 @@ Sema::TemplateDeductionResult Sema::DeduceTemplateArguments(
     FunctionDecl* Specialized,
     TemplateArgumentListInfo *ExplicitTemplateArgs,
     TemplateArgumentList *&DeducedTemplateArgs,
+    TypeSourceInfo *&DeducedType,
     TemplateDeductionInfo &Info) {
   if (FunctionTemplate->isInvalidDecl())
     return TDK_Invalid;
@@ -4656,14 +4665,15 @@ Sema::TemplateDeductionResult Sema::DeduceTemplateArguments(
   }
 
   TemplateArgumentList* TemplateArgs;
-  QualType SpecializationType;
+  TypeSourceInfo *DeducedTSI = nullptr;
   runWithSufficientStackSpace(Info.getLocation(), [&] {
     Result = ::FinishTemplateArgumentDeduction(*this,
-        FunctionTemplate, Deduced, Info, TemplateArgs, SpecializationType);
+        FunctionTemplate, Deduced, Info, TemplateArgs, DeducedTSI);
   });
   if (Result)
     return Result;
 
+  QualType SpecializationType = DeducedTSI->getType();
   ArgFunctionType = adjustCCAndNoReturn(ArgFunctionType, SpecializationType,
                                         /*AdjustExceptionSpec*/false);
 
@@ -4685,6 +4695,7 @@ Sema::TemplateDeductionResult Sema::DeduceTemplateArguments(
     return TDK_NonDeducedMismatch;
   }
 
+  DeducedType = DeducedTSI;
   DeducedTemplateArgs = TemplateArgs;
   return TDK_Success;
 }
