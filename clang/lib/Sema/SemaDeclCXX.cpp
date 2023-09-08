@@ -304,19 +304,19 @@ ExprResult Sema::ConvertParamDefaultArgument(ParmVarDecl *Param, Expr *Arg,
 
 void Sema::SetParamDefaultArgument(ParmVarDecl *Param, Expr *Arg,
                                    SourceLocation EqualLoc) {
-  // Add the default argument to the parameter
-  Param->setDefaultArg(Arg);
-
   // We have already instantiated this parameter; provide each of the
   // instantiations with the uninstantiated default argument.
   UnparsedDefaultArgInstantiationsMap::iterator InstPos
     = UnparsedDefaultArgInstantiations.find(Param);
   if (InstPos != UnparsedDefaultArgInstantiations.end()) {
-    for (unsigned I = 0, N = InstPos->second.size(); I != N; ++I)
-      InstPos->second[I]->setUninstantiatedDefaultArg(Arg);
-
+    auto Params = std::move(InstPos->second);
     // We're done tracking this parameter's instantiations.
     UnparsedDefaultArgInstantiations.erase(InstPos);
+    // Set the default argument and update any dependent arguments
+    for (ParmVarDecl *Pending : Params) {
+      Pending->setUninstantiatedDefaultArg(Arg);
+      SetParamDefaultArgument(Pending, Arg, EqualLoc);
+    }
   }
 }
 
@@ -365,6 +365,9 @@ Sema::ActOnParamDefaultArgument(Decl *param, SourceLocation EqualLoc,
   if (DefaultArgChecker.Visit(DefaultArg))
     return ActOnParamDefaultArgumentError(param, EqualLoc, DefaultArg);
 
+  // Add the default argument to the parameter
+  Param->setDefaultArg(DefaultArg);
+  // Update any pending instantiations
   SetParamDefaultArgument(Param, DefaultArg, EqualLoc);
 }
 

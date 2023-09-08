@@ -3179,7 +3179,7 @@ static Sema::TemplateDeductionResult FinishTemplateArgumentDeduction(
   DeducedType = SpecializationTSI;
   #endif
 
-  TemplateArgs = TemplateArgumentList::CreateCopy(S.Context, SugaredBuilder);
+  TemplateArgs = TemplateArgumentList::CreateCopy(S.Context, CanonicalBuilder);
 
   return Sema::TDK_Success;
 }
@@ -4601,23 +4601,6 @@ Sema::TemplateDeductionResult Sema::DeduceTemplateArguments(
   QualType FunctionType = Function->getType();
   QualType ArgFunctionType = Specialized->getType();
 
-  Qualifiers MethodQuals;
-  if (CXXMethodDecl *Method = dyn_cast<CXXMethodDecl>(Function)) {
-    MethodQuals = Method->getMethodQualifiers();
-    // Constexpr non-static member function are implicitly const before C++14.
-    // Add the implicit const if and only if the function template we are
-    // deducing arguments from is a non-static member function.
-    if (!getLangOpts().CPlusPlus14 &&
-        !Method->isStatic() &&
-        Specialized->isConstexpr()) {
-      const FunctionProtoType *FPT = ArgFunctionType->castAs<FunctionProtoType>();
-      FunctionProtoType::ExtProtoInfo EPI = FPT->getExtProtoInfo();
-      EPI.TypeQuals.addConst();
-      ArgFunctionType = Context.getFunctionType(
-          FPT->getReturnType(), FPT->getParamTypes(), EPI);
-    }
-  }
-
   TemplateDeductionResult Result;
   // Substitute any explicit template arguments.
   LocalInstantiationScope InstScope(*this);
@@ -4637,8 +4620,23 @@ Sema::TemplateDeductionResult Sema::DeduceTemplateArguments(
   }
 
   // Allow arbitrary mismatches of calling convention and noreturn.
-  ArgFunctionType = adjustCCAndNoReturn(ArgFunctionType, FunctionType,
-                                        /*AdjustExceptionSpec*/false);
+  // ArgFunctionType = adjustCCAndNoReturn(ArgFunctionType, FunctionType,
+  //                                       /*AdjustExceptionSpec*/false);
+
+  #if 1
+  if (CXXMethodDecl *Method = dyn_cast<CXXMethodDecl>(Function)) {
+
+    if (!getLangOpts().CPlusPlus14 &&
+        !Method->isStatic() &&
+        Specialized->isConstexpr()) {
+      const auto *FPT = ArgFunctionType->castAs<FunctionProtoType>();
+      FunctionProtoType::ExtProtoInfo EPI = FPT->getExtProtoInfo();
+      EPI.TypeQuals.addConst();
+      ArgFunctionType = Context.getFunctionType(
+          FPT->getReturnType(), FPT->getParamTypes(), EPI);
+    }
+  }
+  #endif
 
   // Unevaluated SFINAE context.
   EnterExpressionEvaluationContext Unevaluated(
@@ -4674,8 +4672,8 @@ Sema::TemplateDeductionResult Sema::DeduceTemplateArguments(
     return Result;
 
   QualType SpecializationType = DeducedTSI->getType();
-  ArgFunctionType = adjustCCAndNoReturn(ArgFunctionType, SpecializationType,
-                                        /*AdjustExceptionSpec*/false);
+  //ArgFunctionType = adjustCCAndNoReturn(ArgFunctionType, SpecializationType,
+  //                                      /*AdjustExceptionSpec*/false);
 
   // Revert placeholder types in the return type back to undeduced types so
   // that the comparison below compares the declared return types.

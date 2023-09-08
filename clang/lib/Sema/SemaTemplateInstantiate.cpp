@@ -2621,8 +2621,9 @@ Sema::SubstFunctionType(FunctionDecl *D,
   assert(CurrentInstantiationScope &&
          "Cannot instantiate function type without a"
          "local instantiation scope");
-
+  // BAD! implicitly added cv-quals not respected
   TypeSourceInfo *TSI = D->getTypeSourceInfo();
+  // TypeSourceInfo *TSI = Context.getTrivialTypeSourceInfo(D->getType());
   assert(TSI && "FunctionDecl missing TypeSourceInfo");
   if (!NeedsInstantiationAsFunctionType(TSI))
     return TSI;
@@ -2639,11 +2640,11 @@ Sema::SubstFunctionType(FunctionDecl *D,
   if (auto FPTL = TL.getAs<FunctionProtoTypeLoc>()) {
     CXXRecordDecl *ThisContext = nullptr;
     Qualifiers ThisQuals;
-    if (auto *Method = dyn_cast<CXXMethodDecl>(D)) {
+    CXXMethodDecl *Method = dyn_cast<CXXMethodDecl>(D);
+    if (Method) {
       ThisContext = cast<CXXRecordDecl>(Method->getDeclContext());
       ThisQuals = Method->getMethodQualifiers();
     }
-
     Result = Instantiator.inherited::TransformFunctionProtoType(
         TLB, FPTL, ThisContext, ThisQuals,
         [&](FunctionProtoType::ExceptionSpecInfo &ESI, bool &Changed) {
@@ -2656,9 +2657,20 @@ Sema::SubstFunctionType(FunctionDecl *D,
           return Instantiator.TransformExceptionSpec(
               D->getLocation(), ESI, ExceptionStorage, Changed);
         });
+    // Constexpr non-static member function are implicitly const before C++14.
+    if (!getLangOpts().CPlusPlus14 && !Result.isNull() &&
+        Method && !Method->isStatic() && Method->isConstexpr()) {
+      const auto *FPT = Result->castAs<FunctionProtoType>();
+      FunctionProtoType::ExtProtoInfo EPI = FPT->getExtProtoInfo();
+      EPI.TypeQuals.addConst();
+      Result = Context.getFunctionType(
+          FPT->getReturnType(), FPT->getParamTypes(), EPI);
+      TLB.TypeWasModifiedSafely(Result);
+    }
   } else {
     Result = Instantiator.TransformType(TLB, TL);
   }
+
   if (Result.isNull())
     return nullptr;
 

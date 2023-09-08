@@ -9618,7 +9618,7 @@ bool Sema::CheckFunctionTemplateSpecialization(
   Previous.clear();
   Previous.addDecl(Specialization);
   return false;
-}
+
 
 
 #else
@@ -9783,10 +9783,13 @@ bool Sema::CheckFunctionTemplateSpecialization(
       NewMethod->setStorageClass(SC_Static);
   }
 
-  auto *DeducedType = ConvertedTemplateArgs[Primary].second;
-  auto FPT = DeducedType->getTypeLoc().getAs<FunctionProtoTypeLoc>();
+  TypeSourceInfo *DeducedType = ConvertedTemplateArgs[Primary].second;
+  auto FPT = DeducedType->getTypeLoc().getAsAdjusted<FunctionProtoTypeLoc>();
+
+  assert(!FPT.isNull() && "Invalid type");
   assert(FPT.getNumParams() == FD->getNumParams() &&
       "Mismatched number of function parameters");
+  // FIXME: Diagnose explicit specializations with default arguments.
   for (unsigned Idx = 0; Idx < FPT.getNumParams(); ++Idx) {
     auto *OldParm = FPT.getParam(Idx);
     auto *NewParm = FD->getParamDecl(Idx);
@@ -9798,9 +9801,9 @@ bool Sema::CheckFunctionTemplateSpecialization(
           OldParm->getUninstantiatedDefaultArg());
     } else if (OldParm->hasUnparsedDefaultArg()) {
       NewParm->setUnparsedDefaultArg();
-      UnparsedDefaultArgLocs[NewParm] = OldParm->getBeginLoc();
+      UnparsedDefaultArgInstantiations[OldParm].push_back(NewParm);
     } else {
-      NewParm->setDefaultArg(OldParm->getDefaultArg());
+      NewParm->setDefaultArg(OldParm->getInit());
     }
     NewParm->setHasInheritedDefaultArg();
   }
@@ -11016,11 +11019,13 @@ DeclResult Sema::ActOnExplicitInstantiation(Scope *S,
     return true;
   }
 
+  #if 0
   FunctionDecl *PrevDecl = Specialization->getPreviousDecl();
   if (!PrevDecl && Specialization->isThisDeclarationADefinition())
     PrevDecl = Specialization;
 
   if (PrevDecl) {
+
     bool HasNoEffect = false;
     if (CheckSpecializationInstantiationRedecl(D.getIdentifierLoc(), TSK,
                                                PrevDecl,
@@ -11034,6 +11039,33 @@ DeclResult Sema::ActOnExplicitInstantiation(Scope *S,
     if (HasNoEffect)
       return (Decl*) nullptr;
   }
+  #else
+
+  FunctionDecl *PrevDecl = Specialization;
+  if (PrevDecl->getTemplateSpecializationKind() !=
+      TSK_ExplicitSpecialization) {
+    PrevDecl = Specialization->getPreviousDecl();
+    if (!PrevDecl && Specialization->isThisDeclarationADefinition())
+      PrevDecl = Specialization;
+  }
+
+  if (PrevDecl) {
+
+    bool HasNoEffect = false;
+    if (CheckSpecializationInstantiationRedecl(D.getIdentifierLoc(), TSK,
+                                               PrevDecl,
+                                     PrevDecl->getTemplateSpecializationKind(),
+                                          PrevDecl->getPointOfInstantiation(),
+                                               HasNoEffect))
+      return true;
+
+    // FIXME: We may still want to build some representation of this
+    // explicit specialization.
+    if (HasNoEffect)
+      return (Decl*) nullptr;
+  }
+
+  #endif
 
   // HACK: libc++ has a bug where it attempts to explicitly instantiate the
   // functions
