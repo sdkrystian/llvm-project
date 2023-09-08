@@ -17882,6 +17882,7 @@ void Sema::SetDeclDeleted(Decl *Dcl, SourceLocation DelLoc) {
   // Deleted function does not have a body.
   Fn->setWillHaveBody(false);
 
+  #if 0
   if (const FunctionDecl *Prev = Fn->getPreviousDecl()) {
     // Don't consider the implicit declaration we generate for explicit
     // specializations. FIXME: Do not generate these implicit declarations.
@@ -17904,6 +17905,26 @@ void Sema::SetDeclDeleted(Decl *Dcl, SourceLocation DelLoc) {
     // instantiated redeclaration.
     Fn = Fn->getCanonicalDecl();
   }
+  #else
+  // C++ [dcl.fct.def.delete]p4:
+  //   A deleted definition of a function shall be the first declaration of
+  //   the function or, for an explicit specialization of a function template,
+  //   the first declaration of that specialization.
+  if (const FunctionDecl *Prev = Fn->getPreviousDecl()) {
+    if (!Prev->isDefined()) {
+      Diag(DelLoc, diag::err_deleted_decl_not_first);
+      Diag(Prev->getLocation().isInvalid() ? DelLoc : Prev->getLocation(),
+           Prev->isImplicit() ? diag::note_previous_implicit_declaration
+                              : diag::note_previous_declaration);
+      // We can't recover from this; the declaration might have already
+      // been used.
+      Fn->setInvalidDecl();
+      return;
+    }
+    // FIXME: Is this needed anymore?
+    Fn = Fn->getCanonicalDecl();
+  }
+  #endif
 
   // dllimport/dllexport cannot be deleted.
   if (const InheritableAttr *DLLAttr = getDLLAttr(Fn)) {

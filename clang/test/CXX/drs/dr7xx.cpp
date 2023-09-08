@@ -190,15 +190,13 @@ namespace dr727 { // dr727: partial
   }
 
   template<typename T, typename U> struct Collision {
-    // FIXME: Missing diagnostic for duplicate function explicit specialization declaration.
     template<typename> int f1();
-    template<> int f1<T>();
-    template<> int f1<U>();
+    template<> int f1<T>(); // expected-note {{previous}}
+    template<> int f1<U>(); // expected-error {{instantiate to the same signature}}
 
-    // FIXME: Missing diagnostic for fucntion redefinition!
     template<typename> int f2();
-    template<> int f2<T>() {}
-    template<> int f2<U>() {}
+    template<> int f2<T>() {} // expected-note {{previous}}
+    template<> int f2<U>() {} // expected-error {{instantiate to the same signature}}
 
     template<typename> static int v1; // expected-error 0-1{{C++14 extension}}
     template<> static int v1<T>; // expected-note {{previous}}
