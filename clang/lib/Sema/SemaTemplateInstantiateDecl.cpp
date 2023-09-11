@@ -2662,19 +2662,19 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
         return nullptr;
     }
 
-    // Map the candidate templates to their instantiations.
-    for (unsigned I = 0, E = Info->getNumTemplates(); I != E; ++I) {
-      Decl *Temp = SemaRef.FindInstantiatedDecl(D->getLocation(),
-                                                Info->getTemplate(I),
-                                                TemplateArgs);
-      if (!Temp) return nullptr;
-
-      Previous.addDecl(cast<FunctionTemplateDecl>(Temp));
+    // Map the candidates for the primary template to their instantiations.
+    for (FunctionTemplateDecl *FTD : Info->getCandidates()) {
+      if (NamedDecl* ND = SemaRef.FindInstantiatedDecl(
+          D->getLocation(), FTD, TemplateArgs))
+        Previous.addDecl(ND);
+      else
+        return nullptr;
     }
 
     if (SemaRef.CheckFunctionTemplateSpecialization(Method,
-                                                    &ExplicitArgs,
-                                                    Previous))
+                                            &ExplicitArgs,
+                                            Previous,
+                                            D->isThisDeclarationADefinition()))
       Method->setInvalidDecl();
 
     IsExplicitSpecialization = true;
@@ -2689,8 +2689,9 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
       return nullptr;
 
     if (SemaRef.CheckFunctionTemplateSpecialization(Method,
-                                                    &ExplicitArgs,
-                                                    Previous))
+                                            &ExplicitArgs,
+                                            Previous,
+                                            D->isThisDeclarationADefinition()))
       Method->setInvalidDecl();
 
     IsExplicitSpecialization = true;
@@ -2710,7 +2711,7 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
     if (Previous.isSingleTagDecl())
       Previous.clear();
   }
-  #else
+  #if 0
   // Substitute any explicitly specified template arguments.
   TemplateArgumentListInfo TemplateArgsWritten;
   if (const auto *ArgsWritten = D->getTemplateSpecializationArgsAsWritten()) {
@@ -2720,6 +2721,8 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
                                        TemplateArgsWritten))
       return nullptr;
   }
+  #endif
+  #else
 
   // If the name of this function was written as a template-id, instantiate
   // the explicit template arguments.
@@ -2781,13 +2784,22 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
   #endif
 
   if (IsExplicitSpecialization) {
+    // Substitute any explicitly specified template arguments.
+    TemplateArgumentListInfo TemplateArgsWritten;
+    if (auto *ArgsWritten = D->getTemplateSpecializationArgsAsWritten()) {
+      TemplateArgsWritten.setLAngleLoc(ArgsWritten->getLAngleLoc());
+      TemplateArgsWritten.setRAngleLoc(ArgsWritten->getRAngleLoc());
+      if (SemaRef.SubstTemplateArguments(ArgsWritten->arguments(),
+                                         TemplateArgs,
+                                         TemplateArgsWritten))
+        return nullptr;
+    }
     if (SemaRef.CheckFunctionTemplateSpecialization(Method,
                                             &TemplateArgsWritten,
                                             Previous,
                                             D->isThisDeclarationADefinition()))
       Method->setInvalidDecl();
   }
-
   #endif
 
   // Per [temp.inst], default arguments in member functions of local classes
