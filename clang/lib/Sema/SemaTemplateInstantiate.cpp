@@ -2653,6 +2653,11 @@ Sema::SubstFunctionType(FunctionDecl *D,
           // instead of rebuilding the function type again later.
           if(!getLangOpts().CPlusPlus17)
             return false;
+          InstantiatingTemplate Instantiation(*this,
+              D->getLocation(), D,
+              InstantiatingTemplate::ExceptionSpecification());
+          if (Instantiation.isInvalid())
+            return true;
           SmallVector<QualType, 4> ExceptionStorage;
           return Instantiator.TransformExceptionSpec(
               D->getLocation(), ESI, ExceptionStorage, Changed);

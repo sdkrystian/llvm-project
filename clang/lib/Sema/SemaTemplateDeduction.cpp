@@ -3056,134 +3056,6 @@ static Sema::TemplateDeductionResult FinishTemplateArgumentDeduction(
   return Sema::TDK_Success;
 }
 
-/// Complete template argument deduction for a function template.
-static Sema::TemplateDeductionResult FinishTemplateArgumentDeduction(
-    Sema &S, FunctionTemplateDecl *Template,
-    SmallVectorImpl<DeducedTemplateArgument> &Deduced,
-    TemplateDeductionInfo &Info,
-    TemplateArgumentList *&TemplateArgs,
-    TypeSourceInfo *&DeducedType) {
-  // Unevaluated SFINAE context.
-  EnterExpressionEvaluationContext Unevaluated(
-      S, Sema::ExpressionEvaluationContext::Unevaluated);
-  Sema::SFINAETrap Trap(S);
-
-  FunctionDecl* Function = Template->getTemplatedDecl();
-  Sema::ContextRAII SavedContext(S, Function);
-
-  SmallVector<TemplateArgument, 4> DeducedArgs(
-      Deduced.begin(), Deduced.end());
-  Sema::InstantiatingTemplate Instantiation(
-      S, Info.getLocation(), Template, DeducedArgs,
-      Sema::CodeSynthesisContext::DeducedTemplateArgumentSubstitution, Info);
-  if (Instantiation.isInvalid())
-    return Sema::TDK_InstantiationDepth;
-
-  // C++ [temp.deduct.type]p2:
-  //   [...] or if any template argument remains neither deduced nor
-  //   explicitly specified, template argument deduction fails.
-  SmallVector<TemplateArgument, 4> SugaredBuilder, CanonicalBuilder;
-  if (auto Result = ConvertDeducedTemplateArguments(
-          S, Template, /*IsDeduced*/ false, Deduced,
-          Info, SugaredBuilder, CanonicalBuilder))
-    return Result;
-
-  if (Trap.hasErrorOccurred())
-    return Sema::TDK_SubstitutionFailure;
-
-  // Substitute the deduced template arguments into the function template
-  // declaration to produce the function template specialization.
-  DeclContext *Owner = Template->getDeclContext();
-  if (Template->getFriendObjectKind())
-    Owner = Template->getLexicalDeclContext();
-  // additional check for inline friend,
-  // ```
-  //   template <class F1> int foo(F1 X);
-  //   template <int A1> struct A {
-  //     template <class F1> friend int foo(F1 X) { return A1; }
-  //   };
-  //   template struct A<1>;
-  //   int a = foo(1.0);
-  // ```
-  const FunctionDecl *Friend;
-  if (Function->getFriendObjectKind() == Decl::FriendObjectKind::FOK_None &&
-      Function->isDefined(Friend, /*CheckForPendingFriendDefinition*/ true) &&
-      Friend->getFriendObjectKind() != Decl::FriendObjectKind::FOK_None) {
-    Function = const_cast<FunctionDecl *>(Friend);
-    Owner = Function->getLexicalDeclContext();
-  }
-
-  LocalInstantiationScope Scope(S);
-  #if 0
-  MultiLevelTemplateArgumentList MLTAL(
-      Template, CanonicalBuilder, /*Final=*/true);
-
-  TypeSourceInfo* SpecializationTSI = S.SubstFunctionType(
-        Function, MLTAL, /*EvaluateConstraints*/false);
-  #else
-  MultiLevelTemplateArgumentList MLTAL(
-      Template, CanonicalBuilder, /*Final=*/true);
-
-  TypeSourceInfo* SpecializationTSI = S.SubstFunctionType(
-        Function, MLTAL, /*EvaluateConstraints*/false);
-  #endif
-
-  #if 0
-  TemplateDeclInstantiator Instantiator(S, Owner, MLTAL);
-  Instantiator.setEvaluateConstraints(false);
-  S.runWithSufficientStackSpace(Function->getLocation(), [&] {
-    SmallVector<ParmVarDecl *, 4> Params;
-    SpecializationTSI = Instantiator.SubstFunctionType(Function, Params,
-        /*InstantiateExceptionSpec*/S.getLangOpts().CPlusPlus17);
-  });
-  #endif
-  if (!SpecializationTSI)
-    return Sema::TDK_SubstitutionFailure;
-
-  // Check constraint satisfaction.
-  if (auto Result = CheckDeducedArgumentConstraints(
-      S, Template, SugaredBuilder, CanonicalBuilder, Info))
-    return Result;
-
-  #if 0
-  // In C++1z onwards, exception specifications are part of the function type,
-  // so substitution into the type must also substitute into the exception
-  // specification.
-  auto *FPT = SubstTSI->getType()->castAs<FunctionProtoType>();
-  auto EPI = FPT->getExtProtoInfo();
-  SmallVector<QualType, 4> ExceptionStorage;
-  if (S.getLangOpts().CPlusPlus17 &&
-      S.SubstExceptionSpec(Function->getLocation(), EPI.ExceptionSpec,
-                           ExceptionStorage, MLTAL))
-    return Sema::TDK_SubstitutionFailure;
-
-  if (Trap.hasErrorOccurred())
-    return Sema::TDK_SubstitutionFailure;
-  #if 0
-  SmallVector<QualType, 4> ParamTypes(FPT->param_types());
-  SpecializationType = S.BuildFunctionType(FPT->getReturnType(),
-                                    ParamTypes,
-                                    Function->getLocation(),
-                                    Function->getDeclName(),
-                                    EPI);
-  if (SpecializationType.isNull() || Trap.hasErrorOccurred())
-    return Sema::TDK_SubstitutionFailure;
-  #else
-  SpecializationType = S.Context.getFunctionType(
-      FPT->getReturnType(), FPT->getParamTypes(), EPI);
-  #endif
-  #else
-  if (Trap.hasErrorOccurred())
-    return Sema::TDK_SubstitutionFailure;
-
-  DeducedType = SpecializationTSI;
-  #endif
-
-  TemplateArgs = TemplateArgumentList::CreateCopy(S.Context, CanonicalBuilder);
-
-  return Sema::TDK_Success;
-}
-
 /// Perform template argument deduction to determine whether
 /// the given template arguments match the given class template
 /// partial specialization per C++ [temp.class.spec.match].
@@ -4584,6 +4456,176 @@ Sema::TemplateDeductionResult Sema::DeduceTemplateArguments(
   return TDK_Success;
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+/// Complete template argument deduction for a function template.
+static Sema::TemplateDeductionResult FinishTemplateArgumentDeduction(
+    Sema &S, FunctionTemplateDecl *Template,
+    SmallVectorImpl<DeducedTemplateArgument> &Deduced,
+    TemplateDeductionInfo &Info,
+    TemplateArgumentList *&TemplateArgs,
+    TypeSourceInfo *&DeducedType) {
+  // Unevaluated SFINAE context.
+  EnterExpressionEvaluationContext Unevaluated(
+      S, Sema::ExpressionEvaluationContext::Unevaluated);
+  Sema::SFINAETrap Trap(S);
+
+  FunctionDecl* Function = Template->getTemplatedDecl();
+  Sema::ContextRAII SavedContext(S, Function);
+
+  SmallVector<TemplateArgument, 4> DeducedArgs(
+      Deduced.begin(), Deduced.end());
+  Sema::InstantiatingTemplate Instantiation(
+      S, Info.getLocation(), Template, DeducedArgs,
+      Sema::CodeSynthesisContext::DeducedTemplateArgumentSubstitution, Info);
+  if (Instantiation.isInvalid())
+    return Sema::TDK_InstantiationDepth;
+
+  // C++ [temp.deduct.type]p2:
+  //   [...] or if any template argument remains neither deduced nor
+  //   explicitly specified, template argument deduction fails.
+  SmallVector<TemplateArgument, 4> SugaredBuilder, CanonicalBuilder;
+  if (auto Result = ConvertDeducedTemplateArguments(
+          S, Template, /*IsDeduced*/ false, Deduced,
+          Info, SugaredBuilder, CanonicalBuilder))
+    return Result;
+
+  if (Trap.hasErrorOccurred())
+    return Sema::TDK_SubstitutionFailure;
+
+  // Substitute the deduced template arguments into the function template
+  // declaration to produce the function template specialization.
+  DeclContext *Owner = Template->getDeclContext();
+  if (Template->getFriendObjectKind())
+    Owner = Template->getLexicalDeclContext();
+  // additional check for inline friend,
+  // ```
+  //   template <class F1> int foo(F1 X);
+  //   template <int A1> struct A {
+  //     template <class F1> friend int foo(F1 X) { return A1; }
+  //   };
+  //   template struct A<1>;
+  //   int a = foo(1.0);
+  // ```
+  const FunctionDecl *Friend;
+  if (Function->getFriendObjectKind() == Decl::FriendObjectKind::FOK_None &&
+      Function->isDefined(Friend, /*CheckForPendingFriendDefinition*/ true) &&
+      Friend->getFriendObjectKind() != Decl::FriendObjectKind::FOK_None) {
+    Function = const_cast<FunctionDecl *>(Friend);
+    Owner = Function->getLexicalDeclContext();
+  }
+
+  LocalInstantiationScope Scope(S);
+  #if 0
+  MultiLevelTemplateArgumentList MLTAL(
+      Template, CanonicalBuilder, /*Final=*/true);
+
+  TypeSourceInfo* SpecializationTSI = S.SubstFunctionType(
+        Function, MLTAL, /*EvaluateConstraints*/false);
+  #elif 0
+  MultiLevelTemplateArgumentList MLTAL(
+      Template, CanonicalBuilder, /*Final=*/true);
+
+  TypeSourceInfo* SpecializationTSI = S.SubstFunctionType(
+        Function, MLTAL, /*EvaluateConstraints*/false);
+  #endif
+
+
+  MultiLevelTemplateArgumentList MLTAL(
+      Template, CanonicalBuilder, /*Final=*/true);
+
+  #if 0
+  TemplateDeclInstantiator Instantiator(S, Owner, MLTAL);
+  Instantiator.setEvaluateConstraints(false);
+
+  SmallVector<ParmVarDecl *, 4> Params;
+  TypeSourceInfo* SpecializationTSI =
+      Instantiator.SubstFunctionType(Function, Params);
+  // S.runWithSufficientStackSpace(Function->getLocation(), [&] {
+  //   SpecializationTSI
+  // });
+  #else
+
+  TypeSourceInfo *PatternTSI = Function->getTypeSourceInfo();
+  assert(PatternTSI && "Missing type source info");
+
+  Qualifiers MethodQuals;
+  if (auto *Method = dyn_cast<CXXMethodDecl>(Function))
+    MethodQuals = Method->getMethodQualifiers();
+
+  #if 0
+  TypeSourceInfo *SpecializationTSI = S.SubstFunctionDeclType(
+      PatternTSI, MLTAL, Function->getTypeSpecStartLoc(),
+      Function->getDeclName(), dyn_cast_or_null<CXXRecordDecl>(Owner),
+      MethodQuals, /*EvaluateConstraints*/false);
+  #else
+  TypeSourceInfo *SpecializationTSI =
+      S.SubstFunctionType(Function, MLTAL, false);
+  #endif
+
+  #endif
+  if (!SpecializationTSI)
+    return Sema::TDK_SubstitutionFailure;
+
+  // Check constraint satisfaction.
+  if (auto Result = CheckDeducedArgumentConstraints(
+      S, Template, SugaredBuilder, CanonicalBuilder, Info))
+    return Result;
+
+  #if 0
+  // In C++1z onwards, exception specifications are part of the function type,
+  // so substitution into the type must also substitute into the exception
+  // specification.
+  auto *FPT = SubstTSI->getType()->castAs<FunctionProtoType>();
+  auto EPI = FPT->getExtProtoInfo();
+  SmallVector<QualType, 4> ExceptionStorage;
+  if (S.getLangOpts().CPlusPlus17 &&
+      S.SubstExceptionSpec(Function->getLocation(), EPI.ExceptionSpec,
+                           ExceptionStorage, MLTAL))
+    return Sema::TDK_SubstitutionFailure;
+
+  if (Trap.hasErrorOccurred())
+    return Sema::TDK_SubstitutionFailure;
+  #if 0
+  SmallVector<QualType, 4> ParamTypes(FPT->param_types());
+  SpecializationType = S.BuildFunctionType(FPT->getReturnType(),
+                                    ParamTypes,
+                                    Function->getLocation(),
+                                    Function->getDeclName(),
+                                    EPI);
+  if (SpecializationType.isNull() || Trap.hasErrorOccurred())
+    return Sema::TDK_SubstitutionFailure;
+  #else
+  SpecializationType = S.Context.getFunctionType(
+      FPT->getReturnType(), FPT->getParamTypes(), EPI);
+  #endif
+  #else
+  if (Trap.hasErrorOccurred())
+    return Sema::TDK_SubstitutionFailure;
+
+  DeducedType = SpecializationTSI;
+  #endif
+
+  TemplateArgs = TemplateArgumentList::CreateCopy(S.Context, CanonicalBuilder);
+
+  return Sema::TDK_Success;
+}
+
+
+
+
+
+
 Sema::TemplateDeductionResult Sema::DeduceTemplateArguments(
     FunctionTemplateDecl *FunctionTemplate,
     FunctionDecl* Specialized,
@@ -4603,7 +4645,7 @@ Sema::TemplateDeductionResult Sema::DeduceTemplateArguments(
 
   TemplateDeductionResult Result;
   // Substitute any explicit template arguments.
-  LocalInstantiationScope InstScope(*this);
+  LocalInstantiationScope Scope(*this);
   SmallVector<DeducedTemplateArgument, 4> Deduced;
   unsigned NumExplicitlySpecified = 0;
   SmallVector<QualType, 4> ParamTypes;
@@ -4672,6 +4714,36 @@ Sema::TemplateDeductionResult Sema::DeduceTemplateArguments(
     return Result;
 
   QualType SpecializationType = DeducedTSI->getType();
+
+  if (SpecializationType.isNull() || Trap.hasErrorOccurred())
+      return TDK_SubstitutionFailure;
+
+  #if 0
+  auto *FPT = SpecializationType->getAs<FunctionProtoType>();
+  if (getLangOpts().CPlusPlus17 &&
+      (FPT->hasExceptionSpec() || FPT->getNoReturnAttr())) {
+    InstantiatingTemplate ExceptionSpecInstantiation(*this,
+        Info.getLocation(), Function,
+        InstantiatingTemplate::ExceptionSpecification());
+    if (ExceptionSpecInstantiation.isInvalid())
+      return TDK_InstantiationDepth;
+
+    FunctionProtoType::ExceptionSpecInfo ESI =
+        FPT->getExtProtoInfo().ExceptionSpec;
+
+    MultiLevelTemplateArgumentList MLTAL(
+      FunctionTemplate, TemplateArgs->asArray(), /*Final=*/true);
+
+    SmallVector<QualType, 4> ExceptionStorage;
+    if (SubstExceptionSpec(Function->getTypeSpecEndLoc(),
+                           ESI, ExceptionStorage, MLTAL))
+      return TDK_SubstitutionFailure;
+
+    SpecializationType = Context.getFunctionTypeWithExceptionSpec(
+        SpecializationType, ESI);
+  }
+  #endif
+
   //ArgFunctionType = adjustCCAndNoReturn(ArgFunctionType, SpecializationType,
   //                                      /*AdjustExceptionSpec*/false);
 
