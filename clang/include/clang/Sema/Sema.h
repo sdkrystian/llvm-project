@@ -8430,7 +8430,7 @@ public:
 
   bool CheckDependentFunctionTemplateSpecialization(
       FunctionDecl *FD, const TemplateArgumentListInfo *ExplicitTemplateArgs,
-      LookupResult &Previous, bool IsFriend);
+      LookupResult &Previous);
 
   bool CheckFunctionTemplateSpecialization(
       FunctionDecl *FD, TemplateArgumentListInfo *ExplicitTemplateArgs,
@@ -8787,6 +8787,9 @@ public:
 
     /// The type of an exception.
     UPPC_ExceptionType,
+
+    /// Explicit specialization.
+    UPPC_ExplicitSpecialization,
 
     /// Partial specialization.
     UPPC_PartialSpecialization,

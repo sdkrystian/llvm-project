@@ -4,7 +4,7 @@ void f(T);
 
 template<typename T>
 struct A {
-  // expected-error@+1{{cannot declare an explicit specialization in a friend}}
+  // expected-error@+1{{explicit specialization declaration cannot be a friend}}
   template <> friend void f<>(int) {}
 };
 
