@@ -5214,13 +5214,10 @@ def err_explicit_specialization_inconsistent_storage_class : Error<
 def err_dependent_function_template_spec_no_match : Error<
   "no candidate function template was found for dependent"
   " %select{member|friend}0 function template specialization">;
-def note_dependent_friend_function_template_spec_discard_reason : Note<
-  "candidate ignored: %select{not a function template"
-  "|not a member of the enclosing namespace;"
-  " did you mean to explicitly qualify the specialization?}0">;
 def note_dependent_function_template_spec_discard_reason : Note<
-  "candidate ignored: %select{not a function template"
-  "|not a member of the enclosing class template}0">;
+  "candidate ignored: %select{not a function template|"
+  "not a member of the enclosing %select{class template|"
+  "namespace; did you mean to explicitly qualify the specialization?}1}0">;
 
 // C++ class template specializations and out-of-line definitions
 def err_template_spec_needs_header : Error<

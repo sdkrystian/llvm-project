@@ -3360,27 +3360,10 @@ TemplateParameterList *Sema::MatchTemplateParametersToScopeSpecifier(
   // to the innermost while checking template-parameter-lists.
   std::reverse(NestedTypes.begin(), NestedTypes.end());
 
-  // C++0x [temp.expl.spec]p17:
-  //   A member or a member template may be nested within many
-  //   enclosing class templates. In an explicit specialization for
-  //   such a member, the member declaration shall be preceded by a
-  //   template<> for each enclosing class template that is
-  //   explicitly specialized.
   bool SawNonEmptyTemplateParameterList = false;
-  bool SawEmptyTemplateParameterList = false;
 
   auto CheckExplicitSpecialization = [&](SourceRange Range, bool Recovery) {
-    #if 0
-    if (SawNonEmptyTemplateParameterList) {
-      if (!SuppressDiagnostic)
-        Diag(DeclLoc, diag::err_specialize_member_of_template)
-          << !Recovery << Range;
-      Invalid = true;
-      IsMemberSpecialization = false;
-      return true;
-    }
-    #endif
-
+#if 0
     if (!SawNonEmptyTemplateParameterList && !IsFriend)
       return false;
 
@@ -3389,17 +3372,50 @@ TemplateParameterList *Sema::MatchTemplateParametersToScopeSpecifier(
         Diag(DeclLoc, diag::err_specialize_member_of_template)
           << !Recovery << Range;
       }
+      // C++ [temp.expl.spec] p20:
+      //   An explicit specialization declaration shall not be
+      //   a friend declaration.
       if (IsFriend) {
         Diag(DeclLoc, diag::err_explicit_specialization_friend)
           << Range;
       }
     }
+#endif
+
+    bool InvalidSpecialization = false;
+
+    // C++0x [temp.expl.spec]p17:
+    //   A member or a member template may be nested within many
+    //   enclosing class templates. In an explicit specialization for
+    //   such a member, the member declaration shall be preceded by a
+    //   template<> for each enclosing class template that is
+    //   explicitly specialized.
+    if (SawNonEmptyTemplateParameterList) {
+      InvalidSpecialization = true;
+      if (!SuppressDiagnostic)
+        Diag(DeclLoc, diag::err_specialize_member_of_template)
+          << !Recovery << Range;
+    }
+
+    // C++ [temp.expl.spec] p20:
+    //   An explicit specialization declaration shall not be
+    //   a friend declaration.
+    if (IsFriend) {
+      InvalidSpecialization = true;
+      if (!SuppressDiagnostic) {
+        auto DB = Diag(DeclLoc, diag::err_explicit_specialization_friend)
+          << Range;
+        if (TemplateId)
+          DB << SourceRange(TemplateId->LAngleLoc, TemplateId->RAngleLoc);
+      }
+    }
+
+    if (!InvalidSpecialization)
+      return false;
+
     Invalid = true;
     IsMemberSpecialization = false;
     return true;
-
-
-    return false;
   };
 
   auto DiagnoseMissingExplicitSpecialization = [&] (SourceRange Range) {
@@ -3491,7 +3507,6 @@ TemplateParameterList *Sema::MatchTemplateParametersToScopeSpecifier(
     //   are not explicitly specialized as well.
     if (ParamIdx < ParamLists.size()) {
       if (ParamLists[ParamIdx]->size() == 0) {
-        SawEmptyTemplateParameterList = true;
         if (CheckExplicitSpecialization(ParamLists[ParamIdx]->getSourceRange(),
                                         false))
           return nullptr;
@@ -8721,16 +8736,7 @@ DeclResult Sema::ActOnClassTemplateSpecialization(
         }
       }
     }
-  } else if (TemplateParams) {
-    #if 0
-    if (TUK == TUK_Friend)
-      Diag(KWLoc, diag::err_template_spec_friend)
-        << FixItHint::CreateRemoval(
-                                SourceRange(TemplateParams->getTemplateLoc(),
-                                            TemplateParams->getRAngleLoc()))
-        << SourceRange(LAngleLoc, RAngleLoc);
-    #endif
-  } else {
+  } else if (!TemplateParams) {
     assert(TUK == TUK_Friend && "should have a 'template<>' for this decl");
   }
 
@@ -9385,12 +9391,15 @@ bool Sema::CheckDependentFunctionTemplateSpecialization(
   if (Previous.empty()) {
     Diag(FD->getLocation(), diag::err_dependent_function_template_spec_no_match)
         << isFriend;
+    #if 0
     unsigned Note =
         isFriend
             ? diag::note_dependent_friend_function_template_spec_discard_reason
             : diag::note_dependent_function_template_spec_discard_reason;
+    #endif
     for (auto &P : DiscardedCandidates)
-      Diag(P.second->getLocation(), Note) << P.first;
+      Diag(P.second->getLocation(), diag::note_dependent_function_template_spec_discard_reason)
+          << P.first << isFriend;
     return true;
   }
 
@@ -9423,7 +9432,7 @@ bool Sema::CheckDependentFunctionTemplateSpecialization(
 /// befriending a function template specialization.
 bool Sema::CheckFunctionTemplateSpecialization(
     FunctionDecl *FD, TemplateArgumentListInfo *ExplicitTemplateArgs,
-    LookupResult &Previous, bool IsDefinition, bool QualifiedFriend) {
+    LookupResult &Previous, bool QualifiedFriend) {
   // The set of function template specializations that could match this
   // explicit function template specialization.
   UnresolvedSet<8> Candidates;

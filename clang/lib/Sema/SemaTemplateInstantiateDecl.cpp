@@ -1407,7 +1407,7 @@ Decl *TemplateDeclInstantiator::VisitFriendDecl(FriendDecl *D) {
   // decl should almost certainly not be placed in Owner.
   #if 0
     Decl *NewND = Visit(ND);
-  #else
+  #elif 0
     Decl *NewND = nullptr;
     if (FunctionDecl *Function = dyn_cast<FunctionDecl>(ND)) {
       if (Function->getPrimaryTemplate()) {
@@ -1417,6 +1417,22 @@ Decl *TemplateDeclInstantiator::VisitFriendDecl(FriendDecl *D) {
 
     if (!NewND)
       NewND = Visit(ND);
+  #elif 1
+    Decl *NewND = nullptr;
+    if (FunctionDecl *Function = dyn_cast<FunctionDecl>(ND))
+    {
+      if (Function->getTemplateSpecializationInfo())
+        NewND = Function;
+      // if (Function->getFriendObjectKind() == Decl::FOK_Declared)
+    }
+
+    if (!NewND)
+      NewND = Visit(ND);
+    // NamedDecl *NewND = SemaRef.FindInstantiatedDecl(
+    //     D->getLocation(), ND->, TemplateArgs, true);
+    // Decl *NewND = nullptr;
+    // if (D->getFriendObjectKind() == Decl::FOK_Declared) {
+    // }
   #endif
 
   if (!NewND) return nullptr;
@@ -2301,8 +2317,7 @@ Decl *TemplateDeclInstantiator::VisitFunctionDecl(
 
     if (SemaRef.CheckFunctionTemplateSpecialization(Function,
                                             &ExplicitArgs,
-                                            Previous,
-                                            D->isThisDeclarationADefinition()))
+                                            Previous))
       Function->setInvalidDecl();
 
     IsExplicitSpecialization = true;
@@ -2320,8 +2335,7 @@ Decl *TemplateDeclInstantiator::VisitFunctionDecl(
 
     if (SemaRef.CheckFunctionTemplateSpecialization(Function,
                                             &ExplicitArgs,
-                                            Previous,
-                                            D->isThisDeclarationADefinition()))
+                                            Previous))
       Function->setInvalidDecl();
 
     IsExplicitSpecialization = true;
@@ -2888,7 +2902,6 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
   #endif
   #else
 
-
   if (DependentFunctionTemplateSpecializationInfo *DFTSI =
       D->getDependentSpecializationInfo()) {
     // Substitute any explicitly specified template arguments.
@@ -2914,8 +2927,7 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
 
     if (SemaRef.CheckFunctionTemplateSpecialization(Method,
                                             &TemplateArgsWritten,
-                                            Previous,
-                                            D->isThisDeclarationADefinition()))
+                                            Previous))
       Method->setInvalidDecl();
 
     IsExplicitSpecialization = true;
@@ -2936,8 +2948,7 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
             return nullptr;
           if (SemaRef.CheckFunctionTemplateSpecialization(Method,
                                                   &TemplateArgsWritten,
-                                                  Previous,
-                                                  D->isThisDeclarationADefinition()))
+                                                  Previous))
             Method->setInvalidDecl();
         }
     #else
@@ -5114,7 +5125,7 @@ void Sema::InstantiateFunctionDefinition(SourceLocation PointOfInstantiation,
 
   // Dependent specializations should be resolved at this point.
   assert(! Function->getDependentSpecializationInfo() &&
-      "instantiating dependent function specialization?");
+      "instantiating definition of a dependent function specialization?");
   // Never instantiate an explicit specialization except if it is a class scope
   // explicit specialization.
   TemplateSpecializationKind TSK =

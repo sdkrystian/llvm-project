@@ -9885,8 +9885,8 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
 
         // A destructor cannot be a template.
         if (Name.getNameKind() == DeclarationName::CXXDestructorName) {
+          Invalid = true;
           Diag(NewFD->getLocation(), diag::err_destructor_template);
-          NewFD->setInvalidDecl();
         }
 
         // Function templates cannot be partially specialized.
@@ -9894,7 +9894,7 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
           Diag(D.getIdentifierLoc(), diag::err_function_template_partial_spec)
               << SourceRange(TemplateArgs.getLAngleLoc(),
                              TemplateArgs.getRAngleLoc());
-          NewFD->setInvalidDecl();
+          Invalid = true;
           // Recover by ignoring the template argument list.
           hasExplicitTemplateArgs = false;
         }
@@ -10027,7 +10027,7 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
       // member function. Check if we can declare it here.
       if (isMemberSpecialization && CheckTemplateDeclScope(
           S, TemplateParamLists.back()))
-        NewFD->setInvalidDecl();
+        Invalid = true;
 
       // For source fidelity, store all the template param lists.
       NewFD->setTemplateParameterListsInfo(Context, TemplateParamLists);
@@ -10586,8 +10586,7 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
           NewFD->setInvalidDecl();
       } else if (!NewFD->isInvalidDecl()) {
         if (CheckFunctionTemplateSpecialization(
-                NewFD, ExplicitTemplateArgs, Previous,
-                D.isFunctionDefinition()))
+                NewFD, ExplicitTemplateArgs, Previous))
           NewFD->setInvalidDecl();
       }
 
