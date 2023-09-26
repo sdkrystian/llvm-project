@@ -1957,6 +1957,132 @@ bool NamedDecl::isCXXInstanceMember() const {
 // DeclaratorDecl Implementation
 //===----------------------------------------------------------------------===//
 
+#if 0
+class QualifierExtInfo final : private llvm::TrailingObjects<
+    QualifierExtInfo, TemplateParameterList *> {
+  friend TrailingObjects;
+
+  size_t numTrailingObjects(OverloadToken<TemplateParameterList *>) const {
+    return NumTPLists;
+  }
+
+public:
+  NestedNameSpecifierLoc QualifierLoc;
+  unsigned NumTPLists = 0;
+};
+
+struct DeclaratorExtInfoBase {
+  // Bit 0: Whether qualifier info (and template parameter lists) is present
+  // Bit 1: Whether extra info is present
+  llvm::PointerIntPair<TypeSourceInfo *, 2, unsigned> TInfo;
+};
+
+template<typename ExtraInfoTy>
+class DeclaratorExtInfo final :
+    public DeclaratorExtInfoBase,
+    private llvm::TrailingObjects<
+        DeclaratorExtInfo, QualifierExtInfo, ExtraInfoTy> {
+  friend TrailingObjects;
+
+  size_t numTrailingObjects(OverloadToken<QualifierExtInfo>) const {
+    return hasQualifierInfo() ? 1 : 0;
+  }
+
+  size_t numTrailingObjects(OverloadToken<ExtraInfoTy>) const {
+    return this->TInfo.getInt();
+  }
+
+public:
+  bool hasQualifierInfo() const {
+    return this->TInfo.getInt() & 1u;
+  }
+  //ASTContext &Context, ArrayRef<TemplateParameterList *> TPLists
+  bool hasExtraInfo() const {
+    return this->TInfo.getInt() & 2u;
+  }
+
+  QualifierExtInfo *getQualifierInfo() const {
+    return hasQualifierInfo() ?
+        getTrailingObjects<QualifierExtInfo>() : nullptr;
+  }
+
+  ExtraInfoTy *getExtraInfo() const {
+    return hasExtraInfo() ?
+        getTrailingObjects<ExtraInfoTy>() : nullptr;
+  }
+};
+#else
+
+struct DeclaratorExtInfoBase {
+  // Bit 0: Whether qualifier info (and template parameter lists) is present
+  // Bit 1: Whether extra info is present
+  llvm::PointerIntPair<TypeSourceInfo *, 2, unsigned> TInfo;
+  unsigned NumTPLists = 0;
+};
+
+template<typename ExtraInfoTy>
+class DeclaratorExtInfo final :
+    public DeclaratorExtInfoBase,
+    private llvm::TrailingObjects<
+        DeclaratorExtInfo<ExtraInfoTy>,
+            TemplateParameterList *,
+            NestedNameSpecifierLoc,
+            ExtraInfoTy> {
+  friend class DeclaratorExtInfo::TrailingObjects;
+
+  template<typename T>
+  using OverloadToken = DeclaratorExtInfo::
+      TrailingObjects::template OverloadToken<T>;
+
+  size_t numTrailingObjects(OverloadToken<TemplateParameterList *>) const {
+    return this->NumTPLists;
+  }
+
+  size_t numTrailingObjects(OverloadToken<NestedNameSpecifierLoc>) const {
+    return hasQualifierInfo() ? 1 : 0;
+  }
+
+  size_t numTrailingObjects(OverloadToken<ExtraInfoTy>) const {
+    return hasExtraInfo() ? 1 : 0;
+  }
+
+public:
+  static size_t Create(ASTContext& Context,
+      NestedNameSpecifierLoc NNSLoc,
+      llvm::ArrayRef<TemplateParameterList *> TPLists)
+  {
+    return DeclaratorExtInfo::template totalSizeToAlloc<
+        TemplateParameterList *, NestedNameSpecifierLoc, ExtraInfoTy>(
+            TPLists.size(), NNSLoc ? 1 : 0, 0);
+  }
+
+  bool hasQualifierInfo() const {
+    return this->TInfo.getInt() & 1u;
+  }
+
+  bool hasExtraInfo() const {
+    return this->TInfo.getInt() & 2u;
+  }
+
+  NestedNameSpecifierLoc getQualifierInfo() const {
+    return hasQualifierInfo() ?
+        *this->template getTrailingObjects<NestedNameSpecifierLoc>() :
+        NestedNameSpecifierLoc();
+  }
+
+  llvm::ArrayRef<TemplateParameterList *>
+  getTemplateParameterLists() const {
+    return {this->template getTrailingObjects<TemplateParameterList *>(
+        )->getTemplateParameterLists(), this->NumTPLists};
+  }
+
+  ExtraInfoTy *getExtraInfo() const {
+    return hasExtraInfo() ?
+        this->template getTrailingObjects<ExtraInfoTy>() : nullptr;
+  }
+};
+#endif
+
 template <typename DeclT>
 static SourceLocation getTemplateOrInnerLocStart(const DeclT *decl) {
   if (decl->getNumTemplateParameterLists() > 0)
@@ -1976,6 +2102,32 @@ SourceLocation DeclaratorDecl::getTypeSpecEndLoc() const {
   return SourceLocation();
 }
 
+/// Retrieve the nested-name-specifier that qualifies the name of this
+/// declaration, if it was present in the source.
+NestedNameSpecifier *DeclaratorDecl::getQualifier() const {
+  // if (isa<ParmVarDecl, ImplicitParamDecl, FieldDecl>)
+  return hasExtInfo() ? getExtInfo()->QualifierLoc.getNestedNameSpecifier()
+                      : nullptr;
+}
+
+/// Retrieve the nested-name-specifier (with source-location
+/// information) that qualifies the name of this declaration, if it was
+/// present in the source.
+NestedNameSpecifierLoc DeclaratorDecl::getQualifierLoc() const {
+  return hasExtInfo() ? getExtInfo()->QualifierLoc
+                      : NestedNameSpecifierLoc();
+}
+
+unsigned DeclaratorDecl::getNumTemplateParameterLists() const {
+  return hasExtInfo() ? getExtInfo()->NumTemplParamLists : 0;
+}
+
+TemplateParameterList *
+DeclaratorDecl::getTemplateParameterList(unsigned index) const {
+  assert(index < getNumTemplateParameterLists());
+  return getExtInfo()->TemplParamLists[index];
+}
+
 void DeclaratorDecl::setQualifierInfo(NestedNameSpecifierLoc QualifierLoc) {
   if (QualifierLoc) {
     // Make sure the extended decl info is allocated.
@@ -1993,21 +2145,6 @@ void DeclaratorDecl::setQualifierInfo(NestedNameSpecifierLoc QualifierLoc) {
     // Here Qualifier == 0, i.e., we are removing the qualifier (if any).
     getExtInfo()->QualifierLoc = QualifierLoc;
   }
-}
-
-void DeclaratorDecl::setTrailingRequiresClause(Expr *TrailingRequiresClause) {
-  assert(TrailingRequiresClause);
-  // Make sure the extended decl info is allocated.
-  if (!hasExtInfo()) {
-    // Save (non-extended) type source info pointer.
-    auto *savedTInfo = DeclInfo.get<TypeSourceInfo*>();
-    // Allocate external info struct.
-    DeclInfo = new (getASTContext()) ExtInfo;
-    // Restore savedTInfo into (extended) decl info.
-    getExtInfo()->TInfo = savedTInfo;
-  }
-  // Set requires clause info.
-  getExtInfo()->TrailingRequiresClause = TrailingRequiresClause;
 }
 
 void DeclaratorDecl::setTemplateParameterListsInfo(
@@ -3521,6 +3658,21 @@ bool FunctionDecl::isTargetMultiVersion() const {
 
 bool FunctionDecl::isTargetClonesMultiVersion() const {
   return isMultiVersion() && hasAttr<TargetClonesAttr>();
+}
+
+void FunctionDecl::setTrailingRequiresClause(Expr *TrailingRequiresClause) {
+  assert(TrailingRequiresClause);
+  // Make sure the extended decl info is allocated.
+  if (!hasExtInfo()) {
+    // Save (non-extended) type source info pointer.
+    auto *savedTInfo = DeclInfo.get<TypeSourceInfo*>();
+    // Allocate external info struct.
+    DeclInfo = new (getASTContext()) ExtInfo;
+    // Restore savedTInfo into (extended) decl info.
+    getExtInfo()->TInfo = savedTInfo;
+  }
+  // Set requires clause info.
+  getExtInfo()->TrailingRequiresClause = TrailingRequiresClause;
 }
 
 void

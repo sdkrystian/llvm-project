@@ -765,6 +765,8 @@ struct QualifierInfo {
 /// Represents a ValueDecl that came out of a declarator.
 /// Contains type source information through TypeSourceInfo.
 class DeclaratorDecl : public ValueDecl {
+
+protected:
   // A struct representing a TInfo, a trailing requires-clause and a syntactic
   // qualifier, to be used for the (uncommon) case of out-of-line declarations
   // and constrained function decls.
@@ -783,7 +785,6 @@ class DeclaratorDecl : public ValueDecl {
   ExtInfo *getExtInfo() { return DeclInfo.get<ExtInfo*>(); }
   const ExtInfo *getExtInfo() const { return DeclInfo.get<ExtInfo*>(); }
 
-protected:
   DeclaratorDecl(Kind DK, DeclContext *DC, SourceLocation L,
                  DeclarationName N, QualType T, TypeSourceInfo *TInfo,
                  SourceLocation StartL)
@@ -822,44 +823,18 @@ public:
 
   /// Retrieve the nested-name-specifier that qualifies the name of this
   /// declaration, if it was present in the source.
-  NestedNameSpecifier *getQualifier() const {
-    return hasExtInfo() ? getExtInfo()->QualifierLoc.getNestedNameSpecifier()
-                        : nullptr;
-  }
+  NestedNameSpecifier *getQualifier() const;
 
   /// Retrieve the nested-name-specifier (with source-location
   /// information) that qualifies the name of this declaration, if it was
   /// present in the source.
-  NestedNameSpecifierLoc getQualifierLoc() const {
-    return hasExtInfo() ? getExtInfo()->QualifierLoc
-                        : NestedNameSpecifierLoc();
-  }
+  NestedNameSpecifierLoc getQualifierLoc() const;
 
   void setQualifierInfo(NestedNameSpecifierLoc QualifierLoc);
 
-  /// \brief Get the constraint-expression introduced by the trailing
-  /// requires-clause in the function/member declaration, or null if no
-  /// requires-clause was provided.
-  Expr *getTrailingRequiresClause() {
-    return hasExtInfo() ? getExtInfo()->TrailingRequiresClause
-                        : nullptr;
-  }
+  unsigned getNumTemplateParameterLists() const;
 
-  const Expr *getTrailingRequiresClause() const {
-    return hasExtInfo() ? getExtInfo()->TrailingRequiresClause
-                        : nullptr;
-  }
-
-  void setTrailingRequiresClause(Expr *TrailingRequiresClause);
-
-  unsigned getNumTemplateParameterLists() const {
-    return hasExtInfo() ? getExtInfo()->NumTemplParamLists : 0;
-  }
-
-  TemplateParameterList *getTemplateParameterList(unsigned index) const {
-    assert(index < getNumTemplateParameterLists());
-    return getExtInfo()->TemplParamLists[index];
-  }
+  TemplateParameterList *getTemplateParameterList(unsigned index) const;
 
   void setTemplateParameterListsInfo(ASTContext &Context,
                                      ArrayRef<TemplateParameterList *> TPLists);
@@ -2578,6 +2553,22 @@ public:
   /// True if this function is a multiversioned dispatch function as a part of
   /// the target-clones functionality.
   bool isTargetClonesMultiVersion() const;
+
+
+  /// \brief Get the constraint-expression introduced by the trailing
+  /// requires-clause in the function/member declaration, or null if no
+  /// requires-clause was provided.
+  Expr *getTrailingRequiresClause() {
+    return hasExtInfo() ? getExtInfo()->TrailingRequiresClause
+                        : nullptr;
+  }
+
+  const Expr *getTrailingRequiresClause() const {
+    return hasExtInfo() ? getExtInfo()->TrailingRequiresClause
+                        : nullptr;
+  }
+
+  void setTrailingRequiresClause(Expr *TrailingRequiresClause);
 
   /// \brief Get the associated-constraints of this function declaration.
   /// Currently, this will either be a vector of size 1 containing the

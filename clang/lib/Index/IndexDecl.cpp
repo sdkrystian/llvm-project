@@ -132,8 +132,6 @@ public:
         }
       }
     }
-    if (auto *C = D->getTrailingRequiresClause())
-      IndexCtx.indexBody(C, Parent);
   }
 
   bool handleObjCMethod(const ObjCMethodDecl *D,
@@ -258,6 +256,9 @@ public:
 
     TRY_DECL(D, IndexCtx.handleDecl(D, Roles, Relations));
     handleDeclarator(D);
+
+    if (auto *C = D->getTrailingRequiresClause())
+      IndexCtx.indexBody(C, D);
 
     if (const CXXConstructorDecl *Ctor = dyn_cast<CXXConstructorDecl>(D)) {
       IndexCtx.handleReference(Ctor->getParent(), Ctor->getLocation(),
