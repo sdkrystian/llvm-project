@@ -3969,7 +3969,7 @@ bool TemplateSpecializationType::anyInstantiationDependentTemplateArguments(
 
 TemplateSpecializationType::TemplateSpecializationType(
     TemplateName T, ArrayRef<TemplateArgument> Args, QualType Canon,
-    QualType AliasedType)
+    QualType AliasedType, TemplateParameterList *TPL)
     : Type(TemplateSpecialization, Canon.isNull() ? QualType(this, 0) : Canon,
            (Canon.isNull()
                 ? TypeDependence::DependentInstantiation
@@ -3979,6 +3979,7 @@ TemplateSpecializationType::TemplateSpecializationType(
       Template(T) {
   TemplateSpecializationTypeBits.NumArgs = Args.size();
   TemplateSpecializationTypeBits.TypeAlias = !AliasedType.isNull();
+  TemplateSpecializationTypeBits.HasTemplateParamList = TPL != nullptr;
 
   assert(!T.getAsDependentTemplateName() &&
          "Use DependentTemplateSpecializationType for dependent template-name");
@@ -4006,10 +4007,14 @@ TemplateSpecializationType::TemplateSpecializationType(
     new (TemplateArgs++) TemplateArgument(Arg);
   }
 
+  auto *Begin = reinterpret_cast<TemplateArgument *>(this + 1) + Args.size();
   // Store the aliased type if this is a type alias template specialization.
-  if (isTypeAlias()) {
-    auto *Begin = reinterpret_cast<TemplateArgument *>(this + 1);
-    *reinterpret_cast<QualType *>(Begin + Args.size()) = AliasedType;
+  if (isTypeAlias())
+    *reinterpret_cast<QualType *>(Begin) = AliasedType;
+
+  if (TemplateSpecializationTypeBits.HasTemplateParamList) {
+    *reinterpret_cast<TemplateParameterList **>(
+        reinterpret_cast<QualType *>(Begin) + isTypeAlias()) = TPL;
   }
 }
 
@@ -4018,11 +4023,22 @@ QualType TemplateSpecializationType::getAliasedType() const {
   return *reinterpret_cast<const QualType *>(template_arguments().end());
 }
 
+TemplateParameterList *TemplateSpecializationType::
+getTemplateParameterList() const {
+  if (!TemplateSpecializationTypeBits.HasTemplateParamList)
+    return nullptr;
+  return *reinterpret_cast<TemplateParameterList * const *>(
+      reinterpret_cast<const QualType *>(
+          template_arguments().end()) + isTypeAlias());
+}
+
 void TemplateSpecializationType::Profile(llvm::FoldingSetNodeID &ID,
                                          const ASTContext &Ctx) {
   Profile(ID, Template, template_arguments(), Ctx);
   if (isTypeAlias())
     getAliasedType().Profile(ID);
+  if (TemplateParameterList *TPL = getTemplateParameterList())
+    ID.AddPointer(TPL);
 }
 
 void

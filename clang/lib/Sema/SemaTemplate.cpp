@@ -3870,7 +3870,8 @@ Sema::findFailedBooleanCondition(Expr *Cond) {
 
 QualType Sema::CheckTemplateIdType(TemplateName Name,
                                    SourceLocation TemplateLoc,
-                                   TemplateArgumentListInfo &TemplateArgs) {
+                                   TemplateArgumentListInfo &TemplateArgs,
+                                   TemplateParameterList *TemplateParams) {
   DependentTemplateName *DTN
     = Name.getUnderlying().getAsDependentTemplateName();
   if (DTN && DTN->isIdentifier())
@@ -4070,7 +4071,7 @@ QualType Sema::CheckTemplateIdType(TemplateName Name,
   // specialization, which refers back to the class template
   // specialization we created or found.
   return Context.getTemplateSpecializationType(Name, TemplateArgs.arguments(),
-                                               CanonType);
+                                               CanonType, TemplateParams);
 }
 
 void Sema::ActOnUndeclaredTypeTemplateName(Scope *S, TemplateTy &ParsedName,

@@ -4929,13 +4929,14 @@ QualType ASTContext::getTemplateTypeParmType(unsigned Depth, unsigned Index,
 
 TypeSourceInfo *
 ASTContext::getTemplateSpecializationTypeInfo(TemplateName Name,
-                                              SourceLocation NameLoc,
-                                        const TemplateArgumentListInfo &Args,
-                                              QualType Underlying) const {
+                                            SourceLocation NameLoc,
+                                      const TemplateArgumentListInfo &Args,
+                                            QualType Underlying,
+                                            TemplateParameterList *TPL) const {
   assert(!Name.getAsDependentTemplateName() &&
          "No dependent template names here!");
-  QualType TST =
-      getTemplateSpecializationType(Name, Args.arguments(), Underlying);
+  QualType TST = getTemplateSpecializationType(
+      Name, Args.arguments(), Underlying, TPL);
 
   TypeSourceInfo *DI = CreateTypeSourceInfo(TST);
   TemplateSpecializationTypeLoc TL =
@@ -4952,7 +4953,8 @@ ASTContext::getTemplateSpecializationTypeInfo(TemplateName Name,
 QualType
 ASTContext::getTemplateSpecializationType(TemplateName Template,
                                           ArrayRef<TemplateArgumentLoc> Args,
-                                          QualType Underlying) const {
+                                          QualType Underlying,
+                                          TemplateParameterList *TPL) const {
   assert(!Template.getAsDependentTemplateName() &&
          "No dependent template names here!");
 
@@ -4961,7 +4963,7 @@ ASTContext::getTemplateSpecializationType(TemplateName Template,
   for (const TemplateArgumentLoc &Arg : Args)
     ArgVec.push_back(Arg.getArgument());
 
-  return getTemplateSpecializationType(Template, ArgVec, Underlying);
+  return getTemplateSpecializationType(Template, ArgVec, Underlying, TPL);
 }
 
 #ifndef NDEBUG
@@ -4977,7 +4979,8 @@ static bool hasAnyPackExpansions(ArrayRef<TemplateArgument> Args) {
 QualType
 ASTContext::getTemplateSpecializationType(TemplateName Template,
                                           ArrayRef<TemplateArgument> Args,
-                                          QualType Underlying) const {
+                                          QualType Underlying,
+                                          TemplateParameterList *TPL) const {
   assert(!Template.getAsDependentTemplateName() &&
          "No dependent template names here!");
   // Look through qualified template names.
@@ -5003,11 +5006,13 @@ ASTContext::getTemplateSpecializationType(TemplateName Template,
   // we don't unique and don't want to lose.
   void *Mem = Allocate(sizeof(TemplateSpecializationType) +
                        sizeof(TemplateArgument) * Args.size() +
-                       (IsTypeAlias? sizeof(QualType) : 0),
+                       (IsTypeAlias? sizeof(QualType) : 0) +
+                       (TPL? sizeof(TemplateParameterList *) : 0),
                        TypeAlignment);
   auto *Spec
     = new (Mem) TemplateSpecializationType(Template, Args, CanonType,
-                                         IsTypeAlias ? Underlying : QualType());
+                                         IsTypeAlias ? Underlying : QualType(),
+                                         TPL);
 
   Types.push_back(Spec);
   return QualType(Spec, 0);
@@ -5045,7 +5050,8 @@ QualType ASTContext::getCanonicalTemplateSpecializationType(
                          TypeAlignment);
     Spec = new (Mem) TemplateSpecializationType(CanonTemplate,
                                                 CanonArgs,
-                                                QualType(), QualType());
+                                                QualType(), QualType(),
+                                                nullptr);
     Types.push_back(Spec);
     TemplateSpecializationTypes.InsertNode(Spec, InsertPos);
   }

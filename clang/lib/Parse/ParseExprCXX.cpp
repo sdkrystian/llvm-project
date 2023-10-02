@@ -183,6 +183,11 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
 
   bool HasScopeSpecifier = false;
 
+  // Template parameter lists to match with template-ids in
+  // declarative nested-name-specifiers.
+  ArrayRef<TemplateParameterList *> TemplateParamLists =
+      SS.getTemplateParamLists();
+
   if (Tok.is(tok::coloncolon)) {
     // ::new and ::delete aren't nested-name-specifiers.
     tok::TokenKind NextKind = NextToken().getKind();
@@ -358,6 +363,12 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
       ASTTemplateArgsPtr TemplateArgsPtr(TemplateId->getTemplateArgs(),
                                          TemplateId->NumArgs);
 
+      TemplateParameterList *TemplateParams = nullptr;
+      if (!TemplateParamLists.empty()) {
+        TemplateParams = TemplateParamLists.front();
+        TemplateParamLists = TemplateParamLists.drop_front();
+      }
+
       if (TemplateId->isInvalid() ||
           Actions.ActOnCXXNestedNameSpecifier(getCurScope(),
                                               SS,
@@ -368,6 +379,7 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
                                               TemplateArgsPtr,
                                               TemplateId->RAngleLoc,
                                               CCLoc,
+                                              TemplateParams,
                                               EnteringContext)) {
         SourceLocation StartLoc
           = SS.getBeginLoc().isValid()? SS.getBeginLoc()

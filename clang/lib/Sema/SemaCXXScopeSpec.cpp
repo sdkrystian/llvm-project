@@ -892,6 +892,7 @@ bool Sema::ActOnCXXNestedNameSpecifier(Scope *S,
                                        ASTTemplateArgsPtr TemplateArgsIn,
                                        SourceLocation RAngleLoc,
                                        SourceLocation CCLoc,
+                                       TemplateParameterList *TemplateParams,
                                        bool EnteringContext) {
   if (SS.isInvalid())
     return true;
@@ -950,7 +951,8 @@ bool Sema::ActOnCXXNestedNameSpecifier(Scope *S,
 
   // We were able to resolve the template name to an actual template.
   // Build an appropriate nested-name-specifier.
-  QualType T = CheckTemplateIdType(Template, TemplateNameLoc, TemplateArgs);
+  QualType T = CheckTemplateIdType(Template, TemplateNameLoc,
+                                   TemplateArgs, TemplateParams);
   if (T.isNull())
     return true;
 

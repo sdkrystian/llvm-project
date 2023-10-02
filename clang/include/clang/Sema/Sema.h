@@ -7150,6 +7150,7 @@ public:
                                    ASTTemplateArgsPtr TemplateArgs,
                                    SourceLocation RAngleLoc,
                                    SourceLocation CCLoc,
+                                   TemplateParameterList *TemplateParams,
                                    bool EnteringContext);
 
   /// Given a C++ nested-name-specifier, produce an annotation value
@@ -8328,7 +8329,8 @@ public:
 
   QualType CheckTemplateIdType(TemplateName Template,
                                SourceLocation TemplateLoc,
-                              TemplateArgumentListInfo &TemplateArgs);
+                              TemplateArgumentListInfo &TemplateArgs,
+                              TemplateParameterList *TemplateParams = nullptr);
 
   TypeResult
   ActOnTemplateIdType(Scope *S, CXXScopeSpec &SS, SourceLocation TemplateKWLoc,

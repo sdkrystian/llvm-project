@@ -1076,9 +1076,11 @@ public:
   /// By default, performs semantic analysis when building the template
   /// specialization type. Subclasses may override this routine to provide
   /// different behavior.
-  QualType RebuildTemplateSpecializationType(TemplateName Template,
-                                             SourceLocation TemplateLoc,
-                                             TemplateArgumentListInfo &Args);
+  QualType RebuildTemplateSpecializationType(
+                              TemplateName Template,
+                              SourceLocation TemplateLoc,
+                              TemplateArgumentListInfo &Args,
+                              TemplateParameterList *TemplateParams = nullptr);
 
   /// Build a new parenthesized type.
   ///
@@ -6895,9 +6897,9 @@ QualType TreeTransform<Derived>::TransformTemplateSpecializationType(
   // FIXME: maybe don't rebuild if all the template arguments are the same.
 
   QualType Result =
-    getDerived().RebuildTemplateSpecializationType(Template,
-                                                   TL.getTemplateNameLoc(),
-                                                   NewTemplateArgs);
+    getDerived().RebuildTemplateSpecializationType(
+                 Template, TL.getTemplateNameLoc(),
+                 NewTemplateArgs, TL.getTypePtr()->getTemplateParameterList());
 
   if (!Result.isNull()) {
     // Specializations of template template parameters are represented as
@@ -15135,8 +15137,10 @@ template<typename Derived>
 QualType TreeTransform<Derived>::RebuildTemplateSpecializationType(
                                                       TemplateName Template,
                                              SourceLocation TemplateNameLoc,
-                                     TemplateArgumentListInfo &TemplateArgs) {
-  return SemaRef.CheckTemplateIdType(Template, TemplateNameLoc, TemplateArgs);
+                                     TemplateArgumentListInfo &TemplateArgs,
+                                     TemplateParameterList *TemplateParams) {
+  return SemaRef.CheckTemplateIdType(Template, TemplateNameLoc,
+                                     TemplateArgs, TemplateParams);
 }
 
 template<typename Derived>

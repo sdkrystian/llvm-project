@@ -1613,7 +1613,8 @@ public:
 
   QualType getTemplateSpecializationType(TemplateName T,
                                          ArrayRef<TemplateArgument> Args,
-                                         QualType Canon = QualType()) const;
+                                         QualType Canon = QualType(),
+                                         TemplateParameterList *TPL = nullptr) const;
 
   QualType
   getCanonicalTemplateSpecializationType(TemplateName T,
@@ -1621,12 +1622,14 @@ public:
 
   QualType getTemplateSpecializationType(TemplateName T,
                                          ArrayRef<TemplateArgumentLoc> Args,
-                                         QualType Canon = QualType()) const;
+                                         QualType Canon = QualType(),
+                                         TemplateParameterList *TPL = nullptr) const;
 
   TypeSourceInfo *
   getTemplateSpecializationTypeInfo(TemplateName T, SourceLocation TLoc,
                                     const TemplateArgumentListInfo &Args,
-                                    QualType Canon = QualType()) const;
+                                    QualType Canon = QualType(),
+                                    TemplateParameterList *TPL = nullptr) const;
 
   QualType getParenType(QualType NamedType) const;
 

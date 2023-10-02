@@ -1899,6 +1899,10 @@ protected:
     /// Whether this template specialization type is a substituted type alias.
     unsigned TypeAlias : 1;
 
+    /// Whether this template specialization type "owns" a TemplateParameterList
+    /// because it was part of a declarative nested-name-specifier.
+    unsigned HasTemplateParamList : 1;
+
     /// The number of template arguments named in this class template
     /// specialization, which is expected to be able to hold at least 1024
     /// according to [implimits]. However, as this limit is somewhat easy to
@@ -5487,7 +5491,8 @@ class alignas(8) TemplateSpecializationType
   TemplateSpecializationType(TemplateName T,
                              ArrayRef<TemplateArgument> Args,
                              QualType Canon,
-                             QualType Aliased);
+                             QualType Aliased,
+                             TemplateParameterList *TPL);
 
 public:
   /// Determine whether any of the given template arguments are dependent.
@@ -5537,6 +5542,8 @@ public:
   /// template.
   QualType getAliasedType() const;
 
+  TemplateParameterList *getTemplateParameterList() const;
+
   /// Retrieve the name of the template that we are specializing.
   TemplateName getTemplateName() const { return Template; }
 
@@ -5546,7 +5553,8 @@ public:
   }
 
   bool isSugared() const {
-    return !isDependentType() || isCurrentInstantiation() || isTypeAlias();
+    return !isDependentType() || isCurrentInstantiation() ||
+      isTypeAlias() || getTemplateParameterList();
   }
 
   QualType desugar() const {
