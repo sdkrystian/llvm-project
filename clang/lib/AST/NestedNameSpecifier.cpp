@@ -21,6 +21,7 @@
 #include "clang/AST/TemplateName.h"
 #include "clang/AST/Type.h"
 #include "clang/AST/TypeLoc.h"
+#include "clang/Basic/IdentifierTable.h"
 #include "clang/Basic/LLVM.h"
 #include "clang/Basic/LangOptions.h"
 #include "clang/Basic/SourceLocation.h"
@@ -37,6 +38,7 @@
 
 using namespace clang;
 
+#if 0
 NestedNameSpecifier *
 NestedNameSpecifier::FindOrInsert(const ASTContext &Context,
                                   const NestedNameSpecifier &Mockup) {
@@ -54,6 +56,44 @@ NestedNameSpecifier::FindOrInsert(const ASTContext &Context,
 
   return NNS;
 }
+#endif
+
+NestedNameSpecifier::NestedNameSpecifier() : Prefix(), Specifier(nullptr) {}
+
+/// Builds the global specifier.
+// NestedNameSpecifier() : Prefix(nullptr, StoredIdentifier) {}
+// NestedNameSpecifier() : Prefix(nullptr, 0) {}
+NestedNameSpecifier::NestedNameSpecifier(
+    NestedNameSpecifier *Prefix, const IdentifierInfo *II)
+    : Prefix(Prefix, 0), Specifier(const_cast<IdentifierInfo *>(II))
+{
+}
+
+NestedNameSpecifier::NestedNameSpecifier(
+    NestedNameSpecifier *Prefix, const NamedDecl *ND)
+    : Prefix(Prefix, 0), Specifier(const_cast<NamedDecl *>(ND))
+{
+}
+
+NestedNameSpecifier::NestedNameSpecifier(
+    NestedNameSpecifier *Prefix, bool HasTemplateKW,
+    const Type *T, TemplateParameterList *TPL)
+    : Prefix(Prefix,
+        (HasTemplateKW << 1) | (TPL != nullptr)),
+      Specifier(const_cast<Type *>(T))
+{
+  if (TPL)
+    *getTrailingObjects<TemplateParameterList *>() = TPL;
+}
+
+NestedNameSpecifier *
+NestedNameSpecifier::
+FindOrInsert(const ASTContext &Context,
+             llvm::FoldingSetNodeID& ID,
+             void *&InsertPos) {
+  return Context.NestedNameSpecifiers.FindNodeOrInsertPos(ID, InsertPos);
+}
+
 
 NestedNameSpecifier *
 NestedNameSpecifier::Create(const ASTContext &Context,
@@ -61,11 +101,22 @@ NestedNameSpecifier::Create(const ASTContext &Context,
   assert(II && "Identifier cannot be NULL");
   assert((!Prefix || Prefix->isDependent()) && "Prefix must be dependent");
 
+  llvm::FoldingSetNodeID ID;
+  Profile(ID, Prefix, II);
+  void *InsertPos = nullptr;
+  NestedNameSpecifier * NNS = FindOrInsert(Context, ID, InsertPos);
+  if (NNS)
+    return NNS;
+  NNS = new (Context) NestedNameSpecifier(Prefix, II);
+  Context.NestedNameSpecifiers.InsertNode(NNS, InsertPos);
+  return NNS;
+  #if 0
   NestedNameSpecifier Mockup;
   Mockup.Prefix.setPointer(Prefix);
   Mockup.Prefix.setInt(StoredIdentifier);
   Mockup.Specifier = II;
   return FindOrInsert(Context, Mockup);
+  #endif
 }
 
 NestedNameSpecifier *
@@ -77,11 +128,24 @@ NestedNameSpecifier::Create(const ASTContext &Context,
           (Prefix->getAsType() == nullptr &&
            Prefix->getAsIdentifier() == nullptr)) &&
          "Broken nested name specifier");
+
+  llvm::FoldingSetNodeID ID;
+  Profile(ID, Prefix, NS);
+  void *InsertPos = nullptr;
+  NestedNameSpecifier * NNS = FindOrInsert(Context, ID, InsertPos);
+  if (NNS)
+    return NNS;
+  NNS = new (Context) NestedNameSpecifier(Prefix, NS);
+  Context.NestedNameSpecifiers.InsertNode(NNS, InsertPos);
+  return NNS;
+
+  #if 0
   NestedNameSpecifier Mockup;
   Mockup.Prefix.setPointer(Prefix);
   Mockup.Prefix.setInt(StoredDecl);
   Mockup.Specifier = const_cast<NamespaceDecl *>(NS);
   return FindOrInsert(Context, Mockup);
+  #endif
 }
 
 NestedNameSpecifier *
@@ -93,11 +157,22 @@ NestedNameSpecifier::Create(const ASTContext &Context,
           (Prefix->getAsType() == nullptr &&
            Prefix->getAsIdentifier() == nullptr)) &&
          "Broken nested name specifier");
+  #if 0
   NestedNameSpecifier Mockup;
   Mockup.Prefix.setPointer(Prefix);
   Mockup.Prefix.setInt(StoredDecl);
   Mockup.Specifier = Alias;
   return FindOrInsert(Context, Mockup);
+  #endif
+  llvm::FoldingSetNodeID ID;
+  Profile(ID, Prefix, Alias);
+  void *InsertPos = nullptr;
+  NestedNameSpecifier * NNS = FindOrInsert(Context, ID, InsertPos);
+  if (NNS)
+    return NNS;
+  NNS = new (Context) NestedNameSpecifier(Prefix, Alias);
+  Context.NestedNameSpecifiers.InsertNode(NNS, InsertPos);
+  return NNS;
 }
 
 NestedNameSpecifier *
@@ -105,21 +180,35 @@ NestedNameSpecifier::Create(const ASTContext &Context,
                             NestedNameSpecifier *Prefix,
                             bool Template, const Type *T) {
   assert(T && "Type cannot be NULL");
+  llvm::FoldingSetNodeID ID;
+  Profile(ID, Prefix, T, Template, nullptr);
+  void *InsertPos = nullptr;
+  NestedNameSpecifier * NNS = FindOrInsert(Context, ID, InsertPos);
+  if (NNS)
+    return NNS;
+  NNS = new (Context) NestedNameSpecifier(Prefix, Template, T, nullptr);
+  Context.NestedNameSpecifiers.InsertNode(NNS, InsertPos);
+  return NNS;
+  #if 0
   NestedNameSpecifier Mockup;
   Mockup.Prefix.setPointer(Prefix);
   Mockup.Prefix.setInt(Template? StoredTypeSpecWithTemplate : StoredTypeSpec);
   Mockup.Specifier = const_cast<Type*>(T);
   return FindOrInsert(Context, Mockup);
+  #endif
 }
 
 NestedNameSpecifier *
 NestedNameSpecifier::Create(const ASTContext &Context, IdentifierInfo *II) {
+  return Create(Context, nullptr, II);
+#if 0
   assert(II && "Identifier cannot be NULL");
   NestedNameSpecifier Mockup;
   Mockup.Prefix.setPointer(nullptr);
   Mockup.Prefix.setInt(StoredIdentifier);
   Mockup.Specifier = II;
   return FindOrInsert(Context, Mockup);
+#endif
 }
 
 NestedNameSpecifier *
@@ -133,20 +222,43 @@ NestedNameSpecifier::GlobalSpecifier(const ASTContext &Context) {
 NestedNameSpecifier *
 NestedNameSpecifier::SuperSpecifier(const ASTContext &Context,
                                     CXXRecordDecl *RD) {
+#if 0
   NestedNameSpecifier Mockup;
   Mockup.Prefix.setPointer(nullptr);
   Mockup.Prefix.setInt(StoredDecl);
   Mockup.Specifier = RD;
   return FindOrInsert(Context, Mockup);
+#endif
+  llvm::FoldingSetNodeID ID;
+  Profile(ID, nullptr, RD);
+  void *InsertPos = nullptr;
+  NestedNameSpecifier * NNS = FindOrInsert(Context, ID, InsertPos);
+  if (NNS)
+    return NNS;
+  NNS = new (Context) NestedNameSpecifier(nullptr, RD);
+  Context.NestedNameSpecifiers.InsertNode(NNS, InsertPos);
+  return NNS;
 }
 
 NestedNameSpecifier::SpecifierKind NestedNameSpecifier::getKind() const {
   if (!Specifier)
     return Global;
 
+  if (Specifier.is<IdentifierInfo *>())
+    return Identifier;
+
+  if (auto *ND = Specifier.dyn_cast<NamedDecl *>()) {
+    if (isa<CXXRecordDecl>(ND))
+      return Super;
+    return isa<NamespaceDecl>(ND) ? Namespace : NamespaceAlias;
+  }
+
+  if (Specifier.is<Type *>())
+    return hasTemplateKeyword() ? TypeSpecWithTemplate : TypeSpec;
+
+  #if 0
   switch (Prefix.getInt()) {
   case StoredIdentifier:
-    return Identifier;
 
   case StoredDecl: {
     NamedDecl *ND = static_cast<NamedDecl *>(Specifier);
@@ -161,28 +273,50 @@ NestedNameSpecifier::SpecifierKind NestedNameSpecifier::getKind() const {
   case StoredTypeSpecWithTemplate:
     return TypeSpecWithTemplate;
   }
-
+  #endif
   llvm_unreachable("Invalid NNS Kind!");
+}
+
+IdentifierInfo *NestedNameSpecifier::getAsIdentifier() const {
+  return Specifier.dyn_cast<IdentifierInfo *>();
+  #if 0
+  if (Prefix.getInt() == StoredIdentifier)
+    return (IdentifierInfo *)Specifier;
+
+  return nullptr;
+  #endif
 }
 
 /// Retrieve the namespace stored in this nested name specifier.
 NamespaceDecl *NestedNameSpecifier::getAsNamespace() const {
-  if (Prefix.getInt() == StoredDecl)
-    return dyn_cast<NamespaceDecl>(static_cast<NamedDecl *>(Specifier));
+  if (auto *ND = Specifier.dyn_cast<NamedDecl *>())
+    return dyn_cast<NamespaceDecl>(ND);
+  // if (Prefix.getInt() == StoredDecl)
+  //   return dyn_cast<NamespaceDecl>(static_cast<NamedDecl *>(Specifier));
 
   return nullptr;
 }
 
 /// Retrieve the namespace alias stored in this nested name specifier.
 NamespaceAliasDecl *NestedNameSpecifier::getAsNamespaceAlias() const {
-  if (Prefix.getInt() == StoredDecl)
-    return dyn_cast<NamespaceAliasDecl>(static_cast<NamedDecl *>(Specifier));
-
+  // if (Prefix.getInt() == StoredDecl)
+  //   return dyn_cast<NamespaceAliasDecl>(static_cast<NamedDecl *>(Specifier));
+  if (auto *ND = Specifier.dyn_cast<NamedDecl *>())
+    return dyn_cast<NamespaceAliasDecl>(ND);
   return nullptr;
 }
 
 /// Retrieve the record declaration stored in this nested name specifier.
 CXXRecordDecl *NestedNameSpecifier::getAsRecordDecl() const {
+  if (auto *II = Specifier.dyn_cast<IdentifierInfo *>())
+    return nullptr;
+  if (auto *ND = Specifier.dyn_cast<NamedDecl *>())
+    return dyn_cast<CXXRecordDecl>(ND);
+  if (auto *T = Specifier.dyn_cast<Type *>())
+    return T->getAsCXXRecordDecl();
+  return nullptr;
+
+  #if 0
   switch (Prefix.getInt()) {
   case StoredIdentifier:
     return nullptr;
@@ -196,6 +330,18 @@ CXXRecordDecl *NestedNameSpecifier::getAsRecordDecl() const {
   }
 
   llvm_unreachable("Invalid NNS Kind!");
+  #endif
+}
+
+const Type *NestedNameSpecifier::getAsType() const {
+  return Specifier.dyn_cast<Type *>();
+  #if 0
+  if (Prefix.getInt() == StoredTypeSpec ||
+      Prefix.getInt() == StoredTypeSpecWithTemplate)
+    return (const Type *)Specifier;
+
+  return nullptr;
+  #endif
 }
 
 NestedNameSpecifierDependence NestedNameSpecifier::getDependence() const {
@@ -216,7 +362,8 @@ NestedNameSpecifierDependence NestedNameSpecifier::getDependence() const {
     return NestedNameSpecifierDependence::None;
 
   case Super: {
-    CXXRecordDecl *RD = static_cast<CXXRecordDecl *>(Specifier);
+    // CXXRecordDecl *RD = static_cast<CXXRecordDecl *>(Specifier);
+    auto *RD = dyn_cast<CXXRecordDecl>(Specifier.dyn_cast<NamedDecl *>());
     for (const auto &Base : RD->bases())
       if (Base.getType()->isDependentType())
         // FIXME: must also be instantiation-dependent.
@@ -334,6 +481,19 @@ void NestedNameSpecifier::print(raw_ostream &OS, const PrintingPolicy &Policy,
   }
 
   OS << "::";
+}
+
+void NestedNameSpecifier::Profile(llvm::FoldingSetNodeID &ID) const {
+  if (Specifier.is<IdentifierInfo *>())
+    return Profile(ID, getPrefix(), getAsIdentifier());
+  if (auto *ND = Specifier.dyn_cast<NamedDecl *>())
+    return Profile(ID, getPrefix(), ND);
+  if (auto *T = Specifier.dyn_cast<Type *>())
+    return Profile(ID, getPrefix(), T,
+        hasTemplateKeyword(), getTemplateParameters());
+  llvm_unreachable("Invalid NNS Kind!");
+  // ID.AddPointer(Prefix.getOpaqueValue());
+  // ID.AddPointer(Specifier.getOpaqueValue());
 }
 
 LLVM_DUMP_METHOD void NestedNameSpecifier::dump(const LangOptions &LO) const {

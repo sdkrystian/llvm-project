@@ -20,7 +20,9 @@
 #include "llvm/ADT/DenseMapInfo.h"
 #include "llvm/ADT/FoldingSet.h"
 #include "llvm/ADT/PointerIntPair.h"
+#include "llvm/ADT/PointerUnion.h"
 #include "llvm/Support/Compiler.h"
+#include "llvm/Support/TrailingObjects.h"
 #include <cstdint>
 #include <cstdlib>
 #include <utility>
@@ -31,9 +33,11 @@ class ASTContext;
 class CXXRecordDecl;
 class IdentifierInfo;
 class LangOptions;
+class NamedDecl;
 class NamespaceAliasDecl;
 class NamespaceDecl;
 struct PrintingPolicy;
+class TemplateParameterList;
 class Type;
 class TypeLoc;
 
@@ -47,7 +51,13 @@ class TypeLoc;
 /// (for dependent names), decltype specifier, or the global specifier ('::').
 /// The last two specifiers can only appear at the start of a
 /// nested-namespace-specifier.
-class NestedNameSpecifier : public llvm::FoldingSetNode {
+class NestedNameSpecifier final :
+    public llvm::FoldingSetNode,
+    private llvm::TrailingObjects<
+        NestedNameSpecifier,
+        TemplateParameterList *> {
+
+  friend TrailingObjects;
   /// Enumeration describing
   enum StoredSpecifierKind {
     StoredIdentifier = 0,
@@ -62,7 +72,9 @@ class NestedNameSpecifier : public llvm::FoldingSetNode {
   /// The pointer is the nested-name-specifier that precedes this
   /// one. The integer stores one of the first four values of type
   /// SpecifierKind.
-  llvm::PointerIntPair<NestedNameSpecifier *, 2, StoredSpecifierKind> Prefix;
+  // llvm::PointerIntPair<NestedNameSpecifier *, 2, StoredSpecifierKind> Prefix;
+  llvm::PointerIntPair<
+      NestedNameSpecifier *, 2, unsigned> Prefix;
 
   /// The last component in the nested name specifier, which
   /// can be an identifier, a declaration, or a type.
@@ -71,7 +83,12 @@ class NestedNameSpecifier : public llvm::FoldingSetNode {
   /// specifier '::'. Otherwise, the pointer is one of
   /// IdentifierInfo*, Namespace*, or Type*, depending on the kind of
   /// specifier as encoded within the prefix.
-  void* Specifier = nullptr;
+  // void* Specifier = nullptr;
+
+  llvm::PointerUnion<
+      IdentifierInfo *,
+      NamedDecl *,
+      Type *> Specifier;
 
 public:
   /// The kind of specifier that completes this nested name
@@ -102,17 +119,29 @@ public:
   };
 
 private:
-  /// Builds the global specifier.
-  NestedNameSpecifier() : Prefix(nullptr, StoredIdentifier) {}
+  NestedNameSpecifier();
 
+  /// Builds the global specifier.
+  // NestedNameSpecifier() : Prefix(nullptr, StoredIdentifier) {}
+  // NestedNameSpecifier() : Prefix(nullptr, 0) {}
+  NestedNameSpecifier(NestedNameSpecifier *Prefix, const IdentifierInfo *II);
+
+  NestedNameSpecifier(NestedNameSpecifier *Prefix, const NamedDecl *ND);
+
+  NestedNameSpecifier(NestedNameSpecifier *Prefix, bool HasTemplateKW,
+                      const Type *T, TemplateParameterList *TPL);
   /// Copy constructor used internally to clone nested name
   /// specifiers.
-  NestedNameSpecifier(const NestedNameSpecifier &Other) = default;
+  // NestedNameSpecifier(const NestedNameSpecifier &Other) = default;
 
   /// Either find or insert the given nested name specifier
   /// mockup in the given context.
   static NestedNameSpecifier *FindOrInsert(const ASTContext &Context,
                                            const NestedNameSpecifier &Mockup);
+
+  static NestedNameSpecifier *FindOrInsert(const ASTContext &Context,
+                                           llvm::FoldingSetNodeID& ID,
+                                           void *&InsertPos);
 
 public:
   NestedNameSpecifier &operator=(const NestedNameSpecifier &) = delete;
@@ -173,12 +202,7 @@ public:
 
   /// Retrieve the identifier stored in this nested name
   /// specifier.
-  IdentifierInfo *getAsIdentifier() const {
-    if (Prefix.getInt() == StoredIdentifier)
-      return (IdentifierInfo *)Specifier;
-
-    return nullptr;
-  }
+  IdentifierInfo *getAsIdentifier() const;
 
   /// Retrieve the namespace stored in this nested name
   /// specifier.
@@ -193,12 +217,15 @@ public:
   CXXRecordDecl *getAsRecordDecl() const;
 
   /// Retrieve the type stored in this nested name specifier.
-  const Type *getAsType() const {
-    if (Prefix.getInt() == StoredTypeSpec ||
-        Prefix.getInt() == StoredTypeSpecWithTemplate)
-      return (const Type *)Specifier;
+  const Type *getAsType() const;
 
-    return nullptr;
+  TemplateParameterList *getTemplateParameters() const {
+    return Prefix.getInt() & 0x1 ?
+        *getTrailingObjects<TemplateParameterList *>() : nullptr;
+  }
+
+  bool hasTemplateKeyword() const {
+    return Prefix.getInt() & 0x2;
   }
 
   NestedNameSpecifierDependence getDependence() const;
@@ -225,10 +252,35 @@ public:
   void print(raw_ostream &OS, const PrintingPolicy &Policy,
              bool ResolveTemplateArguments = false) const;
 
-  void Profile(llvm::FoldingSetNodeID &ID) const {
-    ID.AddPointer(Prefix.getOpaqueValue());
-    ID.AddPointer(Specifier);
+  static void Profile(llvm::FoldingSetNodeID &ID,
+                      NestedNameSpecifier *Prefix,
+                      const IdentifierInfo *II) {
+    ID.AddPointer(Prefix);
+    ID.AddPointer(II);
+    ID.AddBoolean(false);
+    ID.AddPointer(nullptr);
   }
+
+  static void Profile(llvm::FoldingSetNodeID &ID,
+                      NestedNameSpecifier *Prefix,
+                      const NamedDecl *ND) {
+    ID.AddPointer(Prefix);
+    ID.AddPointer(ND);
+    ID.AddBoolean(false);
+    ID.AddPointer(nullptr);
+  }
+
+  static void Profile(llvm::FoldingSetNodeID &ID,
+                      NestedNameSpecifier *Prefix,
+                      const Type *T, bool HasTemplateKW,
+                      TemplateParameterList *TemplateParams) {
+    ID.AddPointer(Prefix);
+    ID.AddPointer(T);
+    ID.AddBoolean(HasTemplateKW);
+    ID.AddPointer(TemplateParams);
+  }
+
+  void Profile(llvm::FoldingSetNodeID &ID) const;
 
   /// Dump the nested name specifier to standard output to aid
   /// in debugging.
