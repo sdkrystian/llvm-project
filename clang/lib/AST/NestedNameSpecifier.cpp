@@ -178,15 +178,18 @@ NestedNameSpecifier::Create(const ASTContext &Context,
 NestedNameSpecifier *
 NestedNameSpecifier::Create(const ASTContext &Context,
                             NestedNameSpecifier *Prefix,
-                            bool Template, const Type *T) {
+                            bool Template, const Type *T,
+                            TemplateParameterList *TPL) {
   assert(T && "Type cannot be NULL");
   llvm::FoldingSetNodeID ID;
-  Profile(ID, Prefix, T, Template, nullptr);
+  Profile(ID, Prefix, T, Template, TPL);
   void *InsertPos = nullptr;
   NestedNameSpecifier * NNS = FindOrInsert(Context, ID, InsertPos);
   if (NNS)
     return NNS;
-  NNS = new (Context) NestedNameSpecifier(Prefix, Template, T, nullptr);
+  NNS = new (Context.Allocate(
+      totalSizeToAlloc<TemplateParameterList *>(TPL != nullptr)))
+          NestedNameSpecifier(Prefix, Template, T, TPL);
   Context.NestedNameSpecifiers.InsertNode(NNS, InsertPos);
   return NNS;
   #if 0
@@ -215,7 +218,7 @@ NestedNameSpecifier *
 NestedNameSpecifier::GlobalSpecifier(const ASTContext &Context) {
   if (!Context.GlobalNestedNameSpecifier)
     Context.GlobalNestedNameSpecifier =
-        new (Context, alignof(NestedNameSpecifier)) NestedNameSpecifier();
+        new (Context) NestedNameSpecifier();
   return Context.GlobalNestedNameSpecifier;
 }
 
@@ -247,13 +250,14 @@ NestedNameSpecifier::SpecifierKind NestedNameSpecifier::getKind() const {
   if (Specifier.is<IdentifierInfo *>())
     return Identifier;
 
-  if (auto *ND = Specifier.dyn_cast<NamedDecl *>()) {
+  TypeOrDecl Named = Specifier.get<TypeOrDecl>();
+  if (auto *ND = Named.dyn_cast<NamedDecl *>()) {
     if (isa<CXXRecordDecl>(ND))
       return Super;
     return isa<NamespaceDecl>(ND) ? Namespace : NamespaceAlias;
   }
 
-  if (Specifier.is<Type *>())
+  if (Named.is<Type *>())
     return hasTemplateKeyword() ? TypeSpecWithTemplate : TypeSpec;
 
   #if 0
@@ -287,9 +291,15 @@ IdentifierInfo *NestedNameSpecifier::getAsIdentifier() const {
   #endif
 }
 
+NamedDecl *NestedNameSpecifier::getAsNamedDecl() const {
+  if (TypeOrDecl Named = Specifier.dyn_cast<TypeOrDecl>())
+    return Named.dyn_cast<NamedDecl *>();
+  return nullptr;
+}
+
 /// Retrieve the namespace stored in this nested name specifier.
 NamespaceDecl *NestedNameSpecifier::getAsNamespace() const {
-  if (auto *ND = Specifier.dyn_cast<NamedDecl *>())
+  if (auto *ND = getAsNamedDecl())
     return dyn_cast<NamespaceDecl>(ND);
   // if (Prefix.getInt() == StoredDecl)
   //   return dyn_cast<NamespaceDecl>(static_cast<NamedDecl *>(Specifier));
@@ -301,18 +311,16 @@ NamespaceDecl *NestedNameSpecifier::getAsNamespace() const {
 NamespaceAliasDecl *NestedNameSpecifier::getAsNamespaceAlias() const {
   // if (Prefix.getInt() == StoredDecl)
   //   return dyn_cast<NamespaceAliasDecl>(static_cast<NamedDecl *>(Specifier));
-  if (auto *ND = Specifier.dyn_cast<NamedDecl *>())
+  if (auto *ND = getAsNamedDecl())
     return dyn_cast<NamespaceAliasDecl>(ND);
   return nullptr;
 }
 
 /// Retrieve the record declaration stored in this nested name specifier.
 CXXRecordDecl *NestedNameSpecifier::getAsRecordDecl() const {
-  if (auto *II = Specifier.dyn_cast<IdentifierInfo *>())
-    return nullptr;
-  if (auto *ND = Specifier.dyn_cast<NamedDecl *>())
+  if (auto *ND = getAsNamedDecl())
     return dyn_cast<CXXRecordDecl>(ND);
-  if (auto *T = Specifier.dyn_cast<Type *>())
+  if (auto *T = getAsType())
     return T->getAsCXXRecordDecl();
   return nullptr;
 
@@ -334,7 +342,10 @@ CXXRecordDecl *NestedNameSpecifier::getAsRecordDecl() const {
 }
 
 const Type *NestedNameSpecifier::getAsType() const {
-  return Specifier.dyn_cast<Type *>();
+  if (TypeOrDecl Named = Specifier.dyn_cast<TypeOrDecl>())
+    return Named.dyn_cast<Type *>();
+  return nullptr;
+  // return Specifier.dyn_cast<Type *>();
   #if 0
   if (Prefix.getInt() == StoredTypeSpec ||
       Prefix.getInt() == StoredTypeSpecWithTemplate)
@@ -363,7 +374,7 @@ NestedNameSpecifierDependence NestedNameSpecifier::getDependence() const {
 
   case Super: {
     // CXXRecordDecl *RD = static_cast<CXXRecordDecl *>(Specifier);
-    auto *RD = dyn_cast<CXXRecordDecl>(Specifier.dyn_cast<NamedDecl *>());
+    auto *RD = dyn_cast<CXXRecordDecl>(getAsNamedDecl());
     for (const auto &Base : RD->bases())
       if (Base.getType()->isDependentType())
         // FIXME: must also be instantiation-dependent.
@@ -486,9 +497,9 @@ void NestedNameSpecifier::print(raw_ostream &OS, const PrintingPolicy &Policy,
 void NestedNameSpecifier::Profile(llvm::FoldingSetNodeID &ID) const {
   if (Specifier.is<IdentifierInfo *>())
     return Profile(ID, getPrefix(), getAsIdentifier());
-  if (auto *ND = Specifier.dyn_cast<NamedDecl *>())
+  if (auto *ND = getAsNamedDecl())
     return Profile(ID, getPrefix(), ND);
-  if (auto *T = Specifier.dyn_cast<Type *>())
+  if (auto *T = getAsType())
     return Profile(ID, getPrefix(), T,
         hasTemplateKeyword(), getTemplateParameters());
   llvm_unreachable("Invalid NNS Kind!");
@@ -718,6 +729,20 @@ operator=(const NestedNameSpecifierLocBuilder &Other) {
   Append(Other.Buffer, Other.Buffer + Other.BufferSize, Buffer, BufferSize,
          BufferCapacity);
   return *this;
+}
+
+void NestedNameSpecifierLocBuilder::Extend(ASTContext &Context,
+                                           SourceLocation TemplateKWLoc,
+                                           TypeLoc TL,
+                                           TemplateParameterList *TPL,
+                                           SourceLocation ColonColonLoc) {
+  Representation = NestedNameSpecifier::Create(Context, Representation,
+                                               TemplateKWLoc.isValid(),
+                                               TL.getTypePtr(), TPL);
+
+  // Push source-location info into the buffer.
+  SavePointer(TL.getOpaqueData(), Buffer, BufferSize, BufferCapacity);
+  SaveSourceLocation(ColonColonLoc, Buffer, BufferSize, BufferCapacity);
 }
 
 void NestedNameSpecifierLocBuilder::Extend(ASTContext &Context,

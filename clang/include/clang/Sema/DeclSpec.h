@@ -109,6 +109,9 @@ public:
   void Extend(ASTContext &Context, SourceLocation TemplateKWLoc, TypeLoc TL,
               SourceLocation ColonColonLoc);
 
+  void Extend(ASTContext &Context, SourceLocation TemplateKWLoc, TypeLoc TL,
+              TemplateParameterList *TPL, SourceLocation ColonColonLoc);
+
   /// Extend the current nested-name-specifier by another
   /// nested-name-specifier component of the form 'identifier::'.
   ///

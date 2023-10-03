@@ -85,10 +85,8 @@ class NestedNameSpecifier final :
   /// specifier as encoded within the prefix.
   // void* Specifier = nullptr;
 
-  llvm::PointerUnion<
-      IdentifierInfo *,
-      NamedDecl *,
-      Type *> Specifier;
+  using TypeOrDecl = llvm::PointerUnion<NamedDecl *, Type *>;
+  llvm::PointerUnion<IdentifierInfo *, TypeOrDecl> Specifier;
 
 public:
   /// The kind of specifier that completes this nested name
@@ -168,7 +166,8 @@ public:
   /// Builds a nested name specifier that names a type.
   static NestedNameSpecifier *Create(const ASTContext &Context,
                                      NestedNameSpecifier *Prefix,
-                                     bool Template, const Type *T);
+                                     bool Template, const Type *T,
+                                     TemplateParameterList *TPL = nullptr);
 
   /// Builds a specifier that consists of just an identifier.
   ///
@@ -203,6 +202,8 @@ public:
   /// Retrieve the identifier stored in this nested name
   /// specifier.
   IdentifierInfo *getAsIdentifier() const;
+
+  NamedDecl *getAsNamedDecl() const;
 
   /// Retrieve the namespace stored in this nested name
   /// specifier.
@@ -454,6 +455,9 @@ public:
   /// \param ColonColonLoc The location of the trailing '::'.
   void Extend(ASTContext &Context, SourceLocation TemplateKWLoc, TypeLoc TL,
               SourceLocation ColonColonLoc);
+
+  void Extend(ASTContext &Context, SourceLocation TemplateKWLoc, TypeLoc TL,
+              TemplateParameterList *TPL, SourceLocation ColonColonLoc);
 
   /// Extend the current nested-name-specifier by another
   /// nested-name-specifier component of the form 'identifier::'.

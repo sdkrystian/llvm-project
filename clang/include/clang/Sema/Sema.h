@@ -7150,7 +7150,8 @@ public:
                                    ASTTemplateArgsPtr TemplateArgs,
                                    SourceLocation RAngleLoc,
                                    SourceLocation CCLoc,
-                                   bool EnteringContext);
+                                   bool EnteringContext,
+                                   TemplateParameterList *TPL = nullptr);
 
   /// Given a C++ nested-name-specifier, produce an annotation value
   /// that the parser can use later to reconstruct the given

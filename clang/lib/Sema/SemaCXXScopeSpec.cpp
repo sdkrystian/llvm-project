@@ -892,7 +892,8 @@ bool Sema::ActOnCXXNestedNameSpecifier(Scope *S,
                                        ASTTemplateArgsPtr TemplateArgsIn,
                                        SourceLocation RAngleLoc,
                                        SourceLocation CCLoc,
-                                       bool EnteringContext) {
+                                       bool EnteringContext,
+                                       TemplateParameterList *TPL) {
   if (SS.isInvalid())
     return true;
 
@@ -975,7 +976,7 @@ bool Sema::ActOnCXXNestedNameSpecifier(Scope *S,
 
 
   SS.Extend(Context, TemplateKWLoc, Builder.getTypeLocInContext(Context, T),
-            CCLoc);
+            TPL, CCLoc);
   return false;
 }
 
