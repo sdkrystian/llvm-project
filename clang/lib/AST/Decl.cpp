@@ -5626,3 +5626,14 @@ ExportDecl *ExportDecl::Create(ASTContext &C, DeclContext *DC,
 ExportDecl *ExportDecl::CreateDeserialized(ASTContext &C, unsigned ID) {
   return new (C, ID) ExportDecl(nullptr, SourceLocation());
 }
+
+void Module_Decl::anchor() {}
+
+Module_Decl *Module_Decl::Create(ASTContext &C, DeclContext *DC,
+                               SourceLocation Loc, Module *Mod) {
+  return new (C, DC) Module_Decl(DC, Loc, Mod);
+}
+
+Module_Decl *Module_Decl::CreateDeserialized(ASTContext &C, unsigned ID) {
+  return new (C, ID) Module_Decl(nullptr, SourceLocation(), nullptr);
+}

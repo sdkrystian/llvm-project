@@ -1803,7 +1803,7 @@ bool LookupResult::isAcceptableSlow(Sema &SemaRef, NamedDecl *D,
   // transparent contexts, but not others (enums).
   auto IsEffectivelyFileContext = [](const DeclContext *DC) {
     return DC->isFileContext() || isa<LinkageSpecDecl>(DC) ||
-           isa<ExportDecl>(DC);
+           isa<ExportDecl>(DC) || isa<Module_Decl>(DC);
   };
 
   // If this declaration is not at namespace scope

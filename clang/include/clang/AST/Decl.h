@@ -4838,6 +4838,33 @@ public:
   }
 };
 
+class Module_Decl final : public Decl, public DeclContext {
+  virtual void anchor();
+
+private:
+  friend class ASTDeclReader;
+
+  Module_Decl(DeclContext *DC, SourceLocation Loc, Module *Mod)
+      : Decl(Decl::Module_, DC, Loc), DeclContext(Decl::Module_),
+      TheModule(Mod) {}
+
+public:
+  Module *TheModule = nullptr;
+
+  static Module_Decl *Create(ASTContext &C, DeclContext *DC,
+                            SourceLocation Loc, Module *Mod);
+  static Module_Decl *CreateDeserialized(ASTContext &C, unsigned ID);
+
+  static bool classof(const Decl *D) { return classofKind(D->getKind()); }
+  static bool classofKind(Kind K) { return K == Decl::Module_; }
+  static DeclContext *castToDeclContext(const Module_Decl *D) {
+    return static_cast<DeclContext *>(const_cast<Module_Decl*>(D));
+  }
+  static Module_Decl *castFromDeclContext(const DeclContext *DC) {
+    return static_cast<Module_Decl *>(const_cast<DeclContext*>(DC));
+  }
+};
+
 /// Represents an empty-declaration.
 class EmptyDecl : public Decl {
   EmptyDecl(DeclContext *DC, SourceLocation L) : Decl(Empty, DC, L) {}

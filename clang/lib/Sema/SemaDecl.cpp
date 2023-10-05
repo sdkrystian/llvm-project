@@ -1539,7 +1539,7 @@ void Sema::PushOnScopeChains(NamedDecl *D, Scope *S, bool AddToContext) {
   // Move up the scope chain until we find the nearest enclosing
   // non-transparent context. The declaration will be introduced into this
   // scope.
-  while (S->getEntity() && S->getEntity()->isTransparentContext())
+  while (S->getEntity() && S->getEntity()->isTransparentContext() && !isa<Module_Decl>(S->getEntity()))
     S = S->getParent();
 
   // Add scoped declarations into their context, so that they can be
@@ -2375,7 +2375,8 @@ ObjCInterfaceDecl *Sema::getObjCInterfaceDecl(IdentifierInfo *&Id,
 /// contain non-field names.
 Scope *Sema::getNonFieldDeclScope(Scope *S) {
   while (((S->getFlags() & Scope::DeclScope) == 0) ||
-         (S->getEntity() && S->getEntity()->isTransparentContext()) ||
+         (S->getEntity() && S->getEntity()->isTransparentContext() &&
+             !isa<Module_Decl>(S->getEntity())) ||
          (S->isClassScope() && !getLangOpts().CPlusPlus))
     S = S->getParent();
   return S;
@@ -9702,7 +9703,8 @@ static Scope *getTagInjectionScope(Scope *S, const LangOptions &LangOpts) {
          (LangOpts.CPlusPlus &&
           S->isFunctionPrototypeScope()) ||
          ((S->getFlags() & Scope::DeclScope) == 0) ||
-         (S->getEntity() && S->getEntity()->isTransparentContext()))
+         (S->getEntity() && S->getEntity()->isTransparentContext() &&
+             !isa<Module_Decl>(S->getEntity())))
     S = S->getParent();
   return S;
 }

@@ -1395,6 +1395,8 @@ enum DeclCode {
   /// An ExportDecl record.
   DECL_EXPORT,
 
+  DECL_MODULE,
+
   /// A CXXRecordDecl record.
   DECL_CXX_RECORD,
 

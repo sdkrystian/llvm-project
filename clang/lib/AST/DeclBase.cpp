@@ -843,6 +843,7 @@ unsigned Decl::getIdentifierNamespaceForKind(Kind DeclKind) {
     case AccessSpec:
     case LinkageSpec:
     case Export:
+    case Module_:
     case FileScopeAsm:
     case TopLevelStmt:
     case StaticAssert:
@@ -1244,7 +1245,7 @@ bool DeclContext::isTransparentContext() const {
   if (getDeclKind() == Decl::Enum)
     return !cast<EnumDecl>(this)->isScoped();
 
-  return isa<LinkageSpecDecl, ExportDecl, HLSLBufferDecl>(this);
+  return isa<LinkageSpecDecl, ExportDecl, HLSLBufferDecl, Module_Decl>(this);
 }
 
 static bool isLinkageSpecContext(const DeclContext *DC,
@@ -1306,6 +1307,7 @@ DeclContext *DeclContext::getPrimaryContext() {
   case Decl::OMPDeclareReduction:
   case Decl::OMPDeclareMapper:
   case Decl::RequiresExprBody:
+  case Decl::Module_:
     // There is only one DeclContext for these entities.
     return this;
 
@@ -1727,7 +1729,8 @@ void DeclContext::buildLookupImpl(DeclContext *DCtx, bool Internal) {
 DeclContext::lookup_result
 DeclContext::lookup(DeclarationName Name) const {
   // For transparent DeclContext, we should lookup in their enclosing context.
-  if (getDeclKind() == Decl::LinkageSpec || getDeclKind() == Decl::Export)
+  if (getDeclKind() == Decl::LinkageSpec || getDeclKind() == Decl::Export ||
+      getDeclKind() == Decl::Module_)
     return getParent()->lookup(Name);
 
   const DeclContext *PrimaryContext = getPrimaryContext();

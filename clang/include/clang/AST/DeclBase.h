@@ -2014,8 +2014,10 @@ public:
 
   /// Test whether the context supports looking up names.
   bool isLookupContext() const {
-    return !isFunctionOrMethod() && getDeclKind() != Decl::LinkageSpec &&
-           getDeclKind() != Decl::Export;
+    return !isFunctionOrMethod() &&
+           getDeclKind() != Decl::LinkageSpec &&
+           getDeclKind() != Decl::Export &&
+           getDeclKind() != Decl::Module_;
   }
 
   bool isFileContext() const {

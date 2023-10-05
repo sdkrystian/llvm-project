@@ -414,6 +414,7 @@ namespace clang {
     void VisitConstructorUsingShadowDecl(ConstructorUsingShadowDecl *D);
     void VisitLinkageSpecDecl(LinkageSpecDecl *D);
     void VisitExportDecl(ExportDecl *D);
+    void VisitModule_Decl(Module_Decl *D);
     void VisitFileScopeAsmDecl(FileScopeAsmDecl *AD);
     void VisitTopLevelStmtDecl(TopLevelStmtDecl *D);
     void VisitImportDecl(ImportDecl *D);
@@ -1794,6 +1795,10 @@ void ASTDeclReader::VisitLinkageSpecDecl(LinkageSpecDecl *D) {
 void ASTDeclReader::VisitExportDecl(ExportDecl *D) {
   VisitDecl(D);
   D->RBraceLoc = readSourceLocation();
+}
+
+void ASTDeclReader::VisitModule_Decl(Module_Decl *D) {
+  VisitDecl(D);
 }
 
 void ASTDeclReader::VisitLabelDecl(LabelDecl *D) {
@@ -3796,6 +3801,9 @@ Decl *ASTReader::ReadDeclRecord(DeclID ID) {
     break;
   case DECL_EXPORT:
     D = ExportDecl::CreateDeserialized(Context, ID);
+    break;
+  case DECL_MODULE:
+    D = Module_Decl::CreateDeserialized(Context, ID);
     break;
   case DECL_LABEL:
     D = LabelDecl::CreateDeserialized(Context, ID);

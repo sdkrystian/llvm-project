@@ -1034,6 +1034,10 @@ void Sema::ActOnStartOfTranslationUnit() {
 }
 
 void Sema::ActOnEndOfTranslationUnitFragment(TUFragmentKind Kind) {
+
+  if (getCurrentModule())
+    PopDeclContext();
+
   // No explicit actions are required at the end of the global module fragment.
   if (Kind == TUFragmentKind::Global)
     return;
@@ -1466,6 +1470,7 @@ void Sema::ActOnEndOfTranslationUnit() {
          "Didn't unmark var as having its initializer parsed");
 
   if (!PP.isIncrementalProcessingEnabled())
+
     TUScope = nullptr;
 }
 

@@ -38,7 +38,7 @@ static void checkModuleImportContext(Sema &S, Module *M,
     DC = LSD->getParent();
   }
 
-  while (isa<LinkageSpecDecl>(DC) || isa<ExportDecl>(DC))
+  while (isa<LinkageSpecDecl>(DC) || isa<ExportDecl>(DC) || isa<Module_Decl>(DC))
     DC = DC->getParent();
 
   if (!isa<TranslationUnitDecl>(DC)) {
@@ -91,6 +91,11 @@ Sema::ActOnGlobalModuleFragmentDecl(SourceLocation ModuleLoc) {
   TU->setModuleOwnershipKind(Decl::ModuleOwnershipKind::ReachableWhenImported);
   TU->setLocalOwningModule(GlobalModule);
 
+  Module_Decl *ModDecl = Module_Decl::Create(
+      Context, CurContext, ModuleLoc, GlobalModule);
+  ModDecl->setModuleOwnershipKind(Decl::ModuleOwnershipKind::ReachableWhenImported);
+  CurContext->addDecl(ModDecl);
+  PushDeclContext(getCurScope(), ModDecl);
   // FIXME: Consider creating an explicit representation of this declaration.
   return nullptr;
 }
@@ -133,6 +138,14 @@ void Sema::HandleStartOfHeaderUnit() {
   auto *TU = Context.getTranslationUnitDecl();
   TU->setModuleOwnershipKind(Decl::ModuleOwnershipKind::Visible);
   TU->setLocalOwningModule(Mod);
+
+  #if 1
+  Module_Decl *ModDecl = Module_Decl::Create(
+      Context, CurContext, StartOfTU, Mod);
+  ModDecl->setModuleOwnershipKind(Decl::ModuleOwnershipKind::Visible);
+  CurContext->addDecl(ModDecl);
+  PushDeclContext(getCurScope(), ModDecl);
+  #endif
 }
 
 /// Tests whether the given identifier is reserved as a module name and
@@ -387,6 +400,12 @@ Sema::ActOnModuleDecl(SourceLocation StartLoc, SourceLocation ModuleLoc,
   TU->setModuleOwnershipKind(Decl::ModuleOwnershipKind::ReachableWhenImported);
   TU->setLocalOwningModule(Mod);
 
+  Module_Decl *ModDecl = Module_Decl::Create(
+      Context, CurContext, ModuleLoc, Mod);
+  ModDecl->setModuleOwnershipKind(Decl::ModuleOwnershipKind::ReachableWhenImported);
+  CurContext->addDecl(ModDecl);
+  PushDeclContext(getCurScope(), ModDecl);
+
   // We are in the module purview, but before any other (non import)
   // statements, so imports are allowed.
   ImportState = ModuleImportState::ImportAllowed;
@@ -479,6 +498,12 @@ Sema::ActOnPrivateModuleFragmentDecl(SourceLocation ModuleLoc,
   auto *TU = Context.getTranslationUnitDecl();
   TU->setModuleOwnershipKind(Decl::ModuleOwnershipKind::ModulePrivate);
   TU->setLocalOwningModule(PrivateModuleFragment);
+
+  Module_Decl *ModDecl = Module_Decl::Create(
+      Context, CurContext, ModuleLoc, PrivateModuleFragment);
+  ModDecl->setModuleOwnershipKind(Decl::ModuleOwnershipKind::ModulePrivate);
+  CurContext->addDecl(ModDecl);
+  PushDeclContext(getCurScope(), ModDecl);
 
   // FIXME: Consider creating an explicit representation of this declaration.
   return nullptr;
@@ -691,6 +716,14 @@ void Sema::ActOnModuleBegin(SourceLocation DirectiveLoc, Module *Mod) {
       cast<Decl>(DC)->setLocalOwningModule(Mod);
     }
   }
+
+  Module_Decl *ModDecl = Module_Decl::Create(
+      Context, CurContext, DirectiveLoc, Mod);
+  ModDecl->setModuleOwnershipKind(getLangOpts().ModulesLocalVisibility
+      ? Decl::ModuleOwnershipKind::VisibleWhenImported
+      : Decl::ModuleOwnershipKind::Visible);
+  CurContext->addDecl(ModDecl);
+  PushDeclContext(getCurScope(), ModDecl);
 }
 
 void Sema::ActOnModuleEnd(SourceLocation EomLoc, Module *Mod) {
@@ -705,6 +738,7 @@ void Sema::ActOnModuleEnd(SourceLocation EomLoc, Module *Mod) {
          "left the wrong module scope");
   ModuleScopes.pop_back();
 
+  PopDeclContext();
   // We got to the end of processing a local module. Create an
   // ImportDecl as we would for an imported module.
   FileID File = getSourceManager().getFileID(EomLoc);

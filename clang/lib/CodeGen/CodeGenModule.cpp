@@ -6793,6 +6793,10 @@ void CodeGenModule::EmitTopLevelDecl(Decl *D) {
     break;
   }
 
+  case Decl::Module_:
+    EmitDeclContext(cast<Module_Decl>(D));
+    break;
+
   case Decl::Export:
     EmitDeclContext(cast<ExportDecl>(D));
     break;

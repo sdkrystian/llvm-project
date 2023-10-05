@@ -1577,6 +1577,8 @@ DEF_TRAVERSE_DECL(LinkageSpecDecl, {})
 
 DEF_TRAVERSE_DECL(ExportDecl, {})
 
+DEF_TRAVERSE_DECL(Module_Decl, {})
+
 DEF_TRAVERSE_DECL(ObjCPropertyImplDecl, {// FIXME: implement this
                                         })
 

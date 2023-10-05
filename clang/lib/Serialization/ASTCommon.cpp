@@ -298,6 +298,7 @@ serialization::getDefinitiveDeclContext(const DeclContext *DC) {
   case Decl::Namespace:
   case Decl::LinkageSpec:
   case Decl::Export:
+  case Decl::Module_:
     return nullptr;
 
   // C/C++ tag types can only be defined in one place.
@@ -413,6 +414,7 @@ bool serialization::isRedeclarableDeclKind(unsigned Kind) {
   case Decl::ObjCCompatibleAlias:
   case Decl::LinkageSpec:
   case Decl::Export:
+  case Decl::Module_:
   case Decl::ObjCPropertyImpl:
   case Decl::PragmaComment:
   case Decl::PragmaDetectMismatch:

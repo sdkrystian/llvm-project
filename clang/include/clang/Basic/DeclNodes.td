@@ -93,6 +93,7 @@ def Named : DeclNode<Decl, "named declarations", 1>;
 def ImplicitConceptSpecialization : DeclNode<Decl>;
 def LinkageSpec : DeclNode<Decl>, DeclContext;
 def Export : DeclNode<Decl>, DeclContext;
+def Module_ : DeclNode<Decl>, DeclContext;
 def ObjCPropertyImpl : DeclNode<Decl>;
 def FileScopeAsm : DeclNode<Decl>;
 def TopLevelStmt : DeclNode<Decl>;

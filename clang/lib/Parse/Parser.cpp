@@ -2420,6 +2420,12 @@ Parser::ParseModuleDecl(Sema::ModuleImportState &ImportState) {
       "not a module declaration");
   SourceLocation ModuleLoc = ConsumeToken();
 
+
+  // ParseScope ModScope(this, Scope::DeclScope);
+  // if (getCurScope()->getParent())
+  //   ExitScope();
+  // EnterScope(Scope::DeclScope);
+
   // Attributes appear after the module name, not before.
   // FIXME: Suggest moving the attributes later with a fixit.
   DiagnoseAndSkipCXX11Attributes();
@@ -2482,7 +2488,6 @@ Parser::ParseModuleDecl(Sema::ModuleImportState &ImportState) {
                           /*WarnOnUnknownAttrs=*/true);
 
   ExpectAndConsumeSemi(diag::err_module_expected_semi);
-
   return Actions.ActOnModuleDecl(StartLoc, ModuleLoc, MDK, Path, Partition,
                                  ImportState);
 }
