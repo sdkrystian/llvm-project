@@ -79,6 +79,13 @@ class Decl;
 //        | link                +-----+                  |
 //        +-->-------------------------------------------+
 
+struct RedeclarableCommon {
+    Decl *First;
+
+    RedeclarableCommon(Decl *FirstDecl) :
+        First(FirstDecl) {}
+};
+
 /// Provides common interface for the Decls that can be redeclared.
 template<typename decl_type>
 class Redeclarable {
@@ -184,10 +191,17 @@ protected:
   /// If there is only one declaration, it is <pointer to self, true>
   DeclLink RedeclLink;
 
-  decl_type *First;
+  //decl_type *First;
+  RedeclarableCommon *Common_ = nullptr;
 
   decl_type *getNextRedeclaration() const {
     return RedeclLink.getPrevious(static_cast<const decl_type *>(this));
+  }
+
+  void setFirstDecl(decl_type *First) {
+    if (!First->Common_)
+      First->Common_ = First->allocateCommon();
+    Common_ = First->Common_;
   }
 
 public:
@@ -196,8 +210,8 @@ public:
   friend class IncrementalParser;
 
   Redeclarable(const ASTContext &Ctx)
-      : RedeclLink(LatestDeclLink(Ctx)),
-        First(static_cast<decl_type *>(this)) {}
+      : RedeclLink(LatestDeclLink(Ctx)) {} //,
+        // First(static_cast<decl_type *>(this)) {}
 
   /// Return the previous declaration of this declaration or NULL if this
   /// is the first declaration.
@@ -213,11 +227,17 @@ public:
 
   /// Return the first declaration of this declaration or itself if this
   /// is the only declaration.
-  decl_type *getFirstDecl() { return First; }
+  decl_type *getFirstDecl() {
+    return Common_ ?
+        static_cast<decl_type*>(Common_->First) :
+        static_cast<decl_type*>(this);
+  }
 
   /// Return the first declaration of this declaration or itself if this
   /// is the only declaration.
-  const decl_type *getFirstDecl() const { return First; }
+  const decl_type *getFirstDecl() const {
+    return const_cast<Redeclarable*>(this)->getFirstDecl();
+  }
 
   /// True if this is the first declaration in its redeclaration chain.
   bool isFirstDecl() const { return RedeclLink.isFirst(); }

@@ -64,6 +64,7 @@ class TemplateDecl;
 class TemplateParameterList;
 class TranslationUnitDecl;
 class UsingDirectiveDecl;
+struct RedeclarableCommon;
 
 /// Captures the result of checking the availability of a
 /// declaration.
@@ -417,6 +418,8 @@ protected:
   }
 
 public:
+  virtual RedeclarableCommon *allocateCommon();
+
   /// Source range that this declaration covers.
   virtual SourceRange getSourceRange() const LLVM_READONLY {
     return SourceRange(getLocation(), getLocation());

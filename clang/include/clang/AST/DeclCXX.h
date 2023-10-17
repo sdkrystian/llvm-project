@@ -3134,7 +3134,8 @@ public:
                                     IdentifierInfo *Alias,
                                     NestedNameSpecifierLoc QualifierLoc,
                                     SourceLocation IdentLoc,
-                                    NamedDecl *Namespace);
+                                    NamedDecl *Namespace,
+                                    NamespaceAliasDecl *PrevDecl);
 
   static NamespaceAliasDecl *CreateDeserialized(ASTContext &C, unsigned ID);
 

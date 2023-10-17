@@ -13561,17 +13561,15 @@ Decl *Sema::ActOnAliasDeclaration(Scope *S, AccessSpecifier AS,
     TypeAliasTemplateDecl *NewDecl =
       TypeAliasTemplateDecl::Create(Context, CurContext, UsingLoc,
                                     Name.Identifier, TemplateParams,
-                                    NewTD);
+                                    NewTD, OldDecl);
     NewTD->setDescribedAliasTemplate(NewDecl);
 
     NewDecl->setAccess(AS);
 
     if (Invalid)
       NewDecl->setInvalidDecl();
-    else if (OldDecl) {
-      NewDecl->setPreviousDecl(OldDecl);
+    else if (OldDecl)
       CheckRedeclarationInModule(NewDecl, OldDecl);
-    }
 
     NewND = NewDecl;
   } else {
@@ -13657,10 +13655,7 @@ Decl *Sema::ActOnNamespaceAliasDef(Scope *S, SourceLocation NamespaceLoc,
   NamespaceAliasDecl *AliasDecl =
     NamespaceAliasDecl::Create(Context, CurContext, NamespaceLoc, AliasLoc,
                                Alias, SS.getWithLocInContext(Context),
-                               IdentLoc, ND);
-  if (Prev)
-    AliasDecl->setPreviousDecl(Prev);
-
+                               IdentLoc, ND, Prev);
   PushOnScopeChains(AliasDecl, S);
   return AliasDecl;
 }

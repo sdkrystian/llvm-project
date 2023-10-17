@@ -4937,10 +4937,12 @@ void Redeclarable<decl_type>::setPreviousDecl(decl_type *PrevDecl) {
          "setPreviousDecl on a decl already in a redeclaration chain");
 
   if (PrevDecl) {
+    setFirstDecl(PrevDecl);
     // Point to previous. Make sure that this is actually the most recent
     // redeclaration, or we can build invalid chains. If the most recent
     // redeclaration is invalid, it won't be PrevDecl, but we want it anyway.
-    First = PrevDecl->getFirstDecl();
+    //First = PrevDecl->getFirstDecl();
+    auto First = static_cast<decl_type*>(Common_->First);
     assert(First->RedeclLink.isFirst() && "Expected first");
     decl_type *MostRecent = First->getNextRedeclaration();
     RedeclLink = PreviousDeclLink(cast<decl_type>(MostRecent));
@@ -4950,13 +4952,13 @@ void Redeclarable<decl_type>::setPreviousDecl(decl_type *PrevDecl) {
     static_cast<decl_type*>(this)->IdentifierNamespace |=
       MostRecent->getIdentifierNamespace() &
       (Decl::IDNS_Ordinary | Decl::IDNS_Tag | Decl::IDNS_Type);
+    // First one will point to this one as latest.
+    First->RedeclLink.setLatest(static_cast<decl_type*>(this));
   } else {
     // Make this first.
-    First = static_cast<decl_type*>(this);
+    //First = static_cast<decl_type*>(this);
   }
 
-  // First one will point to this one as latest.
-  First->RedeclLink.setLatest(static_cast<decl_type*>(this));
 
   assert(!isa<NamedDecl>(static_cast<decl_type*>(this)) ||
          cast<NamedDecl>(static_cast<decl_type*>(this))->isLinkageValid());

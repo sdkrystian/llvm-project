@@ -2616,7 +2616,7 @@ ExpectedDecl ASTNodeImporter::VisitNamespaceAliasDecl(NamespaceAliasDecl *D) {
   NamespaceAliasDecl *ToD;
   if (GetImportedOrCreateDecl(
       ToD, D, Importer.getToContext(), DC, ToNamespaceLoc, ToAliasLoc,
-      ToIdentifier, ToQualifierLoc, ToTargetNameLoc, ToNamespace))
+      ToIdentifier, ToQualifierLoc, ToTargetNameLoc, ToNamespace, nullptr))
     return ToD;
 
   ToD->setLexicalDeclContext(LexicalDC);
@@ -2794,7 +2794,7 @@ ASTNodeImporter::VisitTypeAliasTemplateDecl(TypeAliasTemplateDecl *D) {
 
   TypeAliasTemplateDecl *ToAlias;
   if (GetImportedOrCreateDecl(ToAlias, D, Importer.getToContext(), DC, Loc,
-                              Name, ToTemplateParameters, ToTemplatedDecl))
+                              Name, ToTemplateParameters, ToTemplatedDecl, nullptr))
     return ToAlias;
 
   ToTemplatedDecl->setDescribedAliasTemplate(ToAlias);
@@ -5965,7 +5965,7 @@ ExpectedDecl ASTNodeImporter::VisitClassTemplateDecl(ClassTemplateDecl *D) {
   // Create the class template declaration itself.
   ClassTemplateDecl *D2;
   if (GetImportedOrCreateDecl(D2, D, Importer.getToContext(), DC, Loc, Name,
-                              *TemplateParamsOrErr, ToTemplated))
+                              *TemplateParamsOrErr, ToTemplated, nullptr))
     return D2;
 
   ToTemplated->setDescribedClassTemplate(D2);

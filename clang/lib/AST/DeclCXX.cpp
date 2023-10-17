@@ -125,8 +125,7 @@ CXXRecordDecl::CXXRecordDecl(Kind K, TagKind TK, const ASTContext &C,
                              SourceLocation IdLoc, IdentifierInfo *Id,
                              CXXRecordDecl *PrevDecl)
     : RecordDecl(K, TK, C, DC, StartLoc, IdLoc, Id, PrevDecl),
-      DefinitionData(PrevDecl ? PrevDecl->DefinitionData
-                              : nullptr) {}
+      DefinitionData(nullptr) {}
 
 CXXRecordDecl *CXXRecordDecl::Create(const ASTContext &C, TagKind TK,
                                      DeclContext *DC, SourceLocation StartLoc,
@@ -135,6 +134,9 @@ CXXRecordDecl *CXXRecordDecl::Create(const ASTContext &C, TagKind TK,
                                      bool DelayTypeCreation) {
   auto *R = new (C, DC) CXXRecordDecl(CXXRecord, TK, C, DC, StartLoc, IdLoc, Id,
                                       PrevDecl);
+  R->setPreviousDecl(PrevDecl);
+  if(PrevDecl)
+    R->DefinitionData = PrevDecl->DefinitionData;
   R->setMayHaveOutOfDateDef(C.getLangOpts().Modules);
 
   // FIXME: DelayTypeCreation seems like such a hack
@@ -2920,18 +2922,18 @@ NamespaceDecl::NamespaceDecl(ASTContext &C, DeclContext *DC, bool Inline,
   if (Nested)
     Flags |= F_Nested;
   AnonOrFirstNamespaceAndFlags = {nullptr, Flags};
-  setPreviousDecl(PrevDecl);
-
-  if (PrevDecl)
-    AnonOrFirstNamespaceAndFlags.setPointer(PrevDecl->getOriginalNamespace());
 }
 
 NamespaceDecl *NamespaceDecl::Create(ASTContext &C, DeclContext *DC,
                                      bool Inline, SourceLocation StartLoc,
                                      SourceLocation IdLoc, IdentifierInfo *Id,
                                      NamespaceDecl *PrevDecl, bool Nested) {
-  return new (C, DC)
+  auto *ND = new (C, DC)
       NamespaceDecl(C, DC, Inline, StartLoc, IdLoc, Id, PrevDecl, Nested);
+  ND->setPreviousDecl(PrevDecl);
+  if (PrevDecl)
+    ND->AnonOrFirstNamespaceAndFlags.setPointer(PrevDecl->getOriginalNamespace());
+  return ND;
 }
 
 NamespaceDecl *NamespaceDecl::CreateDeserialized(ASTContext &C, unsigned ID) {
@@ -2987,12 +2989,15 @@ NamespaceAliasDecl *NamespaceAliasDecl::Create(ASTContext &C, DeclContext *DC,
                                                IdentifierInfo *Alias,
                                            NestedNameSpecifierLoc QualifierLoc,
                                                SourceLocation IdentLoc,
-                                               NamedDecl *Namespace) {
+                                               NamedDecl *Namespace,
+                                               NamespaceAliasDecl *PrevDecl) {
   // FIXME: Preserve the aliased namespace as written.
   if (auto *NS = dyn_cast_or_null<NamespaceDecl>(Namespace))
     Namespace = NS->getOriginalNamespace();
-  return new (C, DC) NamespaceAliasDecl(C, DC, UsingLoc, AliasLoc, Alias,
+  auto *AD = new (C, DC) NamespaceAliasDecl(C, DC, UsingLoc, AliasLoc, Alias,
                                         QualifierLoc, IdentLoc, Namespace);
+  AD->setPreviousDecl(PrevDecl);
+  return AD;
 }
 
 NamespaceAliasDecl *

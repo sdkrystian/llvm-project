@@ -345,13 +345,10 @@ struct TemplateParameterListBuilder {
     Builder.Template = ClassTemplateDecl::Create(
         AST, Builder.Record->getDeclContext(), SourceLocation(),
         DeclarationName(Builder.Record->getIdentifier()), ParamList,
-        Builder.Record);
+        Builder.Record, Builder.PrevTemplate);
     Builder.Record->setDescribedClassTemplate(Builder.Template);
     Builder.Template->setImplicit(true);
     Builder.Template->setLexicalDeclContext(Builder.Record->getDeclContext());
-    // NOTE: setPreviousDecl before addDecl so new decl replace old decl when
-    // make visible.
-    Builder.Template->setPreviousDecl(Builder.PrevTemplate);
     Builder.Record->getDeclContext()->addDecl(Builder.Template);
     Params.clear();
 
@@ -450,7 +447,7 @@ void HLSLExternalSemaSource::defineHLSLVectorAlias() {
 
   auto *Template =
       TypeAliasTemplateDecl::Create(AST, HLSLNamespace, SourceLocation(),
-                                    Record->getIdentifier(), ParamList, Record);
+                                    Record->getIdentifier(), ParamList, Record, nullptr);
 
   Record->setDescribedAliasTemplate(Template);
   Template->setImplicit(true);

@@ -494,11 +494,13 @@ ClassTemplateDecl *ClassTemplateDecl::Create(ASTContext &C, DeclContext *DC,
                                              SourceLocation L,
                                              DeclarationName Name,
                                              TemplateParameterList *Params,
-                                             NamedDecl *Decl) {
+                                             NamedDecl *Decl,
+                                             ClassTemplateDecl *PrevDecl) {
   bool Invalid = AdoptTemplateParameterList(Params, cast<DeclContext>(Decl));
   auto *TD = new (C, DC) ClassTemplateDecl(C, DC, L, Name, Params, Decl);
   if (Invalid)
     TD->setInvalidDecl();
+  TD->setPreviousDecl(PrevDecl);
   return TD;
 }
 
@@ -1174,11 +1176,13 @@ FriendTemplateDecl *FriendTemplateDecl::CreateDeserialized(ASTContext &C,
 TypeAliasTemplateDecl *
 TypeAliasTemplateDecl::Create(ASTContext &C, DeclContext *DC, SourceLocation L,
                               DeclarationName Name,
-                              TemplateParameterList *Params, NamedDecl *Decl) {
+                              TemplateParameterList *Params, NamedDecl *Decl,
+                              TypeAliasTemplateDecl *PrevDecl) {
   bool Invalid = AdoptTemplateParameterList(Params, DC);
   auto *TD = new (C, DC) TypeAliasTemplateDecl(C, DC, L, Name, Params, Decl);
   if (Invalid)
     TD->setInvalidDecl();
+  TD->setPreviousDecl(PrevDecl);
   return TD;
 }
 

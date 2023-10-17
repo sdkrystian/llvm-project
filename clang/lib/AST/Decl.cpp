@@ -4628,7 +4628,6 @@ TagDecl::TagDecl(Kind DK, TagKind TK, const ASTContext &C, DeclContext *DC,
       TypedefNameDeclOrQualifier((TypedefNameDecl *)nullptr) {
   assert((DK != Enum || TK == TTK_Enum) &&
          "EnumDecl not matched with TTK_Enum");
-  setPreviousDecl(PrevDecl);
   setTagKind(TK);
   setCompleteDefinition(false);
   setBeingDefined(false);
@@ -4781,6 +4780,7 @@ EnumDecl *EnumDecl::Create(ASTContext &C, DeclContext *DC,
                            bool IsScopedUsingClassTag, bool IsFixed) {
   auto *Enum = new (C, DC) EnumDecl(C, DC, StartLoc, IdLoc, Id, PrevDecl,
                                     IsScoped, IsScopedUsingClassTag, IsFixed);
+  Enum->setPreviousDecl(PrevDecl);
   Enum->setMayHaveOutOfDateDef(C.getLangOpts().Modules);
   C.getTypeDeclType(Enum, PrevDecl);
   return Enum;
@@ -4942,6 +4942,7 @@ RecordDecl *RecordDecl::Create(const ASTContext &C, TagKind TK, DeclContext *DC,
                                IdentifierInfo *Id, RecordDecl* PrevDecl) {
   RecordDecl *R = new (C, DC) RecordDecl(Record, TK, C, DC,
                                          StartLoc, IdLoc, Id, PrevDecl);
+  R->setPreviousDecl(PrevDecl);
   R->setMayHaveOutOfDateDef(C.getLangOpts().Modules);
 
   C.getTypeDeclType(R, PrevDecl);
@@ -5650,4 +5651,10 @@ ExportDecl *ExportDecl::Create(ASTContext &C, DeclContext *DC,
 
 ExportDecl *ExportDecl::CreateDeserialized(ASTContext &C, unsigned ID) {
   return new (C, ID) ExportDecl(nullptr, SourceLocation());
+}
+
+
+
+RedeclarableCommon *Decl::allocateCommon() {
+  return new (getASTContext()) RedeclarableCommon(this);
 }

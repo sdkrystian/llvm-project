@@ -2753,7 +2753,8 @@ ASTDeclReader::VisitRedeclarable(Redeclarable<T> *D) {
     // which is the one that matters and mark the real previous DeclID to be
     // loaded & attached later on.
     D->RedeclLink = Redeclarable<T>::PreviousDeclLink(FirstDecl);
-    D->First = FirstDecl->getCanonicalDecl();
+    D->setFirstDecl(FirstDecl->getCanonicalDecl());
+    // D->First = FirstDecl->getCanonicalDecl();
   }
 
   auto *DAsT = static_cast<T *>(D);
@@ -2898,7 +2899,8 @@ void ASTDeclReader::mergeRedeclarable(Redeclarable<T> *DBase, T *Existing,
     // of the existing declaration, so that this declaration has the
     // appropriate canonical declaration.
     D->RedeclLink = Redeclarable<T>::PreviousDeclLink(ExistingCanon);
-    D->First = ExistingCanon;
+    D->setFirstDecl(ExistingCanon);
+    //D->First = ExistingCanon;
     ExistingCanon->Used |= D->Used;
     D->Used = false;
 
@@ -3511,7 +3513,8 @@ void ASTDeclReader::attachPreviousDeclImpl(ASTReader &Reader,
                                            Redeclarable<DeclT> *D,
                                            Decl *Previous, Decl *Canon) {
   D->RedeclLink.setPrevious(cast<DeclT>(Previous));
-  D->First = cast<DeclT>(Previous)->First;
+  D->setFirstDecl(cast<DeclT>(Previous)->getFirstDecl());
+  // D->First = cast<DeclT>(Previous)->First;
 }
 
 namespace clang {
@@ -3523,7 +3526,8 @@ void ASTDeclReader::attachPreviousDeclImpl(ASTReader &Reader,
   auto *VD = static_cast<VarDecl *>(D);
   auto *PrevVD = cast<VarDecl>(Previous);
   D->RedeclLink.setPrevious(PrevVD);
-  D->First = PrevVD->First;
+  D->setFirstDecl(PrevVD->getFirstDecl());
+  //D->First = PrevVD->First;
 
   // We should keep at most one definition on the chain.
   // FIXME: Cache the definition once we've found it. Building a chain with
@@ -3552,7 +3556,8 @@ void ASTDeclReader::attachPreviousDeclImpl(ASTReader &Reader,
   auto *PrevFD = cast<FunctionDecl>(Previous);
 
   FD->RedeclLink.setPrevious(PrevFD);
-  FD->First = PrevFD->First;
+  FD->setFirstDecl(PrevFD->getFirstDecl());
+  // FD->First = PrevFD->First;
 
   // If the previous declaration is an inline function declaration, then this
   // declaration is too.

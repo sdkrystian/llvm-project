@@ -2302,7 +2302,8 @@ public:
                                    SourceLocation L,
                                    DeclarationName Name,
                                    TemplateParameterList *Params,
-                                   NamedDecl *Decl);
+                                   NamedDecl *Decl,
+                                   ClassTemplateDecl *PrevDecl);
 
   /// Create an empty class template node.
   static ClassTemplateDecl *CreateDeserialized(ASTContext &C, unsigned ID);
@@ -2569,7 +2570,8 @@ public:
                                        SourceLocation L,
                                        DeclarationName Name,
                                        TemplateParameterList *Params,
-                                       NamedDecl *Decl);
+                                       NamedDecl *Decl,
+                                       TypeAliasTemplateDecl *PrevDecl);
 
   /// Create an empty alias template node.
   static TypeAliasTemplateDecl *CreateDeserialized(ASTContext &C, unsigned ID);
