@@ -732,6 +732,7 @@ class RedeclarableTemplateDecl : public TemplateDecl,
                                  public Redeclarable<RedeclarableTemplateDecl>
 {
   using redeclarable_base = Redeclarable<RedeclarableTemplateDecl>;
+  friend redeclarable_base;
 
   RedeclarableTemplateDecl *getNextRedeclarationImpl() override {
     return getNextRedeclaration();
@@ -797,8 +798,8 @@ protected:
   void addSpecializationImpl(llvm::FoldingSetVector<EntryType> &Specs,
                              EntryType *Entry, void *InsertPos);
 
-  struct CommonBase {
-    CommonBase() : InstantiatedFromMember(nullptr, false) {}
+  struct TemplateCommon : redeclarable_base::CommonBase {
+    TemplateCommon() : InstantiatedFromMember(nullptr, false) {}
 
     /// The template from which this was most
     /// directly instantiated (or null).
@@ -827,14 +828,16 @@ protected:
 
   /// Pointer to the common data shared by all declarations of this
   /// template.
-  mutable CommonBase *Common = nullptr;
+  // mutable CommonBase *Common = nullptr;
 
   /// Retrieves the "common" pointer shared by all (re-)declarations of
   /// the same template. Calling this routine may implicitly allocate memory
   /// for the common pointer.
-  CommonBase *getCommonPtr() const;
+  TemplateCommon *getCommonPtr() const {
+    return static_cast<TemplateCommon *>(redeclarable_base::getCommonPtr());
+  }
 
-  virtual CommonBase *newCommon(ASTContext &C) const = 0;
+  virtual CommonBase *newCommonPtr(ASTContext &C) const = 0;
 
   // Construct a template decl with name, parameters, and templated element.
   RedeclarableTemplateDecl(Kind DK, ASTContext &C, DeclContext *DC,
@@ -875,12 +878,12 @@ public:
   /// struct X<int>::Inner { /* ... */ };
   /// \endcode
   bool isMemberSpecialization() const {
-    return getCommonPtr()->InstantiatedFromMember.getInt();
+    return hasCommonPtr() && getCommonPtr()->InstantiatedFromMember.getInt();
   }
 
   /// Note that this member template is a specialization.
   void setMemberSpecialization() {
-    assert(getCommonPtr()->InstantiatedFromMember.getPointer() &&
+    assert(getInstantiatedFromMemberTemplate() &&
            "Only member templates can be member template specializations");
     getCommonPtr()->InstantiatedFromMember.setInt(true);
   }
@@ -922,11 +925,13 @@ public:
   /// void X<T>::f(T, U);
   /// \endcode
   RedeclarableTemplateDecl *getInstantiatedFromMemberTemplate() const {
+    if (!hasCommonPtr())
+      return nullptr;
     return getCommonPtr()->InstantiatedFromMember.getPointer();
   }
 
   void setInstantiatedFromMemberTemplate(RedeclarableTemplateDecl *TD) {
-    assert(!getCommonPtr()->InstantiatedFromMember.getPointer());
+    assert(!getInstantiatedFromMemberTemplate());
     getCommonPtr()->InstantiatedFromMember.setPointer(TD);
   }
 
@@ -977,7 +982,7 @@ protected:
 
   /// Data that is common to all of the declarations of a given
   /// function template.
-  struct Common : CommonBase {
+  struct Common : TemplateCommon {
     /// The function template specializations for this function
     /// template, including explicit specializations and instantiations.
     llvm::FoldingSetVector<FunctionTemplateSpecializationInfo> Specializations;
@@ -991,7 +996,7 @@ protected:
       : RedeclarableTemplateDecl(FunctionTemplate, C, DC, L, Name, Params,
                                  Decl) {}
 
-  CommonBase *newCommon(ASTContext &C) const override;
+  CommonBase *newCommonPtr(ASTContext &C) const override;
 
   Common *getCommonPtr() const {
     return static_cast<Common *>(RedeclarableTemplateDecl::getCommonPtr());
@@ -2237,7 +2242,7 @@ class ClassTemplateDecl : public RedeclarableTemplateDecl {
 protected:
   /// Data that is common to all of the declarations of a given
   /// class template.
-  struct Common : CommonBase {
+  struct Common : TemplateCommon {
     /// The class template specializations for this class
     /// template, including explicit specializations and instantiations.
     llvm::FoldingSetVector<ClassTemplateSpecializationDecl> Specializations;
@@ -2267,14 +2272,10 @@ protected:
                     NamedDecl *Decl)
       : RedeclarableTemplateDecl(ClassTemplate, C, DC, L, Name, Params, Decl) {}
 
-  CommonBase *newCommon(ASTContext &C) const override;
+  CommonBase *newCommonPtr(ASTContext &C) const override;
 
   Common *getCommonPtr() const {
     return static_cast<Common *>(RedeclarableTemplateDecl::getCommonPtr());
-  }
-
-  void setCommonPtr(Common *C) {
-    RedeclarableTemplateDecl::Common = C;
   }
 
 public:
@@ -2302,7 +2303,8 @@ public:
                                    SourceLocation L,
                                    DeclarationName Name,
                                    TemplateParameterList *Params,
-                                   NamedDecl *Decl);
+                                   NamedDecl *Decl,
+                                   ClassTemplateDecl *PrevDecl);
 
   /// Create an empty class template node.
   static ClassTemplateDecl *CreateDeserialized(ASTContext &C, unsigned ID);
@@ -2514,7 +2516,7 @@ public:
 /// \endcode
 class TypeAliasTemplateDecl : public RedeclarableTemplateDecl {
 protected:
-  using Common = CommonBase;
+  using Common = TemplateCommon;
 
   TypeAliasTemplateDecl(ASTContext &C, DeclContext *DC, SourceLocation L,
                         DeclarationName Name, TemplateParameterList *Params,
@@ -2522,7 +2524,7 @@ protected:
       : RedeclarableTemplateDecl(TypeAliasTemplate, C, DC, L, Name, Params,
                                  Decl) {}
 
-  CommonBase *newCommon(ASTContext &C) const override;
+  CommonBase *newCommonPtr(ASTContext &C) const override;
 
   Common *getCommonPtr() {
     return static_cast<Common *>(RedeclarableTemplateDecl::getCommonPtr());
@@ -2569,7 +2571,8 @@ public:
                                        SourceLocation L,
                                        DeclarationName Name,
                                        TemplateParameterList *Params,
-                                       NamedDecl *Decl);
+                                       NamedDecl *Decl,
+                                       TypeAliasTemplateDecl *PrevDecl);
 
   /// Create an empty alias template node.
   static TypeAliasTemplateDecl *CreateDeserialized(ASTContext &C, unsigned ID);
@@ -3016,7 +3019,7 @@ class VarTemplateDecl : public RedeclarableTemplateDecl {
 protected:
   /// Data that is common to all of the declarations of a given
   /// variable template.
-  struct Common : CommonBase {
+  struct Common : TemplateCommon {
     /// The variable template specializations for this variable
     /// template, including explicit specializations and instantiations.
     llvm::FoldingSetVector<VarTemplateSpecializationDecl> Specializations;
@@ -3043,7 +3046,7 @@ protected:
                   NamedDecl *Decl)
       : RedeclarableTemplateDecl(VarTemplate, C, DC, L, Name, Params, Decl) {}
 
-  CommonBase *newCommon(ASTContext &C) const override;
+  CommonBase *newCommonPtr(ASTContext &C) const override;
 
   Common *getCommonPtr() const {
     return static_cast<Common *>(RedeclarableTemplateDecl::getCommonPtr());

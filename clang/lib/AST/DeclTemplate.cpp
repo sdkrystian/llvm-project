@@ -299,6 +299,7 @@ bool TemplateDecl::isTypeAlias() const {
 
 void RedeclarableTemplateDecl::anchor() {}
 
+#if 0
 RedeclarableTemplateDecl::CommonBase *RedeclarableTemplateDecl::getCommonPtr() const {
   if (Common)
     return Common;
@@ -321,7 +322,7 @@ RedeclarableTemplateDecl::CommonBase *RedeclarableTemplateDecl::getCommonPtr() c
     // FIXME: If any of the declarations is from an AST file, we probably
     // need an update record to add the common data.
 
-    Common = newCommon(getASTContext());
+    Common = newCommonPtr(getASTContext());
   }
 
   // Update any previous declarations we saw with the common pointer.
@@ -330,15 +331,16 @@ RedeclarableTemplateDecl::CommonBase *RedeclarableTemplateDecl::getCommonPtr() c
 
   return Common;
 }
+#endif
 
 void RedeclarableTemplateDecl::loadLazySpecializationsImpl() const {
+  if (!hasCommonPtr())
+    return;
   // Grab the most recent declaration to ensure we've loaded any lazy
   // redeclarations of this template.
-  CommonBase *CommonBasePtr = getMostRecentDecl()->getCommonPtr();
-  if (CommonBasePtr->LazySpecializations) {
+  if (auto& LazySpecializations = getCommonPtr()->LazySpecializations) {
     ASTContext &Context = getASTContext();
-    uint32_t *Specs = CommonBasePtr->LazySpecializations;
-    CommonBasePtr->LazySpecializations = nullptr;
+    uint32_t *Specs = std::exchange(LazySpecializations, nullptr);
     for (uint32_t I = 0, N = *Specs++; I != N; ++I)
       (void)Context.getExternalSource()->GetExternalDecl(Specs[I]);
   }
@@ -424,7 +426,7 @@ FunctionTemplateDecl *FunctionTemplateDecl::CreateDeserialized(ASTContext &C,
 }
 
 RedeclarableTemplateDecl::CommonBase *
-FunctionTemplateDecl::newCommon(ASTContext &C) const {
+FunctionTemplateDecl::newCommonPtr(ASTContext &C) const {
   auto *CommonPtr = new (C) Common;
   C.addDestruction(CommonPtr);
   return CommonPtr;
@@ -453,6 +455,7 @@ void FunctionTemplateDecl::addSpecialization(
 }
 
 void FunctionTemplateDecl::mergePrevDecl(FunctionTemplateDecl *Prev) {
+  #if 0
   using Base = RedeclarableTemplateDecl;
 
   // If we haven't created a common pointer yet, then it can just be created
@@ -484,6 +487,7 @@ void FunctionTemplateDecl::mergePrevDecl(FunctionTemplateDecl *Prev) {
          "Can't merge incompatible declarations!");
 
   Base::Common = PrevCommon;
+  #endif
 }
 
 //===----------------------------------------------------------------------===//
@@ -494,11 +498,13 @@ ClassTemplateDecl *ClassTemplateDecl::Create(ASTContext &C, DeclContext *DC,
                                              SourceLocation L,
                                              DeclarationName Name,
                                              TemplateParameterList *Params,
-                                             NamedDecl *Decl) {
+                                             NamedDecl *Decl,
+                                             ClassTemplateDecl *PrevDecl) {
   bool Invalid = AdoptTemplateParameterList(Params, cast<DeclContext>(Decl));
   auto *TD = new (C, DC) ClassTemplateDecl(C, DC, L, Name, Params, Decl);
   if (Invalid)
     TD->setInvalidDecl();
+  TD->setPreviousDecl(PrevDecl);
   return TD;
 }
 
@@ -525,7 +531,7 @@ ClassTemplateDecl::getPartialSpecializations() const {
 }
 
 RedeclarableTemplateDecl::CommonBase *
-ClassTemplateDecl::newCommon(ASTContext &C) const {
+ClassTemplateDecl::newCommonPtr(ASTContext &C) const {
   auto *CommonPtr = new (C) Common;
   C.addDestruction(CommonPtr);
   return CommonPtr;
@@ -936,6 +942,7 @@ ClassTemplateSpecializationDecl::Create(ASTContext &Context, TagKind TK,
       new (Context, DC) ClassTemplateSpecializationDecl(
           Context, ClassTemplateSpecialization, TK, DC, StartLoc, IdLoc,
           SpecializedTemplate, Args, PrevDecl);
+  Result->setPreviousDecl(PrevDecl);
   Result->setMayHaveOutOfDateDef(false);
 
   // If the template decl is incomplete, copy the external lexical storage from
@@ -1127,6 +1134,7 @@ Create(ASTContext &Context, TagKind TK,DeclContext *DC,
       ClassTemplatePartialSpecializationDecl(Context, TK, DC, StartLoc, IdLoc,
                                              Params, SpecializedTemplate, Args,
                                              ASTArgInfos, PrevDecl);
+  Result->setPreviousDecl(PrevDecl);
   Result->setSpecializationKind(TSK_ExplicitSpecialization);
   Result->setMayHaveOutOfDateDef(false);
 
@@ -1174,11 +1182,13 @@ FriendTemplateDecl *FriendTemplateDecl::CreateDeserialized(ASTContext &C,
 TypeAliasTemplateDecl *
 TypeAliasTemplateDecl::Create(ASTContext &C, DeclContext *DC, SourceLocation L,
                               DeclarationName Name,
-                              TemplateParameterList *Params, NamedDecl *Decl) {
+                              TemplateParameterList *Params, NamedDecl *Decl,
+                              TypeAliasTemplateDecl *PrevDecl) {
   bool Invalid = AdoptTemplateParameterList(Params, DC);
   auto *TD = new (C, DC) TypeAliasTemplateDecl(C, DC, L, Name, Params, Decl);
   if (Invalid)
     TD->setInvalidDecl();
+  TD->setPreviousDecl(PrevDecl);
   return TD;
 }
 
@@ -1189,7 +1199,7 @@ TypeAliasTemplateDecl *TypeAliasTemplateDecl::CreateDeserialized(ASTContext &C,
 }
 
 RedeclarableTemplateDecl::CommonBase *
-TypeAliasTemplateDecl::newCommon(ASTContext &C) const {
+TypeAliasTemplateDecl::newCommonPtr(ASTContext &C) const {
   auto *CommonPtr = new (C) Common;
   C.addDestruction(CommonPtr);
   return CommonPtr;
@@ -1243,7 +1253,7 @@ VarTemplateDecl::getPartialSpecializations() const {
 }
 
 RedeclarableTemplateDecl::CommonBase *
-VarTemplateDecl::newCommon(ASTContext &C) const {
+VarTemplateDecl::newCommonPtr(ASTContext &C) const {
   auto *CommonPtr = new (C) Common;
   C.addDestruction(CommonPtr);
   return CommonPtr;

@@ -333,6 +333,15 @@ void PrettyStackTraceDecl::print(raw_ostream &OS) const {
 // Out-of-line virtual method providing a home for Decl.
 Decl::~Decl() = default;
 
+static void DeclContextCheck(const Decl *D) {
+#ifndef NDEBUG
+  const Decl *CD = D->getCanonicalDecl();
+  assert(D->getDeclContext() == CD->getDeclContext());
+  for (const Decl *RD : CD->redecls())
+    assert(RD->getDeclContext() == CD->getDeclContext());
+#endif
+}
+
 void Decl::setDeclContext(DeclContext *DC) {
   DeclCtx = DC;
 }

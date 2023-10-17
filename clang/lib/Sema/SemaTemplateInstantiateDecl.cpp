@@ -960,7 +960,8 @@ TemplateDeclInstantiator::VisitNamespaceAliasDecl(NamespaceAliasDecl *D) {
                                  D->getIdentifier(),
                                  D->getQualifierLoc(),
                                  D->getTargetNameLoc(),
-                                 D->getNamespace());
+                                 D->getNamespace(),
+                                 /*PrevDecl=*/nullptr);
   Owner->addDecl(Inst);
   return Inst;
 }
@@ -1087,10 +1088,9 @@ TemplateDeclInstantiator::VisitTypeAliasTemplateDecl(TypeAliasTemplateDecl *D) {
 
   TypeAliasTemplateDecl *Inst
     = TypeAliasTemplateDecl::Create(SemaRef.Context, Owner, D->getLocation(),
-                                    D->getDeclName(), InstParams, AliasInst);
+                                    D->getDeclName(), InstParams, AliasInst,
+                                    PrevAliasTemplate);
   AliasInst->setDescribedAliasTemplate(Inst);
-  if (PrevAliasTemplate)
-    Inst->setPreviousDecl(PrevAliasTemplate);
 
   Inst->setAccess(D->getAccess());
 
@@ -1680,9 +1680,12 @@ Decl *TemplateDeclInstantiator::VisitClassTemplateDecl(ClassTemplateDecl *D) {
   SemaRef.InstantiateAttrsForDecl(TemplateArgs, Pattern, RecordInst, LateAttrs,
                                                               StartingScope);
 
+  // FIXME: Check template parameters before creating the ClassTemplateDecl.
   ClassTemplateDecl *Inst
     = ClassTemplateDecl::Create(SemaRef.Context, DC, D->getLocation(),
-                                D->getIdentifier(), InstParams, RecordInst);
+                                D->getIdentifier(), InstParams, RecordInst,
+                                PrevClassTemplate);
+
   RecordInst->setDescribedClassTemplate(Inst);
 
   if (isFriend) {
@@ -1691,11 +1694,12 @@ Decl *TemplateDeclInstantiator::VisitClassTemplateDecl(ClassTemplateDecl *D) {
     RecordInst->setLexicalDeclContext(Owner);
 
     if (PrevClassTemplate) {
-      Inst->setCommonPtr(PrevClassTemplate->getCommonPtr());
+      // Inst->setCommonPtr(PrevClassTemplate->getCommonPtr());
       RecordInst->setTypeForDecl(
           PrevClassTemplate->getTemplatedDecl()->getTypeForDecl());
       const ClassTemplateDecl *MostRecentPrevCT =
-          PrevClassTemplate->getMostRecentDecl();
+          Inst->getPreviousDecl();
+          // PrevClassTemplate->getMostRecentDecl();
       TemplateParameterList *PrevParams =
           MostRecentPrevCT->getTemplateParameters();
 
@@ -1725,7 +1729,6 @@ Decl *TemplateDeclInstantiator::VisitClassTemplateDecl(ClassTemplateDecl *D) {
       Inst->setInstantiatedFromMemberTemplate(D);
   }
 
-  Inst->setPreviousDecl(PrevClassTemplate);
 
   // Trigger creation of the type for the instantiation.
   SemaRef.Context.getInjectedClassNameType(

@@ -2110,10 +2110,8 @@ DeclResult Sema::CheckClassTemplate(
   ClassTemplateDecl *NewTemplate
     = ClassTemplateDecl::Create(Context, SemanticContext, NameLoc,
                                 DeclarationName(Name), TemplateParams,
-                                NewClass);
-
-  if (ShouldAddRedecl)
-    NewTemplate->setPreviousDecl(PrevClassTemplate);
+                                NewClass,
+                                ShouldAddRedecl ? PrevClassTemplate : nullptr);
 
   NewClass->setDescribedClassTemplate(NewTemplate);
 

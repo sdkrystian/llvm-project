@@ -184,7 +184,34 @@ protected:
   /// If there is only one declaration, it is <pointer to self, true>
   DeclLink RedeclLink;
 
-  decl_type *First;
+  struct CommonBase {
+    decl_type *First = nullptr;
+  };
+
+  mutable CommonBase *Common = nullptr;
+
+  bool hasCommonPtr() const {
+    return Common != nullptr;
+  }
+
+  CommonBase *getCommonPtr() const {
+    if (!hasCommonPtr()) {
+      auto First = static_cast<const decl_type *>(this);
+      // If a common data pointer has not yet been allocated,
+      // allocate one now.
+      Common = First->newCommonPtr(First->getASTContext());
+      // Set this as the first declaration.
+      Common->First = const_cast<decl_type *>(First);
+    }
+    assert(Common && "getCommonPtr should never return null");
+    return Common;
+  }
+
+  void setFirstDecl(decl_type *First) {
+    // Setting the first declaration is just a matter of copying
+    // the common data pointer from the first declaration.
+    Common = First->getCommonPtr();
+  }
 
   decl_type *getNextRedeclaration() const {
     return RedeclLink.getPrevious(static_cast<const decl_type *>(this));
@@ -196,8 +223,7 @@ public:
   friend class IncrementalParser;
 
   Redeclarable(const ASTContext &Ctx)
-      : RedeclLink(LatestDeclLink(Ctx)),
-        First(static_cast<decl_type *>(this)) {}
+      : RedeclLink(LatestDeclLink(Ctx)) {}
 
   /// Return the previous declaration of this declaration or NULL if this
   /// is the first declaration.
@@ -213,11 +239,15 @@ public:
 
   /// Return the first declaration of this declaration or itself if this
   /// is the only declaration.
-  decl_type *getFirstDecl() { return First; }
+  decl_type *getFirstDecl() {
+    return hasCommonPtr() ? Common->First : static_cast<decl_type*>(this);
+  }
 
   /// Return the first declaration of this declaration or itself if this
   /// is the only declaration.
-  const decl_type *getFirstDecl() const { return First; }
+  const decl_type *getFirstDecl() const {
+    return const_cast<Redeclarable*>(this)->getFirstDecl();
+  }
 
   /// True if this is the first declaration in its redeclaration chain.
   bool isFirstDecl() const { return RedeclLink.isFirst(); }

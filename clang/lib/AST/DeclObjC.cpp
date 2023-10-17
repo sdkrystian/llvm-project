@@ -1550,6 +1550,11 @@ ObjCInterfaceDecl *ObjCInterfaceDecl::Create(const ASTContext &C,
   auto *Result = new (C, DC)
       ObjCInterfaceDecl(C, DC, atLoc, Id, typeParamList, ClassLoc, PrevDecl,
                         isInternal);
+  Result->setPreviousDecl(PrevDecl);
+  // Copy the 'data' pointer over.
+  if (PrevDecl)
+    Result->Data = PrevDecl->Data;
+
   Result->Data.setInt(!C.getLangOpts().Modules);
   C.getObjCInterfaceType(Result, PrevDecl);
   return Result;
@@ -1572,12 +1577,6 @@ ObjCInterfaceDecl::ObjCInterfaceDecl(const ASTContext &C, DeclContext *DC,
                                      bool IsInternal)
     : ObjCContainerDecl(ObjCInterface, DC, Id, CLoc, AtLoc),
       redeclarable_base(C) {
-  setPreviousDecl(PrevDecl);
-
-  // Copy the 'data' pointer over.
-  if (PrevDecl)
-    Data = PrevDecl->Data;
-
   setImplicit(IsInternal);
 
   setTypeParamList(typeParamList);
@@ -1938,11 +1937,7 @@ ObjCProtocolDecl::ObjCProtocolDecl(ASTContext &C, DeclContext *DC,
                                    SourceLocation atStartLoc,
                                    ObjCProtocolDecl *PrevDecl)
     : ObjCContainerDecl(ObjCProtocol, DC, Id, nameLoc, atStartLoc),
-      redeclarable_base(C) {
-  setPreviousDecl(PrevDecl);
-  if (PrevDecl)
-    Data = PrevDecl->Data;
-}
+      redeclarable_base(C) {}
 
 ObjCProtocolDecl *ObjCProtocolDecl::Create(ASTContext &C, DeclContext *DC,
                                            IdentifierInfo *Id,
@@ -1951,6 +1946,9 @@ ObjCProtocolDecl *ObjCProtocolDecl::Create(ASTContext &C, DeclContext *DC,
                                            ObjCProtocolDecl *PrevDecl) {
   auto *Result =
       new (C, DC) ObjCProtocolDecl(C, DC, Id, nameLoc, atStartLoc, PrevDecl);
+  Result->setPreviousDecl(PrevDecl);
+  if (PrevDecl)
+    Result->Data = PrevDecl->Data;
   Result->Data.setInt(!C.getLangOpts().Modules);
   return Result;
 }
