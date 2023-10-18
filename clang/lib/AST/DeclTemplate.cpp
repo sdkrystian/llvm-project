@@ -938,6 +938,7 @@ ClassTemplateSpecializationDecl::Create(ASTContext &Context, TagKind TK,
       new (Context, DC) ClassTemplateSpecializationDecl(
           Context, ClassTemplateSpecialization, TK, DC, StartLoc, IdLoc,
           SpecializedTemplate, Args, PrevDecl);
+  Result->setPreviousDecl(PrevDecl);
   Result->setMayHaveOutOfDateDef(false);
 
   // If the template decl is incomplete, copy the external lexical storage from
@@ -1129,6 +1130,7 @@ Create(ASTContext &Context, TagKind TK,DeclContext *DC,
       ClassTemplatePartialSpecializationDecl(Context, TK, DC, StartLoc, IdLoc,
                                              Params, SpecializedTemplate, Args,
                                              ASTArgInfos, PrevDecl);
+  Result->setPreviousDecl(PrevDecl);
   Result->setSpecializationKind(TSK_ExplicitSpecialization);
   Result->setMayHaveOutOfDateDef(false);
 

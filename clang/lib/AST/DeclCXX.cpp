@@ -125,7 +125,8 @@ CXXRecordDecl::CXXRecordDecl(Kind K, TagKind TK, const ASTContext &C,
                              SourceLocation IdLoc, IdentifierInfo *Id,
                              CXXRecordDecl *PrevDecl)
     : RecordDecl(K, TK, C, DC, StartLoc, IdLoc, Id, PrevDecl),
-      DefinitionData(nullptr) {}
+      DefinitionData(PrevDecl ? PrevDecl->DefinitionData
+                              : nullptr) {}
 
 CXXRecordDecl *CXXRecordDecl::Create(const ASTContext &C, TagKind TK,
                                      DeclContext *DC, SourceLocation StartLoc,
@@ -135,8 +136,6 @@ CXXRecordDecl *CXXRecordDecl::Create(const ASTContext &C, TagKind TK,
   auto *R = new (C, DC) CXXRecordDecl(CXXRecord, TK, C, DC, StartLoc, IdLoc, Id,
                                       PrevDecl);
   R->setPreviousDecl(PrevDecl);
-  if(PrevDecl)
-    R->DefinitionData = PrevDecl->DefinitionData;
   R->setMayHaveOutOfDateDef(C.getLangOpts().Modules);
 
   // FIXME: DelayTypeCreation seems like such a hack
