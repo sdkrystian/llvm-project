@@ -79,13 +79,6 @@ class Decl;
 //        | link                +-----+                  |
 //        +-->-------------------------------------------+
 
-struct RedeclarableCommon {
-    Decl *First;
-
-    RedeclarableCommon(Decl *FirstDecl) :
-        First(FirstDecl) {}
-};
-
 /// Provides common interface for the Decls that can be redeclared.
 template<typename decl_type>
 class Redeclarable {
@@ -191,17 +184,29 @@ protected:
   /// If there is only one declaration, it is <pointer to self, true>
   DeclLink RedeclLink;
 
-  //decl_type *First;
-  RedeclarableCommon *Common_ = nullptr;
+  struct CommonBase {
+    decl_type *First = nullptr;
+  };
+
+  CommonBase *Common = nullptr;
 
   decl_type *getNextRedeclaration() const {
     return RedeclLink.getPrevious(static_cast<const decl_type *>(this));
   }
 
   void setFirstDecl(decl_type *First) {
-    if (!First->Common_)
-      First->Common_ = First->allocateCommon();
-    Common_ = First->Common_;
+    if (!First->Common) {
+      First->Common = First->newCommon(First->getASTContext());
+      First->Common->First = First;
+    }
+    Common = First->Common;
+  }
+
+  CommonBase *getCommonPtr() const {
+    if (!Common)
+      const_cast<Redeclarable *>(this)->setFirstDecl(
+          const_cast<decl_type *>(static_cast<const decl_type *>(this)));
+    return Common;
   }
 
 public:
@@ -228,8 +233,8 @@ public:
   /// Return the first declaration of this declaration or itself if this
   /// is the only declaration.
   decl_type *getFirstDecl() {
-    return Common_ ?
-        static_cast<decl_type*>(Common_->First) :
+    return Common ?
+        static_cast<decl_type*>(Common->First) :
         static_cast<decl_type*>(this);
   }
 

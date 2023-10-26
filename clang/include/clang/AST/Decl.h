@@ -81,6 +81,11 @@ class TranslationUnitDecl : public Decl,
                             public DeclContext,
                             public Redeclarable<TranslationUnitDecl> {
   using redeclarable_base = Redeclarable<TranslationUnitDecl>;
+  friend redeclarable_base;
+
+  CommonBase *newCommon(ASTContext &C) {
+    return new (C) CommonBase;
+  }
 
   TranslationUnitDecl *getNextRedeclarationImpl() override {
     return getNextRedeclaration();
@@ -93,7 +98,6 @@ class TranslationUnitDecl : public Decl,
   TranslationUnitDecl *getMostRecentDeclImpl() override {
     return getMostRecentDecl();
   }
-
   ASTContext &Ctx;
 
   /// The (most recently entered) anonymous namespace for this
@@ -564,6 +568,11 @@ class NamespaceDecl : public NamedDecl, public DeclContext,
                 IdentifierInfo *Id, NamespaceDecl *PrevDecl, bool Nested);
 
   using redeclarable_base = Redeclarable<NamespaceDecl>;
+  friend redeclarable_base;
+
+  CommonBase *newCommon(ASTContext &C) {
+    return new (C) CommonBase;
+  }
 
   NamespaceDecl *getNextRedeclarationImpl() override;
   NamespaceDecl *getPreviousDeclImpl() override;
@@ -1089,6 +1098,11 @@ protected:
           TypeSourceInfo *TInfo, StorageClass SC);
 
   using redeclarable_base = Redeclarable<VarDecl>;
+  friend redeclarable_base;
+
+  CommonBase *newCommon(ASTContext &C) {
+    return new (C) CommonBase;
+  }
 
   VarDecl *getNextRedeclarationImpl() override {
     return getNextRedeclaration();
@@ -2079,6 +2093,11 @@ protected:
                Expr *TrailingRequiresClause = nullptr);
 
   using redeclarable_base = Redeclarable<FunctionDecl>;
+  friend redeclarable_base;
+
+  CommonBase *newCommon(ASTContext &C) {
+    return new (C) CommonBase;
+  }
 
   FunctionDecl *getNextRedeclarationImpl() override {
     return getNextRedeclaration();
@@ -3376,6 +3395,11 @@ protected:
         MaybeModedTInfo(TInfo, 0) {}
 
   using redeclarable_base = Redeclarable<TypedefNameDecl>;
+  friend redeclarable_base;
+
+  CommonBase *newCommon(ASTContext &C) {
+    return new (C) CommonBase;
+  }
 
   TypedefNameDecl *getNextRedeclarationImpl() override {
     return getNextRedeclaration();
@@ -3540,6 +3564,11 @@ protected:
           SourceLocation StartL);
 
   using redeclarable_base = Redeclarable<TagDecl>;
+  friend redeclarable_base;
+
+  CommonBase *newCommon(ASTContext &C) {
+    return new (C) CommonBase;
+  }
 
   TagDecl *getNextRedeclarationImpl() override {
     return getNextRedeclaration();
@@ -4941,8 +4970,7 @@ void Redeclarable<decl_type>::setPreviousDecl(decl_type *PrevDecl) {
     // Point to previous. Make sure that this is actually the most recent
     // redeclaration, or we can build invalid chains. If the most recent
     // redeclaration is invalid, it won't be PrevDecl, but we want it anyway.
-    //First = PrevDecl->getFirstDecl();
-    auto First = static_cast<decl_type*>(Common_->First);
+    auto First = static_cast<decl_type*>(Common->First);
     assert(First->RedeclLink.isFirst() && "Expected first");
     decl_type *MostRecent = First->getNextRedeclaration();
     RedeclLink = PreviousDeclLink(cast<decl_type>(MostRecent));
@@ -4952,14 +4980,8 @@ void Redeclarable<decl_type>::setPreviousDecl(decl_type *PrevDecl) {
     static_cast<decl_type*>(this)->IdentifierNamespace |=
       MostRecent->getIdentifierNamespace() &
       (Decl::IDNS_Ordinary | Decl::IDNS_Tag | Decl::IDNS_Type);
-    // First one will point to this one as latest.
     First->RedeclLink.setLatest(static_cast<decl_type*>(this));
-  } else {
-    // Make this first.
-    //First = static_cast<decl_type*>(this);
   }
-
-
   assert(!isa<NamedDecl>(static_cast<decl_type*>(this)) ||
          cast<NamedDecl>(static_cast<decl_type*>(this))->isLinkageValid());
 }

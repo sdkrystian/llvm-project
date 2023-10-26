@@ -299,6 +299,7 @@ bool TemplateDecl::isTypeAlias() const {
 
 void RedeclarableTemplateDecl::anchor() {}
 
+#if 0
 RedeclarableTemplateDecl::CommonBase *RedeclarableTemplateDecl::getCommonPtr() const {
   if (Common)
     return Common;
@@ -330,11 +331,12 @@ RedeclarableTemplateDecl::CommonBase *RedeclarableTemplateDecl::getCommonPtr() c
 
   return Common;
 }
+#endif
 
 void RedeclarableTemplateDecl::loadLazySpecializationsImpl() const {
   // Grab the most recent declaration to ensure we've loaded any lazy
   // redeclarations of this template.
-  CommonBase *CommonBasePtr = getMostRecentDecl()->getCommonPtr();
+  TemplateCommon *CommonBasePtr = getCommonPtr();
   if (CommonBasePtr->LazySpecializations) {
     ASTContext &Context = getASTContext();
     uint32_t *Specs = CommonBasePtr->LazySpecializations;
@@ -453,6 +455,7 @@ void FunctionTemplateDecl::addSpecialization(
 }
 
 void FunctionTemplateDecl::mergePrevDecl(FunctionTemplateDecl *Prev) {
+  #if 0
   using Base = RedeclarableTemplateDecl;
 
   // If we haven't created a common pointer yet, then it can just be created
@@ -484,6 +487,7 @@ void FunctionTemplateDecl::mergePrevDecl(FunctionTemplateDecl *Prev) {
          "Can't merge incompatible declarations!");
 
   Base::Common = PrevCommon;
+  #endif
 }
 
 //===----------------------------------------------------------------------===//

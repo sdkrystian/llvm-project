@@ -5652,9 +5652,3 @@ ExportDecl *ExportDecl::Create(ASTContext &C, DeclContext *DC,
 ExportDecl *ExportDecl::CreateDeserialized(ASTContext &C, unsigned ID) {
   return new (C, ID) ExportDecl(nullptr, SourceLocation());
 }
-
-
-
-RedeclarableCommon *Decl::allocateCommon() {
-  return new (getASTContext()) RedeclarableCommon(this);
-}

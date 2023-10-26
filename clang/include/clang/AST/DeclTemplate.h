@@ -732,6 +732,7 @@ class RedeclarableTemplateDecl : public TemplateDecl,
                                  public Redeclarable<RedeclarableTemplateDecl>
 {
   using redeclarable_base = Redeclarable<RedeclarableTemplateDecl>;
+  friend redeclarable_base;
 
   RedeclarableTemplateDecl *getNextRedeclarationImpl() override {
     return getNextRedeclaration();
@@ -797,8 +798,8 @@ protected:
   void addSpecializationImpl(llvm::FoldingSetVector<EntryType> &Specs,
                              EntryType *Entry, void *InsertPos);
 
-  struct CommonBase {
-    CommonBase() : InstantiatedFromMember(nullptr, false) {}
+  struct TemplateCommon : redeclarable_base::CommonBase {
+    TemplateCommon() : InstantiatedFromMember(nullptr, false) {}
 
     /// The template from which this was most
     /// directly instantiated (or null).
@@ -827,12 +828,15 @@ protected:
 
   /// Pointer to the common data shared by all declarations of this
   /// template.
-  mutable CommonBase *Common = nullptr;
+  // mutable CommonBase *Common = nullptr;
 
   /// Retrieves the "common" pointer shared by all (re-)declarations of
   /// the same template. Calling this routine may implicitly allocate memory
   /// for the common pointer.
-  CommonBase *getCommonPtr() const;
+  TemplateCommon *getCommonPtr() const {
+    return static_cast<TemplateCommon *>(
+        redeclarable_base::getCommonPtr());
+  }
 
   virtual CommonBase *newCommon(ASTContext &C) const = 0;
 
@@ -977,7 +981,7 @@ protected:
 
   /// Data that is common to all of the declarations of a given
   /// function template.
-  struct Common : CommonBase {
+  struct Common : TemplateCommon {
     /// The function template specializations for this function
     /// template, including explicit specializations and instantiations.
     llvm::FoldingSetVector<FunctionTemplateSpecializationInfo> Specializations;
@@ -2237,7 +2241,7 @@ class ClassTemplateDecl : public RedeclarableTemplateDecl {
 protected:
   /// Data that is common to all of the declarations of a given
   /// class template.
-  struct Common : CommonBase {
+  struct Common : TemplateCommon {
     /// The class template specializations for this class
     /// template, including explicit specializations and instantiations.
     llvm::FoldingSetVector<ClassTemplateSpecializationDecl> Specializations;
@@ -2271,10 +2275,6 @@ protected:
 
   Common *getCommonPtr() const {
     return static_cast<Common *>(RedeclarableTemplateDecl::getCommonPtr());
-  }
-
-  void setCommonPtr(Common *C) {
-    RedeclarableTemplateDecl::Common = C;
   }
 
 public:
@@ -2515,7 +2515,7 @@ public:
 /// \endcode
 class TypeAliasTemplateDecl : public RedeclarableTemplateDecl {
 protected:
-  using Common = CommonBase;
+  using Common = TemplateCommon;
 
   TypeAliasTemplateDecl(ASTContext &C, DeclContext *DC, SourceLocation L,
                         DeclarationName Name, TemplateParameterList *Params,
@@ -3018,7 +3018,7 @@ class VarTemplateDecl : public RedeclarableTemplateDecl {
 protected:
   /// Data that is common to all of the declarations of a given
   /// variable template.
-  struct Common : CommonBase {
+  struct Common : TemplateCommon {
     /// The variable template specializations for this variable
     /// template, including explicit specializations and instantiations.
     llvm::FoldingSetVector<VarTemplateSpecializationDecl> Specializations;

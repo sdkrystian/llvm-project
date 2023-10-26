@@ -3122,6 +3122,11 @@ class NamespaceAliasDecl : public NamedDecl,
   void anchor() override;
 
   using redeclarable_base = Redeclarable<NamespaceAliasDecl>;
+  friend redeclarable_base;
+
+  CommonBase *newCommon(ASTContext &C) {
+    return new (C) CommonBase;
+  }
 
   NamespaceAliasDecl *getNextRedeclarationImpl() override;
   NamespaceAliasDecl *getPreviousDeclImpl() override;
@@ -3307,6 +3312,11 @@ class UsingShadowDecl : public NamedDecl, public Redeclarable<UsingShadowDecl> {
   void anchor() override;
 
   using redeclarable_base = Redeclarable<UsingShadowDecl>;
+  friend redeclarable_base;
+
+  CommonBase *newCommon(ASTContext &C) {
+    return new (C) CommonBase;
+  }
 
   UsingShadowDecl *getNextRedeclarationImpl() override {
     return getNextRedeclaration();

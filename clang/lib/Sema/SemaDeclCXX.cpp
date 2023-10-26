@@ -13561,7 +13561,7 @@ Decl *Sema::ActOnAliasDeclaration(Scope *S, AccessSpecifier AS,
     TypeAliasTemplateDecl *NewDecl =
       TypeAliasTemplateDecl::Create(Context, CurContext, UsingLoc,
                                     Name.Identifier, TemplateParams,
-                                    NewTD, OldDecl);
+                                    NewTD, Invalid ? nullptr : OldDecl);
     NewTD->setDescribedAliasTemplate(NewDecl);
 
     NewDecl->setAccess(AS);

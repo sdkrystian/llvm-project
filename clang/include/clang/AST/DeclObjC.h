@@ -1249,6 +1249,11 @@ class ObjCInterfaceDecl : public ObjCContainerDecl
   void allocateDefinitionData();
 
   using redeclarable_base = Redeclarable<ObjCInterfaceDecl>;
+  friend redeclarable_base;
+
+  CommonBase *newCommon(ASTContext &C) {
+    return new (C) CommonBase;
+  }
 
   ObjCInterfaceDecl *getNextRedeclarationImpl() override {
     return getNextRedeclaration();
@@ -2102,6 +2107,11 @@ class ObjCProtocolDecl : public ObjCContainerDecl,
   void allocateDefinitionData();
 
   using redeclarable_base = Redeclarable<ObjCProtocolDecl>;
+  friend redeclarable_base;
+
+  CommonBase *newCommon(ASTContext &C) {
+    return new (C) CommonBase;
+  }
 
   ObjCProtocolDecl *getNextRedeclarationImpl() override {
     return getNextRedeclaration();

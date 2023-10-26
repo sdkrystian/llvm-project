@@ -2354,13 +2354,15 @@ ASTDeclReader::VisitRedeclarableTemplateDecl(RedeclarableTemplateDecl *D) {
 
   // Make sure we've allocated the Common pointer first. We do this before
   // VisitTemplateDecl so that getCommonPtr() can be used during initialization.
+  #if 0
   RedeclarableTemplateDecl *CanonD = D->getCanonicalDecl();
   if (!CanonD->Common) {
     CanonD->Common = CanonD->newCommon(Reader.getContext());
     Reader.PendingDefinitions.insert(CanonD);
   }
   D->Common = CanonD->Common;
-
+  #endif
+  assert(&D->getASTContext() == &Reader.getContext());
   // If this is the first declaration of the template, fill in the information
   // for the 'common' pointer.
   if (ThisDeclID == Redecl.getFirstID()) {

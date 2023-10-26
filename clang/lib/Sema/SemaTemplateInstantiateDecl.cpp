@@ -1694,11 +1694,12 @@ Decl *TemplateDeclInstantiator::VisitClassTemplateDecl(ClassTemplateDecl *D) {
     RecordInst->setLexicalDeclContext(Owner);
 
     if (PrevClassTemplate) {
-      Inst->setCommonPtr(PrevClassTemplate->getCommonPtr());
+      // Inst->setCommonPtr(PrevClassTemplate->getCommonPtr());
       RecordInst->setTypeForDecl(
           PrevClassTemplate->getTemplatedDecl()->getTypeForDecl());
       const ClassTemplateDecl *MostRecentPrevCT =
-          PrevClassTemplate->getMostRecentDecl();
+          Inst->getPreviousDecl();
+          // PrevClassTemplate->getMostRecentDecl();
       TemplateParameterList *PrevParams =
           MostRecentPrevCT->getTemplateParameters();
 
