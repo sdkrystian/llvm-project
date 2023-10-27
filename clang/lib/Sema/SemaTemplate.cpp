@@ -3897,6 +3897,14 @@ Sema::findFailedBooleanCondition(Expr *Cond) {
 QualType Sema::CheckTemplateIdType(TemplateName Name,
                                    SourceLocation TemplateLoc,
                                    TemplateArgumentListInfo &TemplateArgs) {
+  return CheckTemplateIdType(Name, TemplateLoc,
+                             SourceLocation(), TemplateArgs);
+}
+
+QualType Sema::CheckTemplateIdType(TemplateName Name,
+                                   SourceLocation TemplateLoc,
+                                   SourceLocation TemplateKWLoc,
+                                   TemplateArgumentListInfo &TemplateArgs) {
   DependentTemplateName *DTN
     = Name.getUnderlying().getAsDependentTemplateName();
   if (DTN && DTN->isIdentifier())
@@ -3905,8 +3913,8 @@ QualType Sema::CheckTemplateIdType(TemplateName Name,
     // correct, or the code is ill-formed and will be diagnosed when the
     // dependent name is substituted.
     return Context.getDependentTemplateSpecializationType(
-        ETK_None, DTN->getQualifier(), DTN->getIdentifier(),
-        TemplateArgs.arguments());
+        ETK_None, TemplateKWLoc.isValid(), DTN->getQualifier(),
+        DTN->getIdentifier(), TemplateArgs.arguments());
 
   if (Name.getAsAssumedTemplateName() &&
       resolveAssumedTemplateNameAsType(/*Scope*/nullptr, Name, TemplateLoc))
@@ -4096,7 +4104,8 @@ QualType Sema::CheckTemplateIdType(TemplateName Name,
   // specialization, which refers back to the class template
   // specialization we created or found.
   return Context.getTemplateSpecializationType(Name, TemplateArgs.arguments(),
-                                               CanonType);
+                                               CanonType,
+                                               TemplateKWLoc.isValid());
 }
 
 void Sema::ActOnUndeclaredTypeTemplateName(Scope *S, TemplateTy &ParsedName,
@@ -4219,8 +4228,8 @@ TypeResult Sema::ActOnTemplateIdType(
   if (DependentTemplateName *DTN = Template.getAsDependentTemplateName()) {
     assert(SS.getScopeRep() == DTN->getQualifier());
     QualType T = Context.getDependentTemplateSpecializationType(
-        ETK_None, DTN->getQualifier(), DTN->getIdentifier(),
-        TemplateArgs.arguments());
+        ETK_None, TemplateKWLoc.isValid(), DTN->getQualifier(),
+        DTN->getIdentifier(), TemplateArgs.arguments());
     // Build type-source information.
     TypeLocBuilder TLB;
     DependentTemplateSpecializationTypeLoc SpecTL
@@ -4288,8 +4297,8 @@ TypeResult Sema::ActOnTagTemplateIdType(TagUseKind TUK,
   if (DependentTemplateName *DTN = Template.getAsDependentTemplateName()) {
     assert(SS.getScopeRep() == DTN->getQualifier());
     QualType T = Context.getDependentTemplateSpecializationType(
-        Keyword, DTN->getQualifier(), DTN->getIdentifier(),
-        TemplateArgs.arguments());
+        Keyword, TemplateKWLoc.isValid(), DTN->getQualifier(),
+        DTN->getIdentifier(), TemplateArgs.arguments());
 
     // Build type-source information.
     TypeLocBuilder TLB;
@@ -10908,8 +10917,8 @@ Sema::ActOnTypenameType(Scope *S,
     assert(DTN && "dependent template has non-dependent name?");
     assert(DTN->getQualifier() == SS.getScopeRep());
     QualType T = Context.getDependentTemplateSpecializationType(
-        ETK_Typename, DTN->getQualifier(), DTN->getIdentifier(),
-        TemplateArgs.arguments());
+        ETK_Typename, TemplateKWLoc.isValid(), DTN->getQualifier(),
+        DTN->getIdentifier(), TemplateArgs.arguments());
 
     // Create source-location information for this type.
     TypeLocBuilder Builder;

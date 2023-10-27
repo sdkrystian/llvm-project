@@ -8342,6 +8342,11 @@ public:
 
   QualType CheckTemplateIdType(TemplateName Template,
                                SourceLocation TemplateLoc,
+                               SourceLocation TemplateKWLoc,
+                               TemplateArgumentListInfo &TemplateArgs);
+
+  QualType CheckTemplateIdType(TemplateName Template,
+                               SourceLocation TemplateLoc,
                               TemplateArgumentListInfo &TemplateArgs);
 
   TypeResult

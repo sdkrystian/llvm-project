@@ -908,8 +908,8 @@ bool Sema::ActOnCXXNestedNameSpecifier(Scope *S,
     // the template name.
     assert(DTN->getQualifier() == SS.getScopeRep());
     QualType T = Context.getDependentTemplateSpecializationType(
-        ETK_None, DTN->getQualifier(), DTN->getIdentifier(),
-        TemplateArgs.arguments());
+        ETK_None, TemplateKWLoc.isValid(), DTN->getQualifier(),
+        DTN->getIdentifier(), TemplateArgs.arguments());
 
     // Create source-location information for this type.
     TypeLocBuilder Builder;
@@ -950,7 +950,8 @@ bool Sema::ActOnCXXNestedNameSpecifier(Scope *S,
 
   // We were able to resolve the template name to an actual template.
   // Build an appropriate nested-name-specifier.
-  QualType T = CheckTemplateIdType(Template, TemplateNameLoc, TemplateArgs);
+  QualType T = CheckTemplateIdType(Template, TemplateNameLoc,
+                                   TemplateKWLoc, TemplateArgs);
   if (T.isNull())
     return true;
 

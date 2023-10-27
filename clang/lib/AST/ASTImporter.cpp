@@ -1563,9 +1563,11 @@ ExpectedType ASTNodeImporter::VisitTemplateSpecializationType(
     else
       return TyOrErr.takeError();
   }
-  return Importer.getToContext().getTemplateSpecializationType(*ToTemplateOrErr,
-                                                               ToTemplateArgs,
-                                                               ToCanonType);
+  return Importer.getToContext().getTemplateSpecializationType(
+                                                      *ToTemplateOrErr,
+                                                      ToTemplateArgs,
+                                                      ToCanonType,
+                                                      T->hasTemplateKeyword());
 }
 
 ExpectedType ASTNodeImporter::VisitElaboratedType(const ElaboratedType *T) {
@@ -1613,7 +1615,8 @@ ExpectedType ASTNodeImporter::VisitDependentTemplateSpecializationType(
     return std::move(Err);
 
   return Importer.getToContext().getDependentTemplateSpecializationType(
-      T->getKeyword(), *ToQualifierOrErr, ToName, ToPack);
+      T->getKeyword(), T->hasTemplateKeyword(),
+      *ToQualifierOrErr, ToName, ToPack);
 }
 
 ExpectedType

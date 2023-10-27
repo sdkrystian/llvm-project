@@ -3097,7 +3097,7 @@ StringRef TypeWithKeyword::getKeywordName(ElaboratedTypeKeyword Keyword) {
 }
 
 DependentTemplateSpecializationType::DependentTemplateSpecializationType(
-    ElaboratedTypeKeyword Keyword, NestedNameSpecifier *NNS,
+    ElaboratedTypeKeyword Keyword, bool HasTemplateKW, NestedNameSpecifier *NNS,
     const IdentifierInfo *Name, ArrayRef<TemplateArgument> Args, QualType Canon)
     : TypeWithKeyword(Keyword, DependentTemplateSpecialization, Canon,
                       TypeDependence::DependentInstantiation |
@@ -3105,6 +3105,7 @@ DependentTemplateSpecializationType::DependentTemplateSpecializationType(
                                : TypeDependence::None)),
       NNS(NNS), Name(Name) {
   DependentTemplateSpecializationTypeBits.NumArgs = Args.size();
+  DependentTemplateSpecializationTypeBits.HasTemplateKW = HasTemplateKW;
   assert((!NNS || NNS->isDependent()) &&
          "DependentTemplateSpecializatonType requires dependent qualifier");
   auto *ArgBuffer = const_cast<TemplateArgument *>(template_arguments().data());
@@ -3120,10 +3121,12 @@ void
 DependentTemplateSpecializationType::Profile(llvm::FoldingSetNodeID &ID,
                                              const ASTContext &Context,
                                              ElaboratedTypeKeyword Keyword,
+                                             bool HasTemplateKW,
                                              NestedNameSpecifier *Qualifier,
                                              const IdentifierInfo *Name,
                                              ArrayRef<TemplateArgument> Args) {
   ID.AddInteger(Keyword);
+  ID.AddBoolean(HasTemplateKW);
   ID.AddPointer(Qualifier);
   ID.AddPointer(Name);
   for (const TemplateArgument &Arg : Args)
@@ -3973,8 +3976,8 @@ bool TemplateSpecializationType::anyInstantiationDependentTemplateArguments(
 }
 
 TemplateSpecializationType::TemplateSpecializationType(
-    TemplateName T, ArrayRef<TemplateArgument> Args, QualType Canon,
-    QualType AliasedType)
+    TemplateName T, bool HasTemplateKW, ArrayRef<TemplateArgument> Args,
+    QualType Canon, QualType AliasedType)
     : Type(TemplateSpecialization, Canon.isNull() ? QualType(this, 0) : Canon,
            (Canon.isNull()
                 ? TypeDependence::DependentInstantiation
@@ -3984,6 +3987,7 @@ TemplateSpecializationType::TemplateSpecializationType(
       Template(T) {
   TemplateSpecializationTypeBits.NumArgs = Args.size();
   TemplateSpecializationTypeBits.TypeAlias = !AliasedType.isNull();
+  TemplateSpecializationTypeBits.HasTemplateKW = HasTemplateKW;
 
   assert(!T.getAsDependentTemplateName() &&
          "Use DependentTemplateSpecializationType for dependent template-name");
@@ -4025,7 +4029,7 @@ QualType TemplateSpecializationType::getAliasedType() const {
 
 void TemplateSpecializationType::Profile(llvm::FoldingSetNodeID &ID,
                                          const ASTContext &Ctx) {
-  Profile(ID, Template, template_arguments(), Ctx);
+  Profile(ID, Template, hasTemplateKeyword(), template_arguments(), Ctx);
   if (isTypeAlias())
     getAliasedType().Profile(ID);
 }
@@ -4033,9 +4037,11 @@ void TemplateSpecializationType::Profile(llvm::FoldingSetNodeID &ID,
 void
 TemplateSpecializationType::Profile(llvm::FoldingSetNodeID &ID,
                                     TemplateName T,
+                                    bool HasTemplateKW,
                                     ArrayRef<TemplateArgument> Args,
                                     const ASTContext &Context) {
   T.Profile(ID);
+  ID.AddBoolean(HasTemplateKW);
   for (const TemplateArgument &Arg : Args)
     Arg.Profile(ID, Context);
 }

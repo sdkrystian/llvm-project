@@ -1130,8 +1130,9 @@ public:
     // If it's still dependent, make a dependent specialization.
     if (InstName.getAsDependentTemplateName())
       return SemaRef.Context.getDependentTemplateSpecializationType(
-          Keyword, QualifierLoc.getNestedNameSpecifier(), Name,
-          Args.arguments());
+          Keyword, TemplateKWLoc.isValid(),
+          QualifierLoc.getNestedNameSpecifier(),
+          Name, Args.arguments());
 
     // Otherwise, make an elaborated type wrapping a non-dependent
     // specialization.
@@ -6965,8 +6966,8 @@ QualType TreeTransform<Derived>::TransformDependentTemplateSpecializationType(
 
   if (DependentTemplateName *DTN = Template.getAsDependentTemplateName()) {
     QualType Result = getSema().Context.getDependentTemplateSpecializationType(
-        TL.getTypePtr()->getKeyword(), DTN->getQualifier(),
-        DTN->getIdentifier(), NewTemplateArgs.arguments());
+        TL.getTypePtr()->getKeyword(), TL.getTemplateKeywordLoc().isValid(),
+        DTN->getQualifier(), DTN->getIdentifier(), NewTemplateArgs.arguments());
 
     DependentTemplateSpecializationTypeLoc NewTL
       = TLB.push<DependentTemplateSpecializationTypeLoc>(Result);

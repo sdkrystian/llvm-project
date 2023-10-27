@@ -1619,7 +1619,8 @@ public:
 
   QualType getTemplateSpecializationType(TemplateName T,
                                          ArrayRef<TemplateArgument> Args,
-                                         QualType Canon = QualType()) const;
+                                         QualType Canon = QualType(),
+                                         bool HasTemplateKW = false) const;
 
   QualType
   getCanonicalTemplateSpecializationType(TemplateName T,
@@ -1627,7 +1628,8 @@ public:
 
   QualType getTemplateSpecializationType(TemplateName T,
                                          ArrayRef<TemplateArgumentLoc> Args,
-                                         QualType Canon = QualType()) const;
+                                         QualType Canon = QualType(),
+                                         bool HasTemplateKW = false) const;
 
   TypeSourceInfo *
   getTemplateSpecializationTypeInfo(TemplateName T, SourceLocation TLoc,
@@ -1648,11 +1650,13 @@ public:
                                 QualType Canon = QualType()) const;
 
   QualType getDependentTemplateSpecializationType(
-      ElaboratedTypeKeyword Keyword, NestedNameSpecifier *NNS,
-      const IdentifierInfo *Name, ArrayRef<TemplateArgumentLoc> Args) const;
+      ElaboratedTypeKeyword Keyword, bool HasTemplateKW,
+      NestedNameSpecifier *NNS, const IdentifierInfo *Name,
+      ArrayRef<TemplateArgumentLoc> Args) const;
   QualType getDependentTemplateSpecializationType(
-      ElaboratedTypeKeyword Keyword, NestedNameSpecifier *NNS,
-      const IdentifierInfo *Name, ArrayRef<TemplateArgument> Args) const;
+      ElaboratedTypeKeyword Keyword, bool HasTemplateKW,
+      NestedNameSpecifier *NNS, const IdentifierInfo *Name,
+      ArrayRef<TemplateArgument> Args) const;
 
   TemplateArgument getInjectedTemplateArg(NamedDecl *ParamDecl);
 

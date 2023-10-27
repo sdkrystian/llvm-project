@@ -1901,6 +1901,10 @@ protected:
     /// Whether this template specialization type is a substituted type alias.
     unsigned TypeAlias : 1;
 
+    /// Whether this template specialization type was prefixed by the
+    /// "template" keyword.
+    unsigned HasTemplateKW : 1;
+
     /// The number of template arguments named in this class template
     /// specialization, which is expected to be able to hold at least 1024
     /// according to [implimits]. However, as this limit is somewhat easy to
@@ -1915,6 +1919,10 @@ protected:
     friend class DependentTemplateSpecializationType;
 
     unsigned : NumTypeWithKeywordBits;
+
+    /// Whether this dependent template specialization type was prefixed
+    /// by the "template" keyword.
+    unsigned HasTemplateKW : 1;
 
     /// The number of template arguments named in this class template
     /// specialization, which is expected to be able to hold at least 1024
@@ -5474,6 +5482,7 @@ class TemplateSpecializationType : public Type, public llvm::FoldingSetNode {
   TemplateName Template;
 
   TemplateSpecializationType(TemplateName T,
+                             bool HasTemplateKW,
                              ArrayRef<TemplateArgument> Args,
                              QualType Canon,
                              QualType Aliased);
@@ -5522,6 +5531,10 @@ public:
   /// \endcode
   bool isTypeAlias() const { return TemplateSpecializationTypeBits.TypeAlias; }
 
+  bool hasTemplateKeyword() const {
+    return TemplateSpecializationTypeBits.HasTemplateKW;
+  }
+
   /// Get the aliased type, if this is a specialization of a type alias
   /// template.
   QualType getAliasedType() const;
@@ -5535,7 +5548,8 @@ public:
   }
 
   bool isSugared() const {
-    return !isDependentType() || isCurrentInstantiation() || isTypeAlias();
+    return !isDependentType() || isCurrentInstantiation() ||
+            isTypeAlias() || hasTemplateKeyword();
   }
 
   QualType desugar() const {
@@ -5543,7 +5557,9 @@ public:
   }
 
   void Profile(llvm::FoldingSetNodeID &ID, const ASTContext &Ctx);
-  static void Profile(llvm::FoldingSetNodeID &ID, TemplateName T,
+  static void Profile(llvm::FoldingSetNodeID &ID,
+                      TemplateName T,
+                      bool HasTemplateKW,
                       ArrayRef<TemplateArgument> Args,
                       const ASTContext &Context);
 
@@ -5886,6 +5902,7 @@ class DependentTemplateSpecializationType : public TypeWithKeyword,
   const IdentifierInfo *Name;
 
   DependentTemplateSpecializationType(ElaboratedTypeKeyword Keyword,
+                                      bool HasTemplateKW,
                                       NestedNameSpecifier *NNS,
                                       const IdentifierInfo *Name,
                                       ArrayRef<TemplateArgument> Args,
@@ -5900,16 +5917,22 @@ public:
             DependentTemplateSpecializationTypeBits.NumArgs};
   }
 
+  bool hasTemplateKeyword() const {
+    return DependentTemplateSpecializationTypeBits.HasTemplateKW;
+  }
+
   bool isSugared() const { return false; }
   QualType desugar() const { return QualType(this, 0); }
 
   void Profile(llvm::FoldingSetNodeID &ID, const ASTContext &Context) {
-    Profile(ID, Context, getKeyword(), NNS, Name, template_arguments());
+    Profile(ID, Context, getKeyword(), hasTemplateKeyword(),
+            NNS, Name, template_arguments());
   }
 
   static void Profile(llvm::FoldingSetNodeID &ID,
                       const ASTContext &Context,
                       ElaboratedTypeKeyword Keyword,
+                      bool HasTemplateKW,
                       NestedNameSpecifier *Qualifier,
                       const IdentifierInfo *Name,
                       ArrayRef<TemplateArgument> Args);

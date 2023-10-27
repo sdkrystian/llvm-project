@@ -100,6 +100,29 @@ NestedNameSpecifier::Create(const ASTContext &Context,
   return FindOrInsert(Context, Mockup);
 }
 
+#if 1
+static void CheckTemplateKW(const ASTContext& C,
+                  NestedNameSpecifier& NNS,
+                  const Type* T, bool Template)
+{
+  if(Template == NNS.hasTemplateKeyword())
+    return;
+  DiagnosticsEngine &Diags = C.getDiagnostics();
+  unsigned DiagID = Diags.getCustomDiagID(
+      DiagnosticsEngine::Error,
+      "hasTemplateKeyword mismatch\n  (%0) %2\n  (%1) %3");
+  std::string out_str_t;
+  // out_str_t += T->getTypeClassName();
+  // out_str_t += ' ';
+  llvm::raw_string_ostream stream_t(out_str_t);
+  T->dump(stream_t, C);
+  std::string out_str;
+  llvm::raw_string_ostream stream(out_str);
+  NNS.print(stream, C.getPrintingPolicy());
+  Diags.Report(DiagID) << Template << NNS.hasTemplateKeyword() << out_str << out_str_t;
+}
+#endif
+
 NestedNameSpecifier *
 NestedNameSpecifier::Create(const ASTContext &Context,
                             NestedNameSpecifier *Prefix,
@@ -109,6 +132,9 @@ NestedNameSpecifier::Create(const ASTContext &Context,
   Mockup.Prefix.setPointer(Prefix);
   Mockup.Prefix.setInt(Template? StoredTypeSpecWithTemplate : StoredTypeSpec);
   Mockup.Specifier = const_cast<Type*>(T);
+  Mockup.Prefix.setInt(Mockup.hasTemplateKeyword() ?
+      StoredTypeSpecWithTemplate : StoredTypeSpec);
+  // CheckTemplateKW(Context, Mockup, T, Template);
   return FindOrInsert(Context, Mockup);
 }
 
@@ -245,6 +271,18 @@ bool NestedNameSpecifier::containsUnexpandedParameterPack() const {
 
 bool NestedNameSpecifier::containsErrors() const {
   return getDependence() & NestedNameSpecifierDependence::Error;
+}
+
+bool NestedNameSpecifier::hasTemplateKeyword() const {
+  auto* T = getAsType();
+  if(auto *TST = dyn_cast<TemplateSpecializationType>(T))
+    return TST->hasTemplateKeyword();
+  if(auto *DTST = dyn_cast<DependentTemplateSpecializationType>(T))
+    return DTST->hasTemplateKeyword();
+  // if(isa<DependentTemplateSpecializationType>(T))
+  //   return true;
+  return false;
+  // return getKind() == TypeSpecWithTemplate;
 }
 
 /// Print this nested name specifier to the given output

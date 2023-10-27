@@ -218,6 +218,10 @@ public:
   /// Whether this nested name specifier contains an error.
   bool containsErrors() const;
 
+  /// Whether this nested name specifier is prefixed with
+  /// the "template" keyword.
+  bool hasTemplateKeyword() const;
+
   /// Print this nested name specifier to the given output stream. If
   /// `ResolveTemplateArguments` is true, we'll print actual types, e.g.
   /// `ns::SomeTemplate<int, MyClass>` instead of

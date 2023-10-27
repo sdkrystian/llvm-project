@@ -661,6 +661,9 @@ let Class = TemplateSpecializationType in {
   def : Property<"dependent", Bool> {
     let Read = [{ node->isDependentType() }];
   }
+  def : Property<"hasTemplateKW", Bool> {
+    let Read = [{ node->hasTemplateKeyword() }];
+  }
   def : Property<"templateName", TemplateName> {
     let Read = [{ node->getTemplateName() }];
   }
@@ -679,14 +682,16 @@ let Class = TemplateSpecializationType in {
 
   def : Creator<[{
     QualType result;
-    if (!underlyingType) {
+    if (false && !underlyingType) {
       result = ctx.getCanonicalTemplateSpecializationType(templateName,
                                                           templateArguments);
     } else {
-      result = ctx.getTemplateSpecializationType(templateName,
-                                                 templateArguments,
-                                                 *underlyingType);
+      result = ctx.getTemplateSpecializationType(
+                        templateName, templateArguments,
+                        underlyingType.value_or(QualType()),
+                        hasTemplateKW);
     }
+
     if (dependent)
       const_cast<Type *>(result.getTypePtr())
           ->addDependence(TypeDependence::DependentInstantiation);
@@ -697,6 +702,9 @@ let Class = TemplateSpecializationType in {
 let Class = DependentTemplateSpecializationType in {
   def : Property<"keyword", ElaboratedTypeKeyword> {
     let Read = [{ node->getKeyword() }];
+  }
+  def : Property<"hasTemplateKW", Bool> {
+    let Read = [{ node->hasTemplateKeyword() }];
   }
   def : Property<"qualifier", NestedNameSpecifier> {
     let Read = [{ node->getQualifier() }];
@@ -709,8 +717,9 @@ let Class = DependentTemplateSpecializationType in {
   }
 
   def : Creator<[{
-    return ctx.getDependentTemplateSpecializationType(keyword, qualifier,
-                                                      name, templateArguments);
+    return ctx.getDependentTemplateSpecializationType(keyword, hasTemplateKW,
+                                                      qualifier, name,
+                                                      templateArguments);
   }]>;
 }
 
