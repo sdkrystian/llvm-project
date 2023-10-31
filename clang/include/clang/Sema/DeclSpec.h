@@ -101,13 +101,10 @@ public:
   /// \param Context The AST context in which this nested-name-specifier
   /// resides.
   ///
-  /// \param TemplateKWLoc The location of the 'template' keyword, if present.
-  ///
   /// \param TL The TypeLoc that describes the type preceding the '::'.
   ///
   /// \param ColonColonLoc The location of the trailing '::'.
-  void Extend(ASTContext &Context, SourceLocation TemplateKWLoc, TypeLoc TL,
-              SourceLocation ColonColonLoc);
+  void Extend(ASTContext &Context, TypeLoc TL, SourceLocation ColonColonLoc);
 
   /// Extend the current nested-name-specifier by another
   /// nested-name-specifier component of the form 'identifier::'.

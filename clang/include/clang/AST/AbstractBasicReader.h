@@ -255,34 +255,32 @@ public:
       auto kind = asImpl().readNestedNameSpecifierKind();
       switch (kind) {
       case NestedNameSpecifier::Identifier:
-        cur = NestedNameSpecifier::Create(ctx, cur,
-                                          asImpl().readIdentifier());
+        cur = ctx.getNestedNameSpecifier(
+            cur, asImpl().readIdentifier());
         continue;
 
       case NestedNameSpecifier::Namespace:
-        cur = NestedNameSpecifier::Create(ctx, cur,
-                                          asImpl().readNamespaceDeclRef());
+        cur = ctx.getNestedNameSpecifier(
+            cur, asImpl().readNamespaceDeclRef());
         continue;
 
       case NestedNameSpecifier::NamespaceAlias:
-        cur = NestedNameSpecifier::Create(ctx, cur,
-                                     asImpl().readNamespaceAliasDeclRef());
+        cur = ctx.getNestedNameSpecifier(
+            cur, asImpl().readNamespaceAliasDeclRef());
         continue;
 
       case NestedNameSpecifier::TypeSpec:
-      case NestedNameSpecifier::TypeSpecWithTemplate:
-        cur = NestedNameSpecifier::Create(ctx, cur,
-                          kind == NestedNameSpecifier::TypeSpecWithTemplate,
-                          asImpl().readQualType().getTypePtr());
+        cur = cur = ctx.getNestedNameSpecifier(
+            cur, asImpl().readQualType().getTypePtr());
         continue;
 
       case NestedNameSpecifier::Global:
-        cur = NestedNameSpecifier::GlobalSpecifier(ctx);
+        cur = ctx.getGlobalNestedNameSpecifier();
         continue;
 
       case NestedNameSpecifier::Super:
-        cur = NestedNameSpecifier::SuperSpecifier(ctx,
-                                            asImpl().readCXXRecordDeclRef());
+        cur = ctx.getSuperNestedNameSpecifier(
+            asImpl().readCXXRecordDeclRef());
         continue;
       }
       llvm_unreachable("bad nested name specifier kind");

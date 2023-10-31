@@ -752,10 +752,10 @@ getRequiredQualification(ASTContext &Context, const DeclContext *CurContext,
       if (!Namespace->getIdentifier())
         continue;
 
-      Result = NestedNameSpecifier::Create(Context, Result, Namespace);
+      Result = Context.getNestedNameSpecifier(Result, Namespace);
     } else if (const auto *TD = dyn_cast<TagDecl>(Parent))
-      Result = NestedNameSpecifier::Create(
-          Context, Result, false, Context.getTypeDeclType(TD).getTypePtr());
+      Result = Context.getNestedNameSpecifier(
+          Result, Context.getTypeDeclType(TD).getTypePtr());
   }
   return Result;
 }
@@ -1208,12 +1208,11 @@ void ResultBuilder::MaybeAddResult(Result R, DeclContext *CurContext) {
       !R.StartsNestedNameSpecifier) {
     const DeclContext *Ctx = R.Declaration->getDeclContext();
     if (const NamespaceDecl *Namespace = dyn_cast<NamespaceDecl>(Ctx))
-      R.Qualifier =
-          NestedNameSpecifier::Create(SemaRef.Context, nullptr, Namespace);
+      R.Qualifier = SemaRef.Context.getNestedNameSpecifier(
+          nullptr, Namespace);
     else if (const TagDecl *Tag = dyn_cast<TagDecl>(Ctx))
-      R.Qualifier = NestedNameSpecifier::Create(
-          SemaRef.Context, nullptr, false,
-          SemaRef.Context.getTypeDeclType(Tag).getTypePtr());
+      R.Qualifier = SemaRef.Context.getNestedNameSpecifier(
+          nullptr, SemaRef.Context.getTypeDeclType(Tag).getTypePtr());
     else
       R.QualifierIsInformative = false;
   }
@@ -1396,12 +1395,11 @@ void ResultBuilder::AddResult(Result R, DeclContext *CurContext,
       !R.StartsNestedNameSpecifier) {
     const DeclContext *Ctx = R.Declaration->getDeclContext();
     if (const auto *Namespace = dyn_cast<NamespaceDecl>(Ctx))
-      R.Qualifier =
-          NestedNameSpecifier::Create(SemaRef.Context, nullptr, Namespace);
+      R.Qualifier = SemaRef.Context.getNestedNameSpecifier(
+          nullptr, Namespace);
     else if (const auto *Tag = dyn_cast<TagDecl>(Ctx))
-      R.Qualifier = NestedNameSpecifier::Create(
-          SemaRef.Context, nullptr, false,
-          SemaRef.Context.getTypeDeclType(Tag).getTypePtr());
+      R.Qualifier = SemaRef.Context.getNestedNameSpecifier(
+          nullptr, SemaRef.Context.getTypeDeclType(Tag).getTypePtr());
     else
       R.QualifierIsInformative = false;
   }

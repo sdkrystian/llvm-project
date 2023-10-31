@@ -1374,8 +1374,7 @@ void CXXNameMangler::mangleUnresolvedPrefix(NestedNameSpecifier *qualifier,
     mangleSourceNameWithAbiTags(qualifier->getAsNamespaceAlias());
     break;
 
-  case NestedNameSpecifier::TypeSpec:
-  case NestedNameSpecifier::TypeSpecWithTemplate: {
+  case NestedNameSpecifier::TypeSpec: {
     const Type *type = qualifier->getAsType();
 
     // We only want to use an unresolved-type encoding if this is one of:
@@ -2160,7 +2159,6 @@ void CXXNameMangler::manglePrefix(NestedNameSpecifier *qualifier) {
     return;
 
   case NestedNameSpecifier::TypeSpec:
-  case NestedNameSpecifier::TypeSpecWithTemplate:
     manglePrefix(QualType(qualifier->getAsType(), 0));
     return;
 

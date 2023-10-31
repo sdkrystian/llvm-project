@@ -11841,7 +11841,7 @@ QualType Sema::CheckComparisonCategoryType(ComparisonCategoryType Kind,
   // prepended 'std' namespace but not any inline namespace names.
   auto TyForDiags = [&](ComparisonCategoryInfo *Info) {
     auto *NNS =
-        NestedNameSpecifier::Create(Context, nullptr, getStdNamespace());
+        Context.getNestedNameSpecifier(nullptr, getStdNamespace());
     return Context.getElaboratedType(ElaboratedTypeKeyword::None, NNS,
                                      Info->getType());
   };
@@ -12063,7 +12063,7 @@ QualType Sema::BuildStdInitializerList(QualType Element, SourceLocation Loc) {
                                                                         Loc)));
   return Context.getElaboratedType(
       ElaboratedTypeKeyword::None,
-      NestedNameSpecifier::Create(Context, nullptr, getStdNamespace()),
+      Context.getNestedNameSpecifier(nullptr, getStdNamespace()),
       CheckTemplateIdType(TemplateName(StdInitializerList), Loc, Args));
 }
 
@@ -14688,8 +14688,7 @@ buildSingleCopyAssignRecursively(Sema &S, SourceLocation Loc, QualType T,
     CXXScopeSpec SS;
     const Type *CanonicalT = S.Context.getCanonicalType(T.getTypePtr());
     SS.MakeTrivial(S.Context,
-                   NestedNameSpecifier::Create(S.Context, nullptr, false,
-                                               CanonicalT),
+                   S.Context.getNestedNameSpecifier(nullptr, CanonicalT),
                    Loc);
 
     // Create the reference to operator=.
