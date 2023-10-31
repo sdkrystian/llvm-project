@@ -166,8 +166,7 @@ DeclContext *Sema::computeDeclContext(const CXXScopeSpec &SS,
   case NestedNameSpecifier::NamespaceAlias:
     return NNS->getAsNamespaceAlias()->getNamespace();
 
-  case NestedNameSpecifier::TypeSpec:
-  case NestedNameSpecifier::TypeSpecWithTemplate: {
+  case NestedNameSpecifier::TypeSpec: {
     const TagType *Tag = NNS->getAsType()->getAs<TagType>();
     assert(Tag && "Non-tag type in nested-name-specifier");
     return Tag->getDecl();
@@ -753,8 +752,7 @@ bool Sema::BuildCXXNestedNameSpecifier(Scope *S, NestedNameSpecInfo &IdInfo,
       llvm_unreachable("Unhandled TypeDecl node in nested-name-specifier");
     }
 
-    SS.Extend(Context, SourceLocation(), TLB.getTypeLocInContext(Context, T),
-              IdInfo.CCLoc);
+    SS.Extend(Context, TLB.getTypeLocInContext(Context, T), IdInfo.CCLoc);
     return false;
   }
 
@@ -862,8 +860,7 @@ bool Sema::ActOnCXXNestedNameSpecifierDecltype(CXXScopeSpec &SS,
   DecltypeTypeLoc DecltypeTL = TLB.push<DecltypeTypeLoc>(T);
   DecltypeTL.setDecltypeLoc(DS.getTypeSpecTypeLoc());
   DecltypeTL.setRParenLoc(DS.getTypeofParensRange().getEnd());
-  SS.Extend(Context, SourceLocation(), TLB.getTypeLocInContext(Context, T),
-            ColonColonLoc);
+  SS.Extend(Context, TLB.getTypeLocInContext(Context, T), ColonColonLoc);
   return false;
 }
 
@@ -924,8 +921,7 @@ bool Sema::ActOnCXXNestedNameSpecifier(Scope *S,
     for (unsigned I = 0, N = TemplateArgs.size(); I != N; ++I)
       SpecTL.setArgLocInfo(I, TemplateArgs[I].getLocInfo());
 
-    SS.Extend(Context, TemplateKWLoc, Builder.getTypeLocInContext(Context, T),
-              CCLoc);
+    SS.Extend(Context, Builder.getTypeLocInContext(Context, T), CCLoc);
     return false;
   }
 
@@ -975,8 +971,7 @@ bool Sema::ActOnCXXNestedNameSpecifier(Scope *S,
     SpecTL.setArgLocInfo(I, TemplateArgs[I].getLocInfo());
 
 
-  SS.Extend(Context, TemplateKWLoc, Builder.getTypeLocInContext(Context, T),
-            CCLoc);
+  SS.Extend(Context, Builder.getTypeLocInContext(Context, T), CCLoc);
   return false;
 }
 
@@ -1049,7 +1044,6 @@ bool Sema::ShouldEnterDeclaratorScope(Scope *S, const CXXScopeSpec &SS) {
 
   case NestedNameSpecifier::Identifier:
   case NestedNameSpecifier::TypeSpec:
-  case NestedNameSpecifier::TypeSpecWithTemplate:
   case NestedNameSpecifier::Super:
     // These are never namespace scopes.
     return true;

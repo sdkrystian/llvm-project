@@ -9506,40 +9506,36 @@ ASTImporter::Import(NestedNameSpecifier *FromNNS) {
   switch (FromNNS->getKind()) {
   case NestedNameSpecifier::Identifier:
     assert(FromNNS->getAsIdentifier() && "NNS should contain identifier.");
-    return NestedNameSpecifier::Create(ToContext, Prefix,
+    return ToContext.getNestedNameSpecifier(Prefix,
                                        Import(FromNNS->getAsIdentifier()));
 
   case NestedNameSpecifier::Namespace:
     if (ExpectedDecl NSOrErr = Import(FromNNS->getAsNamespace())) {
-      return NestedNameSpecifier::Create(ToContext, Prefix,
+      return ToContext.getNestedNameSpecifier(Prefix,
                                          cast<NamespaceDecl>(*NSOrErr));
     } else
       return NSOrErr.takeError();
 
   case NestedNameSpecifier::NamespaceAlias:
     if (ExpectedDecl NSADOrErr = Import(FromNNS->getAsNamespaceAlias()))
-      return NestedNameSpecifier::Create(ToContext, Prefix,
+      return ToContext.getNestedNameSpecifier(Prefix,
                                          cast<NamespaceAliasDecl>(*NSADOrErr));
     else
       return NSADOrErr.takeError();
 
   case NestedNameSpecifier::Global:
-    return NestedNameSpecifier::GlobalSpecifier(ToContext);
+    return ToContext.getGlobalNestedNameSpecifier();
 
   case NestedNameSpecifier::Super:
     if (ExpectedDecl RDOrErr = Import(FromNNS->getAsRecordDecl()))
-      return NestedNameSpecifier::SuperSpecifier(ToContext,
-                                                 cast<CXXRecordDecl>(*RDOrErr));
+      return ToContext.getSuperNestedNameSpecifier(
+                                                cast<CXXRecordDecl>(*RDOrErr));
     else
       return RDOrErr.takeError();
 
   case NestedNameSpecifier::TypeSpec:
-  case NestedNameSpecifier::TypeSpecWithTemplate:
     if (ExpectedTypePtr TyOrErr = Import(FromNNS->getAsType())) {
-      bool TSTemplate =
-          FromNNS->getKind() == NestedNameSpecifier::TypeSpecWithTemplate;
-      return NestedNameSpecifier::Create(ToContext, Prefix, TSTemplate,
-                                         *TyOrErr);
+      return ToContext.getNestedNameSpecifier(Prefix, *TyOrErr);
     } else {
       return TyOrErr.takeError();
     }
@@ -9597,21 +9593,13 @@ ASTImporter::Import(NestedNameSpecifierLoc FromNNS) {
                      ToLocalBeginLoc, ToLocalEndLoc);
       break;
 
-    case NestedNameSpecifier::TypeSpec:
-    case NestedNameSpecifier::TypeSpecWithTemplate: {
+    case NestedNameSpecifier::TypeSpec: {
       SourceLocation ToTLoc;
       if (Error Err = importInto(ToTLoc, NNS.getTypeLoc().getBeginLoc()))
         return std::move(Err);
       TypeSourceInfo *TSI = getToContext().getTrivialTypeSourceInfo(
             QualType(Spec->getAsType(), 0), ToTLoc);
-      if (Kind == NestedNameSpecifier::TypeSpecWithTemplate)
-        // ToLocalBeginLoc is here the location of the 'template' keyword.
-        Builder.Extend(getToContext(), ToLocalBeginLoc, TSI->getTypeLoc(),
-                       ToLocalEndLoc);
-      else
-        // No location for 'template' keyword here.
-        Builder.Extend(getToContext(), SourceLocation{}, TSI->getTypeLoc(),
-                       ToLocalEndLoc);
+      Builder.Extend(getToContext(), TSI->getTypeLoc(), ToLocalEndLoc);
       break;
     }
 

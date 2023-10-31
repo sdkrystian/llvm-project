@@ -28,6 +28,7 @@
 namespace clang {
 
 class ASTContext;
+class NamedDecl;
 class CXXRecordDecl;
 class IdentifierInfo;
 class LangOptions;
@@ -48,13 +49,7 @@ class TypeLoc;
 /// The last two specifiers can only appear at the start of a
 /// nested-namespace-specifier.
 class NestedNameSpecifier : public llvm::FoldingSetNode {
-  /// Enumeration describing
-  enum StoredSpecifierKind {
-    StoredIdentifier = 0,
-    StoredDecl = 1,
-    StoredTypeSpec = 2,
-    StoredTypeSpecWithTemplate = 3
-  };
+  friend class ASTContext; // ASTContext creates these.
 
   /// The nested name specifier that precedes this nested name
   /// specifier.
@@ -62,8 +57,8 @@ class NestedNameSpecifier : public llvm::FoldingSetNode {
   /// The pointer is the nested-name-specifier that precedes this
   /// one. The integer stores one of the first four values of type
   /// SpecifierKind.
-  llvm::PointerIntPair<NestedNameSpecifier *, 2, StoredSpecifierKind> Prefix;
-
+  // llvm::PointerIntPair<NestedNameSpecifier *, 2, StoredSpecifierKind> Prefix;
+  NestedNameSpecifier *Prefix;
   /// The last component in the nested name specifier, which
   /// can be an identifier, a declaration, or a type.
   ///
@@ -71,7 +66,15 @@ class NestedNameSpecifier : public llvm::FoldingSetNode {
   /// specifier '::'. Otherwise, the pointer is one of
   /// IdentifierInfo*, Namespace*, or Type*, depending on the kind of
   /// specifier as encoded within the prefix.
-  void* Specifier = nullptr;
+  // void* Specifier = nullptr;
+
+  using StorageType = llvm::PointerUnion<
+      IdentifierInfo*, NamedDecl*, Type*>;
+
+  StorageType Specifier;
+
+  NestedNameSpecifier(NestedNameSpecifier *Pfx, StorageType Spec)
+      : Prefix(Pfx), Specifier(Spec) {}
 
 public:
   /// The kind of specifier that completes this nested name
@@ -89,10 +92,6 @@ public:
     /// A type, stored as a Type*.
     TypeSpec,
 
-    /// A type that was preceded by the 'template' keyword,
-    /// stored as a Type*.
-    TypeSpecWithTemplate,
-
     /// The global specifier '::'. There is no stored value.
     Global,
 
@@ -101,63 +100,9 @@ public:
     Super
   };
 
-private:
-  /// Builds the global specifier.
-  NestedNameSpecifier() : Prefix(nullptr, StoredIdentifier) {}
-
-  /// Copy constructor used internally to clone nested name
-  /// specifiers.
-  NestedNameSpecifier(const NestedNameSpecifier &Other) = default;
-
-  /// Either find or insert the given nested name specifier
-  /// mockup in the given context.
-  static NestedNameSpecifier *FindOrInsert(const ASTContext &Context,
-                                           const NestedNameSpecifier &Mockup);
-
 public:
+  NestedNameSpecifier(const NestedNameSpecifier &) = delete;
   NestedNameSpecifier &operator=(const NestedNameSpecifier &) = delete;
-
-  /// Builds a specifier combining a prefix and an identifier.
-  ///
-  /// The prefix must be dependent, since nested name specifiers
-  /// referencing an identifier are only permitted when the identifier
-  /// cannot be resolved.
-  static NestedNameSpecifier *Create(const ASTContext &Context,
-                                     NestedNameSpecifier *Prefix,
-                                     IdentifierInfo *II);
-
-  /// Builds a nested name specifier that names a namespace.
-  static NestedNameSpecifier *Create(const ASTContext &Context,
-                                     NestedNameSpecifier *Prefix,
-                                     const NamespaceDecl *NS);
-
-  /// Builds a nested name specifier that names a namespace alias.
-  static NestedNameSpecifier *Create(const ASTContext &Context,
-                                     NestedNameSpecifier *Prefix,
-                                     NamespaceAliasDecl *Alias);
-
-  /// Builds a nested name specifier that names a type.
-  static NestedNameSpecifier *Create(const ASTContext &Context,
-                                     NestedNameSpecifier *Prefix,
-                                     bool Template, const Type *T);
-
-  /// Builds a specifier that consists of just an identifier.
-  ///
-  /// The nested-name-specifier is assumed to be dependent, but has no
-  /// prefix because the prefix is implied by something outside of the
-  /// nested name specifier, e.g., in "x->Base::f", the "x" has a dependent
-  /// type.
-  static NestedNameSpecifier *Create(const ASTContext &Context,
-                                     IdentifierInfo *II);
-
-  /// Returns the nested name specifier representing the global
-  /// scope.
-  static NestedNameSpecifier *GlobalSpecifier(const ASTContext &Context);
-
-  /// Returns the nested name specifier representing the __super scope
-  /// for the given CXXRecordDecl.
-  static NestedNameSpecifier *SuperSpecifier(const ASTContext &Context,
-                                             CXXRecordDecl *RD);
 
   /// Return the prefix of this nested name specifier.
   ///
@@ -166,19 +111,20 @@ public:
   /// nested name specifier that represents "foo::bar::", the current
   /// specifier will contain "bar::" and the prefix will contain
   /// "foo::".
-  NestedNameSpecifier *getPrefix() const { return Prefix.getPointer(); }
+  NestedNameSpecifier *getPrefix() const { return Prefix; }
 
   /// Determine what kind of nested name specifier is stored.
   SpecifierKind getKind() const;
 
   /// Retrieve the identifier stored in this nested name
   /// specifier.
-  IdentifierInfo *getAsIdentifier() const {
-    if (Prefix.getInt() == StoredIdentifier)
-      return (IdentifierInfo *)Specifier;
+  IdentifierInfo *getAsIdentifier() const;
 
-    return nullptr;
-  }
+  /// Retrieve the NamedDecl stored in this nested name specifier.
+  NamedDecl *getAsNamedDecl() const;
+
+  /// Retrieve the type stored in this nested name specifier.
+  const Type *getAsType() const;
 
   /// Retrieve the namespace stored in this nested name
   /// specifier.
@@ -191,15 +137,6 @@ public:
   /// Retrieve the record declaration stored in this nested name
   /// specifier.
   CXXRecordDecl *getAsRecordDecl() const;
-
-  /// Retrieve the type stored in this nested name specifier.
-  const Type *getAsType() const {
-    if (Prefix.getInt() == StoredTypeSpec ||
-        Prefix.getInt() == StoredTypeSpecWithTemplate)
-      return (const Type *)Specifier;
-
-    return nullptr;
-  }
 
   NestedNameSpecifierDependence getDependence() const;
 
@@ -230,8 +167,14 @@ public:
              bool ResolveTemplateArguments = false) const;
 
   void Profile(llvm::FoldingSetNodeID &ID) const {
-    ID.AddPointer(Prefix.getOpaqueValue());
-    ID.AddPointer(Specifier);
+    Profile(ID, Prefix, Specifier);
+  }
+
+  static void Profile(llvm::FoldingSetNodeID &ID,
+                      NestedNameSpecifier *Pfx,
+                      StorageType Spec) {
+    ID.AddPointer(Pfx);
+    ID.AddPointer(Spec.getOpaqueValue());
   }
 
   /// Dump the nested name specifier to standard output to aid
@@ -399,13 +342,10 @@ public:
   /// \param Context The AST context in which this nested-name-specifier
   /// resides.
   ///
-  /// \param TemplateKWLoc The location of the 'template' keyword, if present.
-  ///
   /// \param TL The TypeLoc that describes the type preceding the '::'.
   ///
   /// \param ColonColonLoc The location of the trailing '::'.
-  void Extend(ASTContext &Context, SourceLocation TemplateKWLoc, TypeLoc TL,
-              SourceLocation ColonColonLoc);
+  void Extend(ASTContext &Context, TypeLoc TL, SourceLocation ColonColonLoc);
 
   /// Extend the current nested-name-specifier by another
   /// nested-name-specifier component of the form 'identifier::'.

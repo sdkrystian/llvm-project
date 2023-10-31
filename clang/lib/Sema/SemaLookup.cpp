@@ -4543,7 +4543,6 @@ static void getNestedNameSpecifierIdentifiers(
     II = NNS->getAsNamespaceAlias()->getIdentifier();
     break;
 
-  case NestedNameSpecifier::TypeSpecWithTemplate:
   case NestedNameSpecifier::TypeSpec:
     II = QualType(NNS->getAsType(), 0).getBaseTypeIdentifier();
     break;
@@ -4881,7 +4880,7 @@ TypoCorrectionConsumer::NamespaceSpecifierSet::NamespaceSpecifierSet(
 
   // Add the global context as a NestedNameSpecifier
   SpecifierInfo SI = {cast<DeclContext>(Context.getTranslationUnitDecl()),
-                      NestedNameSpecifier::GlobalSpecifier(Context), 1};
+                      Context.getGlobalNestedNameSpecifier(), 1};
   DistanceMap[1].push_back(SI);
 }
 
@@ -4905,11 +4904,10 @@ TypoCorrectionConsumer::NamespaceSpecifierSet::buildNestedNameSpecifier(
   unsigned NumSpecifiers = 0;
   for (DeclContext *C : llvm::reverse(DeclChain)) {
     if (auto *ND = dyn_cast_or_null<NamespaceDecl>(C)) {
-      NNS = NestedNameSpecifier::Create(Context, NNS, ND);
+      NNS = Context.getNestedNameSpecifier(NNS, ND);
       ++NumSpecifiers;
     } else if (auto *RD = dyn_cast_or_null<RecordDecl>(C)) {
-      NNS = NestedNameSpecifier::Create(Context, NNS, RD->isTemplateDecl(),
-                                        RD->getTypeForDecl());
+      NNS = Context.getNestedNameSpecifier(NNS, RD->getTypeForDecl());
       ++NumSpecifiers;
     }
   }
@@ -4936,7 +4934,7 @@ void TypoCorrectionConsumer::NamespaceSpecifierSet::addNameSpecifier(
   // Add an explicit leading '::' specifier if needed.
   if (NamespaceDeclChain.empty()) {
     // Rebuild the NestedNameSpecifier as a globally-qualified specifier.
-    NNS = NestedNameSpecifier::GlobalSpecifier(Context);
+    NNS = Context.getGlobalNestedNameSpecifier();
     NumSpecifiers =
         buildNestedNameSpecifier(FullNamespaceDeclChain, NNS);
   } else if (NamedDecl *ND =
@@ -4954,7 +4952,7 @@ void TypoCorrectionConsumer::NamespaceSpecifierSet::addNameSpecifier(
     }
     if (SameNameSpecifier || llvm::is_contained(CurContextIdentifiers, Name)) {
       // Rebuild the NestedNameSpecifier as a globally-qualified specifier.
-      NNS = NestedNameSpecifier::GlobalSpecifier(Context);
+      NNS = Context.getGlobalNestedNameSpecifier();
       NumSpecifiers =
           buildNestedNameSpecifier(FullNamespaceDeclChain, NNS);
     }

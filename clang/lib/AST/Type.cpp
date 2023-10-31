@@ -3148,6 +3148,15 @@ bool Type::isElaboratedTypeSpecifier() const {
   return TypeWithKeyword::KeywordIsTagTypeKind(Keyword);
 }
 
+bool Type::hasTemplateKeyword() const {
+  if (const auto *TST = dyn_cast<TemplateSpecializationType>(this))
+    return TST->hasTemplateKeyword();
+  else if (const auto *DTST =
+               dyn_cast<DependentTemplateSpecializationType>(this))
+    return DTST->hasTemplateKeyword();
+  return false;
+}
+
 const char *Type::getTypeClassName() const {
   switch (TypeBits.TC) {
 #define ABSTRACT_TYPE(Derived, Base)

@@ -2409,6 +2409,9 @@ public:
   /// Determine wither this type is a C++ elaborated-type-specifier.
   bool isElaboratedTypeSpecifier() const;
 
+  /// Determine whether this type is a preceded by the keyword "template".
+  bool hasTemplateKeyword() const;
+
   bool canDecayToPointerType() const;
 
   /// Whether this type is represented natively as a pointer.  This includes

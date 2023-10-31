@@ -5724,7 +5724,6 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
           llvm_unreachable("Nested-name-specifier must name a type");
 
         case NestedNameSpecifier::TypeSpec:
-        case NestedNameSpecifier::TypeSpecWithTemplate:
           ClsType = QualType(NNS->getAsType(), 0);
           // Note: if the NNS has a prefix and ClsType is a nondependent
           // TemplateSpecializationType, then the NNS prefix is NOT included
@@ -6494,7 +6493,6 @@ namespace {
         break;
 
       case NestedNameSpecifier::TypeSpec:
-      case NestedNameSpecifier::TypeSpecWithTemplate:
         if (isa<ElaboratedType>(ClsTy)) {
           ElaboratedTypeLoc ETLoc = ClsTL.castAs<ElaboratedTypeLoc>();
           ETLoc.setElaboratedKeywordLoc(SourceLocation());

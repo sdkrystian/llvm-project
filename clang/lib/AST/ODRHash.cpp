@@ -129,7 +129,6 @@ void ODRHash::AddNestedNameSpecifier(const NestedNameSpecifier *NNS) {
     AddDecl(NNS->getAsNamespaceAlias());
     break;
   case NestedNameSpecifier::TypeSpec:
-  case NestedNameSpecifier::TypeSpecWithTemplate:
     AddType(NNS->getAsType());
     break;
   case NestedNameSpecifier::Global:

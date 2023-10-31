@@ -6447,7 +6447,6 @@ static bool isSameQualifier(const NestedNameSpecifier *X,
     // We've already checked that we named the same namespace.
     break;
   case NestedNameSpecifier::TypeSpec:
-  case NestedNameSpecifier::TypeSpecWithTemplate:
     if (X->getAsType()->getCanonicalTypeInternal() !=
         Y->getAsType()->getCanonicalTypeInternal())
       return false;
@@ -6783,6 +6782,76 @@ ASTContext::getCanonicalTemplateArgument(const TemplateArgument &Arg) const {
 }
 
 NestedNameSpecifier *
+ASTContext::getNestedNameSpecifierImpl(NestedNameSpecifier *Pfx,
+                                 NestedNameSpecifier::StorageType Spec) const {
+  llvm::FoldingSetNodeID ID;
+  NestedNameSpecifier::Profile(ID, Pfx, Spec);
+  void *InsertPos = nullptr;
+  auto *NNS = NestedNameSpecifiers.FindNodeOrInsertPos(ID, InsertPos);
+  if (!NNS) {
+    NNS = new (*this, alignof(NestedNameSpecifier))
+        NestedNameSpecifier(Pfx, Spec);
+    NestedNameSpecifiers.InsertNode(NNS, InsertPos);
+  }
+  return NNS;
+}
+
+NestedNameSpecifier *
+ASTContext::getNestedNameSpecifier(NestedNameSpecifier *Prefix,
+                                   const IdentifierInfo *II) const {
+  assert(II && "Identifier cannot be NULL");
+  assert((!Prefix || Prefix->isDependent()) && "Prefix must be dependent");
+  return getNestedNameSpecifierImpl(
+      Prefix, const_cast<IdentifierInfo *>(II));
+}
+
+NestedNameSpecifier *
+ASTContext::getNestedNameSpecifier(NestedNameSpecifier *Prefix,
+                                   const Type *T) const {
+  assert(T && "Type cannot be NULL");
+  return getNestedNameSpecifierImpl(Prefix, const_cast<Type *>(T));
+}
+
+NestedNameSpecifier *
+ASTContext::getNestedNameSpecifier(NestedNameSpecifier *Prefix,
+                                   const NamespaceDecl *ND) const {
+  assert(ND && "Namespace cannot be NULL");
+  assert((!Prefix ||
+          (Prefix->getAsType() == nullptr &&
+           Prefix->getAsIdentifier() == nullptr)) &&
+         "Broken nested name specifier");
+  return getNestedNameSpecifierImpl(
+      Prefix, const_cast<NamespaceDecl *>(ND));
+}
+
+NestedNameSpecifier *
+ASTContext::getNestedNameSpecifier(NestedNameSpecifier *Prefix,
+                                   const NamespaceAliasDecl *NAD) const {
+  assert(NAD && "Namespace alias cannot be NULL");
+  assert((!Prefix ||
+          (Prefix->getAsType() == nullptr &&
+           Prefix->getAsIdentifier() == nullptr)) &&
+         "Broken nested name specifier");
+  return getNestedNameSpecifierImpl(
+      Prefix, const_cast<NamespaceAliasDecl *>(NAD));
+}
+
+NestedNameSpecifier *
+ASTContext::getSuperNestedNameSpecifier(const CXXRecordDecl *RD) const {
+  assert(RD && "Class cannot be NULL");
+  return getNestedNameSpecifierImpl(
+      nullptr, const_cast<CXXRecordDecl *>(RD));
+}
+
+NestedNameSpecifier *
+ASTContext::getGlobalNestedNameSpecifier() const {
+  if (!GlobalNestedNameSpecifier)
+    GlobalNestedNameSpecifier = new (*this, alignof(NestedNameSpecifier))
+        NestedNameSpecifier(nullptr, nullptr);
+  return GlobalNestedNameSpecifier;
+}
+
+NestedNameSpecifier *
 ASTContext::getCanonicalNestedNameSpecifier(NestedNameSpecifier *NNS) const {
   if (!NNS)
     return nullptr;
@@ -6790,27 +6859,24 @@ ASTContext::getCanonicalNestedNameSpecifier(NestedNameSpecifier *NNS) const {
   switch (NNS->getKind()) {
   case NestedNameSpecifier::Identifier:
     // Canonicalize the prefix but keep the identifier the same.
-    return NestedNameSpecifier::Create(*this,
-                         getCanonicalNestedNameSpecifier(NNS->getPrefix()),
-                                       NNS->getAsIdentifier());
+    return getNestedNameSpecifier(
+        getCanonicalNestedNameSpecifier(NNS->getPrefix()),
+        NNS->getAsIdentifier());
 
   case NestedNameSpecifier::Namespace:
     // A namespace is canonical; build a nested-name-specifier with
     // this namespace and no prefix.
-    return NestedNameSpecifier::Create(*this, nullptr,
-                                 NNS->getAsNamespace()->getOriginalNamespace());
+    return getNestedNameSpecifier(nullptr, NNS->getAsNamespace()
+                                              ->getOriginalNamespace());
 
   case NestedNameSpecifier::NamespaceAlias:
     // A namespace is canonical; build a nested-name-specifier with
     // this namespace and no prefix.
-    return NestedNameSpecifier::Create(*this, nullptr,
-                                    NNS->getAsNamespaceAlias()->getNamespace()
-                                                      ->getOriginalNamespace());
+    return getNestedNameSpecifier(nullptr, NNS->getAsNamespaceAlias()
+                                              ->getNamespace()
+                                              ->getOriginalNamespace());
 
-  // The difference between TypeSpec and TypeSpecWithTemplate is that the
-  // latter will have the 'template' keyword when printed.
-  case NestedNameSpecifier::TypeSpec:
-  case NestedNameSpecifier::TypeSpecWithTemplate: {
+  case NestedNameSpecifier::TypeSpec: {
     const Type *T = getCanonicalType(NNS->getAsType());
 
     // If we have some kind of dependent-named type (e.g., "typename T::type"),
@@ -6821,16 +6887,12 @@ ASTContext::getCanonicalNestedNameSpecifier(NestedNameSpecifier *NNS) const {
     //   typedef typename T::type T1;
     //   typedef typename T1::type T2;
     if (const auto *DNT = T->getAs<DependentNameType>())
-      return NestedNameSpecifier::Create(
-          *this, DNT->getQualifier(),
-          const_cast<IdentifierInfo *>(DNT->getIdentifier()));
+      return getNestedNameSpecifier(DNT->getQualifier(),
+                                    DNT->getIdentifier());
     if (const auto *DTST = T->getAs<DependentTemplateSpecializationType>())
-      return NestedNameSpecifier::Create(*this, DTST->getQualifier(), true,
-                                         const_cast<Type *>(T));
+      return getNestedNameSpecifier(DTST->getQualifier(), T);
 
-    // TODO: Set 'Template' parameter to true for other template types.
-    return NestedNameSpecifier::Create(*this, nullptr, false,
-                                       const_cast<Type *>(T));
+    return getNestedNameSpecifier(nullptr, T);
   }
 
   case NestedNameSpecifier::Global:

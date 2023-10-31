@@ -2630,6 +2630,34 @@ public:
   /// Determine if two types are similar, ignoring only CVR qualifiers.
   bool hasCvrSimilarType(QualType T1, QualType T2);
 
+private:
+  NestedNameSpecifier *
+  getNestedNameSpecifierImpl(NestedNameSpecifier *Pfx,
+                             NestedNameSpecifier::StorageType Spec) const;
+
+public:
+
+  NestedNameSpecifier *
+  getNestedNameSpecifier(NestedNameSpecifier *Prefix,
+                         const IdentifierInfo *II) const;
+
+  NestedNameSpecifier *
+  getNestedNameSpecifier(NestedNameSpecifier *Prefix,
+                         const Type *T) const;
+
+  NestedNameSpecifier *
+  getNestedNameSpecifier(NestedNameSpecifier *Prefix,
+                         const NamespaceDecl *ND) const;
+
+  NestedNameSpecifier *
+  getNestedNameSpecifier(NestedNameSpecifier *Prefix,
+                         const NamespaceAliasDecl *NAD) const;
+
+  NestedNameSpecifier *
+  getSuperNestedNameSpecifier(const CXXRecordDecl *RD) const;
+
+  NestedNameSpecifier *
+  getGlobalNestedNameSpecifier() const;
   /// Retrieves the "canonical" nested name specifier for a
   /// given nested name specifier.
   ///

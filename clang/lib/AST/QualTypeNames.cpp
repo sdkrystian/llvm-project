@@ -204,7 +204,7 @@ static NestedNameSpecifier *createOuterNNS(const ASTContext &Ctx, const Decl *D,
     return createNestedNameSpecifier(
         Ctx, TDD, FullyQualify, WithGlobalNsPrefix);
   } else if (WithGlobalNsPrefix && DC->isTranslationUnit()) {
-    return NestedNameSpecifier::GlobalSpecifier(Ctx);
+    return Ctx.getGlobalNestedNameSpecifier();
   }
   return nullptr;  // no starting '::' if |WithGlobalNsPrefix| is false
 }
@@ -236,8 +236,7 @@ static NestedNameSpecifier *getFullyQualifiedNestedNameSpecifier(
       return getFullyQualifiedNestedNameSpecifier(
           Ctx, Scope->getPrefix(), WithGlobalNsPrefix);
     case NestedNameSpecifier::Super:
-    case NestedNameSpecifier::TypeSpec:
-    case NestedNameSpecifier::TypeSpecWithTemplate: {
+    case NestedNameSpecifier::TypeSpec: {
       const Type *Type = Scope->getAsType();
       // Find decl context.
       const TagDecl *TD = nullptr;
@@ -308,7 +307,7 @@ static NestedNameSpecifier *createNestedNameSpecifierForScopeOf(
       return nullptr;
     }
   } else if (WithGlobalNsPrefix && DC->isTranslationUnit()) {
-    return NestedNameSpecifier::GlobalSpecifier(Ctx);
+    return Ctx.getGlobalNestedNameSpecifier();
   }
   return nullptr;
 }
@@ -348,8 +347,7 @@ NestedNameSpecifier *createNestedNameSpecifier(const ASTContext &Ctx,
   if (!Namespace) return nullptr;
 
   bool FullyQualified = true;  // doesn't matter, DeclContexts are namespaces
-  return NestedNameSpecifier::Create(
-      Ctx,
+  return Ctx.getNestedNameSpecifier(
       createOuterNNS(Ctx, Namespace, FullyQualified, WithGlobalNsPrefix),
       Namespace);
 }
@@ -368,9 +366,8 @@ NestedNameSpecifier *createNestedNameSpecifier(const ASTContext &Ctx,
     TypePtr = getFullyQualifiedTemplateType(Ctx, TypePtr, WithGlobalNsPrefix);
   }
 
-  return NestedNameSpecifier::Create(
-      Ctx, createOuterNNS(Ctx, TD, FullyQualify, WithGlobalNsPrefix),
-      false /*No TemplateKeyword*/, TypePtr);
+  return Ctx.getNestedNameSpecifier(
+      createOuterNNS(Ctx, TD, FullyQualify, WithGlobalNsPrefix), TypePtr);
 }
 
 /// Return the fully qualified type, including fully-qualified
