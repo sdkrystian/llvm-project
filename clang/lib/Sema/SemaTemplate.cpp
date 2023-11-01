@@ -4245,7 +4245,8 @@ TypeResult Sema::ActOnTemplateIdType(
     return CreateParsedType(T, TLB.getTypeSourceInfo(Context, T));
   }
 
-  QualType SpecTy = CheckTemplateIdType(Template, TemplateIILoc, TemplateArgs);
+  QualType SpecTy = CheckTemplateIdType(Template, TemplateIILoc,
+                                        TemplateKWLoc, TemplateArgs);
   if (SpecTy.isNull())
     return true;
 
@@ -10933,7 +10934,8 @@ Sema::ActOnTypenameType(Scope *S,
     return CreateParsedType(T, Builder.getTypeSourceInfo(Context, T));
   }
 
-  QualType T = CheckTemplateIdType(Template, TemplateIILoc, TemplateArgs);
+  QualType T = CheckTemplateIdType(Template, TemplateIILoc,
+                                   TemplateKWLoc, TemplateArgs);
   if (T.isNull())
     return true;
 
