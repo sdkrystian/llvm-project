@@ -4964,9 +4964,9 @@ void Redeclarable<decl_type>::setPreviousDecl(decl_type *PrevDecl) {
   // and Redeclarable to be defined.
   assert(RedeclLink.isFirst() &&
          "setPreviousDecl on a decl already in a redeclaration chain");
-
+  auto First = static_cast<decl_type*>(this);
   if (PrevDecl) {
-    auto First = PrevDecl->getFirstDecl();
+    First = PrevDecl->getFirstDecl();
     // Copy the first declaration from PrevDecl.
     setFirstDecl(First);
     // Point to previous. Make sure that this is actually the most recent
@@ -4981,8 +4981,10 @@ void Redeclarable<decl_type>::setPreviousDecl(decl_type *PrevDecl) {
     static_cast<decl_type*>(this)->IdentifierNamespace |=
       MostRecent->getIdentifierNamespace() &
       (Decl::IDNS_Ordinary | Decl::IDNS_Tag | Decl::IDNS_Type);
-    First->RedeclLink.setLatest(static_cast<decl_type*>(this));
   }
+
+  First->RedeclLink.setLatest(static_cast<decl_type*>(this));
+
   assert(!isa<NamedDecl>(static_cast<decl_type*>(this)) ||
          cast<NamedDecl>(static_cast<decl_type*>(this))->isLinkageValid());
 }

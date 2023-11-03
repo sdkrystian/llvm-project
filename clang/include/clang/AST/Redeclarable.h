@@ -241,7 +241,8 @@ public:
   /// Return the first declaration of this declaration or itself if this
   /// is the only declaration.
   decl_type *getFirstDecl() {
-    return static_cast<decl_type*>(isFirstDecl() ? this : FirstOrCommon);
+    return isFirstDecl() ? static_cast<decl_type*>(this) :
+                           static_cast<decl_type*>(FirstOrCommon);
   }
 
   /// Return the first declaration of this declaration or itself if this
