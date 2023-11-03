@@ -83,8 +83,8 @@ class TranslationUnitDecl : public Decl,
   using redeclarable_base = Redeclarable<TranslationUnitDecl>;
   friend redeclarable_base;
 
-  CommonBase *newCommonPtr(ASTContext &C) const {
-    return new (C) CommonBase;
+  void *newCommonData(ASTContext &) const {
+    return nullptr;
   }
 
   TranslationUnitDecl *getNextRedeclarationImpl() override {
@@ -570,8 +570,8 @@ class NamespaceDecl : public NamedDecl, public DeclContext,
   using redeclarable_base = Redeclarable<NamespaceDecl>;
   friend redeclarable_base;
 
-  CommonBase *newCommonPtr(ASTContext &C) const {
-    return new (C) CommonBase;
+  void *newCommonData(ASTContext &) const {
+    return nullptr;
   }
 
   NamespaceDecl *getNextRedeclarationImpl() override;
@@ -1100,8 +1100,8 @@ protected:
   using redeclarable_base = Redeclarable<VarDecl>;
   friend redeclarable_base;
 
-  CommonBase *newCommonPtr(ASTContext &C) const {
-    return new (C) CommonBase;
+  void *newCommonData(ASTContext &) const {
+    return nullptr;
   }
 
   VarDecl *getNextRedeclarationImpl() override {
@@ -2095,8 +2095,8 @@ protected:
   using redeclarable_base = Redeclarable<FunctionDecl>;
   friend redeclarable_base;
 
-  CommonBase *newCommonPtr(ASTContext &C) const {
-    return new (C) CommonBase;
+  void *newCommonData(ASTContext &) const {
+    return nullptr;
   }
 
   FunctionDecl *getNextRedeclarationImpl() override {
@@ -3397,8 +3397,8 @@ protected:
   using redeclarable_base = Redeclarable<TypedefNameDecl>;
   friend redeclarable_base;
 
-  CommonBase *newCommonPtr(ASTContext &C) const {
-    return new (C) CommonBase;
+  void *newCommonData(ASTContext &) const {
+    return nullptr;
   }
 
   TypedefNameDecl *getNextRedeclarationImpl() override {
@@ -3566,8 +3566,8 @@ protected:
   using redeclarable_base = Redeclarable<TagDecl>;
   friend redeclarable_base;
 
-  CommonBase *newCommonPtr(ASTContext &C) const {
-    return new (C) CommonBase;
+  void *newCommonData(ASTContext &) const {
+    return nullptr;
   }
 
   TagDecl *getNextRedeclarationImpl() override {
@@ -4966,14 +4966,12 @@ void Redeclarable<decl_type>::setPreviousDecl(decl_type *PrevDecl) {
          "setPreviousDecl on a decl already in a redeclaration chain");
 
   if (PrevDecl) {
-    // Copy first declaration from PrevDecl. If PrevDecl is the first
-    // declaration and a common data pointer has not yet been allocated,
-    // a new common data pointer will be allocated.
-    setFirstDecl(PrevDecl->getFirstDecl());
+    auto First = PrevDecl->getFirstDecl();
+    // Copy the first declaration from PrevDecl.
+    setFirstDecl(First);
     // Point to previous. Make sure that this is actually the most recent
     // redeclaration, or we can build invalid chains. If the most recent
     // redeclaration is invalid, it won't be PrevDecl, but we want it anyway.
-    auto First = getFirstDecl();
     assert(First->RedeclLink.isFirst() && "Expected first");
     decl_type *MostRecent = First->getNextRedeclaration();
     RedeclLink = PreviousDeclLink(cast<decl_type>(MostRecent));

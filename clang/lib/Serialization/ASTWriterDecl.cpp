@@ -209,7 +209,7 @@ namespace clang {
 
     template<typename DeclTy>
     void AddTemplateSpecializations(DeclTy *D) {
-      auto *Common = D->getCommonPtr();
+      auto *Common = D->getCommonData();
 
       // If we have any lazy specializations, and the external AST source is
       // our chained AST reader, we can just write out the DeclIDs. Otherwise,
@@ -1597,7 +1597,7 @@ void ASTDeclWriter::VisitRedeclarableTemplateDecl(RedeclarableTemplateDecl *D) {
   VisitRedeclarable(D);
 
   // Emit data to initialize CommonOrPrev before VisitTemplateDecl so that
-  // getCommonPtr() can be used while this is still initializing.
+  // getCommonData() can be used while this is still initializing.
   if (D->isFirstDecl()) {
     // This declaration owns the 'common' pointer, so serialize that data now.
     Record.AddDeclRef(D->getInstantiatedFromMemberTemplate());

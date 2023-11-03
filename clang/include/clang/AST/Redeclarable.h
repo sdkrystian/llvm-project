@@ -184,33 +184,34 @@ protected:
   /// If there is only one declaration, it is <pointer to self, true>
   DeclLink RedeclLink;
 
-  struct CommonBase {
-    decl_type *First = nullptr;
-  };
+  /// Points to the first declaration or common data.
+  ///
+  /// If isFirst() is false, this stores a pointer to the first declaration
+  /// in the redeclaration chain. If isFirst() is true, then it will instead
+  /// store lazily allocated data common to all redeclarations.
+  mutable void *FirstOrCommon = nullptr;
 
-  mutable CommonBase *Common = nullptr;
-
-  bool hasCommonPtr() const {
-    return Common != nullptr;
+  bool hasCommonData() const {
+    return getFirstDecl()->FirstOrCommon != nullptr;
   }
 
-  CommonBase *getCommonPtr() const {
-    if (!hasCommonPtr()) {
-      auto First = static_cast<const decl_type *>(this);
-      // If a common data pointer has not yet been allocated,
-      // allocate one now.
-      Common = First->newCommonPtr(First->getASTContext());
-      // Set this as the first declaration.
-      Common->First = const_cast<decl_type *>(First);
+  void *getCommonData() const {
+    const decl_type *First = getFirstDecl();
+    void *Common = First->FirstOrCommon;
+    // If a common data pointer has not yet been allocated,
+    // allocate one now.
+    if(!Common) {
+      Common = First->newCommonData(First->getASTContext());
+      First->FirstOrCommon = Common;
     }
-    assert(Common && "getCommonPtr should never return null");
     return Common;
   }
 
   void setFirstDecl(decl_type *First) {
-    // Setting the first declaration is just a matter of copying
-    // the common data pointer from the first declaration.
-    Common = First->getCommonPtr();
+    assert(static_cast<decl_type *>(this) != First &&
+           "Setting self as first declaration?");
+    assert(First->RedeclLink.isFirst() && "Broken first declaration?");
+    FirstOrCommon = First;
   }
 
   decl_type *getNextRedeclaration() const {
@@ -240,7 +241,7 @@ public:
   /// Return the first declaration of this declaration or itself if this
   /// is the only declaration.
   decl_type *getFirstDecl() {
-    return hasCommonPtr() ? Common->First : static_cast<decl_type*>(this);
+    return static_cast<decl_type*>(isFirstDecl() ? this : FirstOrCommon);
   }
 
   /// Return the first declaration of this declaration or itself if this

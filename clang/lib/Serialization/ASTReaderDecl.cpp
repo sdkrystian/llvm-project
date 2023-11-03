@@ -274,7 +274,7 @@ namespace clang {
       // FIXME: We should avoid this pattern of getting the ASTContext.
       ASTContext &C = D->getASTContext();
 
-      auto *&LazySpecializations = D->getCommonPtr()->LazySpecializations;
+      auto *&LazySpecializations = D->getCommonData()->LazySpecializations;
 
       if (auto &Old = LazySpecializations) {
         IDs.insert(IDs.end(), Old + 1, Old + 1 + Old[0]);
@@ -988,7 +988,7 @@ void ASTDeclReader::VisitFunctionDecl(FunctionDecl *FD) {
       llvm::FoldingSetNodeID ID;
       FunctionTemplateSpecializationInfo::Profile(ID, TemplArgs, C);
       void *InsertPos = nullptr;
-      FunctionTemplateDecl::Common *CommonPtr = CanonTemplate->getCommonPtr();
+      FunctionTemplateDecl::Common *CommonPtr = CanonTemplate->getCommonData();
       FunctionTemplateSpecializationInfo *ExistingInfo =
           CommonPtr->Specializations.FindNodeOrInsertPos(ID, InsertPos);
       if (InsertPos)
@@ -2353,11 +2353,12 @@ ASTDeclReader::VisitRedeclarableTemplateDecl(RedeclarableTemplateDecl *D) {
   RedeclarableResult Redecl = VisitRedeclarable(D);
 
   // Make sure we've allocated the Common pointer first. We do this before
-  // VisitTemplateDecl so that getCommonPtr() can be used during initialization.
+  // VisitTemplateDecl so that getCommonData() can be used during
+  // initialization.
   #if 0
   RedeclarableTemplateDecl *CanonD = D->getCanonicalDecl();
   if (!CanonD->Common) {
-    CanonD->Common = CanonD->newCommonPtr(Reader.getContext());
+    CanonD->Common = CanonD->newCommonData(Reader.getContext());
     Reader.PendingDefinitions.insert(CanonD);
   }
   D->Common = CanonD->Common;
@@ -2459,11 +2460,11 @@ ASTDeclReader::VisitClassTemplateSpecializationDeclImpl(
       // Set this as, or find, the canonical declaration for this specialization
       ClassTemplateSpecializationDecl *CanonSpec;
       if (auto *Partial = dyn_cast<ClassTemplatePartialSpecializationDecl>(D)) {
-        CanonSpec = CanonPattern->getCommonPtr()->PartialSpecializations
+        CanonSpec = CanonPattern->getCommonData()->PartialSpecializations
             .GetOrInsertNode(Partial);
       } else {
         CanonSpec =
-            CanonPattern->getCommonPtr()->Specializations.GetOrInsertNode(D);
+            CanonPattern->getCommonData()->Specializations.GetOrInsertNode(D);
       }
       // If there was already a canonical specialization, merge into it.
       if (CanonSpec != D) {
@@ -2576,11 +2577,11 @@ ASTDeclReader::VisitVarTemplateSpecializationDeclImpl(
     if (D->isCanonicalDecl()) { // It's kept in the folding set.
       VarTemplateSpecializationDecl *CanonSpec;
       if (auto *Partial = dyn_cast<VarTemplatePartialSpecializationDecl>(D)) {
-        CanonSpec = CanonPattern->getCommonPtr()
+        CanonSpec = CanonPattern->getCommonData()
                         ->PartialSpecializations.GetOrInsertNode(Partial);
       } else {
         CanonSpec =
-            CanonPattern->getCommonPtr()->Specializations.GetOrInsertNode(D);
+            CanonPattern->getCommonData()->Specializations.GetOrInsertNode(D);
       }
       // If we already have a matching specialization, merge it.
       if (CanonSpec != D)
@@ -2835,7 +2836,7 @@ void ASTDeclReader::mergeRedeclarableTemplate(RedeclarableTemplateDecl *D,
   // If we merged the template with a prior declaration chain, merge the
   // common pointer.
   // FIXME: Actually merge here, don't just overwrite.
-  D->Common = D->getCanonicalDecl()->Common;
+  // D->Common = D->getCanonicalDecl()->Common;
 }
 
 /// "Cast" to type T, asserting if we don't have an implicit conversion.

@@ -322,7 +322,7 @@ RedeclarableTemplateDecl::CommonBase *RedeclarableTemplateDecl::getCommonPtr() c
     // FIXME: If any of the declarations is from an AST file, we probably
     // need an update record to add the common data.
 
-    Common = newCommonPtr(getASTContext());
+    Common = newCommonData(getASTContext());
   }
 
   // Update any previous declarations we saw with the common pointer.
@@ -334,11 +334,11 @@ RedeclarableTemplateDecl::CommonBase *RedeclarableTemplateDecl::getCommonPtr() c
 #endif
 
 void RedeclarableTemplateDecl::loadLazySpecializationsImpl() const {
-  if (!hasCommonPtr())
+  if (!hasCommonData())
     return;
   // Grab the most recent declaration to ensure we've loaded any lazy
   // redeclarations of this template.
-  if (auto& LazySpecializations = getCommonPtr()->LazySpecializations) {
+  if (auto& LazySpecializations = getCommonData()->LazySpecializations) {
     ASTContext &Context = getASTContext();
     uint32_t *Specs = std::exchange(LazySpecializations, nullptr);
     for (uint32_t I = 0, N = *Specs++; I != N; ++I)
@@ -390,7 +390,7 @@ void RedeclarableTemplateDecl::addSpecializationImpl(
 
 ArrayRef<TemplateArgument> RedeclarableTemplateDecl::getInjectedTemplateArgs() {
   TemplateParameterList *Params = getTemplateParameters();
-  auto *CommonPtr = getCommonPtr();
+  auto *CommonPtr = getCommonData();
   if (!CommonPtr->InjectedArgs) {
     auto &Context = getASTContext();
     SmallVector<TemplateArgument, 16> TemplateArgs;
@@ -426,7 +426,7 @@ FunctionTemplateDecl *FunctionTemplateDecl::CreateDeserialized(ASTContext &C,
 }
 
 RedeclarableTemplateDecl::CommonBase *
-FunctionTemplateDecl::newCommonPtr(ASTContext &C) const {
+FunctionTemplateDecl::newCommonData(ASTContext &C) const {
   auto *CommonPtr = new (C) Common;
   C.addDestruction(CommonPtr);
   return CommonPtr;
@@ -439,7 +439,7 @@ void FunctionTemplateDecl::LoadLazySpecializations() const {
 llvm::FoldingSetVector<FunctionTemplateSpecializationInfo> &
 FunctionTemplateDecl::getSpecializations() const {
   LoadLazySpecializations();
-  return getCommonPtr()->Specializations;
+  return getCommonData()->Specializations;
 }
 
 FunctionDecl *
@@ -521,17 +521,17 @@ void ClassTemplateDecl::LoadLazySpecializations() const {
 llvm::FoldingSetVector<ClassTemplateSpecializationDecl> &
 ClassTemplateDecl::getSpecializations() const {
   LoadLazySpecializations();
-  return getCommonPtr()->Specializations;
+  return getCommonData()->Specializations;
 }
 
 llvm::FoldingSetVector<ClassTemplatePartialSpecializationDecl> &
 ClassTemplateDecl::getPartialSpecializations() const {
   LoadLazySpecializations();
-  return getCommonPtr()->PartialSpecializations;
+  return getCommonData()->PartialSpecializations;
 }
 
 RedeclarableTemplateDecl::CommonBase *
-ClassTemplateDecl::newCommonPtr(ASTContext &C) const {
+ClassTemplateDecl::newCommonData(ASTContext &C) const {
   auto *CommonPtr = new (C) Common;
   C.addDestruction(CommonPtr);
   return CommonPtr;
@@ -617,7 +617,7 @@ ClassTemplateDecl::findPartialSpecInstantiatedFromMember(
 
 QualType
 ClassTemplateDecl::getInjectedClassNameSpecialization() {
-  Common *CommonPtr = getCommonPtr();
+  Common *CommonPtr = getCommonData();
   if (!CommonPtr->InjectedClassNameType.isNull())
     return CommonPtr->InjectedClassNameType;
 
@@ -1199,7 +1199,7 @@ TypeAliasTemplateDecl *TypeAliasTemplateDecl::CreateDeserialized(ASTContext &C,
 }
 
 RedeclarableTemplateDecl::CommonBase *
-TypeAliasTemplateDecl::newCommonPtr(ASTContext &C) const {
+TypeAliasTemplateDecl::newCommonData(ASTContext &C) const {
   auto *CommonPtr = new (C) Common;
   C.addDestruction(CommonPtr);
   return CommonPtr;
@@ -1243,17 +1243,17 @@ void VarTemplateDecl::LoadLazySpecializations() const {
 llvm::FoldingSetVector<VarTemplateSpecializationDecl> &
 VarTemplateDecl::getSpecializations() const {
   LoadLazySpecializations();
-  return getCommonPtr()->Specializations;
+  return getCommonData()->Specializations;
 }
 
 llvm::FoldingSetVector<VarTemplatePartialSpecializationDecl> &
 VarTemplateDecl::getPartialSpecializations() const {
   LoadLazySpecializations();
-  return getCommonPtr()->PartialSpecializations;
+  return getCommonData()->PartialSpecializations;
 }
 
 RedeclarableTemplateDecl::CommonBase *
-VarTemplateDecl::newCommonPtr(ASTContext &C) const {
+VarTemplateDecl::newCommonData(ASTContext &C) const {
   auto *CommonPtr = new (C) Common;
   C.addDestruction(CommonPtr);
   return CommonPtr;

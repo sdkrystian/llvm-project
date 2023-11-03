@@ -1694,7 +1694,7 @@ Decl *TemplateDeclInstantiator::VisitClassTemplateDecl(ClassTemplateDecl *D) {
     RecordInst->setLexicalDeclContext(Owner);
 
     if (PrevClassTemplate) {
-      // Inst->setCommonPtr(PrevClassTemplate->getCommonPtr());
+      // Inst->setCommonPtr(PrevClassTemplate->getCommonData());
       RecordInst->setTypeForDecl(
           PrevClassTemplate->getTemplatedDecl()->getTypeForDecl());
       const ClassTemplateDecl *MostRecentPrevCT =
