@@ -2139,6 +2139,10 @@ VarDecl *VarDecl::CreateDeserialized(ASTContext &C, unsigned ID) {
               QualType(), nullptr, SC_None);
 }
 
+auto VarDecl::newCommonPtr(ASTContext &C) const -> CommonBase * {
+  return new (C) CommonBase;
+}
+
 void VarDecl::setStorageClass(StorageClass SC) {
   assert(isLegalForVariable(SC));
   VarDeclBits.SClass = SC;
@@ -3049,6 +3053,10 @@ FunctionDecl::FunctionDecl(Kind DK, ASTContext &C, DeclContext *DC,
   FunctionDeclBits.FriendConstraintRefersToEnclosingTemplate = false;
   if (TrailingRequiresClause)
     setTrailingRequiresClause(TrailingRequiresClause);
+}
+
+auto FunctionDecl::newCommonPtr(ASTContext &C) const -> CommonBase * {
+  return new (C) CommonBase;
 }
 
 void FunctionDecl::getNameForDiagnostic(
@@ -4647,6 +4655,10 @@ SourceRange TagDecl::getSourceRange() const {
   return SourceRange(getOuterLocStart(), E);
 }
 
+auto TagDecl::newCommonPtr(ASTContext &C) const -> CommonBase * {
+  return new (C) CommonBase;
+}
+
 TagDecl *TagDecl::getCanonicalDecl() { return getFirstDecl(); }
 
 void TagDecl::setTypedefNameForAnonDecl(TypedefNameDecl *TDD) {
@@ -5412,6 +5424,10 @@ TypedefDecl *TypedefDecl::Create(ASTContext &C, DeclContext *DC,
 }
 
 void TypedefNameDecl::anchor() {}
+
+auto TypedefNameDecl::newCommonPtr(ASTContext &C) const -> CommonBase * {
+  return new (C) CommonBase;
+}
 
 TagDecl *TypedefNameDecl::getAnonDeclWithTypedefName(bool AnyRedecl) const {
   if (auto *TT = getTypeSourceInfo()->getType()->getAs<TagType>()) {

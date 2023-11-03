@@ -188,25 +188,33 @@ protected:
     decl_type *First = nullptr;
   };
 
-  CommonBase *Common = nullptr;
+  mutable CommonBase *Common = nullptr;
 
-  decl_type *getNextRedeclaration() const {
-    return RedeclLink.getPrevious(static_cast<const decl_type *>(this));
-  }
-
-  void setFirstDecl(decl_type *First) {
-    if (!First->Common) {
-      First->Common = First->newCommon(First->getASTContext());
-      First->Common->First = First;
-    }
-    Common = First->Common;
+  bool hasCommonPtr() const {
+    return Common != nullptr;
   }
 
   CommonBase *getCommonPtr() const {
-    if (!Common)
-      const_cast<Redeclarable *>(this)->setFirstDecl(
-          const_cast<decl_type *>(static_cast<const decl_type *>(this)));
+    if (!hasCommonPtr()) {
+      auto First = static_cast<const decl_type *>(this);
+      // If a common data pointer has not yet been allocated,
+      // allocate one now.
+      Common = First->newCommonPtr(First->getASTContext());
+      // Set this as the first declaration.
+      Common->First = const_cast<decl_type *>(First);
+    }
+    assert(Common && "getCommonPtr should never return null");
     return Common;
+  }
+
+  void setFirstDecl(decl_type *First) {
+    // Setting the first declaration is just a matter of copying
+    // the common data pointer from the first declaration.
+    Common = First->getCommonPtr();
+  }
+
+  decl_type *getNextRedeclaration() const {
+    return RedeclLink.getPrevious(static_cast<const decl_type *>(this));
   }
 
 public:
@@ -233,9 +241,7 @@ public:
   /// Return the first declaration of this declaration or itself if this
   /// is the only declaration.
   decl_type *getFirstDecl() {
-    return Common ?
-        static_cast<decl_type*>(Common->First) :
-        static_cast<decl_type*>(this);
+    return hasCommonPtr() ? Common->First : static_cast<decl_type*>(this);
   }
 
   /// Return the first declaration of this declaration or itself if this

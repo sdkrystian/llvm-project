@@ -83,7 +83,7 @@ class TranslationUnitDecl : public Decl,
   using redeclarable_base = Redeclarable<TranslationUnitDecl>;
   friend redeclarable_base;
 
-  CommonBase *newCommon(ASTContext &C) {
+  CommonBase *newCommonPtr(ASTContext &C) const {
     return new (C) CommonBase;
   }
 
@@ -570,9 +570,7 @@ class NamespaceDecl : public NamedDecl, public DeclContext,
   using redeclarable_base = Redeclarable<NamespaceDecl>;
   friend redeclarable_base;
 
-  CommonBase *newCommon(ASTContext &C) {
-    return new (C) CommonBase;
-  }
+  CommonBase *newCommonPtr(ASTContext &C) const;
 
   NamespaceDecl *getNextRedeclarationImpl() override;
   NamespaceDecl *getPreviousDeclImpl() override;
@@ -1100,9 +1098,7 @@ protected:
   using redeclarable_base = Redeclarable<VarDecl>;
   friend redeclarable_base;
 
-  CommonBase *newCommon(ASTContext &C) {
-    return new (C) CommonBase;
-  }
+  CommonBase *newCommonPtr(ASTContext &C) const;
 
   VarDecl *getNextRedeclarationImpl() override {
     return getNextRedeclaration();
@@ -2095,9 +2091,7 @@ protected:
   using redeclarable_base = Redeclarable<FunctionDecl>;
   friend redeclarable_base;
 
-  CommonBase *newCommon(ASTContext &C) {
-    return new (C) CommonBase;
-  }
+  CommonBase *newCommonPtr(ASTContext &C) const;
 
   FunctionDecl *getNextRedeclarationImpl() override {
     return getNextRedeclaration();
@@ -3397,9 +3391,7 @@ protected:
   using redeclarable_base = Redeclarable<TypedefNameDecl>;
   friend redeclarable_base;
 
-  CommonBase *newCommon(ASTContext &C) {
-    return new (C) CommonBase;
-  }
+  CommonBase *newCommonPtr(ASTContext &C) const;
 
   TypedefNameDecl *getNextRedeclarationImpl() override {
     return getNextRedeclaration();
@@ -3566,9 +3558,7 @@ protected:
   using redeclarable_base = Redeclarable<TagDecl>;
   friend redeclarable_base;
 
-  CommonBase *newCommon(ASTContext &C) {
-    return new (C) CommonBase;
-  }
+  CommonBase *newCommonPtr(ASTContext &C) const;
 
   TagDecl *getNextRedeclarationImpl() override {
     return getNextRedeclaration();
@@ -4966,6 +4956,7 @@ void Redeclarable<decl_type>::setPreviousDecl(decl_type *PrevDecl) {
          "setPreviousDecl on a decl already in a redeclaration chain");
 
   if (PrevDecl) {
+    #if 0
     setFirstDecl(PrevDecl);
     // Point to previous. Make sure that this is actually the most recent
     // redeclaration, or we can build invalid chains. If the most recent
@@ -4973,8 +4964,19 @@ void Redeclarable<decl_type>::setPreviousDecl(decl_type *PrevDecl) {
     auto First = static_cast<decl_type*>(Common->First);
     assert(First->RedeclLink.isFirst() && "Expected first");
     decl_type *MostRecent = First->getNextRedeclaration();
+    #else
+    // Copy first declaration from PrevDecl. If PrevDecl is the first
+    // declaration and a common data pointer has not yet been allocated,
+    // a new common data pointer will be allocated.
+    setFirstDecl(PrevDecl->getFirstDecl());
+    // Point to previous. Make sure that this is actually the most recent
+    // redeclaration, or we can build invalid chains. If the most recent
+    // redeclaration is invalid, it won't be PrevDecl, but we want it anyway.
+    auto First = getFirstDecl();
+    assert(First->RedeclLink.isFirst() && "Expected first");
+    decl_type *MostRecent = First->getNextRedeclaration();
+    #endif
     RedeclLink = PreviousDeclLink(cast<decl_type>(MostRecent));
-
     // If the declaration was previously visible, a redeclaration of it remains
     // visible even if it wouldn't be visible by itself.
     static_cast<decl_type*>(this)->IdentifierNamespace |=

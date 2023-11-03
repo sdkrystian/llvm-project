@@ -986,13 +986,13 @@ void ASTDeclReader::VisitFunctionDecl(FunctionDecl *FD) {
       // We avoid getASTContext because a decl in the parent hierarchy may
       // be initializing.
       llvm::FoldingSetNodeID ID;
-      FunctionTemplateSpecializationInfo::Profile(ID, TemplArgs, C);
+      FunctionTemplateSpecializationInfo::Profile(ID, C, TemplArgs);
       void *InsertPos = nullptr;
       FunctionTemplateDecl::Common *CommonPtr = CanonTemplate->getCommonPtr();
       FunctionTemplateSpecializationInfo *ExistingInfo =
-          CommonPtr->Specializations.FindNodeOrInsertPos(ID, InsertPos);
+          CommonPtr->Specializations.findSpecialization(ID, InsertPos);
       if (InsertPos)
-        CommonPtr->Specializations.InsertNode(FTInfo, InsertPos);
+        CommonPtr->Specializations.addSpecialization(FTInfo, InsertPos);
       else {
         assert(Reader.getContext().getLangOpts().Modules &&
                "already deserialized this template specialization");
@@ -2357,7 +2357,7 @@ ASTDeclReader::VisitRedeclarableTemplateDecl(RedeclarableTemplateDecl *D) {
   #if 0
   RedeclarableTemplateDecl *CanonD = D->getCanonicalDecl();
   if (!CanonD->Common) {
-    CanonD->Common = CanonD->newCommon(Reader.getContext());
+    CanonD->Common = CanonD->newCommonPtr(Reader.getContext());
     Reader.PendingDefinitions.insert(CanonD);
   }
   D->Common = CanonD->Common;
@@ -2460,10 +2460,11 @@ ASTDeclReader::VisitClassTemplateSpecializationDeclImpl(
       ClassTemplateSpecializationDecl *CanonSpec;
       if (auto *Partial = dyn_cast<ClassTemplatePartialSpecializationDecl>(D)) {
         CanonSpec = CanonPattern->getCommonPtr()->PartialSpecializations
-            .GetOrInsertNode(Partial);
+            .addSpecialization(Partial, nullptr);
       } else {
         CanonSpec =
-            CanonPattern->getCommonPtr()->Specializations.GetOrInsertNode(D);
+            CanonPattern->getCommonPtr()->Specializations
+                .addSpecialization(D, nullptr);
       }
       // If there was already a canonical specialization, merge into it.
       if (CanonSpec != D) {
@@ -2577,10 +2578,10 @@ ASTDeclReader::VisitVarTemplateSpecializationDeclImpl(
       VarTemplateSpecializationDecl *CanonSpec;
       if (auto *Partial = dyn_cast<VarTemplatePartialSpecializationDecl>(D)) {
         CanonSpec = CanonPattern->getCommonPtr()
-                        ->PartialSpecializations.GetOrInsertNode(Partial);
+                        ->PartialSpecializations.addSpecialization(Partial, nullptr);
       } else {
         CanonSpec =
-            CanonPattern->getCommonPtr()->Specializations.GetOrInsertNode(D);
+            CanonPattern->getCommonPtr()->Specializations.addSpecialization(D, nullptr);
       }
       // If we already have a matching specialization, merge it.
       if (CanonSpec != D)

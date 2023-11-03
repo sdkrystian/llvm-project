@@ -203,7 +203,7 @@ namespace clang {
     decltype(T::PartialSpecializations) &getPartialSpecializations(T *Common) {
       return Common->PartialSpecializations;
     }
-    ArrayRef<Decl> getPartialSpecializations(FunctionTemplateDecl::Common *) {
+    ArrayRef<Decl*> getPartialSpecializations(FunctionTemplateDecl::Common *) {
       return std::nullopt;
     }
 
@@ -231,10 +231,10 @@ namespace clang {
       // AddFirstDeclFromEachModule might trigger deserialization, invalidating
       // *Specializations iterators.
       llvm::SmallVector<const Decl*, 16> Specs;
-      for (auto &Entry : Common->Specializations)
-        Specs.push_back(getSpecializationDecl(Entry));
-      for (auto &Entry : getPartialSpecializations(Common))
-        Specs.push_back(getSpecializationDecl(Entry));
+      for (auto *Entry : Common->Specializations)
+        Specs.push_back(getSpecializationDecl(*Entry));
+      for (auto *Entry : getPartialSpecializations(Common))
+        Specs.push_back(getSpecializationDecl(*Entry));
 
       for (auto *D : Specs) {
         assert(D->isCanonicalDecl() && "non-canonical decl in set");

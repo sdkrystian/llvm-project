@@ -3124,9 +3124,7 @@ class NamespaceAliasDecl : public NamedDecl,
   using redeclarable_base = Redeclarable<NamespaceAliasDecl>;
   friend redeclarable_base;
 
-  CommonBase *newCommon(ASTContext &C) {
-    return new (C) CommonBase;
-  }
+  CommonBase *newCommonPtr(ASTContext &C) const;
 
   NamespaceAliasDecl *getNextRedeclarationImpl() override;
   NamespaceAliasDecl *getPreviousDeclImpl() override;
@@ -3314,9 +3312,7 @@ class UsingShadowDecl : public NamedDecl, public Redeclarable<UsingShadowDecl> {
   using redeclarable_base = Redeclarable<UsingShadowDecl>;
   friend redeclarable_base;
 
-  CommonBase *newCommon(ASTContext &C) {
-    return new (C) CommonBase;
-  }
+  CommonBase *newCommonPtr(ASTContext &C) const;
 
   UsingShadowDecl *getNextRedeclarationImpl() override {
     return getNextRedeclaration();

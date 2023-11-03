@@ -474,11 +474,121 @@ public:
   }
 };
 
+template<typename EntryType>
+class SpecFoldingSet {
+  /// Stores the specializations of the given entry type
+  /// for a given template.
+  llvm::FoldingSet<EntryType> Entries;
+
+  /// Pointer to most recently inserted entry.
+  ///
+  /// The next pointer for the last entry will point to the first entry,
+  /// forming a circular linked list.
+  EntryType *Last = nullptr;
+
+public:
+  class iterator {
+    /// First - The first specialization.
+    EntryType *First = nullptr;
+    /// Current - The current specialization.
+    EntryType *Current = nullptr;
+
+  public:
+    using value_type = EntryType;
+    using reference = value_type *;
+    using pointer = value_type *;
+    using iterator_category = std::forward_iterator_tag;
+    using difference_type = std::ptrdiff_t;
+
+    iterator() = default;
+    explicit iterator(EntryType *C) : Current(C), First(C) {}
+
+    reference operator*() const {
+      return Current;
+    }
+
+    pointer operator->() const {
+      return Current;
+    }
+
+    iterator& operator++() {
+      assert(Current && "Advancing while iterator has reached end");
+      EntryType *Next = static_cast<EntryType *>(
+          Current->getNextSpecialization());
+      Current = (Next != First) ? Next : nullptr;
+      return *this;
+    }
+
+    iterator operator++(int) {
+      iterator tmp(*this);
+      ++(*this);
+      return tmp;
+    }
+
+    friend bool operator==(iterator x, iterator y) {
+      return x.Current == y.Current;
+    }
+    friend bool operator!=(iterator x, iterator y) {
+      return x.Current != y.Current;
+    }
+  };
+
+  iterator begin() const {
+    return Last ? iterator(static_cast<EntryType *>(
+        Last->getNextSpecialization())) : end();
+  }
+
+  iterator end() const {
+    return iterator();
+  }
+
+  size_t size() const {
+    return Entries.size();
+  }
+
+  EntryType *findSpecialization(EntryType *Entry, void *&InsertPos);
+  EntryType *findSpecialization(llvm::FoldingSetNodeID& ID, void *&InsertPos);
+
+  template<typename... ProfileArguments>
+  EntryType * findSpecialization(void *&InsertPos,
+                                 const ASTContext& Context,
+                                 ProfileArguments&&... ProfileArgs);
+
+
+  /// Insert the specified specialization knowing that it is not already
+  /// in. InsertPos must be obtained from findSpecialization.
+  EntryType *addSpecialization(EntryType *Entry, void *InsertPos);
+
+
+};
+
+
+template<typename EntryType>
+class SpecFoldingSetNode : public llvm::FoldingSetNode {
+  template<typename>
+  friend class SpecFoldingSet;
+
+  /// Stores a pointer to the next specialization, or the
+  /// first specialization if this is the last specialization.
+  EntryType *Next;
+
+protected:
+  SpecFoldingSetNode(EntryType *Entry) : Next(Entry) {}
+
+  EntryType *getNextSpecialization() const {
+    return Next;
+  }
+
+  void setNextSpecialization(EntryType *Spec) {
+    Next = Spec;
+  }
+};
+
 /// Provides information about a function template specialization,
 /// which is a FunctionDecl that has been explicitly specialization or
 /// instantiated from a function template.
 class FunctionTemplateSpecializationInfo final
-    : public llvm::FoldingSetNode,
+    : public SpecFoldingSetNode<FunctionTemplateSpecializationInfo>,
       private llvm::TrailingObjects<FunctionTemplateSpecializationInfo,
                                     MemberSpecializationInfo *> {
   /// The function template specialization that this structure describes and a
@@ -510,7 +620,9 @@ private:
       TemplateSpecializationKind TSK, const TemplateArgumentList *TemplateArgs,
       const ASTTemplateArgumentListInfo *TemplateArgsAsWritten,
       SourceLocation POI, MemberSpecializationInfo *MSInfo)
-      : Function(FD, MSInfo ? true : false), Template(Template, TSK - 1),
+      : SpecFoldingSetNode(this),
+        Function(FD, MSInfo ? true : false),
+        Template(Template, TSK - 1),
         TemplateArguments(TemplateArgs),
         TemplateArgumentsAsWritten(TemplateArgsAsWritten),
         PointOfInstantiation(POI) {
@@ -614,12 +726,12 @@ public:
   }
 
   void Profile(llvm::FoldingSetNodeID &ID) {
-    Profile(ID, TemplateArguments->asArray(), getFunction()->getASTContext());
+    Profile(ID, getFunction()->getASTContext(), TemplateArguments->asArray());
   }
 
   static void
-  Profile(llvm::FoldingSetNodeID &ID, ArrayRef<TemplateArgument> TemplateArgs,
-          const ASTContext &Context) {
+  Profile(llvm::FoldingSetNodeID &ID, const ASTContext &Context,
+          ArrayRef<TemplateArgument> TemplateArgs) {
     ID.AddInteger(TemplateArgs.size());
     for (const TemplateArgument &TemplateArg : TemplateArgs)
       TemplateArg.Profile(ID, Context);
@@ -761,21 +873,20 @@ protected:
   };
 
   template <typename EntryType, typename SETraits = SpecEntryTraits<EntryType>,
-            typename DeclType = typename SETraits::DeclType>
+            typename DeclType = typename SETraits::DeclType,
+            typename Wrapped = typename SpecFoldingSet<EntryType>::iterator>
   struct SpecIterator
+
       : llvm::iterator_adaptor_base<
-            SpecIterator<EntryType, SETraits, DeclType>,
-            typename llvm::FoldingSetVector<EntryType>::iterator,
-            typename std::iterator_traits<typename llvm::FoldingSetVector<
-                EntryType>::iterator>::iterator_category,
-            DeclType *, ptrdiff_t, DeclType *, DeclType *> {
+      SpecIterator<EntryType, SETraits, DeclType, Wrapped>, Wrapped,
+                                    typename Wrapped::iterator_category,
+                                    DeclType> {
     SpecIterator() = default;
-    explicit SpecIterator(
-        typename llvm::FoldingSetVector<EntryType>::iterator SetIter)
+    explicit SpecIterator(Wrapped SetIter)
         : SpecIterator::iterator_adaptor_base(std::move(SetIter)) {}
 
     DeclType *operator*() const {
-      return SETraits::getDecl(&*this->I)->getMostRecentDecl();
+      return SETraits::getDecl(*(this->I))->getMostRecentDecl();
     }
 
     DeclType *operator->() const { return **this; }
@@ -783,7 +894,7 @@ protected:
 
   template <typename EntryType>
   static SpecIterator<EntryType>
-  makeSpecIterator(llvm::FoldingSetVector<EntryType> &Specs, bool isEnd) {
+  makeSpecIterator(SpecFoldingSet<EntryType> &Specs, bool isEnd) {
     return SpecIterator<EntryType>(isEnd ? Specs.end() : Specs.begin());
   }
 
@@ -791,15 +902,15 @@ protected:
 
   template <class EntryType, typename ...ProfileArguments>
   typename SpecEntryTraits<EntryType>::DeclType*
-  findSpecializationImpl(llvm::FoldingSetVector<EntryType> &Specs,
+  findSpecializationImpl(SpecFoldingSet<EntryType> &Specs,
                          void *&InsertPos, ProfileArguments &&...ProfileArgs);
 
   template <class Derived, class EntryType>
-  void addSpecializationImpl(llvm::FoldingSetVector<EntryType> &Specs,
+  void addSpecializationImpl(SpecFoldingSet<EntryType> &Specs,
                              EntryType *Entry, void *InsertPos);
 
-  struct TemplateCommon : redeclarable_base::CommonBase {
-    TemplateCommon() : InstantiatedFromMember(nullptr, false) {}
+  struct CommonBase : redeclarable_base::CommonBase {
+    CommonBase() : InstantiatedFromMember(nullptr, false) {}
 
     /// The template from which this was most
     /// directly instantiated (or null).
@@ -833,12 +944,11 @@ protected:
   /// Retrieves the "common" pointer shared by all (re-)declarations of
   /// the same template. Calling this routine may implicitly allocate memory
   /// for the common pointer.
-  TemplateCommon *getCommonPtr() const {
-    return static_cast<TemplateCommon *>(
-        redeclarable_base::getCommonPtr());
+  CommonBase *getCommonPtr() const {
+    return static_cast<CommonBase *>(redeclarable_base::getCommonPtr());
   }
 
-  virtual CommonBase *newCommon(ASTContext &C) const = 0;
+  virtual CommonBase *newCommonPtr(ASTContext &C) const = 0;
 
   // Construct a template decl with name, parameters, and templated element.
   RedeclarableTemplateDecl(Kind DK, ASTContext &C, DeclContext *DC,
@@ -879,12 +989,12 @@ public:
   /// struct X<int>::Inner { /* ... */ };
   /// \endcode
   bool isMemberSpecialization() const {
-    return getCommonPtr()->InstantiatedFromMember.getInt();
+    return hasCommonPtr() && getCommonPtr()->InstantiatedFromMember.getInt();
   }
 
   /// Note that this member template is a specialization.
   void setMemberSpecialization() {
-    assert(getCommonPtr()->InstantiatedFromMember.getPointer() &&
+    assert(getInstantiatedFromMemberTemplate() &&
            "Only member templates can be member template specializations");
     getCommonPtr()->InstantiatedFromMember.setInt(true);
   }
@@ -926,11 +1036,13 @@ public:
   /// void X<T>::f(T, U);
   /// \endcode
   RedeclarableTemplateDecl *getInstantiatedFromMemberTemplate() const {
+    if(!hasCommonPtr())
+      return nullptr;
     return getCommonPtr()->InstantiatedFromMember.getPointer();
   }
 
   void setInstantiatedFromMemberTemplate(RedeclarableTemplateDecl *TD) {
-    assert(!getCommonPtr()->InstantiatedFromMember.getPointer());
+    assert(!getInstantiatedFromMemberTemplate());
     getCommonPtr()->InstantiatedFromMember.setPointer(TD);
   }
 
@@ -981,10 +1093,10 @@ protected:
 
   /// Data that is common to all of the declarations of a given
   /// function template.
-  struct Common : TemplateCommon {
+  struct Common : RedeclarableTemplateDecl::CommonBase {
     /// The function template specializations for this function
     /// template, including explicit specializations and instantiations.
-    llvm::FoldingSetVector<FunctionTemplateSpecializationInfo> Specializations;
+    SpecFoldingSet<FunctionTemplateSpecializationInfo> Specializations;
 
     Common() = default;
   };
@@ -995,7 +1107,7 @@ protected:
       : RedeclarableTemplateDecl(FunctionTemplate, C, DC, L, Name, Params,
                                  Decl) {}
 
-  CommonBase *newCommon(ASTContext &C) const override;
+  CommonBase *newCommonPtr(ASTContext &C) const override;
 
   Common *getCommonPtr() const {
     return static_cast<Common *>(RedeclarableTemplateDecl::getCommonPtr());
@@ -1003,7 +1115,7 @@ protected:
 
   /// Retrieve the set of function template specializations of this
   /// function template.
-  llvm::FoldingSetVector<FunctionTemplateSpecializationInfo> &
+  SpecFoldingSet<FunctionTemplateSpecializationInfo> &
   getSpecializations() const;
 
   /// Add a specialization of this function template.
@@ -1071,6 +1183,7 @@ public:
   }
 
   using spec_iterator = SpecIterator<FunctionTemplateSpecializationInfo>;
+      //SpecFoldingSet<FunctionTemplateSpecializationInfo>::iterator;
   using spec_range = llvm::iterator_range<spec_iterator>;
 
   spec_range specializations() const {
@@ -1794,7 +1907,8 @@ public:
 /// class array<bool> { }; // class template specialization array<bool>
 /// \endcode
 class ClassTemplateSpecializationDecl
-  : public CXXRecordDecl, public llvm::FoldingSetNode {
+  : public CXXRecordDecl,
+    public SpecFoldingSetNode<ClassTemplateSpecializationDecl> {
   /// Structure that stores information about a class template
   /// specialization that was instantiated from a class template partial
   /// specialization.
@@ -2046,12 +2160,12 @@ public:
   SourceRange getSourceRange() const override LLVM_READONLY;
 
   void Profile(llvm::FoldingSetNodeID &ID) const {
-    Profile(ID, TemplateArgs->asArray(), getASTContext());
+    Profile(ID, getASTContext(), TemplateArgs->asArray());
   }
 
   static void
-  Profile(llvm::FoldingSetNodeID &ID, ArrayRef<TemplateArgument> TemplateArgs,
-          const ASTContext &Context) {
+  Profile(llvm::FoldingSetNodeID &ID, const ASTContext &Context,
+          ArrayRef<TemplateArgument> TemplateArgs) {
     ID.AddInteger(TemplateArgs.size());
     for (const TemplateArgument &TemplateArg : TemplateArgs)
       TemplateArg.Profile(ID, Context);
@@ -2221,13 +2335,13 @@ public:
   }
 
   void Profile(llvm::FoldingSetNodeID &ID) const {
-    Profile(ID, getTemplateArgs().asArray(), getTemplateParameters(),
-            getASTContext());
+    Profile(ID, getASTContext(), getTemplateArgs().asArray(),
+            getTemplateParameters());
   }
 
   static void
-  Profile(llvm::FoldingSetNodeID &ID, ArrayRef<TemplateArgument> TemplateArgs,
-          TemplateParameterList *TPL, const ASTContext &Context);
+  Profile(llvm::FoldingSetNodeID &ID, const ASTContext &Context,
+          ArrayRef<TemplateArgument> TemplateArgs, TemplateParameterList *TPL);
 
   static bool classof(const Decl *D) { return classofKind(D->getKind()); }
 
@@ -2241,14 +2355,14 @@ class ClassTemplateDecl : public RedeclarableTemplateDecl {
 protected:
   /// Data that is common to all of the declarations of a given
   /// class template.
-  struct Common : TemplateCommon {
+  struct Common : RedeclarableTemplateDecl::CommonBase {
     /// The class template specializations for this class
     /// template, including explicit specializations and instantiations.
-    llvm::FoldingSetVector<ClassTemplateSpecializationDecl> Specializations;
+    SpecFoldingSet<ClassTemplateSpecializationDecl> Specializations;
 
     /// The class template partial specializations for this class
     /// template.
-    llvm::FoldingSetVector<ClassTemplatePartialSpecializationDecl>
+    SpecFoldingSet<ClassTemplatePartialSpecializationDecl>
       PartialSpecializations;
 
     /// The injected-class-name type for this class template.
@@ -2258,12 +2372,12 @@ protected:
   };
 
   /// Retrieve the set of specializations of this class template.
-  llvm::FoldingSetVector<ClassTemplateSpecializationDecl> &
+  SpecFoldingSet<ClassTemplateSpecializationDecl> &
   getSpecializations() const;
 
   /// Retrieve the set of partial specializations of this class
   /// template.
-  llvm::FoldingSetVector<ClassTemplatePartialSpecializationDecl> &
+  SpecFoldingSet<ClassTemplatePartialSpecializationDecl> &
   getPartialSpecializations() const;
 
   ClassTemplateDecl(ASTContext &C, DeclContext *DC, SourceLocation L,
@@ -2271,7 +2385,7 @@ protected:
                     NamedDecl *Decl)
       : RedeclarableTemplateDecl(ClassTemplate, C, DC, L, Name, Params, Decl) {}
 
-  CommonBase *newCommon(ASTContext &C) const override;
+  CommonBase *newCommonPtr(ASTContext &C) const override;
 
   Common *getCommonPtr() const {
     return static_cast<Common *>(RedeclarableTemplateDecl::getCommonPtr());
@@ -2515,7 +2629,7 @@ public:
 /// \endcode
 class TypeAliasTemplateDecl : public RedeclarableTemplateDecl {
 protected:
-  using Common = TemplateCommon;
+  using Common = RedeclarableTemplateDecl::CommonBase;
 
   TypeAliasTemplateDecl(ASTContext &C, DeclContext *DC, SourceLocation L,
                         DeclarationName Name, TemplateParameterList *Params,
@@ -2523,7 +2637,7 @@ protected:
       : RedeclarableTemplateDecl(TypeAliasTemplate, C, DC, L, Name, Params,
                                  Decl) {}
 
-  CommonBase *newCommon(ASTContext &C) const override;
+  CommonBase *newCommonPtr(ASTContext &C) const override;
 
   Common *getCommonPtr() {
     return static_cast<Common *>(RedeclarableTemplateDecl::getCommonPtr());
@@ -2594,8 +2708,9 @@ public:
 /// template<>
 /// constexpr float pi<float>; // variable template specialization pi<float>
 /// \endcode
-class VarTemplateSpecializationDecl : public VarDecl,
-                                      public llvm::FoldingSetNode {
+class VarTemplateSpecializationDecl
+    : public VarDecl,
+      public SpecFoldingSetNode<VarTemplateSpecializationDecl> {
 
   /// Structure that stores information about a variable template
   /// specialization that was instantiated from a variable template partial
@@ -2839,12 +2954,12 @@ public:
   SourceRange getSourceRange() const override LLVM_READONLY;
 
   void Profile(llvm::FoldingSetNodeID &ID) const {
-    Profile(ID, TemplateArgs->asArray(), getASTContext());
+    Profile(ID, getASTContext(), TemplateArgs->asArray());
   }
 
   static void Profile(llvm::FoldingSetNodeID &ID,
-                      ArrayRef<TemplateArgument> TemplateArgs,
-                      const ASTContext &Context) {
+                      const ASTContext &Context,
+                      ArrayRef<TemplateArgument> TemplateArgs) {
     ID.AddInteger(TemplateArgs.size());
     for (const TemplateArgument &TemplateArg : TemplateArgs)
       TemplateArg.Profile(ID, Context);
@@ -2998,13 +3113,13 @@ public:
   SourceRange getSourceRange() const override LLVM_READONLY;
 
   void Profile(llvm::FoldingSetNodeID &ID) const {
-    Profile(ID, getTemplateArgs().asArray(), getTemplateParameters(),
-            getASTContext());
+    Profile(ID, getASTContext(), getTemplateArgs().asArray(),
+            getTemplateParameters());
   }
 
   static void
-  Profile(llvm::FoldingSetNodeID &ID, ArrayRef<TemplateArgument> TemplateArgs,
-          TemplateParameterList *TPL, const ASTContext &Context);
+  Profile(llvm::FoldingSetNodeID &ID, const ASTContext &Context,
+          ArrayRef<TemplateArgument> TemplateArgs, TemplateParameterList *TPL);
 
   static bool classof(const Decl *D) { return classofKind(D->getKind()); }
 
@@ -3018,26 +3133,26 @@ class VarTemplateDecl : public RedeclarableTemplateDecl {
 protected:
   /// Data that is common to all of the declarations of a given
   /// variable template.
-  struct Common : TemplateCommon {
+  struct Common : RedeclarableTemplateDecl::CommonBase {
     /// The variable template specializations for this variable
     /// template, including explicit specializations and instantiations.
-    llvm::FoldingSetVector<VarTemplateSpecializationDecl> Specializations;
+    SpecFoldingSet<VarTemplateSpecializationDecl> Specializations;
 
     /// The variable template partial specializations for this variable
     /// template.
-    llvm::FoldingSetVector<VarTemplatePartialSpecializationDecl>
+    SpecFoldingSet<VarTemplatePartialSpecializationDecl>
     PartialSpecializations;
 
     Common() = default;
   };
 
   /// Retrieve the set of specializations of this variable template.
-  llvm::FoldingSetVector<VarTemplateSpecializationDecl> &
+  SpecFoldingSet<VarTemplateSpecializationDecl> &
   getSpecializations() const;
 
   /// Retrieve the set of partial specializations of this class
   /// template.
-  llvm::FoldingSetVector<VarTemplatePartialSpecializationDecl> &
+  SpecFoldingSet<VarTemplatePartialSpecializationDecl> &
   getPartialSpecializations() const;
 
   VarTemplateDecl(ASTContext &C, DeclContext *DC, SourceLocation L,
@@ -3045,7 +3160,7 @@ protected:
                   NamedDecl *Decl)
       : RedeclarableTemplateDecl(VarTemplate, C, DC, L, Name, Params, Decl) {}
 
-  CommonBase *newCommon(ASTContext &C) const override;
+  CommonBase *newCommonPtr(ASTContext &C) const override;
 
   Common *getCommonPtr() const {
     return static_cast<Common *>(RedeclarableTemplateDecl::getCommonPtr());

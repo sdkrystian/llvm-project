@@ -294,6 +294,117 @@ bool TemplateDecl::isTypeAlias() const {
 }
 
 //===----------------------------------------------------------------------===//
+// SpecFoldingSet Implementation
+//===----------------------------------------------------------------------===//
+
+#if 0
+template<typename EntryType>
+EntryType *SpecFoldingSet<EntryType>::findSpecialization(
+    llvm::FoldingSetNodeID& ID, void *&InsertPos) {
+  #if 0
+  if(EntryType *Entry = Specializations.FindNodeOrInsertPos(ID, InsertPos))
+    return EntryTraits::getDecl(Entry)->getMostRecentDecl();
+  return nullptr;
+  #else
+  return Specializations.FindNodeOrInsertPos(ID, InsertPos);
+  #endif
+}
+
+template<typename EntryType>
+template<typename... ProfileArguments>
+EntryType *SpecFoldingSet<EntryType>::findSpecialization(
+    void *&InsertPos, const ASTContext& Context,
+    ProfileArguments&&... ProfileArgs) {
+  llvm::FoldingSetNodeID ID;
+  EntryType::Profile(ID, Context,
+                     std::forward<ProfileArguments>(ProfileArgs)...);
+  return findSpecialization(ID, InsertPos);
+}
+
+template<typename EntryType>
+void SpecFoldingSet<EntryType>::addSpecialization(
+    EntryType *Entry, void *InsertPos) {
+#if 1
+  assert(InsertPos && "addSpecialization requires non-null InsertPos");
+  // Set the new last pointer, and if this was not the first
+  // specialization, swap the next pointers.
+  if (EntryType *Previous = std::exchange(Last, Entry)) {
+    Entry->setNextSpecialization(Previous->getNextSpecialization());
+    Previous->setNextSpecialization(Entry);
+  }
+  Specializations.InsertNode(Entry, InsertPos);
+
+#ifndef NDEBUG
+  llvm::FoldingSetNodeID ID;
+  Entry->Profile(ID);
+  assert((findSpecialization(ID, InsertPos) == Entry && ! InsertPos) &&
+         "findSpecialization returning wrong node after addSpecialization?");
+#endif
+#else
+  // Set the new last pointer, and if this was not the first
+  // specialization, swap the next pointers.
+  if (EntryType *Previous = std::exchange(Last, Entry)) {
+    Entry->setNextSpecialization(Previous->getNextSpecialization());
+    Previous->setNextSpecialization(Entry);
+  }
+
+#endif
+
+  // if (ASTMutationListener *L = getASTMutationListener())
+  //   L->AddedCXXTemplateSpecialization(cast<Derived>(this),
+  //                                     EntryTraits::getDecl(Entry));
+}
+#endif
+
+template<typename EntryType>
+EntryType *
+SpecFoldingSet<EntryType>::findSpecialization(
+    llvm::FoldingSetNodeID& ID, void *&InsertPos) {
+  return Entries.FindNodeOrInsertPos(ID, InsertPos);
+}
+
+template<typename EntryType>
+EntryType *
+SpecFoldingSet<EntryType>::findSpecialization(
+    EntryType *Entry, void *&InsertPos) {
+  llvm::FoldingSetNodeID ID;
+  Entry->Profile(ID);
+  return Entries.FindNodeOrInsertPos(ID, InsertPos);
+}
+
+template<typename EntryType>
+template<typename... ProfileArguments>
+EntryType *
+SpecFoldingSet<EntryType>::findSpecialization(
+    void *&InsertPos, const ASTContext& Context,
+    ProfileArguments&&... ProfileArgs) {
+  llvm::FoldingSetNodeID ID;
+  EntryType::Profile(ID, Context,
+                     std::forward<ProfileArguments>(ProfileArgs)...);
+  return findSpecialization(ID, InsertPos);
+}
+
+
+template<typename EntryType>
+EntryType *
+SpecFoldingSet<EntryType>::addSpecialization(EntryType *Entry,
+                                             void *InsertPos) {
+  EntryType *Existing = nullptr;
+  if (! InsertPos)
+    Existing = findSpecialization(Entry, InsertPos);
+  if (! Existing) {
+    if (EntryType *Previous = std::exchange(Last, Entry)) {
+      Entry->setNextSpecialization(Previous->getNextSpecialization());
+      Previous->setNextSpecialization(Entry);
+    }
+    Entries.InsertNode(Entry, InsertPos);
+    Existing = Entry;
+  }
+  return Existing;
+}
+
+
+//===----------------------------------------------------------------------===//
 // RedeclarableTemplateDecl Implementation
 //===----------------------------------------------------------------------===//
 
@@ -322,7 +433,7 @@ RedeclarableTemplateDecl::CommonBase *RedeclarableTemplateDecl::getCommonPtr() c
     // FIXME: If any of the declarations is from an AST file, we probably
     // need an update record to add the common data.
 
-    Common = newCommon(getASTContext());
+    Common = newCommonPtr(getASTContext());
   }
 
   // Update any previous declarations we saw with the common pointer.
@@ -334,9 +445,11 @@ RedeclarableTemplateDecl::CommonBase *RedeclarableTemplateDecl::getCommonPtr() c
 #endif
 
 void RedeclarableTemplateDecl::loadLazySpecializationsImpl() const {
+  if (!hasCommonPtr())
+    return;
   // Grab the most recent declaration to ensure we've loaded any lazy
   // redeclarations of this template.
-  TemplateCommon *CommonBasePtr = getCommonPtr();
+  CommonBase *CommonBasePtr = getCommonPtr();
   if (CommonBasePtr->LazySpecializations) {
     ASTContext &Context = getASTContext();
     uint32_t *Specs = CommonBasePtr->LazySpecializations;
@@ -349,23 +462,23 @@ void RedeclarableTemplateDecl::loadLazySpecializationsImpl() const {
 template<class EntryType, typename... ProfileArguments>
 typename RedeclarableTemplateDecl::SpecEntryTraits<EntryType>::DeclType *
 RedeclarableTemplateDecl::findSpecializationImpl(
-    llvm::FoldingSetVector<EntryType> &Specs, void *&InsertPos,
+    SpecFoldingSet<EntryType> &Specs, void *&InsertPos,
     ProfileArguments&&... ProfileArgs) {
   using SETraits = SpecEntryTraits<EntryType>;
 
   llvm::FoldingSetNodeID ID;
-  EntryType::Profile(ID, std::forward<ProfileArguments>(ProfileArgs)...,
-                     getASTContext());
-  EntryType *Entry = Specs.FindNodeOrInsertPos(ID, InsertPos);
+  EntryType::Profile(ID, getASTContext(),
+                     std::forward<ProfileArguments>(ProfileArgs)...);
+  EntryType *Entry = Specs.findSpecialization(ID, InsertPos);
   return Entry ? SETraits::getDecl(Entry)->getMostRecentDecl() : nullptr;
 }
 
 template<class Derived, class EntryType>
 void RedeclarableTemplateDecl::addSpecializationImpl(
-    llvm::FoldingSetVector<EntryType> &Specializations, EntryType *Entry,
+    SpecFoldingSet<EntryType> &Specializations, EntryType *Entry,
     void *InsertPos) {
   using SETraits = SpecEntryTraits<EntryType>;
-
+  #if 0
   if (InsertPos) {
 #ifndef NDEBUG
     void *CorrectInsertPos;
@@ -375,13 +488,18 @@ void RedeclarableTemplateDecl::addSpecializationImpl(
            InsertPos == CorrectInsertPos &&
            "given incorrect InsertPos for specialization");
 #endif
-    Specializations.InsertNode(Entry, InsertPos);
   } else {
-    EntryType *Existing = Specializations.GetOrInsertNode(Entry);
+
+    llvm::FoldingSetNodeID ID;
+    Entry->Profile(ID);
+    EntryType *Existing =
+        Specializations.findSpecialization(ID, InsertPos);
     (void)Existing;
-    assert(SETraits::getDecl(Existing)->isCanonicalDecl() &&
-           "non-canonical specialization?");
+    //assert(SETraits::getDecl(Existing)->isCanonicalDecl() &&
+    //       "non-canonical specialization?");
   }
+  #endif
+  Specializations.addSpecialization(Entry, InsertPos);
 
   if (ASTMutationListener *L = getASTMutationListener())
     L->AddedCXXTemplateSpecialization(cast<Derived>(this),
@@ -426,7 +544,7 @@ FunctionTemplateDecl *FunctionTemplateDecl::CreateDeserialized(ASTContext &C,
 }
 
 RedeclarableTemplateDecl::CommonBase *
-FunctionTemplateDecl::newCommon(ASTContext &C) const {
+FunctionTemplateDecl::newCommonPtr(ASTContext &C) const {
   auto *CommonPtr = new (C) Common;
   C.addDestruction(CommonPtr);
   return CommonPtr;
@@ -436,7 +554,7 @@ void FunctionTemplateDecl::LoadLazySpecializations() const {
   loadLazySpecializationsImpl();
 }
 
-llvm::FoldingSetVector<FunctionTemplateSpecializationInfo> &
+SpecFoldingSet<FunctionTemplateSpecializationInfo> &
 FunctionTemplateDecl::getSpecializations() const {
   LoadLazySpecializations();
   return getCommonPtr()->Specializations;
@@ -518,20 +636,20 @@ void ClassTemplateDecl::LoadLazySpecializations() const {
   loadLazySpecializationsImpl();
 }
 
-llvm::FoldingSetVector<ClassTemplateSpecializationDecl> &
+SpecFoldingSet<ClassTemplateSpecializationDecl> &
 ClassTemplateDecl::getSpecializations() const {
   LoadLazySpecializations();
   return getCommonPtr()->Specializations;
 }
 
-llvm::FoldingSetVector<ClassTemplatePartialSpecializationDecl> &
+SpecFoldingSet<ClassTemplatePartialSpecializationDecl> &
 ClassTemplateDecl::getPartialSpecializations() const {
   LoadLazySpecializations();
   return getCommonPtr()->PartialSpecializations;
 }
 
 RedeclarableTemplateDecl::CommonBase *
-ClassTemplateDecl::newCommon(ASTContext &C) const {
+ClassTemplateDecl::newCommonPtr(ASTContext &C) const {
   auto *CommonPtr = new (C) Common;
   C.addDestruction(CommonPtr);
   return CommonPtr;
@@ -557,8 +675,8 @@ ClassTemplateDecl::findPartialSpecialization(
 }
 
 void ClassTemplatePartialSpecializationDecl::Profile(
-    llvm::FoldingSetNodeID &ID, ArrayRef<TemplateArgument> TemplateArgs,
-    TemplateParameterList *TPL, const ASTContext &Context) {
+    llvm::FoldingSetNodeID &ID, const ASTContext &Context,
+    ArrayRef<TemplateArgument> TemplateArgs, TemplateParameterList *TPL) {
   ID.AddInteger(TemplateArgs.size());
   for (const TemplateArgument &TemplateArg : TemplateArgs)
     TemplateArg.Profile(ID, Context);
@@ -568,6 +686,7 @@ void ClassTemplatePartialSpecializationDecl::Profile(
 void ClassTemplateDecl::AddPartialSpecialization(
                                       ClassTemplatePartialSpecializationDecl *D,
                                       void *InsertPos) {
+  #if 0
   if (InsertPos)
     getPartialSpecializations().InsertNode(D, InsertPos);
   else {
@@ -576,6 +695,20 @@ void ClassTemplateDecl::AddPartialSpecialization(
     (void)Existing;
     assert(Existing->isCanonicalDecl() && "Non-canonical specialization?");
   }
+  #endif
+
+  #if 0
+  auto& Specs = getPartialSpecializations();
+  if (! InsertPos) {
+    llvm::FoldingSetNodeID ID;
+    D->Profile(ID);
+    Specs.findSpecialization(ID, InsertPos);
+  }
+  if (InsertPos)
+    Specs.addSpecialization(D, InsertPos);
+  #endif
+
+  getPartialSpecializations().addSpecialization(D, InsertPos);
 
   if (ASTMutationListener *L = getASTMutationListener())
     L->AddedCXXTemplateSpecialization(this, D);
@@ -583,21 +716,21 @@ void ClassTemplateDecl::AddPartialSpecialization(
 
 void ClassTemplateDecl::getPartialSpecializations(
     SmallVectorImpl<ClassTemplatePartialSpecializationDecl *> &PS) const {
-  llvm::FoldingSetVector<ClassTemplatePartialSpecializationDecl> &PartialSpecs
+  SpecFoldingSet<ClassTemplatePartialSpecializationDecl> &PartialSpecs
     = getPartialSpecializations();
   PS.clear();
   PS.reserve(PartialSpecs.size());
-  for (ClassTemplatePartialSpecializationDecl &P : PartialSpecs)
-    PS.push_back(P.getMostRecentDecl());
+  for (ClassTemplatePartialSpecializationDecl *P : PartialSpecs)
+    PS.push_back(P->getMostRecentDecl());
 }
 
 ClassTemplatePartialSpecializationDecl *
 ClassTemplateDecl::findPartialSpecialization(QualType T) {
   ASTContext &Context = getASTContext();
-  for (ClassTemplatePartialSpecializationDecl &P :
+  for (ClassTemplatePartialSpecializationDecl *P :
        getPartialSpecializations()) {
-    if (Context.hasSameType(P.getInjectedSpecializationType(), T))
-      return P.getMostRecentDecl();
+    if (Context.hasSameType(P->getInjectedSpecializationType(), T))
+      return P->getMostRecentDecl();
   }
 
   return nullptr;
@@ -607,9 +740,9 @@ ClassTemplatePartialSpecializationDecl *
 ClassTemplateDecl::findPartialSpecInstantiatedFromMember(
                                     ClassTemplatePartialSpecializationDecl *D) {
   Decl *DCanon = D->getCanonicalDecl();
-  for (ClassTemplatePartialSpecializationDecl &P : getPartialSpecializations()) {
-    if (P.getInstantiatedFromMember()->getCanonicalDecl() == DCanon)
-      return P.getMostRecentDecl();
+  for (ClassTemplatePartialSpecializationDecl *P : getPartialSpecializations()) {
+    if (P->getInstantiatedFromMember()->getCanonicalDecl() == DCanon)
+      return P->getMostRecentDecl();
   }
 
   return nullptr;
@@ -919,6 +1052,7 @@ ClassTemplateSpecializationDecl(ASTContext &Context, Kind DK, TagKind TK,
                                 ClassTemplateSpecializationDecl *PrevDecl)
     : CXXRecordDecl(DK, TK, Context, DC, StartLoc, IdLoc,
                     SpecializedTemplate->getIdentifier(), PrevDecl),
+    SpecFoldingSetNode(this),
     SpecializedTemplate(SpecializedTemplate),
     TemplateArgs(TemplateArgumentList::CreateCopy(Context, Args)),
     SpecializationKind(TSK_Undeclared) {
@@ -928,6 +1062,7 @@ ClassTemplateSpecializationDecl::ClassTemplateSpecializationDecl(ASTContext &C,
                                                                  Kind DK)
     : CXXRecordDecl(DK, TTK_Struct, C, nullptr, SourceLocation(),
                     SourceLocation(), nullptr, nullptr),
+      SpecFoldingSetNode(this),
       SpecializationKind(TSK_Undeclared) {}
 
 ClassTemplateSpecializationDecl *
@@ -1199,7 +1334,7 @@ TypeAliasTemplateDecl *TypeAliasTemplateDecl::CreateDeserialized(ASTContext &C,
 }
 
 RedeclarableTemplateDecl::CommonBase *
-TypeAliasTemplateDecl::newCommon(ASTContext &C) const {
+TypeAliasTemplateDecl::newCommonPtr(ASTContext &C) const {
   auto *CommonPtr = new (C) Common;
   C.addDestruction(CommonPtr);
   return CommonPtr;
@@ -1240,20 +1375,20 @@ void VarTemplateDecl::LoadLazySpecializations() const {
   loadLazySpecializationsImpl();
 }
 
-llvm::FoldingSetVector<VarTemplateSpecializationDecl> &
+SpecFoldingSet<VarTemplateSpecializationDecl> &
 VarTemplateDecl::getSpecializations() const {
   LoadLazySpecializations();
   return getCommonPtr()->Specializations;
 }
 
-llvm::FoldingSetVector<VarTemplatePartialSpecializationDecl> &
+SpecFoldingSet<VarTemplatePartialSpecializationDecl> &
 VarTemplateDecl::getPartialSpecializations() const {
   LoadLazySpecializations();
   return getCommonPtr()->PartialSpecializations;
 }
 
 RedeclarableTemplateDecl::CommonBase *
-VarTemplateDecl::newCommon(ASTContext &C) const {
+VarTemplateDecl::newCommonPtr(ASTContext &C) const {
   auto *CommonPtr = new (C) Common;
   C.addDestruction(CommonPtr);
   return CommonPtr;
@@ -1278,8 +1413,8 @@ VarTemplateDecl::findPartialSpecialization(ArrayRef<TemplateArgument> Args,
 }
 
 void VarTemplatePartialSpecializationDecl::Profile(
-    llvm::FoldingSetNodeID &ID, ArrayRef<TemplateArgument> TemplateArgs,
-    TemplateParameterList *TPL, const ASTContext &Context) {
+    llvm::FoldingSetNodeID &ID, const ASTContext &Context,
+    ArrayRef<TemplateArgument> TemplateArgs, TemplateParameterList *TPL) {
   ID.AddInteger(TemplateArgs.size());
   for (const TemplateArgument &TemplateArg : TemplateArgs)
     TemplateArg.Profile(ID, Context);
@@ -1288,6 +1423,7 @@ void VarTemplatePartialSpecializationDecl::Profile(
 
 void VarTemplateDecl::AddPartialSpecialization(
     VarTemplatePartialSpecializationDecl *D, void *InsertPos) {
+  #if 0
   if (InsertPos)
     getPartialSpecializations().InsertNode(D, InsertPos);
   else {
@@ -1296,6 +1432,19 @@ void VarTemplateDecl::AddPartialSpecialization(
     (void)Existing;
     assert(Existing->isCanonicalDecl() && "Non-canonical specialization?");
   }
+  #endif
+  #if 0
+  auto& Specs = getPartialSpecializations();
+  if (! InsertPos) {
+    llvm::FoldingSetNodeID ID;
+    D->Profile(ID);
+    Specs.findSpecialization(ID, InsertPos);
+  }
+  if (InsertPos)
+    Specs.addSpecialization(D, InsertPos);
+  #endif
+
+  getPartialSpecializations().addSpecialization(D, InsertPos);
 
   if (ASTMutationListener *L = getASTMutationListener())
     L->AddedCXXTemplateSpecialization(this, D);
@@ -1303,21 +1452,21 @@ void VarTemplateDecl::AddPartialSpecialization(
 
 void VarTemplateDecl::getPartialSpecializations(
     SmallVectorImpl<VarTemplatePartialSpecializationDecl *> &PS) const {
-  llvm::FoldingSetVector<VarTemplatePartialSpecializationDecl> &PartialSpecs =
+  SpecFoldingSet<VarTemplatePartialSpecializationDecl> &PartialSpecs =
       getPartialSpecializations();
   PS.clear();
   PS.reserve(PartialSpecs.size());
-  for (VarTemplatePartialSpecializationDecl &P : PartialSpecs)
-    PS.push_back(P.getMostRecentDecl());
+  for (VarTemplatePartialSpecializationDecl *P : PartialSpecs)
+    PS.push_back(P->getMostRecentDecl());
 }
 
 VarTemplatePartialSpecializationDecl *
 VarTemplateDecl::findPartialSpecInstantiatedFromMember(
     VarTemplatePartialSpecializationDecl *D) {
   Decl *DCanon = D->getCanonicalDecl();
-  for (VarTemplatePartialSpecializationDecl &P : getPartialSpecializations()) {
-    if (P.getInstantiatedFromMember()->getCanonicalDecl() == DCanon)
-      return P.getMostRecentDecl();
+  for (VarTemplatePartialSpecializationDecl *P : getPartialSpecializations()) {
+    if (P->getInstantiatedFromMember()->getCanonicalDecl() == DCanon)
+      return P->getMostRecentDecl();
   }
 
   return nullptr;
@@ -1333,6 +1482,7 @@ VarTemplateSpecializationDecl::VarTemplateSpecializationDecl(
     TypeSourceInfo *TInfo, StorageClass S, ArrayRef<TemplateArgument> Args)
     : VarDecl(DK, Context, DC, StartLoc, IdLoc,
               SpecializedTemplate->getIdentifier(), T, TInfo, S),
+      SpecFoldingSetNode(this),
       SpecializedTemplate(SpecializedTemplate),
       TemplateArgs(TemplateArgumentList::CreateCopy(Context, Args)),
       SpecializationKind(TSK_Undeclared), IsCompleteDefinition(false) {}
@@ -1341,6 +1491,7 @@ VarTemplateSpecializationDecl::VarTemplateSpecializationDecl(Kind DK,
                                                              ASTContext &C)
     : VarDecl(DK, C, nullptr, SourceLocation(), SourceLocation(), nullptr,
               QualType(), nullptr, SC_None),
+      SpecFoldingSetNode(this),
       SpecializationKind(TSK_Undeclared), IsCompleteDefinition(false) {}
 
 VarTemplateSpecializationDecl *VarTemplateSpecializationDecl::Create(

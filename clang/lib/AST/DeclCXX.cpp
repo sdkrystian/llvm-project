@@ -2903,6 +2903,10 @@ UsingDirectiveDecl *UsingDirectiveDecl::CreateDeserialized(ASTContext &C,
                                         SourceLocation(), nullptr, nullptr);
 }
 
+auto NamespaceDecl::newCommonPtr(ASTContext &C) const -> CommonBase * {
+  return new (C) CommonBase;
+}
+
 NamespaceDecl *UsingDirectiveDecl::getNominatedNamespace() {
   if (auto *NA = dyn_cast_or_null<NamespaceAliasDecl>(NominatedNamespace))
     return NA->getNamespace();
@@ -2969,6 +2973,10 @@ NamespaceDecl *NamespaceDecl::getMostRecentDeclImpl() {
 }
 
 void NamespaceAliasDecl::anchor() {}
+
+auto NamespaceAliasDecl::newCommonPtr(ASTContext &C) const -> CommonBase * {
+  return new (C) CommonBase;
+}
 
 NamespaceAliasDecl *NamespaceAliasDecl::getNextRedeclarationImpl() {
   return getNextRedeclaration();
@@ -3038,6 +3046,10 @@ APValue *LifetimeExtendedTemporaryDecl::getOrCreateValue(bool MayCreate) const {
 }
 
 void UsingShadowDecl::anchor() {}
+
+auto UsingShadowDecl::newCommonPtr(ASTContext &C) const -> CommonBase * {
+  return new (C) CommonBase;
+}
 
 UsingShadowDecl::UsingShadowDecl(Kind K, ASTContext &C, DeclContext *DC,
                                  SourceLocation Loc, DeclarationName Name,

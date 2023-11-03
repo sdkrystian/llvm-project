@@ -1251,7 +1251,7 @@ class ObjCInterfaceDecl : public ObjCContainerDecl
   using redeclarable_base = Redeclarable<ObjCInterfaceDecl>;
   friend redeclarable_base;
 
-  CommonBase *newCommon(ASTContext &C) {
+  CommonBase *newCommonPtr(ASTContext &C) const {
     return new (C) CommonBase;
   }
 
@@ -2109,7 +2109,7 @@ class ObjCProtocolDecl : public ObjCContainerDecl,
   using redeclarable_base = Redeclarable<ObjCProtocolDecl>;
   friend redeclarable_base;
 
-  CommonBase *newCommon(ASTContext &C) {
+  CommonBase *newCommonPtr(ASTContext &C) const {
     return new (C) CommonBase;
   }
 
