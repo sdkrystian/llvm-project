@@ -1644,7 +1644,9 @@ void ASTDeclWriter::VisitClassTemplateSpecializationDecl(
     Record.AddDeclRef(D->getSpecializedTemplate()->getCanonicalDecl());
   }
 
-  Record.AddASTTemplateArgumentListInfo(D->getTemplateArgsAsWritten());
+  Record.push_back(D->getTemplateArgsAsWritten() != nullptr);
+  if (const auto *ArgsWritten = D->getTemplateArgsAsWritten())
+    Record.AddASTTemplateArgumentListInfo(ArgsWritten);
   bool HasExplicitInfo = D->getExternLoc().isValid() ||
                          D->getTemplateKeywordLoc().isValid();
   Record.push_back(HasExplicitInfo);
@@ -1709,7 +1711,9 @@ void ASTDeclWriter::VisitVarTemplateSpecializationDecl(
     Record.AddSourceLocation(D->getTemplateKeywordLoc());
   }
   #endif
-  Record.AddASTTemplateArgumentListInfo(D->getTemplateArgsAsWritten());
+  Record.push_back(D->getTemplateArgsAsWritten() != nullptr);
+  if (const auto *ArgsWritten = D->getTemplateArgsAsWritten())
+    Record.AddASTTemplateArgumentListInfo(ArgsWritten);
   bool HasExplicitInfo = D->getExternLoc().isValid() ||
                          D->getTemplateKeywordLoc().isValid();
   Record.push_back(HasExplicitInfo);

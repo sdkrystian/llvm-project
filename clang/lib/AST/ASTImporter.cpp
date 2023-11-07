@@ -6084,9 +6084,10 @@ ExpectedDecl ASTNodeImporter::VisitClassTemplateSpecializationDecl(
 
   // Import TemplateArgumentListInfo.
   TemplateArgumentListInfo ToTAInfo;
-  const auto &ASTTemplateArgs = *PartialSpec->getTemplateArgsAsWritten();
-  if (Error Err = ImportTemplateArgumentListInfo(ASTTemplateArgs, ToTAInfo))
-      return std::move(Err);
+  if (const auto *ArgsWritten = D->getTemplateArgsAsWritten()) {
+    if (Error Err = ImportTemplateArgumentListInfo(*ArgsWritten, ToTAInfo))
+        return std::move(Err);
+  }
 
   // Create the specialization.
   ClassTemplateSpecializationDecl *D2 = nullptr;
@@ -6101,7 +6102,7 @@ ExpectedDecl ASTNodeImporter::VisitClassTemplateSpecializationDecl(
     if (GetImportedOrCreateDecl<ClassTemplatePartialSpecializationDecl>(
             D2, D, Importer.getToContext(), D->getTagKind(), DC, *BeginLocOrErr,
             *IdLocOrErr, ToTPList, ClassTemplate,
-            llvm::ArrayRef(TemplateArgs.data(), TemplateArgs.size()), ToTAInfo,
+            llvm::ArrayRef(TemplateArgs.data(), TemplateArgs.size()), &ToTAInfo,
             CanonInjType,
             cast_or_null<ClassTemplatePartialSpecializationDecl>(PrevDecl)))
       return D2;
@@ -6119,7 +6120,7 @@ ExpectedDecl ASTNodeImporter::VisitClassTemplateSpecializationDecl(
     if (GetImportedOrCreateDecl(
             D2, D, Importer.getToContext(), D->getTagKind(), DC,
             *BeginLocOrErr, *IdLocOrErr, ClassTemplate, TemplateArgs,
-            ToTAInfo, PrevDecl))
+            &ToTAInfo, PrevDecl))
       return D2;
 
     // Update InsertPos, because preceding import calls may have invalidated
@@ -6369,8 +6370,8 @@ ExpectedDecl ASTNodeImporter::VisitVarTemplateSpecializationDecl(
     }
   } else {
     TemplateArgumentListInfo ArgInfos;
-    if (const ASTTemplateArgumentListInfo *Args = D->getTemplateArgsAsWritten()) {
-      if (Error Err = ImportTemplateArgumentListInfo(*Args, ArgInfos))
+    if (const auto *ArgsWritten = D->getTemplateArgsAsWritten()) {
+      if (Error Err = ImportTemplateArgumentListInfo(*ArgsWritten, ArgInfos))
         return std::move(Err);
     }
 
@@ -6395,7 +6396,8 @@ ExpectedDecl ASTNodeImporter::VisitVarTemplateSpecializationDecl(
       if (GetImportedOrCreateDecl(ToPartial, D, Importer.getToContext(), DC,
                                   *BeginLocOrErr, *IdLocOrErr, *ToTPListOrErr,
                                   VarTemplate, QualType(), nullptr,
-                                  D->getStorageClass(), TemplateArgs, ArgInfos))
+                                  D->getStorageClass(), TemplateArgs,
+                                  &ArgInfos))
         return ToPartial;
 
       if (Expected<PartVarSpecDecl *> ToInstOrErr = import(
@@ -6416,7 +6418,7 @@ ExpectedDecl ASTNodeImporter::VisitVarTemplateSpecializationDecl(
       if (GetImportedOrCreateDecl(D2, D, Importer.getToContext(), DC,
                                   *BeginLocOrErr, *IdLocOrErr, VarTemplate,
                                   QualType(), nullptr, D->getStorageClass(),
-                                  TemplateArgs, ArgInfos))
+                                  TemplateArgs, &ArgInfos))
         return D2;
     }
 

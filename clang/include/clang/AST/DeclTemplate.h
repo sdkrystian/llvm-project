@@ -1859,7 +1859,7 @@ public:
          SourceLocation StartLoc, SourceLocation IdLoc,
          ClassTemplateDecl *SpecializedTemplate,
          ArrayRef<TemplateArgument> Args,
-         const TemplateArgumentListInfo& ArgInfos,
+         const TemplateArgumentListInfo *ArgInfos,
          ClassTemplateSpecializationDecl *PrevDecl);
   static ClassTemplateSpecializationDecl *
   CreateDeserialized(ASTContext &C, unsigned ID);
@@ -2112,7 +2112,7 @@ public:
          TemplateParameterList *Params,
          ClassTemplateDecl *SpecializedTemplate,
          ArrayRef<TemplateArgument> Args,
-         const TemplateArgumentListInfo &ArgInfos,
+         const TemplateArgumentListInfo *ArgInfos,
          QualType CanonInjectedType,
          ClassTemplatePartialSpecializationDecl *PrevDecl);
 
@@ -2674,7 +2674,7 @@ public:
          SourceLocation IdLoc, VarTemplateDecl *SpecializedTemplate, QualType T,
          TypeSourceInfo *TInfo, StorageClass S,
          ArrayRef<TemplateArgument> Args,
-         const TemplateArgumentListInfo &ArgInfos);
+         const TemplateArgumentListInfo *ArgInfos);
   static VarTemplateSpecializationDecl *CreateDeserialized(ASTContext &C,
                                                            unsigned ID);
 
@@ -2909,7 +2909,7 @@ public:
          SourceLocation IdLoc, TemplateParameterList *Params,
          VarTemplateDecl *SpecializedTemplate, QualType T,
          TypeSourceInfo *TInfo, StorageClass S, ArrayRef<TemplateArgument> Args,
-         const TemplateArgumentListInfo &ArgInfos);
+         const TemplateArgumentListInfo *ArgInfos);
 
   static VarTemplatePartialSpecializationDecl *CreateDeserialized(ASTContext &C,
                                                                   unsigned ID);

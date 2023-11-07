@@ -4066,7 +4066,7 @@ QualType Sema::CheckTemplateIdType(TemplateName Name,
           ClassTemplate->getDeclContext(),
           ClassTemplate->getTemplatedDecl()->getBeginLoc(),
           ClassTemplate->getLocation(), ClassTemplate, CanonicalConverted,
-          TemplateArgs, nullptr);
+          /*ArgInfos=*/nullptr, /*PrevDecl=*/nullptr);
       ClassTemplate->AddSpecialization(Decl, InsertPos);
       if (ClassTemplate->isOutOfLine())
         Decl->setLexicalDeclContext(ClassTemplate->getLexicalDeclContext());
@@ -4662,7 +4662,7 @@ DeclResult Sema::ActOnVarTemplateSpecialization(
         VarTemplatePartialSpecializationDecl::Create(
             Context, VarTemplate->getDeclContext(), TemplateKWLoc,
             TemplateNameLoc, TemplateParams, VarTemplate, DI->getType(), DI, SC,
-            CanonicalConverted, TemplateArgs);
+            CanonicalConverted, &TemplateArgs);
 
     if (!PrevPartial)
       VarTemplate->AddPartialSpecialization(Partial, InsertPos);
@@ -4679,7 +4679,7 @@ DeclResult Sema::ActOnVarTemplateSpecialization(
     // this explicit specialization or friend declaration.
     Specialization = VarTemplateSpecializationDecl::Create(
         Context, VarTemplate->getDeclContext(), TemplateKWLoc, TemplateNameLoc,
-        VarTemplate, DI->getType(), DI, SC, CanonicalConverted, TemplateArgs);
+        VarTemplate, DI->getType(), DI, SC, CanonicalConverted, &TemplateArgs);
     // Specialization->setTemplateArgsInfo(TemplateArgs);
 
     if (!PrevDecl)
@@ -8855,7 +8855,7 @@ DeclResult Sema::ActOnClassTemplateSpecialization(
         ClassTemplatePartialSpecializationDecl::Create(
             Context, Kind, ClassTemplate->getDeclContext(), KWLoc,
             TemplateNameLoc, TemplateParams, ClassTemplate, CanonicalConverted,
-            TemplateArgs, CanonType, PrevPartial);
+            &TemplateArgs, CanonType, PrevPartial);
     SetNestedNameSpecifier(*this, Partial, SS);
     if (TemplateParameterLists.size() > 1 && SS.isSet()) {
       Partial->setTemplateParameterListsInfo(
@@ -8877,7 +8877,7 @@ DeclResult Sema::ActOnClassTemplateSpecialization(
     // this explicit specialization or friend declaration.
     Specialization = ClassTemplateSpecializationDecl::Create(
         Context, Kind, ClassTemplate->getDeclContext(), KWLoc, TemplateNameLoc,
-        ClassTemplate, CanonicalConverted, TemplateArgs, PrevDecl);
+        ClassTemplate, CanonicalConverted, &TemplateArgs, PrevDecl);
     SetNestedNameSpecifier(*this, Specialization, SS);
     if (TemplateParameterLists.size() > 0) {
       Specialization->setTemplateParameterListsInfo(Context,
@@ -8975,7 +8975,13 @@ DeclResult Sema::ActOnClassTemplateSpecialization(
     Specialization->setTypeAsWritten(WrittenTy);
     Specialization->setTemplateKeywordLoc(TemplateKWLoc);
   }
-  #else
+  #elif 1
+  TypeSourceInfo *WrittenTy
+    = Context.getTemplateSpecializationTypeInfo(Name, TemplateNameLoc,
+                                                TemplateArgs, CanonType);
+  if (TUK != TUK_Friend)
+    Specialization->setTemplateKeywordLoc(TemplateKWLoc);
+  #elif 1
     if (TUK != TUK_Friend)
       Specialization->setTemplateKeywordLoc(TemplateKWLoc);
   #endif
@@ -8995,9 +9001,9 @@ DeclResult Sema::ActOnClassTemplateSpecialization(
     Specialization->startDefinition();
 
   if (TUK == TUK_Friend) {
-    TypeSourceInfo *WrittenTy
-      = Context.getTemplateSpecializationTypeInfo(Name, TemplateNameLoc,
-                                                  TemplateArgs, CanonType);
+    // TypeSourceInfo *WrittenTy
+    //   = Context.getTemplateSpecializationTypeInfo(Name, TemplateNameLoc,
+    //                                               TemplateArgs, CanonType);
     FriendDecl *Friend = FriendDecl::Create(Context, CurContext,
                                             TemplateNameLoc,
                                             WrittenTy,
@@ -10149,7 +10155,7 @@ DeclResult Sema::ActOnExplicitInstantiation(
     // this explicit specialization.
     Specialization = ClassTemplateSpecializationDecl::Create(
         Context, Kind, ClassTemplate->getDeclContext(), KWLoc, TemplateNameLoc,
-        ClassTemplate, CanonicalConverted, TemplateArgs, PrevDecl);
+        ClassTemplate, CanonicalConverted, &TemplateArgs, PrevDecl);
     SetNestedNameSpecifier(*this, Specialization, SS);
 
     // A MSInheritanceAttr attached to the previous declaration must be
@@ -10169,7 +10175,6 @@ DeclResult Sema::ActOnExplicitInstantiation(
     }
   }
 
-  #if 0
   // Build the fully-sugared type for this explicit instantiation as
   // the user wrote in the explicit instantiation itself. This means
   // that we'll pretty-print the type retrieved from the
@@ -10181,6 +10186,7 @@ DeclResult Sema::ActOnExplicitInstantiation(
     = Context.getTemplateSpecializationTypeInfo(Name, TemplateNameLoc,
                                                 TemplateArgs,
                                   Context.getTypeDeclType(Specialization));
+  #if 0
   Specialization->setTypeAsWritten(WrittenTy);
   #endif
 

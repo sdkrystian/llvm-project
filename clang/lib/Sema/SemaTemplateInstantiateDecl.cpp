@@ -3858,7 +3858,7 @@ TemplateDeclInstantiator::VisitClassTemplateSpecializationDecl(
       ClassTemplateSpecializationDecl::Create(
           SemaRef.Context, D->getTagKind(), Owner, D->getBeginLoc(),
           D->getLocation(), InstClassTemplate, CanonicalConverted,
-          InstTemplateArgs, PrevDecl);
+          &InstTemplateArgs, PrevDecl);
 
   // Add this partial specialization to the set of class template partial
   // specializations.
@@ -3982,7 +3982,7 @@ Decl *TemplateDeclInstantiator::VisitVarTemplateSpecializationDecl(
   VarTemplateSpecializationDecl *Var = VarTemplateSpecializationDecl::Create(
       SemaRef.Context, Owner, D->getInnerLocStart(), D->getLocation(),
       VarTemplate, DI->getType(), DI, D->getStorageClass(), Converted,
-      TemplateArgsInfo);
+      &TemplateArgsInfo);
   if (!PrevDecl) {
     void *InsertPos = nullptr;
     VarTemplate->findSpecialization(Converted, InsertPos);
@@ -4267,7 +4267,7 @@ TemplateDeclInstantiator::InstantiateClassTemplatePartialSpecialization(
       ClassTemplatePartialSpecializationDecl::Create(
           SemaRef.Context, PartialSpec->getTagKind(), Owner,
           PartialSpec->getBeginLoc(), PartialSpec->getLocation(), InstParams,
-          ClassTemplate, CanonicalConverted, InstTemplateArgs, CanonType,
+          ClassTemplate, CanonicalConverted, &InstTemplateArgs, CanonType,
           nullptr);
   // Substitute the nested name specifier, if any.
   if (SubstQualifier(PartialSpec, InstPartialSpec))
@@ -4404,7 +4404,7 @@ TemplateDeclInstantiator::InstantiateVarTemplatePartialSpecialization(
           SemaRef.Context, Owner, PartialSpec->getInnerLocStart(),
           PartialSpec->getLocation(), InstParams, VarTemplate, DI->getType(),
           DI, PartialSpec->getStorageClass(), CanonicalConverted,
-          InstTemplateArgs);
+          &InstTemplateArgs);
 
   // Substitute the nested name specifier, if any.
   if (SubstQualifier(PartialSpec, InstPartialSpec))

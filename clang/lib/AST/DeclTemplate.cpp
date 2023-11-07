@@ -933,10 +933,15 @@ ClassTemplateSpecializationDecl::Create(ASTContext &Context, TagKind TK,
                                         SourceLocation IdLoc,
                                         ClassTemplateDecl *SpecializedTemplate,
                                         ArrayRef<TemplateArgument> Args,
-                                    const TemplateArgumentListInfo& ArgInfos,
+                                    const TemplateArgumentListInfo *ArgInfos,
                                    ClassTemplateSpecializationDecl *PrevDecl) {
+  #if 0
   const ASTTemplateArgumentListInfo *ASTArgInfos =
     ASTTemplateArgumentListInfo::Create(Context, ArgInfos);
+  #else
+  const ASTTemplateArgumentListInfo *ASTArgInfos = ArgInfos ?
+      ASTTemplateArgumentListInfo::Create(Context, *ArgInfos) : nullptr;
+  #endif
   auto *Result =
       new (Context, DC) ClassTemplateSpecializationDecl(
           Context, ClassTemplateSpecialization, TK, DC, StartLoc, IdLoc,
@@ -1123,11 +1128,11 @@ Create(ASTContext &Context, TagKind TK,DeclContext *DC,
        TemplateParameterList *Params,
        ClassTemplateDecl *SpecializedTemplate,
        ArrayRef<TemplateArgument> Args,
-       const TemplateArgumentListInfo &ArgInfos,
+       const TemplateArgumentListInfo *ArgInfos,
        QualType CanonInjectedType,
        ClassTemplatePartialSpecializationDecl *PrevDecl) {
-  const ASTTemplateArgumentListInfo *ASTArgInfos =
-    ASTTemplateArgumentListInfo::Create(Context, ArgInfos);
+  const ASTTemplateArgumentListInfo *ASTArgInfos = ArgInfos ?
+    ASTTemplateArgumentListInfo::Create(Context, *ArgInfos) : nullptr;
 
   auto *Result = new (Context, DC)
       ClassTemplatePartialSpecializationDecl(Context, TK, DC, StartLoc, IdLoc,
@@ -1345,9 +1350,9 @@ VarTemplateSpecializationDecl *VarTemplateSpecializationDecl::Create(
     ASTContext &Context, DeclContext *DC, SourceLocation StartLoc,
     SourceLocation IdLoc, VarTemplateDecl *SpecializedTemplate, QualType T,
     TypeSourceInfo *TInfo, StorageClass S, ArrayRef<TemplateArgument> Args,
-    const TemplateArgumentListInfo &ArgInfos) {
-  const ASTTemplateArgumentListInfo *ArgsAsWritten
-    = ASTTemplateArgumentListInfo::Create(Context, ArgInfos);
+    const TemplateArgumentListInfo *ArgInfos) {
+  const ASTTemplateArgumentListInfo *ArgsAsWritten = ArgInfos ?
+      ASTTemplateArgumentListInfo::Create(Context, *ArgInfos) : nullptr;
   return new (Context, DC) VarTemplateSpecializationDecl(
       VarTemplateSpecialization, Context, DC, StartLoc, IdLoc,
       SpecializedTemplate, T, TInfo, S, Args, ArgsAsWritten);
@@ -1433,9 +1438,9 @@ VarTemplatePartialSpecializationDecl::Create(
     SourceLocation IdLoc, TemplateParameterList *Params,
     VarTemplateDecl *SpecializedTemplate, QualType T, TypeSourceInfo *TInfo,
     StorageClass S, ArrayRef<TemplateArgument> Args,
-    const TemplateArgumentListInfo &ArgInfos) {
-  const ASTTemplateArgumentListInfo *ASTArgInfos
-    = ASTTemplateArgumentListInfo::Create(Context, ArgInfos);
+    const TemplateArgumentListInfo *ArgInfos) {
+  const ASTTemplateArgumentListInfo *ASTArgInfos = ArgInfos ?
+      ASTTemplateArgumentListInfo::Create(Context, *ArgInfos) : nullptr;
 
   auto *Result =
       new (Context, DC) VarTemplatePartialSpecializationDecl(

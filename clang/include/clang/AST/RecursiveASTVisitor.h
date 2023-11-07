@@ -1996,9 +1996,11 @@ DEF_TRAVERSE_DECL(CXXRecordDecl, { TRY_TO(TraverseCXXRecordHelper(D)); })
 #define DEF_TRAVERSE_TMPL_SPEC_DECL(TMPLDECLKIND, DECLKIND)                    \
   DEF_TRAVERSE_DECL(TMPLDECLKIND##TemplateSpecializationDecl, {                \
                                                                                \
-    TRY_TO(TraverseTemplateArgumentLocsHelper(                                 \
-        D->getTemplateArgsAsWritten()->getTemplateArgs(),                      \
-        D->getTemplateArgsAsWritten()->NumTemplateArgs));                      \
+    if (const auto *ArgsWritten = D->getTemplateArgsAsWritten()) {             \
+      TRY_TO(TraverseTemplateArgumentLocsHelper(                               \
+          ArgsWritten->getTemplateArgs(),                                      \
+          ArgsWritten->NumTemplateArgs));                                      \
+    }                                                                          \
                                                                                \
     if (getDerived().shouldVisitTemplateInstantiations() ||                    \
         D->getTemplateSpecializationKind() == TSK_ExplicitSpecialization) {    \
@@ -2036,10 +2038,6 @@ bool RecursiveASTVisitor<Derived>::TraverseTemplateArgumentLocsHelper(
         TRY_TO(TraverseDecl(*I));                                              \
       }                                                                        \
     }                                                                          \
-    /* The args that remains unspecialized. */                                 \
-    TRY_TO(TraverseTemplateArgumentLocsHelper(                                 \
-        D->getTemplateArgsAsWritten()->getTemplateArgs(),                      \
-        D->getTemplateArgsAsWritten()->NumTemplateArgs));                      \
                                                                                \
     /* Don't need the *TemplatePartialSpecializationHelper, even               \
        though that's our parent class -- we already visit all the              \

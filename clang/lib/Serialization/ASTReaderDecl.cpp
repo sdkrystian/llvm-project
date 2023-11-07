@@ -2480,7 +2480,8 @@ ASTDeclReader::VisitClassTemplateSpecializationDeclImpl(
     }
   }
 
-  D->ArgsAsWritten = Record.readASTTemplateArgumentListInfo();
+  if (Record.readBool())
+    D->ArgsAsWritten = Record.readASTTemplateArgumentListInfo();
   if (Record.readBool()) {
     auto *ExplicitInfo =
         new (C) ClassTemplateSpecializationDecl::ExplicitSpecializationInfo;
@@ -2559,7 +2560,8 @@ ASTDeclReader::VisitVarTemplateSpecializationDeclImpl(
   }
 
   // Explicit info.
-  D->ArgsAsWritten = Record.readASTTemplateArgumentListInfo();
+  if (Record.readBool())
+    D->ArgsAsWritten = Record.readASTTemplateArgumentListInfo();
   if (Record.readBool()) {
     auto *ExplicitInfo =
         new (C) VarTemplateSpecializationDecl::ExplicitSpecializationInfo;
