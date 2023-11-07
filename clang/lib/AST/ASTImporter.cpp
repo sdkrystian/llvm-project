@@ -6082,14 +6082,15 @@ ExpectedDecl ASTNodeImporter::VisitClassTemplateSpecializationDecl(
   if (!IdLocOrErr)
     return IdLocOrErr.takeError();
 
+  // Import TemplateArgumentListInfo.
+  TemplateArgumentListInfo ToTAInfo;
+  const auto &ASTTemplateArgs = *PartialSpec->getTemplateArgsAsWritten();
+  if (Error Err = ImportTemplateArgumentListInfo(ASTTemplateArgs, ToTAInfo))
+      return std::move(Err);
+
   // Create the specialization.
   ClassTemplateSpecializationDecl *D2 = nullptr;
   if (PartialSpec) {
-    // Import TemplateArgumentListInfo.
-    TemplateArgumentListInfo ToTAInfo;
-    const auto &ASTTemplateArgs = *PartialSpec->getTemplateArgsAsWritten();
-    if (Error Err = ImportTemplateArgumentListInfo(ASTTemplateArgs, ToTAInfo))
-      return std::move(Err);
 
     QualType CanonInjType;
     if (Error Err = importInto(
@@ -6118,7 +6119,7 @@ ExpectedDecl ASTNodeImporter::VisitClassTemplateSpecializationDecl(
     if (GetImportedOrCreateDecl(
             D2, D, Importer.getToContext(), D->getTagKind(), DC,
             *BeginLocOrErr, *IdLocOrErr, ClassTemplate, TemplateArgs,
-            PrevDecl))
+            ToTAInfo, PrevDecl))
       return D2;
 
     // Update InsertPos, because preceding import calls may have invalidated
@@ -6149,22 +6150,24 @@ ExpectedDecl ASTNodeImporter::VisitClassTemplateSpecializationDecl(
   else
     return LocOrErr.takeError();
 
+  #if 0
   if (auto *TSI = D->getTypeAsWritten()) {
     if (auto TInfoOrErr = import(TSI))
       D2->setTypeAsWritten(*TInfoOrErr);
     else
       return TInfoOrErr.takeError();
 
-    if (auto LocOrErr = import(D->getTemplateKeywordLoc()))
-      D2->setTemplateKeywordLoc(*LocOrErr);
-    else
-      return LocOrErr.takeError();
-
-    if (auto LocOrErr = import(D->getExternLoc()))
-      D2->setExternLoc(*LocOrErr);
-    else
-      return LocOrErr.takeError();
   }
+  #endif
+  if (auto LocOrErr = import(D->getTemplateKeywordLoc()))
+    D2->setTemplateKeywordLoc(*LocOrErr);
+  else
+    return LocOrErr.takeError();
+
+  if (auto LocOrErr = import(D->getExternLoc()))
+    D2->setExternLoc(*LocOrErr);
+  else
+    return LocOrErr.takeError();
 
   if (D->getPointOfInstantiation().isValid()) {
     if (auto POIOrErr = import(D->getPointOfInstantiation()))
@@ -6365,15 +6368,16 @@ ExpectedDecl ASTNodeImporter::VisitVarTemplateSpecializationDecl(
       }
     }
   } else {
-    TemplateArgumentListInfo ToTAInfo;
-    if (const ASTTemplateArgumentListInfo *Args = D->getTemplateArgsInfo()) {
-      if (Error Err = ImportTemplateArgumentListInfo(*Args, ToTAInfo))
+    TemplateArgumentListInfo ArgInfos;
+    if (const ASTTemplateArgumentListInfo *Args = D->getTemplateArgsAsWritten()) {
+      if (Error Err = ImportTemplateArgumentListInfo(*Args, ArgInfos))
         return std::move(Err);
     }
 
     using PartVarSpecDecl = VarTemplatePartialSpecializationDecl;
     // Create a new specialization.
     if (auto *FromPartial = dyn_cast<PartVarSpecDecl>(D)) {
+      #if 0
       // Import TemplateArgumentListInfo
       TemplateArgumentListInfo ArgInfos;
       const auto *FromTAArgsAsWritten = FromPartial->getTemplateArgsAsWritten();
@@ -6381,6 +6385,7 @@ ExpectedDecl ASTNodeImporter::VisitVarTemplateSpecializationDecl(
       if (Error Err = ImportTemplateArgumentListInfo(
           *FromTAArgsAsWritten, ArgInfos))
         return std::move(Err);
+      #endif
 
       auto ToTPListOrErr = import(FromPartial->getTemplateParameters());
       if (!ToTPListOrErr)
@@ -6411,7 +6416,7 @@ ExpectedDecl ASTNodeImporter::VisitVarTemplateSpecializationDecl(
       if (GetImportedOrCreateDecl(D2, D, Importer.getToContext(), DC,
                                   *BeginLocOrErr, *IdLocOrErr, VarTemplate,
                                   QualType(), nullptr, D->getStorageClass(),
-                                  TemplateArgs))
+                                  TemplateArgs, ArgInfos))
         return D2;
     }
 
@@ -6433,7 +6438,7 @@ ExpectedDecl ASTNodeImporter::VisitVarTemplateSpecializationDecl(
     }
 
     D2->setSpecializationKind(D->getSpecializationKind());
-    D2->setTemplateArgsInfo(ToTAInfo);
+    // D2->setTemplateArgsInfo(ToTAInfo);
 
     // Add this specialization to the class template.
     VarTemplate->AddSpecialization(D2, InsertPos);

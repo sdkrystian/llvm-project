@@ -3781,6 +3781,7 @@ TemplateDeclInstantiator::VisitClassTemplateSpecializationDecl(
 
   // Substitute into the template arguments of the class template explicit
   // specialization.
+  #if 0
   TemplateSpecializationTypeLoc Loc = D->getTypeAsWritten()->getTypeLoc().
                                         castAs<TemplateSpecializationTypeLoc>();
   TemplateArgumentListInfo InstTemplateArgs(Loc.getLAngleLoc(),
@@ -3790,6 +3791,20 @@ TemplateDeclInstantiator::VisitClassTemplateSpecializationDecl(
     ArgLocs.push_back(Loc.getArgLoc(I));
   if (SemaRef.SubstTemplateArguments(ArgLocs, TemplateArgs, InstTemplateArgs))
     return nullptr;
+  #endif
+
+  TemplateArgumentListInfo InstTemplateArgs;
+  // Substitute the current template arguments.
+  if (const ASTTemplateArgumentListInfo *ArgsWritten =
+          D->getTemplateArgsAsWritten()) {
+    InstTemplateArgs.setLAngleLoc(ArgsWritten->getLAngleLoc());
+    InstTemplateArgs.setRAngleLoc(ArgsWritten->getRAngleLoc());
+
+    if (SemaRef.SubstTemplateArguments(ArgsWritten->arguments(),
+                                       TemplateArgs, InstTemplateArgs))
+      return nullptr;
+  }
+
 
   // Check that the template argument list is well-formed for this
   // class template.
@@ -3842,7 +3857,8 @@ TemplateDeclInstantiator::VisitClassTemplateSpecializationDecl(
   ClassTemplateSpecializationDecl *InstD =
       ClassTemplateSpecializationDecl::Create(
           SemaRef.Context, D->getTagKind(), Owner, D->getBeginLoc(),
-          D->getLocation(), InstClassTemplate, CanonicalConverted, PrevDecl);
+          D->getLocation(), InstClassTemplate, CanonicalConverted,
+          InstTemplateArgs, PrevDecl);
 
   // Add this partial specialization to the set of class template partial
   // specializations.
@@ -3873,7 +3889,7 @@ TemplateDeclInstantiator::VisitClassTemplateSpecializationDecl(
   InstD->setAccess(D->getAccess());
   InstD->setInstantiationOfMemberClass(D, TSK_ImplicitInstantiation);
   InstD->setSpecializationKind(D->getSpecializationKind());
-  InstD->setTypeAsWritten(WrittenTy);
+  // InstD->setTypeAsWritten(WrittenTy);
   InstD->setExternLoc(D->getExternLoc());
   InstD->setTemplateKeywordLoc(D->getTemplateKeywordLoc());
 
@@ -3908,7 +3924,7 @@ Decl *TemplateDeclInstantiator::VisitVarTemplateSpecializationDecl(
 
   // Substitute the current template arguments.
   if (const ASTTemplateArgumentListInfo *TemplateArgsInfo =
-          D->getTemplateArgsInfo()) {
+          D->getTemplateArgsAsWritten()) {
     VarTemplateArgsInfo.setLAngleLoc(TemplateArgsInfo->getLAngleLoc());
     VarTemplateArgsInfo.setRAngleLoc(TemplateArgsInfo->getRAngleLoc());
 
@@ -3965,8 +3981,8 @@ Decl *TemplateDeclInstantiator::VisitVarTemplateSpecializationDecl(
   // Build the instantiated declaration
   VarTemplateSpecializationDecl *Var = VarTemplateSpecializationDecl::Create(
       SemaRef.Context, Owner, D->getInnerLocStart(), D->getLocation(),
-      VarTemplate, DI->getType(), DI, D->getStorageClass(), Converted);
-  Var->setTemplateArgsInfo(TemplateArgsInfo);
+      VarTemplate, DI->getType(), DI, D->getStorageClass(), Converted,
+      TemplateArgsInfo);
   if (!PrevDecl) {
     void *InsertPos = nullptr;
     VarTemplate->findSpecialization(Converted, InsertPos);
@@ -4258,7 +4274,7 @@ TemplateDeclInstantiator::InstantiateClassTemplatePartialSpecialization(
     return nullptr;
 
   InstPartialSpec->setInstantiatedFromMember(PartialSpec);
-  InstPartialSpec->setTypeAsWritten(WrittenTy);
+  // InstPartialSpec->setTypeAsWritten(WrittenTy);
 
   // Check the completed partial specialization.
   SemaRef.CheckTemplatePartialSpecialization(InstPartialSpec);
@@ -4395,7 +4411,7 @@ TemplateDeclInstantiator::InstantiateVarTemplatePartialSpecialization(
     return nullptr;
 
   InstPartialSpec->setInstantiatedFromMember(PartialSpec);
-  InstPartialSpec->setTypeAsWritten(WrittenTy);
+  // InstPartialSpec->setTypeAsWritten(WrittenTy);
 
   // Check the completed partial specialization.
   SemaRef.CheckTemplatePartialSpecialization(InstPartialSpec);
@@ -5648,7 +5664,7 @@ void Sema::InstantiateVariableDefinition(SourceLocation PointOfInstantiation,
 
     TemplateArgumentListInfo TemplateArgInfo;
     if (const ASTTemplateArgumentListInfo *ArgInfo =
-            VarSpec->getTemplateArgsInfo()) {
+            VarSpec->getTemplateArgsAsWritten()) {
       TemplateArgInfo.setLAngleLoc(ArgInfo->getLAngleLoc());
       TemplateArgInfo.setRAngleLoc(ArgInfo->getRAngleLoc());
       for (const TemplateArgumentLoc &Arg : ArgInfo->arguments())

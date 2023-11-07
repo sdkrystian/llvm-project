@@ -1623,6 +1623,7 @@ void ASTDeclWriter::VisitClassTemplateSpecializationDecl(
 
   VisitCXXRecordDecl(D);
 
+
   llvm::PointerUnion<ClassTemplateDecl *,
                      ClassTemplatePartialSpecializationDecl *> InstFrom
     = D->getSpecializedTemplateOrPartial();
@@ -1643,12 +1644,23 @@ void ASTDeclWriter::VisitClassTemplateSpecializationDecl(
     Record.AddDeclRef(D->getSpecializedTemplate()->getCanonicalDecl());
   }
 
+  Record.AddASTTemplateArgumentListInfo(D->getTemplateArgsAsWritten());
+  bool HasExplicitInfo = D->getExternLoc().isValid() ||
+                         D->getTemplateKeywordLoc().isValid();
+  Record.push_back(HasExplicitInfo);
+  if (HasExplicitInfo) {
+    Record.AddSourceLocation(D->getExternLoc());
+    Record.AddSourceLocation(D->getTemplateKeywordLoc());
+  }
+
+  #if 0
   // Explicit info.
   Record.AddTypeSourceInfo(D->getTypeAsWritten());
   if (D->getTypeAsWritten()) {
     Record.AddSourceLocation(D->getExternLoc());
     Record.AddSourceLocation(D->getTemplateKeywordLoc());
   }
+  #endif
 
   Code = serialization::DECL_CLASS_TEMPLATE_SPECIALIZATION;
 }
@@ -1656,7 +1668,6 @@ void ASTDeclWriter::VisitClassTemplateSpecializationDecl(
 void ASTDeclWriter::VisitClassTemplatePartialSpecializationDecl(
                                     ClassTemplatePartialSpecializationDecl *D) {
   Record.AddTemplateParameterList(D->getTemplateParameters());
-  Record.AddASTTemplateArgumentListInfo(D->getTemplateArgsAsWritten());
 
   VisitClassTemplateSpecializationDecl(D);
 
@@ -1690,9 +1701,19 @@ void ASTDeclWriter::VisitVarTemplateSpecializationDecl(
     Record.AddTemplateArgumentList(&D->getTemplateInstantiationArgs());
   }
 
+  #if 0
   // Explicit info.
   Record.AddTypeSourceInfo(D->getTypeAsWritten());
   if (D->getTypeAsWritten()) {
+    Record.AddSourceLocation(D->getExternLoc());
+    Record.AddSourceLocation(D->getTemplateKeywordLoc());
+  }
+  #endif
+  Record.AddASTTemplateArgumentListInfo(D->getTemplateArgsAsWritten());
+  bool HasExplicitInfo = D->getExternLoc().isValid() ||
+                         D->getTemplateKeywordLoc().isValid();
+  Record.push_back(HasExplicitInfo);
+  if (HasExplicitInfo) {
     Record.AddSourceLocation(D->getExternLoc());
     Record.AddSourceLocation(D->getTemplateKeywordLoc());
   }
@@ -1717,7 +1738,6 @@ void ASTDeclWriter::VisitVarTemplateSpecializationDecl(
 void ASTDeclWriter::VisitVarTemplatePartialSpecializationDecl(
     VarTemplatePartialSpecializationDecl *D) {
   Record.AddTemplateParameterList(D->getTemplateParameters());
-  Record.AddASTTemplateArgumentListInfo(D->getTemplateArgsAsWritten());
 
   VisitVarTemplateSpecializationDecl(D);
 

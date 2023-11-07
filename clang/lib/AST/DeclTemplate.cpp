@@ -910,10 +910,12 @@ ClassTemplateSpecializationDecl(ASTContext &Context, Kind DK, TagKind TK,
                                 SourceLocation IdLoc,
                                 ClassTemplateDecl *SpecializedTemplate,
                                 ArrayRef<TemplateArgument> Args,
+                          const ASTTemplateArgumentListInfo *ArgsAsWritten,
                                 ClassTemplateSpecializationDecl *PrevDecl)
     : CXXRecordDecl(DK, TK, Context, DC, StartLoc, IdLoc,
                     SpecializedTemplate->getIdentifier(), PrevDecl),
     SpecializedTemplate(SpecializedTemplate),
+    ArgsAsWritten(ArgsAsWritten),
     TemplateArgs(TemplateArgumentList::CreateCopy(Context, Args)),
     SpecializationKind(TSK_Undeclared) {
 }
@@ -931,11 +933,14 @@ ClassTemplateSpecializationDecl::Create(ASTContext &Context, TagKind TK,
                                         SourceLocation IdLoc,
                                         ClassTemplateDecl *SpecializedTemplate,
                                         ArrayRef<TemplateArgument> Args,
+                                    const TemplateArgumentListInfo& ArgInfos,
                                    ClassTemplateSpecializationDecl *PrevDecl) {
+  const ASTTemplateArgumentListInfo *ASTArgInfos =
+    ASTTemplateArgumentListInfo::Create(Context, ArgInfos);
   auto *Result =
       new (Context, DC) ClassTemplateSpecializationDecl(
           Context, ClassTemplateSpecialization, TK, DC, StartLoc, IdLoc,
-          SpecializedTemplate, Args, PrevDecl);
+          SpecializedTemplate, Args, ASTArgInfos, PrevDecl);
   Result->setMayHaveOutOfDateDef(false);
 
   // If the template decl is incomplete, copy the external lexical storage from
@@ -997,8 +1002,9 @@ ClassTemplateSpecializationDecl::getSourceRange() const {
       if (getExternLoc().isValid())
         Begin = getExternLoc();
       SourceLocation End = getBraceRange().getEnd();
-      if (End.isInvalid())
-        End = getTypeAsWritten()->getTypeLoc().getEndLoc();
+      if (End.isInvalid() && getTemplateArgsAsWritten())
+        End = getTemplateArgsAsWritten()->getRAngleLoc();
+        //End = getTypeAsWritten()->getTypeLoc().getEndLoc();
       return SourceRange(Begin, End);
     }
     // An implicit instantiation of a class template partial specialization
@@ -1103,9 +1109,9 @@ ClassTemplatePartialSpecializationDecl(ASTContext &Context, TagKind TK,
     : ClassTemplateSpecializationDecl(Context,
                                       ClassTemplatePartialSpecialization,
                                       TK, DC, StartLoc, IdLoc,
-                                      SpecializedTemplate, Args, PrevDecl),
-      TemplateParams(Params), ArgsAsWritten(ArgInfos),
-      InstantiatedFromMember(nullptr, false) {
+                                      SpecializedTemplate, Args,
+                                      ArgInfos, PrevDecl),
+      TemplateParams(Params), InstantiatedFromMember(nullptr, false) {
   if (AdoptTemplateParameterList(Params, this))
     setInvalidDecl();
 }
@@ -1320,11 +1326,13 @@ VarTemplateDecl::findPartialSpecInstantiatedFromMember(
 VarTemplateSpecializationDecl::VarTemplateSpecializationDecl(
     Kind DK, ASTContext &Context, DeclContext *DC, SourceLocation StartLoc,
     SourceLocation IdLoc, VarTemplateDecl *SpecializedTemplate, QualType T,
-    TypeSourceInfo *TInfo, StorageClass S, ArrayRef<TemplateArgument> Args)
+    TypeSourceInfo *TInfo, StorageClass S, ArrayRef<TemplateArgument> Args,
+    const ASTTemplateArgumentListInfo *ArgsAsWritten)
     : VarDecl(DK, Context, DC, StartLoc, IdLoc,
               SpecializedTemplate->getIdentifier(), T, TInfo, S),
       SpecializedTemplate(SpecializedTemplate),
       TemplateArgs(TemplateArgumentList::CreateCopy(Context, Args)),
+      ArgsAsWritten(ArgsAsWritten),
       SpecializationKind(TSK_Undeclared), IsCompleteDefinition(false) {}
 
 VarTemplateSpecializationDecl::VarTemplateSpecializationDecl(Kind DK,
@@ -1336,10 +1344,13 @@ VarTemplateSpecializationDecl::VarTemplateSpecializationDecl(Kind DK,
 VarTemplateSpecializationDecl *VarTemplateSpecializationDecl::Create(
     ASTContext &Context, DeclContext *DC, SourceLocation StartLoc,
     SourceLocation IdLoc, VarTemplateDecl *SpecializedTemplate, QualType T,
-    TypeSourceInfo *TInfo, StorageClass S, ArrayRef<TemplateArgument> Args) {
+    TypeSourceInfo *TInfo, StorageClass S, ArrayRef<TemplateArgument> Args,
+    const TemplateArgumentListInfo &ArgInfos) {
+  const ASTTemplateArgumentListInfo *ArgsAsWritten
+    = ASTTemplateArgumentListInfo::Create(Context, ArgInfos);
   return new (Context, DC) VarTemplateSpecializationDecl(
       VarTemplateSpecialization, Context, DC, StartLoc, IdLoc,
-      SpecializedTemplate, T, TInfo, S, Args);
+      SpecializedTemplate, T, TInfo, S, Args, ArgsAsWritten);
 }
 
 VarTemplateSpecializationDecl *
@@ -1373,21 +1384,22 @@ VarTemplateDecl *VarTemplateSpecializationDecl::getSpecializedTemplate() const {
   return SpecializedTemplate.get<VarTemplateDecl *>();
 }
 
+#if 0
 void VarTemplateSpecializationDecl::setTemplateArgsInfo(
     const TemplateArgumentListInfo &ArgsInfo) {
-  TemplateArgsInfo =
+  ArgsAsWritten =
       ASTTemplateArgumentListInfo::Create(getASTContext(), ArgsInfo);
 }
 
 void VarTemplateSpecializationDecl::setTemplateArgsInfo(
     const ASTTemplateArgumentListInfo *ArgsInfo) {
-  TemplateArgsInfo =
+  ArgsAsWritten =
       ASTTemplateArgumentListInfo::Create(getASTContext(), ArgsInfo);
 }
-
+#endif
 SourceRange VarTemplateSpecializationDecl::getSourceRange() const {
   if (isExplicitSpecialization() && !hasInit()) {
-    if (const ASTTemplateArgumentListInfo *Info = getTemplateArgsInfo())
+    if (const ASTTemplateArgumentListInfo *Info = getTemplateArgsAsWritten())
       return SourceRange(getOuterLocStart(), Info->getRAngleLoc());
   }
   return VarDecl::getSourceRange();
@@ -1405,11 +1417,11 @@ VarTemplatePartialSpecializationDecl::VarTemplatePartialSpecializationDecl(
     SourceLocation IdLoc, TemplateParameterList *Params,
     VarTemplateDecl *SpecializedTemplate, QualType T, TypeSourceInfo *TInfo,
     StorageClass S, ArrayRef<TemplateArgument> Args,
-    const ASTTemplateArgumentListInfo *ArgInfos)
+    const ASTTemplateArgumentListInfo *ArgsAsWritten)
     : VarTemplateSpecializationDecl(VarTemplatePartialSpecialization, Context,
                                     DC, StartLoc, IdLoc, SpecializedTemplate, T,
-                                    TInfo, S, Args),
-      TemplateParams(Params), ArgsAsWritten(ArgInfos),
+                                    TInfo, S, Args, ArgsAsWritten),
+      TemplateParams(Params),
       InstantiatedFromMember(nullptr, false) {
   if (AdoptTemplateParameterList(Params, DC))
     setInvalidDecl();

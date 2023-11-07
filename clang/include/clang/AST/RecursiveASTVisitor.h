@@ -1995,16 +1995,10 @@ DEF_TRAVERSE_DECL(CXXRecordDecl, { TRY_TO(TraverseCXXRecordHelper(D)); })
 
 #define DEF_TRAVERSE_TMPL_SPEC_DECL(TMPLDECLKIND, DECLKIND)                    \
   DEF_TRAVERSE_DECL(TMPLDECLKIND##TemplateSpecializationDecl, {                \
-    /* For implicit instantiations ("set<int> x;"), we don't want to           \
-       recurse at all, since the instatiated template isn't written in         \
-       the source code anywhere.  (Note the instatiated *type* --              \
-       set<int> -- is written, and will still get a callback of                \
-       TemplateSpecializationType).  For explicit instantiations               \
-       ("template set<int>;"), we do need a callback, since this               \
-       is the only callback that's made for this instantiation.                \
-       We use getTypeAsWritten() to distinguish. */                            \
-    if (TypeSourceInfo *TSI = D->getTypeAsWritten())                           \
-      TRY_TO(TraverseTypeLoc(TSI->getTypeLoc()));                              \
+                                                                               \
+    TRY_TO(TraverseTemplateArgumentLocsHelper(                                 \
+        D->getTemplateArgsAsWritten()->getTemplateArgs(),                      \
+        D->getTemplateArgsAsWritten()->NumTemplateArgs));                      \
                                                                                \
     if (getDerived().shouldVisitTemplateInstantiations() ||                    \
         D->getTemplateSpecializationKind() == TSK_ExplicitSpecialization) {    \

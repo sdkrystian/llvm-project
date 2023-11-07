@@ -4066,7 +4066,7 @@ QualType Sema::CheckTemplateIdType(TemplateName Name,
           ClassTemplate->getDeclContext(),
           ClassTemplate->getTemplatedDecl()->getBeginLoc(),
           ClassTemplate->getLocation(), ClassTemplate, CanonicalConverted,
-          nullptr);
+          TemplateArgs, nullptr);
       ClassTemplate->AddSpecialization(Decl, InsertPos);
       if (ClassTemplate->isOutOfLine())
         Decl->setLexicalDeclContext(ClassTemplate->getLexicalDeclContext());
@@ -4679,8 +4679,8 @@ DeclResult Sema::ActOnVarTemplateSpecialization(
     // this explicit specialization or friend declaration.
     Specialization = VarTemplateSpecializationDecl::Create(
         Context, VarTemplate->getDeclContext(), TemplateKWLoc, TemplateNameLoc,
-        VarTemplate, DI->getType(), DI, SC, CanonicalConverted);
-    Specialization->setTemplateArgsInfo(TemplateArgs);
+        VarTemplate, DI->getType(), DI, SC, CanonicalConverted, TemplateArgs);
+    // Specialization->setTemplateArgsInfo(TemplateArgs);
 
     if (!PrevDecl)
       VarTemplate->AddSpecialization(Specialization, InsertPos);
@@ -8877,7 +8877,7 @@ DeclResult Sema::ActOnClassTemplateSpecialization(
     // this explicit specialization or friend declaration.
     Specialization = ClassTemplateSpecializationDecl::Create(
         Context, Kind, ClassTemplate->getDeclContext(), KWLoc, TemplateNameLoc,
-        ClassTemplate, CanonicalConverted, PrevDecl);
+        ClassTemplate, CanonicalConverted, TemplateArgs, PrevDecl);
     SetNestedNameSpecifier(*this, Specialization, SS);
     if (TemplateParameterLists.size() > 0) {
       Specialization->setTemplateParameterListsInfo(Context,
@@ -8960,6 +8960,7 @@ DeclResult Sema::ActOnClassTemplateSpecialization(
       << (isPartialSpecialization? 1 : 0)
       << FixItHint::CreateRemoval(ModulePrivateLoc);
 
+  #if 0
   // Build the fully-sugared type for this class template
   // specialization as the user wrote in the specialization
   // itself. This means that we'll pretty-print the type retrieved
@@ -8974,6 +8975,10 @@ DeclResult Sema::ActOnClassTemplateSpecialization(
     Specialization->setTypeAsWritten(WrittenTy);
     Specialization->setTemplateKeywordLoc(TemplateKWLoc);
   }
+  #else
+    if (TUK != TUK_Friend)
+      Specialization->setTemplateKeywordLoc(TemplateKWLoc);
+  #endif
 
   // C++ [temp.expl.spec]p9:
   //   A template explicit specialization is in the scope of the
@@ -8990,6 +8995,9 @@ DeclResult Sema::ActOnClassTemplateSpecialization(
     Specialization->startDefinition();
 
   if (TUK == TUK_Friend) {
+    TypeSourceInfo *WrittenTy
+      = Context.getTemplateSpecializationTypeInfo(Name, TemplateNameLoc,
+                                                  TemplateArgs, CanonType);
     FriendDecl *Friend = FriendDecl::Create(Context, CurContext,
                                             TemplateNameLoc,
                                             WrittenTy,
@@ -10141,7 +10149,7 @@ DeclResult Sema::ActOnExplicitInstantiation(
     // this explicit specialization.
     Specialization = ClassTemplateSpecializationDecl::Create(
         Context, Kind, ClassTemplate->getDeclContext(), KWLoc, TemplateNameLoc,
-        ClassTemplate, CanonicalConverted, PrevDecl);
+        ClassTemplate, CanonicalConverted, TemplateArgs, PrevDecl);
     SetNestedNameSpecifier(*this, Specialization, SS);
 
     // A MSInheritanceAttr attached to the previous declaration must be
@@ -10161,6 +10169,7 @@ DeclResult Sema::ActOnExplicitInstantiation(
     }
   }
 
+  #if 0
   // Build the fully-sugared type for this explicit instantiation as
   // the user wrote in the explicit instantiation itself. This means
   // that we'll pretty-print the type retrieved from the
@@ -10173,6 +10182,7 @@ DeclResult Sema::ActOnExplicitInstantiation(
                                                 TemplateArgs,
                                   Context.getTypeDeclType(Specialization));
   Specialization->setTypeAsWritten(WrittenTy);
+  #endif
 
   // Set source locations for keywords.
   Specialization->setExternLoc(ExternLoc);

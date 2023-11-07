@@ -1138,6 +1138,7 @@ void DeclPrinter::VisitCXXRecordDecl(CXXRecordDecl *D) {
       NNS->print(Out, Policy);
     Out << *D;
 
+    #if 0
     if (auto S = dyn_cast<ClassTemplateSpecializationDecl>(D)) {
       ArrayRef<TemplateArgument> Args = S->getTemplateArgs().asArray();
       if (!Policy.PrintCanonicalTypes)
@@ -1147,6 +1148,17 @@ void DeclPrinter::VisitCXXRecordDecl(CXXRecordDecl *D) {
             Args = TST->template_arguments();
       printTemplateArguments(
           Args, S->getSpecializedTemplate()->getTemplateParameters());
+    }
+    #endif
+
+    if (auto S = dyn_cast<ClassTemplateSpecializationDecl>(D)) {
+      const TemplateParameterList *TPL =
+          S->getSpecializedTemplate()->getTemplateParameters();
+      const auto *TArgAsWritten = S->getTemplateArgsAsWritten();
+      if (TArgAsWritten && !Policy.PrintCanonicalTypes)
+        printTemplateArguments(TArgAsWritten->arguments(), TPL);
+      else
+        printTemplateArguments(S->getTemplateArgs().asArray(), TPL);
     }
   }
 

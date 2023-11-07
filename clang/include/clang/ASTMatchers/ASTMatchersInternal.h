@@ -186,10 +186,10 @@ inline TypeSourceInfo *GetTypeSourceInfo(const BlockDecl &Node) {
 inline TypeSourceInfo *GetTypeSourceInfo(const CXXNewExpr &Node) {
   return Node.getAllocatedTypeSourceInfo();
 }
-inline TypeSourceInfo *
-GetTypeSourceInfo(const ClassTemplateSpecializationDecl &Node) {
-  return Node.getTypeAsWritten();
-}
+// inline TypeSourceInfo *
+// GetTypeSourceInfo(const ClassTemplateSpecializationDecl &Node) {
+//   return Node.getTypeAsWritten();
+// }
 
 /// Unifies obtaining the FunctionProtoType pointer from both
 /// FunctionProtoType and FunctionDecl nodes..

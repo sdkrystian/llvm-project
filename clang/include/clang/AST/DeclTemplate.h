@@ -1811,7 +1811,7 @@ class ClassTemplateSpecializationDecl
   /// Further info for explicit template specialization/instantiation.
   struct ExplicitSpecializationInfo {
     /// The type-as-written.
-    TypeSourceInfo *TypeAsWritten = nullptr;
+    // TypeSourceInfo *TypeAsWritten = nullptr;
 
     /// The location of the extern keyword.
     SourceLocation ExternLoc;
@@ -1825,6 +1825,9 @@ class ClassTemplateSpecializationDecl
   /// Further info for explicit template specialization/instantiation.
   /// Does not apply to implicit specializations.
   ExplicitSpecializationInfo *ExplicitInfo = nullptr;
+
+  /// The source info for the template arguments as written.
+  const ASTTemplateArgumentListInfo *ArgsAsWritten = nullptr;
 
   /// The template arguments used to describe this specialization.
   const TemplateArgumentList *TemplateArgs;
@@ -1842,6 +1845,7 @@ protected:
                                   SourceLocation IdLoc,
                                   ClassTemplateDecl *SpecializedTemplate,
                                   ArrayRef<TemplateArgument> Args,
+                            const ASTTemplateArgumentListInfo *ArgsAsWritten,
                                   ClassTemplateSpecializationDecl *PrevDecl);
 
   explicit ClassTemplateSpecializationDecl(ASTContext &C, Kind DK);
@@ -1855,6 +1859,7 @@ public:
          SourceLocation StartLoc, SourceLocation IdLoc,
          ClassTemplateDecl *SpecializedTemplate,
          ArrayRef<TemplateArgument> Args,
+         const TemplateArgumentListInfo& ArgInfos,
          ClassTemplateSpecializationDecl *PrevDecl);
   static ClassTemplateSpecializationDecl *
   CreateDeserialized(ASTContext &C, unsigned ID);
@@ -2001,6 +2006,12 @@ public:
     SpecializedTemplate = TemplDecl;
   }
 
+  /// Get the template arguments as written.
+  const ASTTemplateArgumentListInfo *getTemplateArgsAsWritten() const {
+    return ArgsAsWritten;
+  }
+
+  #if 0
   /// Sets the type of this specialization as it was written by
   /// the user. This will be a class template specialization type.
   void setTypeAsWritten(TypeSourceInfo *T) {
@@ -2014,6 +2025,7 @@ public:
   TypeSourceInfo *getTypeAsWritten() const {
     return ExplicitInfo ? ExplicitInfo->TypeAsWritten : nullptr;
   }
+  #endif
 
   /// Gets the location of the extern keyword, if present.
   SourceLocation getExternLoc() const {
@@ -2065,10 +2077,6 @@ class ClassTemplatePartialSpecializationDecl
   : public ClassTemplateSpecializationDecl {
   /// The list of template parameters
   TemplateParameterList* TemplateParams = nullptr;
-
-  /// The source info for the template arguments as written.
-  /// FIXME: redundant with TypeAsWritten?
-  const ASTTemplateArgumentListInfo *ArgsAsWritten = nullptr;
 
   /// The class template partial specialization from which this
   /// class template partial specialization was instantiated.
@@ -2134,11 +2142,6 @@ public:
 
   bool hasAssociatedConstraints() const {
     return TemplateParams->hasAssociatedConstraints();
-  }
-
-  /// Get the template arguments as written.
-  const ASTTemplateArgumentListInfo *getTemplateArgsAsWritten() const {
-    return ArgsAsWritten;
   }
 
   /// Retrieve the member class template partial specialization from
@@ -2615,7 +2618,7 @@ class VarTemplateSpecializationDecl : public VarDecl,
   /// Further info for explicit template specialization/instantiation.
   struct ExplicitSpecializationInfo {
     /// The type-as-written.
-    TypeSourceInfo *TypeAsWritten = nullptr;
+    // TypeSourceInfo *TypeAsWritten = nullptr;
 
     /// The location of the extern keyword.
     SourceLocation ExternLoc;
@@ -2632,7 +2635,10 @@ class VarTemplateSpecializationDecl : public VarDecl,
 
   /// The template arguments used to describe this specialization.
   const TemplateArgumentList *TemplateArgs;
-  const ASTTemplateArgumentListInfo *TemplateArgsInfo = nullptr;
+
+  // The source info for the template arguments as written.
+  /// FIXME: redundant with TypeAsWritten?
+  const ASTTemplateArgumentListInfo *ArgsAsWritten = nullptr;
 
   /// The point where this template was instantiated (if any).
   SourceLocation PointOfInstantiation;
@@ -2653,7 +2659,8 @@ protected:
                                 VarTemplateDecl *SpecializedTemplate,
                                 QualType T, TypeSourceInfo *TInfo,
                                 StorageClass S,
-                                ArrayRef<TemplateArgument> Args);
+                                ArrayRef<TemplateArgument> Args,
+                          const ASTTemplateArgumentListInfo *ArgsAsWritten);
 
   explicit VarTemplateSpecializationDecl(Kind DK, ASTContext &Context);
 
@@ -2666,7 +2673,8 @@ public:
   Create(ASTContext &Context, DeclContext *DC, SourceLocation StartLoc,
          SourceLocation IdLoc, VarTemplateDecl *SpecializedTemplate, QualType T,
          TypeSourceInfo *TInfo, StorageClass S,
-         ArrayRef<TemplateArgument> Args);
+         ArrayRef<TemplateArgument> Args,
+         const TemplateArgumentListInfo &ArgInfos);
   static VarTemplateSpecializationDecl *CreateDeserialized(ASTContext &C,
                                                            unsigned ID);
 
@@ -2685,13 +2693,20 @@ public:
   /// specialization.
   const TemplateArgumentList &getTemplateArgs() const { return *TemplateArgs; }
 
+  /// Get the template arguments as written.
+  const ASTTemplateArgumentListInfo *getTemplateArgsAsWritten() const {
+    return ArgsAsWritten;
+  }
+
+  #if 0
   // TODO: Always set this when creating the new specialization?
   void setTemplateArgsInfo(const TemplateArgumentListInfo &ArgsInfo);
   void setTemplateArgsInfo(const ASTTemplateArgumentListInfo *ArgsInfo);
 
   const ASTTemplateArgumentListInfo *getTemplateArgsInfo() const {
-    return TemplateArgsInfo;
+    return ArgsAsWritten;
   }
+  #endif
 
   /// Determine the kind of specialization that this
   /// declaration represents.
@@ -2796,6 +2811,7 @@ public:
     SpecializedTemplate = TemplDecl;
   }
 
+  #if 0
   /// Sets the type of this specialization as it was written by
   /// the user.
   void setTypeAsWritten(TypeSourceInfo *T) {
@@ -2809,6 +2825,7 @@ public:
   TypeSourceInfo *getTypeAsWritten() const {
     return ExplicitInfo ? ExplicitInfo->TypeAsWritten : nullptr;
   }
+  #endif
 
   /// Gets the location of the extern keyword, if present.
   SourceLocation getExternLoc() const {
@@ -2861,10 +2878,6 @@ class VarTemplatePartialSpecializationDecl
   /// The list of template parameters
   TemplateParameterList *TemplateParams = nullptr;
 
-  /// The source info for the template arguments as written.
-  /// FIXME: redundant with TypeAsWritten?
-  const ASTTemplateArgumentListInfo *ArgsAsWritten = nullptr;
-
   /// The variable template partial specialization from which this
   /// variable template partial specialization was instantiated.
   ///
@@ -2910,11 +2923,6 @@ public:
   /// Get the list of template parameters
   TemplateParameterList *getTemplateParameters() const {
     return TemplateParams;
-  }
-
-  /// Get the template arguments as written.
-  const ASTTemplateArgumentListInfo *getTemplateArgsAsWritten() const {
-    return ArgsAsWritten;
   }
 
   /// \brief All associated constraints of this partial specialization,
