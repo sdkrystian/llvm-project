@@ -1996,14 +1996,14 @@ DEF_TRAVERSE_DECL(CXXRecordDecl, { TRY_TO(TraverseCXXRecordHelper(D)); })
 #define DEF_TRAVERSE_TMPL_SPEC_DECL(TMPLDECLKIND, DECLKIND)                    \
   DEF_TRAVERSE_DECL(TMPLDECLKIND##TemplateSpecializationDecl, {                \
                                                                                \
+                                                                               \
+    if (getDerived().shouldVisitTemplateInstantiations() ||                    \
+        D->getTemplateSpecializationKind() == TSK_ExplicitSpecialization) {    \
     if (const auto *ArgsWritten = D->getTemplateArgsAsWritten()) {             \
       TRY_TO(TraverseTemplateArgumentLocsHelper(                               \
           ArgsWritten->getTemplateArgs(),                                      \
           ArgsWritten->NumTemplateArgs));                                      \
     }                                                                          \
-                                                                               \
-    if (getDerived().shouldVisitTemplateInstantiations() ||                    \
-        D->getTemplateSpecializationKind() == TSK_ExplicitSpecialization) {    \
       /* Traverse base definition for explicit specializations */              \
       TRY_TO(Traverse##DECLKIND##Helper(D));                                   \
     } else {                                                                   \
