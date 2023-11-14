@@ -246,6 +246,8 @@ Decl *Parser::ParseSingleDeclarationAfterTemplate(
         getCurScope(), AS, DS, ParsedAttributesView::none(),
         TemplateInfo.TemplateParams ? *TemplateInfo.TemplateParams
                                     : MultiTemplateParamsArg(),
+        TemplateInfo.LastParameterListWasEmpty ||
+            TemplateInfo.Kind == ParsedTemplateInfo::ExplicitSpecialization,
         TemplateInfo.Kind == ParsedTemplateInfo::ExplicitInstantiation,
         AnonRecord);
     Actions.ActOnDefinedDeclarationSpecifier(Decl);

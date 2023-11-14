@@ -4876,7 +4876,10 @@ Decl *Sema::ParsedFreeStandingDeclSpec(Scope *S, AccessSpecifier AS,
                                        const ParsedAttributesView &DeclAttrs,
                                        RecordDecl *&AnonRecord) {
   return ParsedFreeStandingDeclSpec(
-      S, AS, DS, DeclAttrs, MultiTemplateParamsArg(), false, AnonRecord);
+      S, AS, DS, DeclAttrs, MultiTemplateParamsArg(),
+      /*IsExplicitSpecialization=*/false,
+      /*IsExplicitInstantiation=*/false,
+      AnonRecord);
 }
 
 // The MS ABI changed between VS2013 and VS2015 with regard to numbers used to
@@ -5099,6 +5102,7 @@ Decl *Sema::ParsedFreeStandingDeclSpec(Scope *S, AccessSpecifier AS,
                                        DeclSpec &DS,
                                        const ParsedAttributesView &DeclAttrs,
                                        MultiTemplateParamsArg TemplateParams,
+                                       bool IsExplicitSpecialization,
                                        bool IsExplicitInstantiation,
                                        RecordDecl *&AnonRecord) {
   Decl *TagD = nullptr;
@@ -5169,8 +5173,6 @@ Decl *Sema::ParsedFreeStandingDeclSpec(Scope *S, AccessSpecifier AS,
   }
 
   const CXXScopeSpec &SS = DS.getTypeSpecScope();
-  bool IsExplicitSpecialization =
-    !TemplateParams.empty() && TemplateParams.back()->size() == 0;
   if (Tag && SS.isNotEmpty() && !Tag->isCompleteDefinition() &&
       !IsExplicitInstantiation && !IsExplicitSpecialization &&
       !isa<ClassTemplatePartialSpecializationDecl>(Tag)) {

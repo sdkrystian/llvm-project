@@ -3309,6 +3309,7 @@ public:
   Decl *ParsedFreeStandingDeclSpec(Scope *S, AccessSpecifier AS, DeclSpec &DS,
                                    const ParsedAttributesView &DeclAttrs,
                                    MultiTemplateParamsArg TemplateParams,
+                                   bool IsExplicitSpecialization,
                                    bool IsExplicitInstantiation,
                                    RecordDecl *&AnonRecord);
 

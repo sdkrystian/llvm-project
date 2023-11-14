@@ -2863,7 +2863,10 @@ Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
 
     RecordDecl *AnonRecord = nullptr;
     Decl *TheDecl = Actions.ParsedFreeStandingDeclSpec(
-        getCurScope(), AS, DS, DeclAttrs, TemplateParams, false, AnonRecord);
+        getCurScope(), AS, DS, DeclAttrs, TemplateParams,
+        TemplateInfo.LastParameterListWasEmpty ||
+            TemplateInfo.Kind == ParsedTemplateInfo::ExplicitSpecialization,
+        /*IsExplicitInstantiation=*/false, AnonRecord);
     Actions.ActOnDefinedDeclarationSpecifier(TheDecl);
     DS.complete(TheDecl);
     if (AnonRecord) {
