@@ -1761,7 +1761,8 @@ Parser::TryAnnotateName(CorrectionCandidateCallback *CCC,
   if (getLangOpts().CPlusPlus &&
       ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
                                      /*ObjectHasErrors=*/false,
-                                     EnteringContext))
+                                     EnteringContext,
+                                     /*Declarative=*/false))
     return ANK_Error;
 
   if (Tok.isNot(tok::identifier) || SS.isInvalid()) {
@@ -2006,8 +2007,10 @@ bool Parser::TryAnnotateTypeOrScopeToken(
     CXXScopeSpec SS;
     if (ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
                                        /*ObjectHasErrors=*/false,
-                                       /*EnteringContext=*/false, nullptr,
-                                       /*IsTypename*/ true))
+                                       /*EnteringContext=*/false,
+                                       /*Declarative=*/false,
+                                       /*MayBePseudoDestructor=*/nullptr,
+                                       /*IsTypename*/true))
       return true;
     if (SS.isEmpty()) {
       if (Tok.is(tok::identifier) || Tok.is(tok::annot_template_id) ||
@@ -2078,7 +2081,8 @@ bool Parser::TryAnnotateTypeOrScopeToken(
   if (getLangOpts().CPlusPlus)
     if (ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
                                        /*ObjectHasErrors=*/false,
-                                       /*EnteringContext*/ false))
+                                       /*EnteringContext*/false,
+                                       /*Declarative=*/false))
       return true;
 
   return TryAnnotateTypeOrScopeTokenAfterScopeSpec(SS, !WasScopeAnnotation,
@@ -2203,7 +2207,7 @@ bool Parser::TryAnnotateTypeOrScopeTokenAfterScopeSpec(
 ///
 /// Note that this routine emits an error if you call it with ::new or ::delete
 /// as the current tokens, so only call it in contexts where these are invalid.
-bool Parser::TryAnnotateCXXScopeToken(bool EnteringContext) {
+bool Parser::TryAnnotateCXXScopeToken(bool EnteringContext, bool Declarative) {
   assert(getLangOpts().CPlusPlus &&
          "Call sites of this function should be guarded by checking for C++");
   assert(MightBeCXXScopeToken() && "Cannot be a type or scope token!");
@@ -2211,7 +2215,8 @@ bool Parser::TryAnnotateCXXScopeToken(bool EnteringContext) {
   CXXScopeSpec SS;
   if (ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
                                      /*ObjectHasErrors=*/false,
-                                     EnteringContext))
+                                     EnteringContext,
+                                     /*Declarative=*/false))
     return true;
   if (SS.isEmpty())
     return false;
@@ -2322,7 +2327,8 @@ bool Parser::ParseMicrosoftIfExistsCondition(IfExistsCondition& Result) {
   if (getLangOpts().CPlusPlus)
     ParseOptionalCXXScopeSpecifier(Result.SS, /*ObjectType=*/nullptr,
                                    /*ObjectHasErrors=*/false,
-                                   /*EnteringContext=*/false);
+                                   /*EnteringContext=*/false,
+                                   /*Declarative=*/false);
 
   // Check nested-name specifier.
   if (Result.SS.isInvalid()) {

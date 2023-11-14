@@ -310,6 +310,7 @@ Decl *Parser::ParseNamespaceAlias(SourceLocation NamespaceLoc,
   ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
                                  /*ObjectHasErrors=*/false,
                                  /*EnteringContext=*/false,
+                                 /*Declarative=*/false,
                                  /*MayBePseudoDestructor=*/nullptr,
                                  /*IsTypename=*/false,
                                  /*LastII=*/nullptr,
@@ -543,6 +544,7 @@ Decl *Parser::ParseUsingDirective(DeclaratorContext Context,
   ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
                                  /*ObjectHasErrors=*/false,
                                  /*EnteringContext=*/false,
+                                 /*Declarative=*/false,
                                  /*MayBePseudoDestructor=*/nullptr,
                                  /*IsTypename=*/false,
                                  /*LastII=*/nullptr,
@@ -612,6 +614,7 @@ bool Parser::ParseUsingDeclarator(DeclaratorContext Context,
   if (ParseOptionalCXXScopeSpecifier(D.SS, /*ObjectType=*/nullptr,
                                      /*ObjectHasErrors=*/false,
                                      /*EnteringContext=*/false,
+                                     /*Declarative=*/false,
                                      /*MayBePseudoDtor=*/nullptr,
                                      /*IsTypename=*/false,
                                      /*LastII=*/&LastII,
@@ -714,6 +717,7 @@ Parser::DeclGroupPtrTy Parser::ParseUsingDeclaration(
     if (ParseOptionalCXXScopeSpecifier(SS, /*ParsedType=*/nullptr,
                                        /*ObectHasErrors=*/false,
                                        /*EnteringConttext=*/false,
+                                       /*Declarative=*/false,
                                        /*MayBePseudoDestructor=*/nullptr,
                                        /*IsTypename=*/false,
                                        /*IdentifierInfo=*/nullptr,
@@ -1271,7 +1275,8 @@ TypeResult Parser::ParseBaseTypeSpecifier(SourceLocation &BaseLoc,
   CXXScopeSpec SS;
   if (ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
                                      /*ObjectHasErrors=*/false,
-                                     /*EnteringContext=*/false))
+                                     /*EnteringContext=*/false,
+                                     /*Declarative=*/false))
     return true;
 
   BaseLoc = Tok.getLocation();
@@ -1708,7 +1713,8 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
     bool HasValidSpec = true;
     if (ParseOptionalCXXScopeSpecifier(Spec, /*ObjectType=*/nullptr,
                                        /*ObjectHasErrors=*/false,
-                                       EnteringContext)) {
+                                       EnteringContext,
+                                       /*Declarative=*/true)) {
       DS.SetTypeSpecError();
       HasValidSpec = false;
     }
@@ -2718,7 +2724,8 @@ Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
       CXXScopeSpec SS;
       ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
                                      /*ObjectHasErrors=*/false,
-                                     /*EnteringContext=*/false);
+                                     /*EnteringContext=*/false,
+                                     /*Declarative=*/false);
 
       if (SS.isInvalid()) {
         SkipUntil(tok::semi);
@@ -3804,7 +3811,8 @@ MemInitResult Parser::ParseMemInitializer(Decl *ConstructorDecl) {
   CXXScopeSpec SS;
   if (ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
                                      /*ObjectHasErrors=*/false,
-                                     /*EnteringContext=*/false))
+                                     /*EnteringContext=*/false,
+                                     /*Declarative=*/false))
     return true;
 
   // : identifier

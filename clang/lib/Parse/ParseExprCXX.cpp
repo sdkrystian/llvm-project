@@ -135,6 +135,9 @@ void Parser::CheckForTemplateAndDigraph(Token &Next, ParsedType ObjectType,
 /// \param EnteringContext whether we will be entering into the context of
 /// the nested-name-specifier after parsing it.
 ///
+/// \param Declarative whether this nested-name-specifier is a declarative
+/// nested-name-specifier.
+///
 /// \param MayBePseudoDestructor When non-NULL, points to a flag that
 /// indicates whether this nested-name-specifier may be part of a
 /// pseudo-destructor name. In this case, the flag will be set false
@@ -156,8 +159,9 @@ void Parser::CheckForTemplateAndDigraph(Token &Next, ParsedType ObjectType,
 /// \returns true if there was an error parsing a scope specifier
 bool Parser::ParseOptionalCXXScopeSpecifier(
     CXXScopeSpec &SS, ParsedType ObjectType, bool ObjectHadErrors,
-    bool EnteringContext, bool *MayBePseudoDestructor, bool IsTypename,
-    IdentifierInfo **LastII, bool OnlyNamespace, bool InUsingDeclaration) {
+    bool EnteringContext, bool Declarative, bool *MayBePseudoDestructor,
+    bool IsTypename, IdentifierInfo **LastII, bool OnlyNamespace,
+    bool InUsingDeclaration) {
   assert(getLangOpts().CPlusPlus &&
          "Call sites of this function should be guarded by checking for C++");
 
@@ -342,6 +346,11 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
       if (CheckForDestructor && GetLookAheadToken(2).is(tok::tilde)) {
         *MayBePseudoDestructor = true;
         return false;
+      }
+
+      if (Declarative && TemplateId->TemplateKWLoc.isValid()) {
+        Diag(TemplateId->TemplateKWLoc,
+             diag::err_template_in_declarative_nested_name_specifier);
       }
 
       if (LastII)
@@ -672,7 +681,9 @@ ExprResult Parser::ParseCXXIdExpression(bool isAddressOfOperand) {
   CXXScopeSpec SS;
   ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
                                  /*ObjectHasErrors=*/false,
-                                 /*EnteringContext=*/false);
+                                 /*EnteringContext=*/false,
+                                 // KRYSTIAN FIXME: Is this correct?
+                                 /*Declarative=*/false);
 
   Token Replacement;
   ExprResult Result =
@@ -3082,7 +3093,8 @@ bool Parser::ParseUnqualifiedId(CXXScopeSpec &SS, ParsedType ObjectType,
         SS.clear();
       }
       if (ParseOptionalCXXScopeSpecifier(SS, ObjectType, ObjectHadErrors,
-                                         EnteringContext))
+                                         EnteringContext,
+                                         /*Declarative=*/false))
         return true;
       if (SS.isNotEmpty())
         ObjectType = nullptr;

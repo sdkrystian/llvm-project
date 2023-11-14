@@ -1636,7 +1636,8 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
         CXXScopeSpec SS;
         ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
                                        /*ObjectHasErrors=*/false,
-                                       /*EnteringContext=*/false);
+                                       /*EnteringContext=*/false,
+                                       /*Declarative=*/false);
         AnnotateTemplateIdTokenAsType(SS, ImplicitTypenameContext::Yes);
         return ParseCastExpression(ParseKind, isAddressOfOperand, NotCastExpr,
                                    isTypeCast, isVectorLiteral,
@@ -2196,7 +2197,8 @@ Parser::ParsePostfixExpressionSuffix(ExprResult LHS) {
         }
         ParseOptionalCXXScopeSpecifier(
             SS, ObjectType, LHS.get() && LHS.get()->containsErrors(),
-            /*EnteringContext=*/false, &MayBePseudoDestructor);
+            /*EnteringContext=*/false, /*Declarative=*/false,
+            &MayBePseudoDestructor);
         if (SS.isNotEmpty())
           ObjectType = nullptr;
       }

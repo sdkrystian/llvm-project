@@ -3196,7 +3196,7 @@ Parser::DiagnoseMissingSemiAfterTagDefinition(DeclSpec &DS, AccessSpecifier AS,
   if (getLangOpts().CPlusPlus &&
       Tok.isOneOf(tok::identifier, tok::coloncolon, tok::kw_decltype,
                   tok::annot_template_id) &&
-      TryAnnotateCXXScopeToken(EnteringContext)) {
+      TryAnnotateCXXScopeToken(EnteringContext, /*Declarative=*/true)) {
     SkipMalformedDecl();
     return true;
   }
@@ -4912,7 +4912,8 @@ void Parser::ParseEnumSpecifier(SourceLocation StartLoc, DeclSpec &DS,
     CXXScopeSpec Spec;
     if (ParseOptionalCXXScopeSpecifier(Spec, /*ObjectType=*/nullptr,
                                        /*ObjectHasErrors=*/false,
-                                       /*EnteringContext=*/true))
+                                       /*EnteringContext=*/true,
+                                       /*Declarative=*/true))
       return;
 
     if (Spec.isSet() && Tok.isNot(tok::identifier)) {
@@ -5850,7 +5851,8 @@ bool Parser::isConstructorDeclarator(bool IsUnqualified, bool DeductionGuide,
 
   if (ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
                                      /*ObjectHasErrors=*/false,
-                                     /*EnteringContext=*/true)) {
+                                     /*EnteringContext=*/true,
+                                     /*Declarative=*/true)) {
     return false;
   }
 
@@ -6251,7 +6253,9 @@ void Parser::ParseDeclaratorInternal(Declarator &D,
     CXXScopeSpec SS;
     SS.setTemplateParamLists(D.getTemplateParameterLists());
     ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
-                                   /*ObjectHasErrors=*/false, EnteringContext);
+                                   /*ObjectHasErrors=*/false, EnteringContext,
+                                   // KRYSTIAN FIXME: Is this correct?
+                                   /*Declarative=*/false);
 
     if (SS.isNotEmpty()) {
       if (Tok.isNot(tok::star)) {
@@ -6484,7 +6488,8 @@ void Parser::ParseDirectDeclarator(Declarator &D) {
                              D.getContext() == DeclaratorContext::Member;
       ParseOptionalCXXScopeSpecifier(
           D.getCXXScopeSpec(), /*ObjectType=*/nullptr,
-          /*ObjectHasErrors=*/false, EnteringContext);
+          /*ObjectHasErrors=*/false, EnteringContext,
+          /*Declarative=*/true);
     }
 
     if (D.getCXXScopeSpec().isValid()) {

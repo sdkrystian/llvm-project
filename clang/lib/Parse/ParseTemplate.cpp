@@ -408,6 +408,7 @@ Parser::ParseConceptDefinition(const ParsedTemplateInfo &TemplateInfo,
   if (ParseOptionalCXXScopeSpecifier(
           SS, /*ObjectType=*/nullptr,
           /*ObjectHasErrors=*/false, /*EnteringContext=*/false,
+          /*Declarative=*/false,
           /*MayBePseudoDestructor=*/nullptr,
           /*IsTypename=*/false, /*LastII=*/nullptr, /*OnlyNamespace=*/true) ||
       SS.isInvalid()) {
@@ -734,6 +735,7 @@ bool Parser::TryAnnotateTypeConstraint() {
   if (ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
                                      /*ObjectHasErrors=*/false,
                                      /*EnteringContext=*/false,
+                                     /*Declarative=*/false,
                                      /*MayBePseudoDestructor=*/nullptr,
                                      // If this is not a type-constraint, then
                                      // this scope-spec is part of the typename
@@ -805,7 +807,8 @@ NamedDecl *Parser::ParseTypeParameter(unsigned Depth, unsigned Position) {
   SourceLocation KeyLoc;
   ParseOptionalCXXScopeSpecifier(TypeConstraintSS, /*ObjectType=*/nullptr,
                                  /*ObjectHasErrors=*/false,
-                                 /*EnteringContext*/ false);
+                                 /*EnteringContext*/ false,
+                                 /*Declarative=*/false);
   if (Tok.is(tok::annot_template_id)) {
     // Consume the 'type-constraint'.
     TypeConstraint =
@@ -1518,7 +1521,8 @@ ParsedTemplateArgument Parser::ParseTemplateTemplateArgument() {
   CXXScopeSpec SS; // nested-name-specifier, if present
   ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
                                  /*ObjectHasErrors=*/false,
-                                 /*EnteringContext=*/false);
+                                 /*EnteringContext=*/false,
+                                 /*Declarative=*/false);
 
   ParsedTemplateArgument Result;
   SourceLocation EllipsisLoc;

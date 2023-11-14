@@ -428,6 +428,8 @@ def err_typename_invalid_constexpr : Error<
 def err_typename_identifiers_only : Error<
   "typename is allowed for identifiers only">;
 
+def err_template_in_declarative_nested_name_specifier : Error<
+    "'template' cannot be used in a declarative nested name specifier">;
 def err_friend_invalid_in_context : Error<
   "'friend' used outside of class">;
 def err_templated_using_directive_declaration : Error<

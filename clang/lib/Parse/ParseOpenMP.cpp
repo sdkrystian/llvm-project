@@ -3029,7 +3029,10 @@ bool Parser::ParseOpenMPSimpleVarList(
 
     if (AllowScopeSpecifier && getLangOpts().CPlusPlus &&
         ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
-                                       /*ObjectHasErrors=*/false, false)) {
+                                       /*ObjectHasErrors=*/false,
+                                       /*EnteringContext=*/false,
+                                       // KRYSTIAN FIXME: Is this correct?
+                                       /*Declarative=*/false)) {
       IsCorrect = false;
       SkipUntil(tok::comma, tok::r_paren, tok::annot_pragma_openmp_end,
                 StopBeforeMatch);
@@ -4170,7 +4173,9 @@ bool Parser::parseMapperModifier(Sema::OpenMPVarListDataTy &Data) {
     ParseOptionalCXXScopeSpecifier(Data.ReductionOrMapperIdScopeSpec,
                                    /*ObjectType=*/nullptr,
                                    /*ObjectHasErrors=*/false,
-                                   /*EnteringContext=*/false);
+                                   /*EnteringContext=*/false,
+                                   // KRYSTIAN FIXME: Is this correct?
+                                   /*Declarative=*/false);
   if (Tok.isNot(tok::identifier) && Tok.isNot(tok::kw_default)) {
     Diag(Tok.getLocation(), diag::err_omp_mapper_illegal_identifier);
     SkipUntil(tok::colon, tok::r_paren, tok::annot_pragma_openmp_end,
@@ -4460,7 +4465,9 @@ bool Parser::ParseOpenMPVarList(OpenMPDirectiveKind DKind,
       ParseOptionalCXXScopeSpecifier(Data.ReductionOrMapperIdScopeSpec,
                                      /*ObjectType=*/nullptr,
                                      /*ObjectHasErrors=*/false,
-                                     /*EnteringContext=*/false);
+                                     /*EnteringContext=*/false,
+                                     // KRYSTIAN FIXME: Is this correct?
+                                     /*Declarative=*/false);
     InvalidReductionId = ParseReductionId(
         *this, Data.ReductionOrMapperIdScopeSpec, UnqualifiedReductionId);
     if (InvalidReductionId) {

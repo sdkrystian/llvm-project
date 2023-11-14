@@ -70,7 +70,9 @@ bool Parser::isCXXDeclarationStatement(
       CXXScopeSpec SS;
       ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
                                      /*ObjectHasErrors=*/false,
-                                     /*EnteringContext=*/true);
+                                     /*EnteringContext=*/true,
+                                     // KRYSTIAN FIXME: Is this correct?
+                                     /*Declarative=*/true);
 
       switch (Tok.getKind()) {
       case tok::identifier: {

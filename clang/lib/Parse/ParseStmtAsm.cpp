@@ -223,7 +223,8 @@ ExprResult Parser::ParseMSAsmIdentifier(llvm::SmallVectorImpl<Token> &LineToks,
   if (getLangOpts().CPlusPlus)
     ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
                                    /*ObjectHasErrors=*/false,
-                                   /*EnteringContext=*/false);
+                                   /*EnteringContext=*/false,
+                                   /*Declarative=*/false);
 
   // Require an identifier here.
   SourceLocation TemplateKWLoc;

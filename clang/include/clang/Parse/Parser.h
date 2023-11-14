@@ -863,7 +863,8 @@ public:
   bool TryAnnotateTypeOrScopeTokenAfterScopeSpec(
       CXXScopeSpec &SS, bool IsNewScope,
       ImplicitTypenameContext AllowImplicitTypename);
-  bool TryAnnotateCXXScopeToken(bool EnteringContext = false);
+  bool TryAnnotateCXXScopeToken(bool EnteringContext = false,
+                                bool Declarative = false);
 
   bool MightBeCXXScopeToken() {
     return getLangOpts().CPlusPlus &&
@@ -1896,6 +1897,7 @@ private:
                                       ParsedType ObjectType,
                                       bool ObjectHasErrors,
                                       bool EnteringContext,
+                                      bool Declarative,
                                       bool *MayBePseudoDestructor = nullptr,
                                       bool IsTypename = false,
                                       IdentifierInfo **LastII = nullptr,
