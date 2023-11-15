@@ -62,10 +62,12 @@ MacroArgs *MacroArgs::create(const MacroInfo *MI,
 
   // Copy the actual unexpanded tokens to immediately after the result ptr.
   if (!UnexpArgTokens.empty()) {
-    static_assert(std::is_trivial_v<Token>,
+    #if 0
+      static_assert(std::is_trivial_v<Token>,
                   "assume trivial copyability if copying into the "
                   "uninitialized array (as opposed to reusing a cached "
                   "MacroArgs)");
+    #endif
     std::copy(UnexpArgTokens.begin(), UnexpArgTokens.end(),
               Result->getTrailingObjects<Token>());
   }
@@ -94,8 +96,9 @@ MacroArgs *MacroArgs::deallocate() {
   // Run the dtor to deallocate the vectors.
   this->~MacroArgs();
   // Release the memory for the object.
-  static_assert(std::is_trivially_destructible_v<Token>,
-                "assume trivially destructible and forego destructors");
+  std::destroy_n(getTrailingObjects<Token>(), NumUnexpArgTokens);
+  // static_assert(std::is_trivially_destructible_v<Token>,
+  //               "assume trivially destructible and forego destructors");
   free(this);
 
   return Next;

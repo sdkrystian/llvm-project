@@ -23,6 +23,15 @@ namespace clang {
 
 class IdentifierInfo;
 
+class AnnotatedToken {
+  friend class Token;
+
+  /// Total number of references. This is NOT thread-safe.
+  unsigned Refs = 0;
+public:
+  virtual ~AnnotatedToken() {}
+};
+
 /// Token - This structure provides full information about a lexed token.
 /// It is not intended to be space efficient, it is intended to return as much
 /// information as possible about each returned token.  This is expected to be
@@ -68,7 +77,68 @@ class Token {
   /// Flags - Bits we track about this token, members of the TokenFlags enum.
   unsigned short Flags;
 
+  void setPtrData(void *val = nullptr) {
+    freeAnnotationData();
+    PtrData = val;
+  }
+
+  void setPtrData(AnnotatedToken *val) {
+    assert(isAnnotation());
+    setPtrData(static_cast<void *>(val));
+    setFlag(OwnsAnnotation);
+    ++getAnnotationData()->Refs;
+  }
+
+  AnnotatedToken *getAnnotationData() {
+    assert(isAnnotation() && ownsAnnotation() && hasPtrData());
+    return static_cast<AnnotatedToken *>(PtrData);
+  }
+
+  void freeAnnotationData() {
+    if(!ownsAnnotation() || !hasPtrData())
+      return;
+    AnnotatedToken *Data = getAnnotationData();
+    assert(Data->Refs);
+    if(!--Data->Refs) {
+      delete Data;
+      clearFlag(OwnsAnnotation);
+      PtrData = nullptr;
+    }
+  }
+
 public:
+  Token() = default;
+  Token(const Token &Other) : Loc(Other.Loc), UintData(Other.UintData),
+        Kind(Other.Kind), Flags(Other.Flags), PtrData(Other.PtrData) {
+    if(ownsAnnotation())
+      ++getAnnotationData()->Refs;
+    // assert(!Other.ownsAnnotation() && "Copying Token with owned annotation");
+  }
+
+  Token(Token &&Other) : Loc(Other.Loc), UintData(Other.UintData),
+      Kind(Other.Kind), Flags(Other.Flags), PtrData(Other.PtrData) {
+    Other.clearFlag(OwnsAnnotation);
+    Other.PtrData = nullptr;
+  }
+
+  Token& operator=(const Token& Other) {
+    if(&Other == this)
+      return *this;
+    freeAnnotationData();
+    return *::new (this) Token(Other);
+  }
+
+  Token& operator=(Token&& Other) {
+    if(&Other == this)
+      return *this;
+    freeAnnotationData();
+    return *::new (this) Token(std::move(Other));
+  }
+
+  ~Token() {
+    freeAnnotationData();
+  }
+
   // Various flags set per token:
   enum TokenFlags {
     StartOfLine = 0x01,   // At start of line or only after whitespace
@@ -88,10 +158,16 @@ public:
     IsReinjected = 0x800, // A phase 4 token that was produced before and
                           // re-added, e.g. via EnterTokenStream. Annotation
                           // tokens are *not* reinjected.
+    OwnsAnnotation = 0x1000 // This token stores annotation data allocated by
+                            // new that needs to be deallocated once the token
+                            // is destroyed.
   };
 
   tok::TokenKind getKind() const { return Kind; }
-  void setKind(tok::TokenKind K) { Kind = K; }
+  void setKind(tok::TokenKind K) {
+    assert(!ownsAnnotation() && "Token owns annotation data");
+    Kind = K;
+  }
 
   /// is/isNot - Predicates to check if this token is a specific kind, as in
   /// "if (Tok.is(tok::l_brace)) {...}".
@@ -174,9 +250,9 @@ public:
 
   /// Reset all flags to cleared.
   void startToken() {
+    setPtrData();
     Kind = tok::unknown;
     Flags = 0;
-    PtrData = nullptr;
     UintData = 0;
     Loc = SourceLocation().getRawEncoding();
   }
@@ -193,7 +269,7 @@ public:
     return (IdentifierInfo*) PtrData;
   }
   void setIdentifierInfo(IdentifierInfo *II) {
-    PtrData = (void*) II;
+    setPtrData(II);
   }
 
   const void *getEofData() const {
@@ -202,8 +278,8 @@ public:
   }
   void setEofData(const void *D) {
     assert(is(tok::eof));
-    assert(!PtrData);
-    PtrData = const_cast<void *>(D);
+    assert(!hasPtrData());
+    setPtrData(const_cast<void *>(D));
   }
 
   /// getRawIdentifier - For a raw identifier token (i.e., an identifier
@@ -215,7 +291,7 @@ public:
   }
   void setRawIdentifierData(const char *Ptr) {
     assert(is(tok::raw_identifier));
-    PtrData = const_cast<char*>(Ptr);
+    setPtrData(const_cast<char *>(Ptr));
   }
 
   /// getLiteralData - For a literal token (numeric constant, string, etc), this
@@ -227,16 +303,22 @@ public:
   }
   void setLiteralData(const char *Ptr) {
     assert(isLiteral() && "Cannot set literal data of non-literal");
-    PtrData = const_cast<char*>(Ptr);
+    setPtrData(const_cast<char *>(Ptr));
   }
 
   void *getAnnotationValue() const {
     assert(isAnnotation() && "Used AnnotVal on non-annotation token");
     return PtrData;
   }
+
   void setAnnotationValue(void *val) {
     assert(isAnnotation() && "Used AnnotVal on non-annotation token");
-    PtrData = val;
+    setPtrData(val);
+  }
+
+  void setAnnotationValue(AnnotatedToken *val) {
+    assert(isAnnotation() && "Used AnnotVal on non-annotation token");
+    setPtrData(val);
   }
 
   /// Set the specified flag.
@@ -290,6 +372,8 @@ public:
 
   /// Return true if this token has trigraphs or escaped newlines in it.
   bool needsCleaning() const { return getFlag(NeedsCleaning); }
+
+  bool ownsAnnotation() const { return getFlag(OwnsAnnotation); }
 
   /// Return true if this token has an empty macro before it.
   ///

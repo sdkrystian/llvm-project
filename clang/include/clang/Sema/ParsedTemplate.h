@@ -147,7 +147,8 @@ namespace clang {
   /// annotate C as a TemplateIdAnnotation with no template arguments (the angle
   /// locations would be invalid in this case).
   struct TemplateIdAnnotation final
-      : private llvm::TrailingObjects<TemplateIdAnnotation,
+      : public AnnotatedToken,
+        private llvm::TrailingObjects<TemplateIdAnnotation,
                                       ParsedTemplateArgument> {
     friend TrailingObjects;
     /// TemplateKWLoc - The location of the template keyword.
@@ -251,7 +252,10 @@ namespace clang {
       std::uninitialized_copy(TemplateArgs.begin(), TemplateArgs.end(),
                               getTemplateArgs());
     }
-    ~TemplateIdAnnotation() = default;
+    // ~TemplateIdAnnotation() = default;
+    ~TemplateIdAnnotation() {
+        auto x = this;
+    }
   };
 
   /// Retrieves the range of the given template parameter lists.

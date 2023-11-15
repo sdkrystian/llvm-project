@@ -544,7 +544,7 @@ bool Preprocessor::HandleEndOfFile(Token &Result, bool isEndOfMacro) {
   if (getLangOpts().IncrementalExtensions) {
     CurLexer->FormTokenWithChars(Result, EndPos, tok::annot_repl_input_end);
     Result.setAnnotationEndLoc(Result.getLocation());
-    Result.setAnnotationValue(nullptr);
+    Result.setAnnotationValue(static_cast<void *>(nullptr));
   } else {
     CurLexer->FormTokenWithChars(Result, EndPos, tok::eof);
   }
