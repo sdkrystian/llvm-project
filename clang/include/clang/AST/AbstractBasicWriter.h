@@ -260,7 +260,6 @@ public:
         continue;
 
       case NestedNameSpecifier::Super:
-        asImpl().writeDeclRef(NNS->getAsRecordDecl());
         continue;
       }
       llvm_unreachable("bad nested name specifier kind");

@@ -176,7 +176,14 @@ DeclContext *Sema::computeDeclContext(const CXXScopeSpec &SS,
     return Context.getTranslationUnitDecl();
 
   case NestedNameSpecifier::Super:
-    return NNS->getAsRecordDecl();
+  {
+    DeclContext *Cur = CurContext;
+    if (Cur->isDependentContext())
+      return nullptr;
+    for (; Cur && !Cur->isRecord(); Cur = Cur->getParent());
+    assert(Cur && "Broken __super specifier");
+    return dyn_cast<CXXRecordDecl>(Cur);
+  }
   }
 
   llvm_unreachable("Invalid NestedNameSpecifier::Kind!");
@@ -336,7 +343,7 @@ bool Sema::ActOnSuperScopeSpecifier(SourceLocation SuperLoc,
     return true;
   }
 
-  SS.MakeSuper(Context, RD, SuperLoc, ColonColonLoc);
+  SS.MakeSuper(Context, SuperLoc, ColonColonLoc);
   return false;
 }
 

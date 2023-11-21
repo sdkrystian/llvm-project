@@ -9546,11 +9546,7 @@ ASTImporter::Import(NestedNameSpecifier *FromNNS) {
     return ToContext.getGlobalNestedNameSpecifier();
 
   case NestedNameSpecifier::Super:
-    if (ExpectedDecl RDOrErr = Import(FromNNS->getAsRecordDecl()))
-      return ToContext.getSuperNestedNameSpecifier(
-                                                cast<CXXRecordDecl>(*RDOrErr));
-    else
-      return RDOrErr.takeError();
+    return ToContext.getSuperNestedNameSpecifier();
 
   case NestedNameSpecifier::TypeSpec:
     if (ExpectedTypePtr TyOrErr = Import(FromNNS->getAsType())) {
@@ -9587,14 +9583,13 @@ ASTImporter::Import(NestedNameSpecifierLoc FromNNS) {
     NestedNameSpecifier::SpecifierKind Kind = Spec->getKind();
 
     SourceLocation ToLocalBeginLoc, ToLocalEndLoc;
-    if (Kind != NestedNameSpecifier::Super) {
-      if (Error Err = importInto(ToLocalBeginLoc, NNS.getLocalBeginLoc()))
-        return std::move(Err);
 
-      if (Kind != NestedNameSpecifier::Global)
-        if (Error Err = importInto(ToLocalEndLoc, NNS.getLocalEndLoc()))
-          return std::move(Err);
-    }
+    if (Error Err = importInto(ToLocalBeginLoc, NNS.getLocalBeginLoc()))
+      return std::move(Err);
+
+    if (Kind != NestedNameSpecifier::Global)
+      if (Error Err = importInto(ToLocalEndLoc, NNS.getLocalEndLoc()))
+        return std::move(Err);
 
     switch (Kind) {
     case NestedNameSpecifier::Identifier:
@@ -9626,15 +9621,9 @@ ASTImporter::Import(NestedNameSpecifierLoc FromNNS) {
       Builder.MakeGlobal(getToContext(), ToLocalBeginLoc);
       break;
 
-    case NestedNameSpecifier::Super: {
-      auto ToSourceRangeOrErr = Import(NNS.getSourceRange());
-      if (!ToSourceRangeOrErr)
-        return ToSourceRangeOrErr.takeError();
-
-      Builder.MakeSuper(getToContext(), Spec->getAsRecordDecl(),
-                        ToSourceRangeOrErr->getBegin(),
-                        ToSourceRangeOrErr->getEnd());
-    }
+    case NestedNameSpecifier::Super:
+      Builder.MakeSuper(getToContext(), ToLocalBeginLoc, ToLocalEndLoc);
+      break;
   }
   }
 

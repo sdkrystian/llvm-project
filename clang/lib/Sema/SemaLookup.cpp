@@ -2690,11 +2690,13 @@ bool Sema::LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
 bool Sema::LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
                                CXXScopeSpec &SS) {
   auto *NNS = SS.getScopeRep();
-  if (NNS && NNS->getKind() == NestedNameSpecifier::Super)
-    return LookupInSuper(R, NNS->getAsRecordDecl());
-  else
+  if (NNS && NNS->getKind() == NestedNameSpecifier::Super) {
+    for (; LookupCtx && !LookupCtx->isRecord();
+        LookupCtx = LookupCtx->getParent());
+    return LookupInSuper(R, dyn_cast_if_present<CXXRecordDecl>(LookupCtx));
+  }
 
-    return LookupQualifiedName(R, LookupCtx);
+  return LookupQualifiedName(R, LookupCtx);
 }
 
 /// Performs name lookup for a name that was parsed in the
@@ -2726,8 +2728,21 @@ bool Sema::LookupParsedName(LookupResult &R, Scope *S, CXXScopeSpec *SS,
 
   if (SS && SS->isSet()) {
     NestedNameSpecifier *NNS = SS->getScopeRep();
-    if (NNS->getKind() == NestedNameSpecifier::Super)
-      return LookupInSuper(R, NNS->getAsRecordDecl());
+    if (NNS->getKind() == NestedNameSpecifier::Super) {
+      CXXRecordDecl *RD = nullptr;
+      for (; S; S = S->getParent()) {
+        if (S->isFunctionScope()) {
+          if (CXXMethodDecl *MD = dyn_cast<CXXMethodDecl>(S->getEntity()))
+            RD = MD->getParent();
+          break;
+        }
+        if (S->isClassScope()) {
+          RD = cast<CXXRecordDecl>(S->getEntity());
+          break;
+        }
+      }
+      return LookupInSuper(R, RD->getCanonicalDecl());
+    }
 
     if (DeclContext *DC = computeDeclContext(*SS, EnteringContext)) {
       // We have resolved the scope specifier to a particular declaration

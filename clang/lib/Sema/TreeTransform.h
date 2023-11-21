@@ -4345,13 +4345,9 @@ NestedNameSpecifierLoc TreeTransform<Derived>::TransformNestedNameSpecifierLoc(
       SS.MakeGlobal(SemaRef.Context, Q.getBeginLoc());
       break;
 
-    case NestedNameSpecifier::Super: {
-      CXXRecordDecl *RD =
-          cast_or_null<CXXRecordDecl>(getDerived().TransformDecl(
-              SourceLocation(), QNNS->getAsRecordDecl()));
-      SS.MakeSuper(SemaRef.Context, RD, Q.getBeginLoc(), Q.getEndLoc());
+    case NestedNameSpecifier::Super:
+      SS.MakeSuper(SemaRef.Context, Q.getBeginLoc(), Q.getEndLoc());
       break;
-    }
 
     case NestedNameSpecifier::TypeSpec: {
       TypeLoc TL = TransformTypeInObjectScope(Q.getTypeLoc(), ObjectType,

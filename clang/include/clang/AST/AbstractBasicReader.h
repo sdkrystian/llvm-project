@@ -279,8 +279,7 @@ public:
         continue;
 
       case NestedNameSpecifier::Super:
-        cur = ctx.getSuperNestedNameSpecifier(
-            asImpl().readCXXRecordDeclRef());
+        cur = ctx.getSuperNestedNameSpecifier();
         continue;
       }
       llvm_unreachable("bad nested name specifier kind");

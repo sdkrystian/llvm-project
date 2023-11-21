@@ -260,6 +260,7 @@ class ASTContext : public RefCountedBase<ASTContext> {
   /// This set is managed by the NestedNameSpecifier class.
   mutable llvm::FoldingSet<NestedNameSpecifier> NestedNameSpecifiers;
   mutable NestedNameSpecifier *GlobalNestedNameSpecifier = nullptr;
+  mutable NestedNameSpecifier *SuperNestedNameSpecifier = nullptr;
 
   /// A cache mapping from RecordDecls to ASTRecordLayouts.
   ///
@@ -2655,6 +2656,8 @@ public:
 
   NestedNameSpecifier *
   getSuperNestedNameSpecifier(const CXXRecordDecl *RD) const;
+  NestedNameSpecifier *
+  getSuperNestedNameSpecifier() const;
 
   NestedNameSpecifier *
   getGlobalNestedNameSpecifier() const;

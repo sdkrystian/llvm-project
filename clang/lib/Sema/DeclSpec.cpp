@@ -111,10 +111,10 @@ void CXXScopeSpec::MakeGlobal(ASTContext &Context,
          "NestedNameSpecifierLoc range computation incorrect");
 }
 
-void CXXScopeSpec::MakeSuper(ASTContext &Context, CXXRecordDecl *RD,
+void CXXScopeSpec::MakeSuper(ASTContext &Context,
                              SourceLocation SuperLoc,
                              SourceLocation ColonColonLoc) {
-  Builder.MakeSuper(Context, RD, SuperLoc, ColonColonLoc);
+  Builder.MakeSuper(Context, SuperLoc, ColonColonLoc);
 
   Range.setBegin(SuperLoc);
   Range.setEnd(ColonColonLoc);

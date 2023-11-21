@@ -215,6 +215,7 @@ static NestedNameSpecifier *getFullyQualifiedNestedNameSpecifier(
     bool WithGlobalNsPrefix) {
   switch (Scope->getKind()) {
     case NestedNameSpecifier::Global:
+    case NestedNameSpecifier::Super:
       // Already fully qualified
       return Scope;
     case NestedNameSpecifier::Namespace:
@@ -235,7 +236,6 @@ static NestedNameSpecifier *getFullyQualifiedNestedNameSpecifier(
       // but use the name of it's prefix.
       return getFullyQualifiedNestedNameSpecifier(
           Ctx, Scope->getPrefix(), WithGlobalNsPrefix);
-    case NestedNameSpecifier::Super:
     case NestedNameSpecifier::TypeSpec: {
       const Type *Type = Scope->getAsType();
       // Find decl context.

@@ -41,14 +41,14 @@ NestedNameSpecifier::SpecifierKind NestedNameSpecifier::getKind() const {
   if (!Specifier)
     return Global;
 
-  if (getAsIdentifier())
-    return Identifier;
-
-  if (auto *ND = getAsNamedDecl())
-  {
-    if (isa<CXXRecordDecl>(ND))
+  if (auto *II = Specifier.dyn_cast<IdentifierInfo*>()) {
+    if (II->getTokenID() == tok::kw___super)
       return Super;
-    else if (isa<NamespaceDecl>(ND))
+    return Identifier;
+  }
+
+  if (auto *ND = getAsNamedDecl()) {
+    if (isa<NamespaceDecl>(ND))
       return Namespace;
     return NamespaceAlias;
   }
@@ -57,7 +57,10 @@ NestedNameSpecifier::SpecifierKind NestedNameSpecifier::getKind() const {
 }
 
 IdentifierInfo *NestedNameSpecifier::getAsIdentifier() const {
-  return Specifier.dyn_cast<IdentifierInfo*>();
+  auto *II = Specifier.dyn_cast<IdentifierInfo*>();
+  if (!II || II->getTokenID() == tok::kw___super)
+    return nullptr;
+  return II;
 }
 
 NamedDecl *NestedNameSpecifier::getAsNamedDecl() const {
@@ -102,16 +105,8 @@ NestedNameSpecifierDependence NestedNameSpecifier::getDependence() const {
   case Namespace:
   case NamespaceAlias:
   case Global:
+  case Super:
     return NestedNameSpecifierDependence::None;
-
-  case Super: {
-    CXXRecordDecl *RD = cast<CXXRecordDecl>(getAsNamedDecl());
-    for (const auto &Base : RD->bases())
-      if (Base.getType()->isDependentType())
-        // FIXME: must also be instantiation-dependent.
-        return NestedNameSpecifierDependence::Dependent;
-    return NestedNameSpecifierDependence::None;
-  }
 
   case TypeSpec:
     return toNestedNameSpecifierDependendence(getAsType()->getDependence());
@@ -500,10 +495,9 @@ void NestedNameSpecifierLocBuilder::MakeGlobal(ASTContext &Context,
 }
 
 void NestedNameSpecifierLocBuilder::MakeSuper(ASTContext &Context,
-                                              CXXRecordDecl *RD,
                                               SourceLocation SuperLoc,
                                               SourceLocation ColonColonLoc) {
-  Representation = Context.getSuperNestedNameSpecifier(RD);
+  Representation = Context.getSuperNestedNameSpecifier();
 
   // Push source-location info into the buffer.
   SaveSourceLocation(SuperLoc, Buffer, BufferSize, BufferCapacity);

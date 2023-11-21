@@ -6837,6 +6837,15 @@ ASTContext::getSuperNestedNameSpecifier(const CXXRecordDecl *RD) const {
 }
 
 NestedNameSpecifier *
+ASTContext::getSuperNestedNameSpecifier() const {
+  if (!SuperNestedNameSpecifier)
+    SuperNestedNameSpecifier = new (*this, alignof(NestedNameSpecifier))
+        NestedNameSpecifier(nullptr, false, &Idents.get("__super"));
+  return SuperNestedNameSpecifier;
+}
+
+
+NestedNameSpecifier *
 ASTContext::getGlobalNestedNameSpecifier() const {
   if (!GlobalNestedNameSpecifier)
     GlobalNestedNameSpecifier = new (*this, alignof(NestedNameSpecifier))

@@ -501,10 +501,8 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
     return IsStructurallyEquivalent(Context, QualType(NNS1->getAsType(), 0),
                                     QualType(NNS2->getAsType(), 0));
   case NestedNameSpecifier::Global:
-    return true;
   case NestedNameSpecifier::Super:
-    return IsStructurallyEquivalent(Context, NNS1->getAsRecordDecl(),
-                                    NNS2->getAsRecordDecl());
+    return true;
   }
   return false;
 }

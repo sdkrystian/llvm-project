@@ -9266,9 +9266,8 @@ ASTRecordReader::readNestedNameSpecifierLoc() {
     }
 
     case NestedNameSpecifier::Super: {
-      CXXRecordDecl *RD = readDeclAs<CXXRecordDecl>();
       SourceRange Range = readSourceRange();
-      Builder.MakeSuper(Context, RD, Range.getBegin(), Range.getEnd());
+      Builder.MakeSuper(Context, Range.getBegin(), Range.getEnd());
       break;
     }
     }

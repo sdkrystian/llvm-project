@@ -166,8 +166,8 @@ public:
   /// name.
   ///
   /// \param ColonColonLoc The location of the trailing '::'.
-  void MakeSuper(ASTContext &Context, CXXRecordDecl *RD,
-                 SourceLocation SuperLoc, SourceLocation ColonColonLoc);
+  void MakeSuper(ASTContext &Context, SourceLocation SuperLoc,
+                 SourceLocation ColonColonLoc);
 
   /// Make a new nested-name-specifier from incomplete source-location
   /// information.
