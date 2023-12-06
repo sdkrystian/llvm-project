@@ -35,6 +35,151 @@ class DeclContext;
 class UsingDirectiveDecl;
 class VarDecl;
 
+class ScopeDeclNodePool;
+
+class ScopeDeclList {
+  friend class ScopeDeclNodePool;
+
+  struct Node {
+    NamedDecl *Entry;
+    Node *Previous;
+  };
+
+  Node *Head = nullptr;
+
+public:
+  ScopeDeclList() = default;
+
+  NamedDecl *get() const {
+    assert(Head && "ScopeDeclList empty?");
+    return Head->Entry;
+  }
+
+  void add(ScopeDeclNodePool &Pool, NamedDecl *ND);
+
+  void remove(ScopeDeclNodePool &Pool, NamedDecl *ND);
+
+  class iterator {
+    Node *Current = nullptr;
+
+  public:
+    using difference_type = ptrdiff_t;
+    using value_type = NamedDecl*;
+    using pointer = void;
+    using reference = value_type;
+    using iterator_category = std::forward_iterator_tag;
+
+    iterator() = default;
+    iterator(Node *N) : Current(N) { }
+
+    reference operator*() const {
+      assert(Current && Current->Entry && "dereferencing end() iterator");
+      return Current->Entry;
+    }
+
+    void operator->() const { } // Unsupported.
+
+    bool operator==(const iterator &Other) const {
+      return Current == Other.Current;
+    }
+
+    bool operator!=(const iterator &Other) const {
+      return !(*this == Other);
+    }
+
+    iterator &operator++() {
+      assert(Current && "advancing end() iterator");
+      Current = Current->Previous;
+      return *this;
+    }
+
+    iterator operator++(int) { // It++
+      iterator temp = *this;
+      ++(*this);
+      return temp;
+    }
+  };
+
+  iterator begin() const { return iterator(Head); }
+  iterator end() const { return iterator(); }
+};
+
+class ScopeDeclNodePool {
+  friend class Scope;
+
+  static constexpr size_t block_size = 512;
+
+  struct Block {
+    ScopeDeclList::Node Nodes[block_size];
+    Block *Prev = nullptr;
+    Block *Next = nullptr;
+
+    ScopeDeclList::Node *begin() {
+      return Nodes;
+    }
+
+    ScopeDeclList::Node *end() {
+      return Nodes + block_size;
+    }
+  };
+
+  void allocateBlock() {
+    Block *NewCurrent = new Block;
+    if (State.Current) {
+      NewCurrent->Prev = State.Current;
+      State.Current->Next = NewCurrent;
+    }
+    State.Current = NewCurrent;
+    State.Alloc = NewCurrent->begin();
+  }
+
+public:
+  struct PoolState {
+    Block *Current = nullptr;
+    ScopeDeclList::Node *Alloc = nullptr;
+  };
+
+  ScopeDeclNodePool() {
+    allocateBlock();
+  }
+
+  ~ScopeDeclNodePool() {
+    Block *Last = State.Current;
+    while (Last->Next)
+      Last = Last->Next;
+    do {
+      Block *Prev = Last->Prev;
+      delete Last;
+      Last = Prev;
+    } while (Last);
+  }
+
+  PoolState save() {
+    return State;
+  }
+
+  void restore(const PoolState& PS) {
+    State = PS;
+  }
+
+  // All allocated nodes are freed once the scope they were allocated
+  // in is exited.
+  ScopeDeclList::Node *allocate() {
+    if (State.Alloc == State.Current->end()) {
+      if (State.Current->Next) {
+        State.Current = State.Current->Next;
+        State.Alloc = State.Current->begin();
+      } else {
+        allocateBlock();
+      }
+    }
+    return State.Alloc++;
+  }
+
+private:
+  PoolState State;
+};
+
 /// Scope - A scope is a transient data structure that is used while parsing the
 /// program.  It assists with resolving identifiers to the appropriate
 /// declaration.
@@ -209,6 +354,10 @@ private:
   using DeclSetTy = llvm::SmallPtrSet<Decl *, 32>;
   DeclSetTy DeclsInScope;
 
+  ScopeDeclNodePool *DeclNodePool;
+  ScopeDeclNodePool::PoolState DeclNodePoolState;
+  llvm::DenseMap<DeclarationName, ScopeDeclList> Lookups;
+
   /// The DeclContext with which this scope is associated. For
   /// example, the entity of a class scope is the class itself, the
   /// entity of a function scope is a function, etc.
@@ -240,6 +389,15 @@ public:
   Scope(Scope *Parent, unsigned ScopeFlags, DiagnosticsEngine &Diag)
       : ErrorTrap(Diag) {
     Init(Parent, ScopeFlags);
+  }
+
+  void SaveDeclNodePool(ScopeDeclNodePool& Pool) {
+    DeclNodePool = &Pool;
+    DeclNodePoolState = Pool.save();
+
+  }
+  void RestoreDeclNodePool() {
+    DeclNodePool->restore(DeclNodePoolState);
   }
 
   /// getFlags - Return the flags for this scope.
@@ -329,9 +487,18 @@ public:
         ReturnSlots.insert(VD);
 
     DeclsInScope.insert(D);
+
+    if(auto *ND = dyn_cast<NamedDecl>(D))
+      Lookups[ND->getDeclName()].add(*DeclNodePool, ND);
+
   }
 
-  void RemoveDecl(Decl *D) { DeclsInScope.erase(D); }
+  void RemoveDecl(Decl *D) {
+    DeclsInScope.erase(D);
+
+    if(auto *ND = dyn_cast<NamedDecl>(D))
+      Lookups[ND->getDeclName()].remove(*DeclNodePool, ND);
+  }
 
   void incrementMSManglingNumber() {
     if (Scope *MSLMP = getMSLastManglingParent()) {

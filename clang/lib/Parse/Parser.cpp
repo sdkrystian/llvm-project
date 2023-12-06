@@ -419,6 +419,7 @@ void Parser::EnterScope(unsigned ScopeFlags) {
   } else {
     Actions.CurScope = new Scope(getCurScope(), ScopeFlags, Diags);
   }
+  Actions.CurScope->SaveDeclNodePool(DeclNodePool);
 }
 
 /// ExitScope - Pop a scope off the scope stack.
@@ -432,6 +433,7 @@ void Parser::ExitScope() {
   Scope *OldScope = getCurScope();
   Actions.CurScope = OldScope->getParent();
 
+  OldScope->RestoreDeclNodePool();
   if (NumCachedScopes == ScopeCacheSize)
     delete OldScope;
   else

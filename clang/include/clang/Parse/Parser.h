@@ -91,6 +91,8 @@ class Parser : public CodeCompletionHandler {
   unsigned NumCachedScopes;
   Scope *ScopeCache[ScopeCacheSize];
 
+  ScopeDeclNodePool DeclNodePool;
+
   /// Identifiers used for SEH handling in Borland. These are only
   /// allowed in particular circumstances
   // __except block

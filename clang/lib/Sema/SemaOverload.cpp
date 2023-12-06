@@ -4226,7 +4226,7 @@ isBetterReferenceBindingKind(const StandardConversionSequence &SCS1,
   // time of this writing) break the standard definition of std::forward
   // and std::reference_wrapper when dealing with references to functions.
   // Proposed wording changes submitted to CWG for consideration.
-  if (SCS1.BindsImplicitObjectArgumentWithoutRefQualifier ||
+      if (SCS1.BindsImplicitObjectArgumentWithoutRefQualifier ||
       SCS2.BindsImplicitObjectArgumentWithoutRefQualifier)
     return false;
 

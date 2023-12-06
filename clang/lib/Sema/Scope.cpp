@@ -17,6 +17,28 @@
 
 using namespace clang;
 
+void ScopeDeclList::add(ScopeDeclNodePool &Pool, NamedDecl *ND) {
+  Node *NewHead = Pool.allocate();
+  NewHead->Entry = ND;
+  NewHead->Previous = std::exchange(Head, NewHead);
+}
+
+void ScopeDeclList::remove(ScopeDeclNodePool &Pool, NamedDecl *ND) {
+  Node *Current = Head;
+  Node *Trailing = nullptr;
+  while (Current && Current->Entry != ND)
+    Trailing = std::exchange(Current, Current->Previous);
+  // Declaration not found
+  if (!Current)
+    return;
+  if (Trailing)
+    // Declaration isn't the head node, splice it out
+    Trailing->Previous = Current->Previous;
+  else
+    // Declaration is the head node, replace it
+    Head = Current->Previous;
+}
+
 void Scope::setFlags(Scope *parent, unsigned flags) {
   AnyParent = parent;
   Flags = flags;
@@ -92,6 +114,7 @@ void Scope::setFlags(Scope *parent, unsigned flags) {
 void Scope::Init(Scope *parent, unsigned flags) {
   setFlags(parent, flags);
 
+  Lookups.init(Lookups.size());
   DeclsInScope.clear();
   UsingDirectives.clear();
   Entity = nullptr;
