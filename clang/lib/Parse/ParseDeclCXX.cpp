@@ -224,11 +224,8 @@ Parser::DeclGroupPtrTy Parser::ParseNamespace(DeclaratorContext Context,
                         ? diag::warn_cxx98_compat_inline_namespace
                         : diag::ext_inline_namespace);
 
-  // Enter a scope for the namespace.
-  ParseScope NamespaceScope(this, Scope::DeclScope);
-
   UsingDirectiveDecl *ImplicitUsingDirectiveDecl = nullptr;
-  Decl *NamespcDecl = Actions.ActOnStartNamespaceDef(
+  Decl *NamespcDecl = Actions.ActOnNamespace(
       getCurScope(), InlineLoc, NamespaceLoc, IdentLoc, Ident,
       T.getOpenLocation(), attrs, ImplicitUsingDirectiveDecl, false);
 
@@ -237,10 +234,8 @@ Parser::DeclGroupPtrTy Parser::ParseNamespace(DeclaratorContext Context,
 
   // Parse the contents of the namespace.  This includes parsing recovery on
   // any improperly nested namespaces.
-  ParseInnerNamespace(ExtraNSs, 0, InlineLoc, attrs, T);
-
-  // Leave the namespace scope.
-  NamespaceScope.Exit();
+  ParseInnerNamespace(dyn_cast_if_present<NamedDecl>(NamespcDecl),
+                      ExtraNSs, 0, InlineLoc, attrs, T);
 
   DeclEnd = T.getCloseLocation();
   Actions.ActOnFinishNamespaceDef(NamespcDecl, DeclEnd);
@@ -250,10 +245,16 @@ Parser::DeclGroupPtrTy Parser::ParseNamespace(DeclaratorContext Context,
 }
 
 /// ParseInnerNamespace - Parse the contents of a namespace.
-void Parser::ParseInnerNamespace(const InnerNamespaceInfoList &InnerNSs,
+void Parser::ParseInnerNamespace(NamedDecl *Namespac,
+                                 const InnerNamespaceInfoList &InnerNSs,
                                  unsigned int index, SourceLocation &InlineLoc,
                                  ParsedAttributes &attrs,
                                  BalancedDelimiterTracker &Tracker) {
+  // Enter a scope for the namespace.
+  ParseScope NamespaceScope(this, Scope::DeclScope);
+
+  Actions.ActOnStartNamespaceDef(Namespac);
+
   if (index == InnerNSs.size()) {
     while (!tryParseMisplacedModuleImport() && Tok.isNot(tok::r_brace) &&
            Tok.isNot(tok::eof)) {
@@ -273,18 +274,17 @@ void Parser::ParseInnerNamespace(const InnerNamespaceInfoList &InnerNSs,
   // Handle a nested namespace definition.
   // FIXME: Preserve the source information through to the AST rather than
   // desugaring it here.
-  ParseScope NamespaceScope(this, Scope::DeclScope);
   UsingDirectiveDecl *ImplicitUsingDirectiveDecl = nullptr;
-  Decl *NamespcDecl = Actions.ActOnStartNamespaceDef(
+  Decl *NamespcDecl = Actions.ActOnNamespace(
       getCurScope(), InnerNSs[index].InlineLoc, InnerNSs[index].NamespaceLoc,
       InnerNSs[index].IdentLoc, InnerNSs[index].Ident,
       Tracker.getOpenLocation(), attrs, ImplicitUsingDirectiveDecl, true);
   assert(!ImplicitUsingDirectiveDecl &&
          "nested namespace definition cannot define anonymous namespace");
 
-  ParseInnerNamespace(InnerNSs, ++index, InlineLoc, attrs, Tracker);
+  ParseInnerNamespace(dyn_cast_if_present<NamedDecl>(NamespcDecl),
+                      InnerNSs, ++index, InlineLoc, attrs, Tracker);
 
-  NamespaceScope.Exit();
   Actions.ActOnFinishNamespaceDef(NamespcDecl, Tracker.getCloseLocation());
 }
 

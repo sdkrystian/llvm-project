@@ -111,7 +111,6 @@ class ScopeDeclNodePool {
 
   struct Block {
     ScopeDeclList::Node Nodes[block_size];
-    Block *Prev = nullptr;
     Block *Next = nullptr;
 
     ScopeDeclList::Node *begin() {
@@ -125,13 +124,13 @@ class ScopeDeclNodePool {
 
   void allocateBlock() {
     Block *NewCurrent = new Block;
-    if (State.Current) {
-      NewCurrent->Prev = State.Current;
+    if (State.Current)
       State.Current->Next = NewCurrent;
-    }
     State.Current = NewCurrent;
     State.Alloc = NewCurrent->begin();
   }
+
+  Block *Head = nullptr;
 
 public:
   struct PoolState {
@@ -141,17 +140,14 @@ public:
 
   ScopeDeclNodePool() {
     allocateBlock();
+    Head = State.Current;
   }
 
   ~ScopeDeclNodePool() {
-    Block *Last = State.Current;
-    while (Last->Next)
-      Last = Last->Next;
+    Block *Current = Head;
     do {
-      Block *Prev = Last->Prev;
-      delete Last;
-      Last = Prev;
-    } while (Last);
+      delete std::exchange(Current, Current->Next);
+    } while (Current );
   }
 
   PoolState save() {
@@ -394,9 +390,15 @@ public:
   void SaveDeclNodePool(ScopeDeclNodePool& Pool) {
     DeclNodePool = &Pool;
     DeclNodePoolState = Pool.save();
+    assert(DeclNodePoolState.Alloc &&
+           DeclNodePoolState.Current &&
+           "invalid DeclNodePool state?");
 
   }
   void RestoreDeclNodePool() {
+    assert(DeclNodePoolState.Alloc &&
+           DeclNodePoolState.Current &&
+           "invalid DeclNodePool state?");
     DeclNodePool->restore(DeclNodePoolState);
   }
 
@@ -481,23 +483,30 @@ public:
 
   bool decl_empty() const { return DeclsInScope.empty(); }
 
+  void AddScopeDecl(Decl *D) {
+    if(auto *ND = dyn_cast<NamedDecl>(D)) {
+      assert(DeclNodePool && "no DeclNodePool?");
+      Lookups[ND->getDeclName()].add(*DeclNodePool, ND);
+    }
+  }
+
   void AddDecl(Decl *D) {
     if (auto *VD = dyn_cast<VarDecl>(D))
       if (!isa<ParmVarDecl>(VD))
         ReturnSlots.insert(VD);
 
     DeclsInScope.insert(D);
+  }
 
-    if(auto *ND = dyn_cast<NamedDecl>(D))
-      Lookups[ND->getDeclName()].add(*DeclNodePool, ND);
-
+  void RemoveScopeDecl(Decl *D) {
+    if(auto *ND = dyn_cast<NamedDecl>(D)) {
+      assert(DeclNodePool && "no DeclNodePool?");
+      Lookups[ND->getDeclName()].remove(*DeclNodePool, ND);
+    }
   }
 
   void RemoveDecl(Decl *D) {
     DeclsInScope.erase(D);
-
-    if(auto *ND = dyn_cast<NamedDecl>(D))
-      Lookups[ND->getDeclName()].remove(*DeclNodePool, ND);
   }
 
   void incrementMSManglingNumber() {

@@ -6190,12 +6190,14 @@ public:
   //===---------------------------- C++ Features --------------------------===//
 
   // Act on C++ namespaces
-  Decl *ActOnStartNamespaceDef(Scope *S, SourceLocation InlineLoc,
+
+  Decl *ActOnNamespace(Scope *S, SourceLocation InlineLoc,
                                SourceLocation NamespaceLoc,
                                SourceLocation IdentLoc, IdentifierInfo *Ident,
                                SourceLocation LBrace,
                                const ParsedAttributesView &AttrList,
                                UsingDirectiveDecl *&UsingDecl, bool IsNested);
+  void ActOnStartNamespaceDef(Decl *Dcl);
   void ActOnFinishNamespaceDef(Decl *Dcl, SourceLocation RBrace);
 
   NamespaceDecl *getStdNamespace() const;

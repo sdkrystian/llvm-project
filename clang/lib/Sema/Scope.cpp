@@ -18,16 +18,45 @@
 using namespace clang;
 
 void ScopeDeclList::add(ScopeDeclNodePool &Pool, NamedDecl *ND) {
+#if 0
   Node *NewHead = Pool.allocate();
   NewHead->Entry = ND;
   NewHead->Previous = std::exchange(Head, NewHead);
+  assert(NewHead->Previous != NewHead);
+#endif
 }
 
 void ScopeDeclList::remove(ScopeDeclNodePool &Pool, NamedDecl *ND) {
+#if 0
   Node *Current = Head;
-  Node *Trailing = nullptr;
-  while (Current && Current->Entry != ND)
+  // Nothing to do...
+  if (!Current)
+    return;
+  // Removing the head node. Previous node is the new head.
+  if (Current->Entry == ND) {
+    Head = Current->Previous;
+    return;
+  }
+  size_t n = 0;
+  // Node is some previous node. Splice it out.
+  Node *Trailing = Current;
+  for (; Current = Current->Previous; Trailing = Current) {
+    assert(++n < 1024);
+    assert(Trailing && Current);
+    if (Current->Entry != ND)
+      continue;
+    assert(Trailing->Previous != Current->Previous);
+    // Found the matching node. Splice it out and return.
+    Trailing->Previous = Current->Previous;
+    break;
+  }
+  #if 0
+  while (Current = Current->Previous) {
+  }
+  while (Current && Current->Entry != ND) {
     Trailing = std::exchange(Current, Current->Previous);
+    assert(++n < 1024);
+  }
   // Declaration not found
   if (!Current)
     return;
@@ -37,6 +66,8 @@ void ScopeDeclList::remove(ScopeDeclNodePool &Pool, NamedDecl *ND) {
   else
     // Declaration is the head node, replace it
     Head = Current->Previous;
+  #endif
+  #endif
 }
 
 void Scope::setFlags(Scope *parent, unsigned flags) {

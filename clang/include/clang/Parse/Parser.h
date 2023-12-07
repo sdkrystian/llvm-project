@@ -3178,7 +3178,8 @@ private:
   };
   using InnerNamespaceInfoList = llvm::SmallVector<InnerNamespaceInfo, 4>;
 
-  void ParseInnerNamespace(const InnerNamespaceInfoList &InnerNSs,
+  void ParseInnerNamespace(NamedDecl *Namespac,
+                           const InnerNamespaceInfoList &InnerNSs,
                            unsigned int index, SourceLocation &InlineLoc,
                            ParsedAttributes &attrs,
                            BalancedDelimiterTracker &Tracker);

@@ -1500,6 +1500,7 @@ void Sema::ActOnReenterFunctionContext(Scope* S, Decl *D) {
     // If the parameter has an identifier, then add it to the scope
     if (Param->getIdentifier()) {
       S->AddDecl(Param);
+      S->AddScopeDecl(Param);
       IdResolver.AddDecl(Param);
     }
   }
@@ -1577,6 +1578,7 @@ void Sema::PushOnScopeChains(NamedDecl *D, Scope *S, bool AddToContext) {
   for (; I != IEnd; ++I) {
     if (S->isDeclScope(*I) && D->declarationReplaces(*I)) {
       S->RemoveDecl(*I);
+      S->RemoveScopeDecl(*I);
       IdResolver.RemoveDecl(*I);
 
       // Should only need to replace one decl.
@@ -1602,6 +1604,7 @@ void Sema::PushOnScopeChains(NamedDecl *D, Scope *S, bool AddToContext) {
     IdResolver.InsertDeclAfter(I, D);
   } else {
     IdResolver.AddDecl(D);
+    S->AddScopeDecl(D);
   }
   warnOnReservedIdentifier(D);
 }
@@ -2686,6 +2689,7 @@ void Sema::MergeTypedefNameDecl(Scope *S, TypedefNameDecl *New,
           auto *ED = cast<EnumConstantDecl>(D);
           assert(EnumScope->isDeclScope(ED));
           EnumScope->RemoveDecl(ED);
+          EnumScope->RemoveScopeDecl(ED);
           IdResolver.RemoveDecl(ED);
           ED->getLexicalDeclContext()->removeDecl(ED);
         }
@@ -15082,8 +15086,10 @@ Decl *Sema::ActOnParamDeclarator(Scope *S, Declarator &D,
 
   // Add the parameter declaration into this scope.
   S->AddDecl(New);
-  if (II)
+  if (II) {
     IdResolver.AddDecl(New);
+    S->AddScopeDecl(New);
+  }
 
   ProcessDeclAttributes(S, New, D);
 
@@ -18752,6 +18758,7 @@ Decl *Sema::ActOnIvar(Scope *S, SourceLocation DeclStart, Declarator &D,
     // FIXME: When interfaces are DeclContexts, we'll need to add
     // these to the interface.
     S->AddDecl(NewID);
+    S->AddScopeDecl(NewID);
     IdResolver.AddDecl(NewID);
   }
 

@@ -10717,6 +10717,7 @@ Sema::ActOnReenterTemplateScope(Decl *D,
       if (Param->getDeclName()) {
         InnermostTemplateScope->AddDecl(Param);
         IdResolver.AddDecl(Param);
+        InnermostTemplateScope->AddScopeDecl(Param);
       }
     }
     ++Count;
@@ -10751,8 +10752,10 @@ void Sema::ActOnReenterCXXMethodParameter(Scope *S, ParmVarDecl *Param) {
     return;
 
   S->AddDecl(Param);
-  if (Param->getDeclName())
+  if (Param->getDeclName()) {
     IdResolver.AddDecl(Param);
+    S->AddScopeDecl(Param);
+  }
 }
 
 /// ActOnStartDelayedCXXMethodDeclaration - We have completed
@@ -10778,8 +10781,10 @@ void Sema::ActOnDelayedCXXMethodParameter(Scope *S, Decl *ParamD) {
   ParmVarDecl *Param = cast<ParmVarDecl>(ParamD);
 
   S->AddDecl(Param);
-  if (Param->getDeclName())
+  if (Param->getDeclName()) {
     IdResolver.AddDecl(Param);
+    S->AddScopeDecl(Param);
+  }
 }
 
 /// ActOnFinishDelayedCXXMethodDeclaration - We have finished
@@ -11596,9 +11601,10 @@ static void DiagnoseNamespaceInlineMismatch(Sema &S, SourceLocation KeywordLoc,
   *IsInline = PrevNS->isInline();
 }
 
+// Decl *Sema::ActOnStartNamespaceDef(Scope *NamespcScope,
 /// ActOnStartNamespaceDef - This is called at the start of a namespace
 /// definition.
-Decl *Sema::ActOnStartNamespaceDef(Scope *NamespcScope,
+Decl *Sema::ActOnNamespace(Scope *NamespcScope,
                                    SourceLocation InlineLoc,
                                    SourceLocation NamespaceLoc,
                                    SourceLocation IdentLoc, IdentifierInfo *II,
@@ -11612,7 +11618,8 @@ Decl *Sema::ActOnStartNamespaceDef(Scope *NamespcScope,
   bool IsInvalid = false;
   bool IsStd = false;
   bool AddToKnown = false;
-  Scope *DeclRegionScope = NamespcScope->getParent();
+  // Scope *DeclRegionScope = NamespcScope->getParent();
+  Scope *DeclRegionScope = NamespcScope;
 
   NamespaceDecl *PrevNS = nullptr;
   if (II) {
@@ -11759,7 +11766,7 @@ Decl *Sema::ActOnStartNamespaceDef(Scope *NamespcScope,
   // FIXME: We should be able to push Namespc here, so that the each DeclContext
   // for the namespace has the declarations that showed up in that particular
   // namespace definition.
-  PushDeclContext(NamespcScope, Namespc);
+
   return Namespc;
 }
 
@@ -11769,6 +11776,12 @@ static inline NamespaceDecl *getNamespaceDecl(NamedDecl *D) {
   if (NamespaceAliasDecl *AD = dyn_cast_or_null<NamespaceAliasDecl>(D))
     return AD->getNamespace();
   return dyn_cast_or_null<NamespaceDecl>(D);
+}
+
+void Sema::ActOnStartNamespaceDef(Decl *Dcl) {
+  NamespaceDecl *Namespc = dyn_cast_or_null<NamespaceDecl>(Dcl);
+  assert(Namespc && "Invalid parameter, expected NamespaceDecl");
+  PushDeclContext(getCurScope(), Namespc);
 }
 
 /// ActOnFinishNamespaceDef - This callback is called after a namespace is
@@ -12654,6 +12667,7 @@ void Sema::HideUsingShadowDecl(Scope *S, UsingShadowDecl *Shadow) {
   // ...and the scope, if applicable...
   if (S) {
     S->RemoveDecl(Shadow);
+    S->RemoveScopeDecl(Shadow);
     IdResolver.RemoveDecl(Shadow);
   }
 

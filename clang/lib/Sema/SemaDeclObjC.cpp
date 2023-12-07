@@ -806,6 +806,7 @@ void Sema::popObjCTypeParamList(Scope *S, ObjCTypeParamList *typeParamList) {
   for (auto *typeParam : *typeParamList) {
     if (!typeParam->isInvalidDecl()) {
       S->RemoveDecl(typeParam);
+      S->RemoveScopeDecl(typeParam);
       IdResolver.RemoveDecl(typeParam);
     }
   }
@@ -4813,6 +4814,7 @@ Decl *Sema::ActOnMethodDeclaration(
       Param->setInvalidDecl();
     }
     S->AddDecl(Param);
+    S->AddScopeDecl(Param);
     IdResolver.AddDecl(Param);
 
     Params.push_back(Param);
@@ -5229,8 +5231,10 @@ Decl *Sema::ActOnObjCExceptionDecl(Scope *S, Declarator &D) {
 
   // Add the parameter declaration into this scope.
   S->AddDecl(New);
-  if (D.getIdentifier())
+  if (D.getIdentifier()) {
+    S->AddDecl(New);
     IdResolver.AddDecl(New);
+  }
 
   ProcessDeclAttributes(S, New, D);
 

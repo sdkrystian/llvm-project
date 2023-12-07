@@ -1064,6 +1064,7 @@ NamedDecl *Sema::ActOnTypeParameter(Scope *S, bool Typename,
 
     // Add the template parameter into the current scope.
     S->AddDecl(Param);
+    S->AddScopeDecl(Param);
     IdResolver.AddDecl(Param);
   }
 
@@ -1600,6 +1601,7 @@ NamedDecl *Sema::ActOnNonTypeTemplateParameter(Scope *S, Declarator &D,
 
     // Add the template parameter into the current scope.
     S->AddDecl(Param);
+    S->AddScopeDecl(Param);
     IdResolver.AddDecl(Param);
   }
 
@@ -1658,6 +1660,7 @@ NamedDecl *Sema::ActOnTemplateTemplateParameter(Scope* S,
     maybeDiagnoseTemplateParameterShadow(*this, S, NameLoc, Name);
 
     S->AddDecl(Param);
+    S->AddScopeDecl(Param);
     IdResolver.AddDecl(Param);
   }
 

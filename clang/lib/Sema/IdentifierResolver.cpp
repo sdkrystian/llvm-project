@@ -347,6 +347,7 @@ bool IdentifierResolver::tryAddTopLevelDecl(NamedDecl *D, DeclarationName Name){
     // If the existing declaration is not visible in translation unit scope,
     // then add the new top-level declaration first.
     if (!PrevD->getDeclContext()->getRedeclContext()->isTranslationUnit()) {
+      // llvm::errs() << D->getQualifiedNameAsString() << " inserted before " << PrevD->getQualifiedNameAsString() << "\n";
       IDI->AddDecl(D);
       IDI->AddDecl(PrevD);
     } else {
@@ -379,6 +380,7 @@ bool IdentifierResolver::tryAddTopLevelDecl(NamedDecl *D, DeclarationName Name){
     if (!(*I)->getDeclContext()->getRedeclContext()->isTranslationUnit()) {
       // We've found a declaration that is not visible from the translation
       // unit (it's in an inner scope). Insert our declaration here.
+      // llvm::errs() << D->getQualifiedNameAsString() << " inserted before " << (*I)->getQualifiedNameAsString() << "\n";
       IDI->InsertDecl(I, D);
       return true;
     }
