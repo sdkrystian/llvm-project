@@ -432,8 +432,10 @@ void Parser::ExitScope() {
 
   Scope *OldScope = getCurScope();
   Actions.CurScope = OldScope->getParent();
-
-  OldScope->RestoreDeclNodePool();
+  if (!OldScope->isTemplateParamScope()) {
+    if(!OldScope->getEntity() || !OldScope->getEntity()->isTransparentContext())
+      OldScope->RestoreDeclNodePool();
+  }
   if (NumCachedScopes == ScopeCacheSize)
     delete OldScope;
   else
@@ -1340,13 +1342,11 @@ Decl *Parser::ParseFunctionDefinition(ParsingDeclarator &D,
       Actions.canDelayFunctionBody(D)) {
     MultiTemplateParamsArg TemplateParameterLists(*TemplateInfo.TemplateParams);
 
+    D.setFunctionDefinitionKind(FunctionDefinitionKind::Definition);
+    Decl *DP = Actions.HandleDeclarator(getCurScope(), D,
+                                        TemplateParameterLists);
     ParseScope BodyScope(this, Scope::FnScope | Scope::DeclScope |
                                    Scope::CompoundStmtScope);
-    Scope *ParentScope = getCurScope()->getParent();
-
-    D.setFunctionDefinitionKind(FunctionDefinitionKind::Definition);
-    Decl *DP = Actions.HandleDeclarator(ParentScope, D,
-                                        TemplateParameterLists);
     D.complete(DP);
     D.getMutableDeclSpec().abort();
 
@@ -1371,13 +1371,12 @@ Decl *Parser::ParseFunctionDefinition(ParsingDeclarator &D,
            (Tok.is(tok::l_brace) || Tok.is(tok::kw_try) ||
             Tok.is(tok::colon)) &&
       Actions.CurContext->isTranslationUnit()) {
-    ParseScope BodyScope(this, Scope::FnScope | Scope::DeclScope |
-                                   Scope::CompoundStmtScope);
-    Scope *ParentScope = getCurScope()->getParent();
 
     D.setFunctionDefinitionKind(FunctionDefinitionKind::Definition);
-    Decl *FuncDecl = Actions.HandleDeclarator(ParentScope, D,
+    Decl *FuncDecl = Actions.HandleDeclarator(getCurScope(), D,
                                               MultiTemplateParamsArg());
+    ParseScope BodyScope(this, Scope::FnScope | Scope::DeclScope |
+                                   Scope::CompoundStmtScope);
     D.complete(FuncDecl);
     D.getMutableDeclSpec().abort();
     if (FuncDecl) {
@@ -1388,10 +1387,6 @@ Decl *Parser::ParseFunctionDefinition(ParsingDeclarator &D,
     }
     // FIXME: Should we really fall through here?
   }
-
-  // Enter a scope for the function body.
-  ParseScope BodyScope(this, Scope::FnScope | Scope::DeclScope |
-                                 Scope::CompoundStmtScope);
 
   // Parse function body eagerly if it is either '= delete;' or '= default;' as
   // ActOnStartOfFunctionDef needs to know whether the function is deleted.
@@ -1431,11 +1426,44 @@ Decl *Parser::ParseFunctionDefinition(ParsingDeclarator &D,
   // Tell the actions module that we have entered a function definition with the
   // specified Declarator for the function.
   Sema::SkipBodyInfo SkipBody;
+  #if 0
   Decl *Res = Actions.ActOnStartOfFunctionDef(getCurScope(), D,
                                               TemplateInfo.TemplateParams
                                                   ? *TemplateInfo.TemplateParams
                                                   : MultiTemplateParamsArg(),
                                               &SkipBody, BodyKind);
+  #else
+  // assert(getCurFunctionDecl() == nullptr && "Function parsing confused");
+  assert(D.isFunctionDeclarator() && "Not a function declarator!");
+
+
+  MultiTemplateParamsArg TPLs = TemplateInfo.TemplateParams
+                                    ? *TemplateInfo.TemplateParams
+                                    : MultiTemplateParamsArg();
+  // Check if we are in an `omp begin/end declare variant` scope. If we are, and
+  // we define a non-templated function definition, we will create a declaration
+  // instead (=BaseFD), and emit the definition with a mangled name afterwards.
+  // The base function declaration will have the equivalent of an `omp declare
+  // variant` annotation which specifies the mangled definition as a
+  // specialization function under the OpenMP context defined as part of the
+  // `omp begin declare variant`.
+  SmallVector<FunctionDecl *, 4> Bases;
+  if (getLangOpts().OpenMP && Actions.isInOpenMPDeclareVariantScope())
+    Actions.ActOnStartOfFunctionDefinitionInOpenMPDeclareVariantScope(
+        getCurScope(), D, TPLs, Bases);
+
+  D.setFunctionDefinitionKind(FunctionDefinitionKind::Definition);
+  Decl *Dcl = Actions.HandleDeclarator(getCurScope(), D, TPLs);
+
+  // Enter a scope for the function body.
+  ParseScope BodyScope(this, Scope::FnScope | Scope::DeclScope |
+                                 Scope::CompoundStmtScope);
+
+  Decl *Res = Actions.ActOnStartOfFunctionDef(getCurScope(), Dcl, &SkipBody, BodyKind);
+
+  if (!Bases.empty())
+    Actions.ActOnFinishedFunctionDefinitionInOpenMPDeclareVariantScope(Res, Bases);
+  #endif
 
   if (SkipBody.ShouldSkip) {
     // Do NOT enter SkipFunctionBody if we already consumed the tokens.

@@ -17,18 +17,28 @@
 
 using namespace clang;
 
+void ScopeDeclList::set(NamedDecl *ND) {
+  Head = ND;
+}
+
+void ScopeDeclList::clear(NamedDecl *ND) {
+  if (NamedDecl *Stored = Head.dyn_cast<NamedDecl *>(); Stored && Stored == ND)
+    Head = nullptr;
+}
+
 void ScopeDeclList::add(ScopeDeclNodePool &Pool, NamedDecl *ND) {
-#if 0
+#if 1
   Node *NewHead = Pool.allocate();
   NewHead->Entry = ND;
-  NewHead->Previous = std::exchange(Head, NewHead);
+  NewHead->Previous = Head.dyn_cast<Node *>();
+  Head = NewHead;
   assert(NewHead->Previous != NewHead);
 #endif
 }
 
 void ScopeDeclList::remove(ScopeDeclNodePool &Pool, NamedDecl *ND) {
-#if 0
-  Node *Current = Head;
+#if 1
+  Node *Current = Head.dyn_cast<Node *>();
   // Nothing to do...
   if (!Current)
     return;
@@ -68,6 +78,32 @@ void ScopeDeclList::remove(ScopeDeclNodePool &Pool, NamedDecl *ND) {
     Head = Current->Previous;
   #endif
   #endif
+}
+
+void Scope::AddScopeDecl(Decl *D) {
+  auto *ND = dyn_cast<NamedDecl>(D);
+  if (!ND)
+    return;
+  ScopeDeclList& list = Lookups[ND->getDeclName()];
+  if (isTemplateParamScope()) {
+    list.set(ND);
+  } else {
+    assert(DeclNodePool && "no DeclNodePool?");
+    list.add(*DeclNodePool, ND);
+  }
+}
+
+void Scope::RemoveScopeDecl(Decl *D) {
+  auto *ND = dyn_cast<NamedDecl>(D);
+  if (!ND)
+    return;
+  ScopeDeclList& list = Lookups[ND->getDeclName()];
+  if (isTemplateParamScope()) {
+    list.clear(ND);
+  } else {
+    assert(DeclNodePool && "no DeclNodePool?");
+    list.remove(*DeclNodePool, ND);
+  }
 }
 
 void Scope::setFlags(Scope *parent, unsigned flags) {

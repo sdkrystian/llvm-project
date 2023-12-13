@@ -1606,6 +1606,7 @@ void Sema::PushOnScopeChains(NamedDecl *D, Scope *S, bool AddToContext) {
     IdResolver.AddDecl(D);
     S->AddScopeDecl(D);
   }
+
   warnOnReservedIdentifier(D);
 }
 

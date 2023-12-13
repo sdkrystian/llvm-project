@@ -45,15 +45,14 @@ class ScopeDeclList {
     Node *Previous;
   };
 
-  Node *Head = nullptr;
+  llvm::PointerUnion<NamedDecl *, Node *> Head = nullptr;
 
 public:
   ScopeDeclList() = default;
 
-  NamedDecl *get() const {
-    assert(Head && "ScopeDeclList empty?");
-    return Head->Entry;
-  }
+  void set(NamedDecl *ND);
+
+  void clear(NamedDecl *ND);
 
   void add(ScopeDeclNodePool &Pool, NamedDecl *ND);
 
@@ -100,7 +99,7 @@ public:
     }
   };
 
-  iterator begin() const { return iterator(Head); }
+  iterator begin() const { return iterator(Head.dyn_cast<Node *>()); }
   iterator end() const { return iterator(); }
 };
 
@@ -483,12 +482,7 @@ public:
 
   bool decl_empty() const { return DeclsInScope.empty(); }
 
-  void AddScopeDecl(Decl *D) {
-    if(auto *ND = dyn_cast<NamedDecl>(D)) {
-      assert(DeclNodePool && "no DeclNodePool?");
-      Lookups[ND->getDeclName()].add(*DeclNodePool, ND);
-    }
-  }
+  void AddScopeDecl(Decl *D);
 
   void AddDecl(Decl *D) {
     if (auto *VD = dyn_cast<VarDecl>(D))
@@ -498,12 +492,7 @@ public:
     DeclsInScope.insert(D);
   }
 
-  void RemoveScopeDecl(Decl *D) {
-    if(auto *ND = dyn_cast<NamedDecl>(D)) {
-      assert(DeclNodePool && "no DeclNodePool?");
-      Lookups[ND->getDeclName()].remove(*DeclNodePool, ND);
-    }
-  }
+  void RemoveScopeDecl(Decl *D);
 
   void RemoveDecl(Decl *D) {
     DeclsInScope.erase(D);
