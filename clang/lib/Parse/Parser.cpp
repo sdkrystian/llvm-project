@@ -419,7 +419,7 @@ void Parser::EnterScope(unsigned ScopeFlags) {
   } else {
     Actions.CurScope = new Scope(getCurScope(), ScopeFlags, Diags);
   }
-  Actions.CurScope->SaveDeclNodePool(DeclNodePool);
+  Actions.CurScope->DeclNodePool = &DeclNodePool;
 }
 
 /// ExitScope - Pop a scope off the scope stack.
@@ -432,10 +432,6 @@ void Parser::ExitScope() {
 
   Scope *OldScope = getCurScope();
   Actions.CurScope = OldScope->getParent();
-  if (!OldScope->isTemplateParamScope()) {
-    if(!OldScope->getEntity() || !OldScope->getEntity()->isTransparentContext())
-      OldScope->RestoreDeclNodePool();
-  }
   if (NumCachedScopes == ScopeCacheSize)
     delete OldScope;
   else

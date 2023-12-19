@@ -314,6 +314,8 @@ static DeclMatchKind compareDeclarations(NamedDecl *Existing, NamedDecl *New) {
 }
 
 bool IdentifierResolver::tryAddTopLevelDecl(NamedDecl *D, DeclarationName Name){
+  // llvm::errs() << "tryAddTopLevelDecl: " << D->getQualifiedNameAsString() << "\n";
+  // assert(!D)
   if (IdentifierInfo *II = Name.getAsIdentifierInfo())
     readingIdentifier(*II);
 

@@ -42,7 +42,7 @@ class ScopeDeclList {
 
   struct Node {
     NamedDecl *Entry;
-    Node *Previous;
+    Node *Previous = this + 1;
   };
 
   llvm::PointerUnion<NamedDecl *, Node *> Head = nullptr;
@@ -110,7 +110,11 @@ class ScopeDeclNodePool {
 
   struct Block {
     ScopeDeclList::Node Nodes[block_size];
-    Block *Next = nullptr;
+    Block *Previous;
+
+    Block(Block *Current) : Previous(Current) {
+      Nodes[block_size - 1].Previous = nullptr;
+    }
 
     ScopeDeclList::Node *begin() {
       return Nodes;
@@ -121,58 +125,34 @@ class ScopeDeclNodePool {
     }
   };
 
-  void allocateBlock() {
-    Block *NewCurrent = new Block;
-    if (State.Current)
-      State.Current->Next = NewCurrent;
-    State.Current = NewCurrent;
-    State.Alloc = NewCurrent->begin();
-  }
-
   Block *Head = nullptr;
+  ScopeDeclList::Node *Free = nullptr;
 
 public:
-  struct PoolState {
-    Block *Current = nullptr;
-    ScopeDeclList::Node *Alloc = nullptr;
-  };
-
-  ScopeDeclNodePool() {
-    allocateBlock();
-    Head = State.Current;
-  }
-
   ~ScopeDeclNodePool() {
     Block *Current = Head;
-    do {
-      delete std::exchange(Current, Current->Next);
-    } while (Current );
+    while (Current)
+      delete std::exchange(Current, Current->Previous);
   }
 
-  PoolState save() {
-    return State;
-  }
-
-  void restore(const PoolState& PS) {
-    State = PS;
-  }
-
-  // All allocated nodes are freed once the scope they were allocated
-  // in is exited.
   ScopeDeclList::Node *allocate() {
-    if (State.Alloc == State.Current->end()) {
-      if (State.Current->Next) {
-        State.Current = State.Current->Next;
-        State.Alloc = State.Current->begin();
-      } else {
-        allocateBlock();
-      }
+    // If there are no free nodes, allocate a new block.
+    if (!Free) {
+      Head = new Block(Head);
+      Free = Head->Nodes;
     }
-    return State.Alloc++;
+    assert(Free && "failed to allocate new block?");
+    // Allocate a node and update the freelist.
+    auto *Allocated = std::exchange(Free, Free->Previous);
+    Allocated->Previous = nullptr;
+    return Allocated;
   }
 
-private:
-  PoolState State;
+  void deallocate(ScopeDeclList::Node *Freed) {
+    assert(Freed && "deallocating null Node?");
+    // Set the deallocated node as the head of the freelist.
+    Freed->Previous = std::exchange(Free, Freed);
+  }
 };
 
 /// Scope - A scope is a transient data structure that is used while parsing the
@@ -349,8 +329,6 @@ private:
   using DeclSetTy = llvm::SmallPtrSet<Decl *, 32>;
   DeclSetTy DeclsInScope;
 
-  ScopeDeclNodePool *DeclNodePool;
-  ScopeDeclNodePool::PoolState DeclNodePoolState;
   llvm::DenseMap<DeclarationName, ScopeDeclList> Lookups;
 
   /// The DeclContext with which this scope is associated. For
@@ -385,21 +363,7 @@ public:
       : ErrorTrap(Diag) {
     Init(Parent, ScopeFlags);
   }
-
-  void SaveDeclNodePool(ScopeDeclNodePool& Pool) {
-    DeclNodePool = &Pool;
-    DeclNodePoolState = Pool.save();
-    assert(DeclNodePoolState.Alloc &&
-           DeclNodePoolState.Current &&
-           "invalid DeclNodePool state?");
-
-  }
-  void RestoreDeclNodePool() {
-    assert(DeclNodePoolState.Alloc &&
-           DeclNodePoolState.Current &&
-           "invalid DeclNodePool state?");
-    DeclNodePool->restore(DeclNodePoolState);
-  }
+  ScopeDeclNodePool *DeclNodePool;
 
   /// getFlags - Return the flags for this scope.
   unsigned getFlags() const { return Flags; }

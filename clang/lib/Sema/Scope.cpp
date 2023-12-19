@@ -27,17 +27,69 @@ void ScopeDeclList::clear(NamedDecl *ND) {
 }
 
 void ScopeDeclList::add(ScopeDeclNodePool &Pool, NamedDecl *ND) {
-#if 1
-  Node *NewHead = Pool.allocate();
-  NewHead->Entry = ND;
-  NewHead->Previous = Head.dyn_cast<Node *>();
-  Head = NewHead;
-  assert(NewHead->Previous != NewHead);
-#endif
+  // If this is the first declaration in the chain, just set the pointer.
+  if (!Head) {
+    Head = ND;
+    return;
+  }
+  Node *Previous = Head.dyn_cast<Node *>();
+  // If this is the second declaration in the chain, create a node for the
+  // previous declaration.
+  if (!Previous) {
+    Previous = Pool.allocate();
+    Previous->Entry = Head.get<NamedDecl *>();
+  }
+  // Finally, create a node for the new declaration.
+  Node *Current = Pool.allocate();
+  // Sanity check to verify the node allocator is working.
+  assert(Current != Previous);
+  Current->Entry = ND;
+  Current->Previous = Previous;
+  Head = Current;
 }
 
 void ScopeDeclList::remove(ScopeDeclNodePool &Pool, NamedDecl *ND) {
-#if 1
+  // Chain only contains a single declaration.
+  if (Head.is<NamedDecl *>()) {
+    // Reset the pointer to if this is the declaration we are removing.
+    if (Head.get<NamedDecl *>() == ND)
+      Head = nullptr;
+    return;
+  }
+  // Otherwise, there are one or more declarations in the chain.
+  Node *Current = Head.get<Node *>();
+  Node *Trailing = nullptr;
+  // Traverse the chain until we either find the matching node,
+  // or reach the end of the declaration chain.
+  size_t n = 0;
+  while(Current && Current->Entry != ND) {
+    assert(++n < 1024);
+    Trailing = std::exchange(Current, Current->Previous);
+  }
+  // Declaration not found.
+  if (!Current)
+    return;
+
+  if (Trailing)
+    // Declaration isn't the head node, splice it out.
+    Trailing->Previous = Current->Previous;
+  else
+    // Declaration is the head node, replace it.
+    Head = Current->Previous;
+
+  // Deallocate the removed node.
+  Pool.deallocate(Current);
+
+  // If the updated chain only contains a single declaration,
+  // deallocate the remaining node and set the pointer to
+  // the declaration.
+  Node *Remaining = Head.get<Node *>();
+  if (!Remaining->Previous) {
+    Head = Remaining->Entry;
+    Pool.deallocate(Remaining);
+  }
+
+#if 0
   Node *Current = Head.dyn_cast<Node *>();
   // Nothing to do...
   if (!Current)
@@ -45,6 +97,7 @@ void ScopeDeclList::remove(ScopeDeclNodePool &Pool, NamedDecl *ND) {
   // Removing the head node. Previous node is the new head.
   if (Current->Entry == ND) {
     Head = Current->Previous;
+    Pool.deallocate(Current);
     return;
   }
   size_t n = 0;
@@ -56,8 +109,9 @@ void ScopeDeclList::remove(ScopeDeclNodePool &Pool, NamedDecl *ND) {
     if (Current->Entry != ND)
       continue;
     assert(Trailing->Previous != Current->Previous);
-    // Found the matching node. Splice it out and return.
+    // Found the matching node. Splice out and deallocate the node.
     Trailing->Previous = Current->Previous;
+    Pool.deallocate(Current);
     break;
   }
   #if 0
@@ -84,26 +138,16 @@ void Scope::AddScopeDecl(Decl *D) {
   auto *ND = dyn_cast<NamedDecl>(D);
   if (!ND)
     return;
-  ScopeDeclList& list = Lookups[ND->getDeclName()];
-  if (isTemplateParamScope()) {
-    list.set(ND);
-  } else {
-    assert(DeclNodePool && "no DeclNodePool?");
-    list.add(*DeclNodePool, ND);
-  }
+  assert(DeclNodePool && "no DeclNodePool?");
+  Lookups[ND->getDeclName()].add(*DeclNodePool, ND);
 }
 
 void Scope::RemoveScopeDecl(Decl *D) {
   auto *ND = dyn_cast<NamedDecl>(D);
   if (!ND)
     return;
-  ScopeDeclList& list = Lookups[ND->getDeclName()];
-  if (isTemplateParamScope()) {
-    list.clear(ND);
-  } else {
-    assert(DeclNodePool && "no DeclNodePool?");
-    list.remove(*DeclNodePool, ND);
-  }
+  assert(DeclNodePool && "no DeclNodePool?");
+  Lookups[ND->getDeclName()].remove(*DeclNodePool, ND);
 }
 
 void Scope::setFlags(Scope *parent, unsigned flags) {
