@@ -678,6 +678,8 @@ static bool LookupMemberExprInRecord(Sema &SemaRef, LookupResult &R,
                                      TypoExpr *&TE) {
   SourceRange BaseRange = BaseExpr ? BaseExpr->getSourceRange() : SourceRange();
   RecordDecl *RDecl = dyn_cast_if_present<RecordDecl>(RTy->getAsTagDecl());
+  if (!RDecl)
+    return true;
   if (!SemaRef.isThisOutsideMemberFunctionBody(RTy) &&
       SemaRef.RequireCompleteType(OpLoc, RTy,
                                   diag::err_typecheck_incomplete_tag,
@@ -698,6 +700,8 @@ static bool LookupMemberExprInRecord(Sema &SemaRef, LookupResult &R,
     // If the member name was a qualified-id, look into the
     // nested-name-specifier.
     DC = SemaRef.computeDeclContext(SS, false);
+    if (!DC)
+      return true;
 
     if (SemaRef.RequireCompleteDeclContext(SS, DC)) {
       SemaRef.Diag(SS.getRange().getEnd(), diag::err_typecheck_incomplete_tag)
