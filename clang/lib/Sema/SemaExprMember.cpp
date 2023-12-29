@@ -1360,8 +1360,11 @@ static ExprResult LookupMemberExpr(Sema &S, LookupResult &R,
     if (ObjTy) {
       TypoExpr *TE = nullptr;
       if (LookupMemberExprInRecord(S, R, BaseExpr.get(), QualType(ObjTy, 0), OpLoc,
-                                    IsArrow, SS, HasTemplateArgs, TemplateKWLoc, TE))
+                                    IsArrow, SS, HasTemplateArgs, TemplateKWLoc, TE)) {
+        // We still need to diagnose unexpanded parameter packs in the nested-name-specifier.
+        S.DiagnoseUnexpandedParameterPack(SS, Sema::UPPC_Expression);
         return ExprError();
+      }
 
       // Returning valid-but-null is how we indicate to the caller that
       // the lookup result was filled in. If typo correction was attempted and
