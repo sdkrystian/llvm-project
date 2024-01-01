@@ -2169,6 +2169,10 @@ public:
                                        SourceLocation Loc = SourceLocation());
   const FunctionProtoType *ResolveExceptionSpec(SourceLocation Loc,
                                                 const FunctionProtoType *FPT);
+  const FunctionProtoType *ResolveExceptionSpec(const FunctionDecl *FD,
+                                                SourceLocation Loc,
+                                                const FunctionProtoType *FPT);
+
   void UpdateExceptionSpec(FunctionDecl *FD,
                            const FunctionProtoType::ExceptionSpecInfo &ESI);
   bool CheckSpecifiedExceptionType(QualType &T, SourceRange Range);

@@ -214,6 +214,13 @@ bool Sema::CheckDistantExceptionSpec(QualType T) {
 
 const FunctionProtoType *
 Sema::ResolveExceptionSpec(SourceLocation Loc, const FunctionProtoType *FPT) {
+  return ResolveExceptionSpec(nullptr, Loc, FPT);
+}
+
+const FunctionProtoType *
+Sema::ResolveExceptionSpec(const FunctionDecl *FD,
+                           SourceLocation Loc,
+                           const FunctionProtoType *FPT) {
   if (FPT->getExceptionSpecType() == EST_Unparsed) {
     Diag(Loc, diag::err_exception_spec_not_parsed);
     return nullptr;
@@ -225,6 +232,13 @@ Sema::ResolveExceptionSpec(SourceLocation Loc, const FunctionProtoType *FPT) {
   FunctionDecl *SourceDecl = FPT->getExceptionSpecDecl();
   const FunctionProtoType *SourceFPT =
       SourceDecl->getType()->castAs<FunctionProtoType>();
+
+  if (FD) {
+    if (FD != SourceDecl) {
+      assert(false);
+      FD = FD;
+    }
+  }
 
   // If the exception specification has already been resolved, just return it.
   if (!isUnresolvedExceptionSpec(SourceFPT->getExceptionSpecType()))

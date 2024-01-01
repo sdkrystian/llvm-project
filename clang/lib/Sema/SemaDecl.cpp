@@ -15700,7 +15700,7 @@ Decl *Sema::ActOnStartOfFunctionDef(Scope *FnBodyScope, Decl *D,
 
   // Ensure that the function's exception specification is instantiated.
   if (const FunctionProtoType *FPT = FD->getType()->getAs<FunctionProtoType>())
-    ResolveExceptionSpec(D->getLocation(), FPT);
+    ResolveExceptionSpec(FD, D->getLocation(), FPT);
 
   // dllimport cannot be applied to non-inline function definitions.
   if (FD->hasAttr<DLLImportAttr>() && !FD->isInlined() &&

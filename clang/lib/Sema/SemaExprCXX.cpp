@@ -5026,7 +5026,7 @@ static bool HasNoThrowOperator(const RecordType *RT, OverloadedOperatorKind Op,
       if((Operator->*IsDesiredOp)()) {
         FoundOperator = true;
         auto *CPT = Operator->getType()->castAs<FunctionProtoType>();
-        CPT = Self.ResolveExceptionSpec(KeyLoc, CPT);
+        CPT = Self.ResolveExceptionSpec(Operator, KeyLoc, CPT);
         if (!CPT || !CPT->isNothrow())
           return false;
       }
@@ -5297,7 +5297,7 @@ static bool EvaluateUnaryTypeTrait(Sema &Self, TypeTrait UTT,
         return false;
       if (UTT == UTT_IsNothrowDestructible) {
         auto *CPT = Destructor->getType()->castAs<FunctionProtoType>();
-        CPT = Self.ResolveExceptionSpec(KeyLoc, CPT);
+        CPT = Self.ResolveExceptionSpec(Destructor, KeyLoc, CPT);
         if (!CPT || !CPT->isNothrow())
           return false;
       }
@@ -5385,7 +5385,7 @@ static bool EvaluateUnaryTypeTrait(Sema &Self, TypeTrait UTT,
         if (Constructor->isCopyConstructor(FoundTQs)) {
           FoundConstructor = true;
           auto *CPT = Constructor->getType()->castAs<FunctionProtoType>();
-          CPT = Self.ResolveExceptionSpec(KeyLoc, CPT);
+          CPT = Self.ResolveExceptionSpec(Constructor, KeyLoc, CPT);
           if (!CPT)
             return false;
           // TODO: check whether evaluating default arguments can throw.
@@ -5423,7 +5423,7 @@ static bool EvaluateUnaryTypeTrait(Sema &Self, TypeTrait UTT,
         if (Constructor->isDefaultConstructor()) {
           FoundConstructor = true;
           auto *CPT = Constructor->getType()->castAs<FunctionProtoType>();
-          CPT = Self.ResolveExceptionSpec(KeyLoc, CPT);
+          CPT = Self.ResolveExceptionSpec(Constructor, KeyLoc, CPT);
           if (!CPT)
             return false;
           // FIXME: check whether evaluating default arguments can throw.

@@ -79,7 +79,7 @@ static ExprResult CreateFunctionRefExpr(
   S.MarkDeclRefReferenced(DRE, Base);
   if (auto *FPT = DRE->getType()->getAs<FunctionProtoType>()) {
     if (isUnresolvedExceptionSpec(FPT->getExceptionSpecType())) {
-      S.ResolveExceptionSpec(Loc, FPT);
+      S.ResolveExceptionSpec(Fn, Loc, FPT);
       DRE->setType(Fn->getType());
     }
   }
@@ -12604,7 +12604,7 @@ static bool completeFunctionType(Sema &S, FunctionDecl *FD, SourceLocation Loc,
   auto *FPT = FD->getType()->castAs<FunctionProtoType>();
   if (S.getLangOpts().CPlusPlus17 &&
       isUnresolvedExceptionSpec(FPT->getExceptionSpecType()) &&
-      !S.ResolveExceptionSpec(Loc, FPT))
+      !S.ResolveExceptionSpec(FD, Loc, FPT))
     return true;
 
   return false;
@@ -13059,7 +13059,7 @@ Sema::ResolveAddressOfOverloadedFunction(Expr *AddressOfExpr,
     Fn = Resolver.getMatchingFunctionDecl();
     assert(Fn);
     if (auto *FPT = Fn->getType()->getAs<FunctionProtoType>())
-      ResolveExceptionSpec(AddressOfExpr->getExprLoc(), FPT);
+      ResolveExceptionSpec(Fn, AddressOfExpr->getExprLoc(), FPT);
     FoundResult = *Resolver.getMatchingFunctionAccessPair();
     if (Complain) {
       if (Resolver.IsStaticMemberFunctionFromBoundPointer())

@@ -187,7 +187,7 @@ Sema::ImplicitExceptionSpecification::CalledDecl(SourceLocation CallLoc,
 
   const FunctionProtoType *Proto
     = Method->getType()->getAs<FunctionProtoType>();
-  Proto = Self->ResolveExceptionSpec(CallLoc, Proto);
+  Proto = Self->ResolveExceptionSpec(Method, CallLoc, Proto);
   if (!Proto)
     return;
 
@@ -9174,7 +9174,7 @@ void Sema::DefineDefaultedComparison(SourceLocation UseLoc, FunctionDecl *FD,
 
   // The exception specification is needed because we are defining the
   // function. Note that this will reuse the body we just built.
-  ResolveExceptionSpec(UseLoc, FD->getType()->castAs<FunctionProtoType>());
+  ResolveExceptionSpec(FD, UseLoc, FD->getType()->castAs<FunctionProtoType>());
 
   if (ASTMutationListener *L = getASTMutationListener())
     L->CompletedImplicitDefinition(FD);
@@ -14025,7 +14025,7 @@ void Sema::DefineImplicitDefaultConstructor(SourceLocation CurrentLocation,
 
   // The exception specification is needed because we are defining the
   // function.
-  ResolveExceptionSpec(CurrentLocation,
+  ResolveExceptionSpec(Constructor, CurrentLocation,
                        Constructor->getType()->castAs<FunctionProtoType>());
   MarkVTableUsed(CurrentLocation, ClassDecl);
 
@@ -14163,7 +14163,7 @@ void Sema::DefineInheritingConstructor(SourceLocation CurrentLocation,
 
   // The exception specification is needed because we are defining the
   // function.
-  ResolveExceptionSpec(CurrentLocation,
+  ResolveExceptionSpec(Constructor, CurrentLocation,
                        Constructor->getType()->castAs<FunctionProtoType>());
   MarkVTableUsed(CurrentLocation, ClassDecl);
 
@@ -14312,7 +14312,7 @@ void Sema::DefineImplicitDestructor(SourceLocation CurrentLocation,
 
   // The exception specification is needed because we are defining the
   // function.
-  ResolveExceptionSpec(CurrentLocation,
+  ResolveExceptionSpec(Destructor, CurrentLocation,
                        Destructor->getType()->castAs<FunctionProtoType>());
   MarkVTableUsed(CurrentLocation, ClassDecl);
 
@@ -15013,7 +15013,7 @@ void Sema::DefineImplicitCopyAssignment(SourceLocation CurrentLocation,
 
   // The exception specification is needed because we are defining the
   // function.
-  ResolveExceptionSpec(CurrentLocation,
+  ResolveExceptionSpec(CopyAssignOperator, CurrentLocation,
                        CopyAssignOperator->getType()->castAs<FunctionProtoType>());
 
   // Add a context note for diagnostics produced after this point.
@@ -15408,7 +15408,7 @@ void Sema::DefineImplicitMoveAssignment(SourceLocation CurrentLocation,
 
   // The exception specification is needed because we are defining the
   // function.
-  ResolveExceptionSpec(CurrentLocation,
+  ResolveExceptionSpec(MoveAssignOperator, CurrentLocation,
                        MoveAssignOperator->getType()->castAs<FunctionProtoType>());
 
   // Add a context note for diagnostics produced after this point.
@@ -15718,7 +15718,7 @@ void Sema::DefineImplicitCopyConstructor(SourceLocation CurrentLocation,
 
   // The exception specification is needed because we are defining the
   // function.
-  ResolveExceptionSpec(CurrentLocation,
+  ResolveExceptionSpec(CopyConstructor, CurrentLocation,
                        CopyConstructor->getType()->castAs<FunctionProtoType>());
   MarkVTableUsed(CurrentLocation, ClassDecl);
 
@@ -15854,7 +15854,7 @@ void Sema::DefineImplicitMoveConstructor(SourceLocation CurrentLocation,
 
   // The exception specification is needed because we are defining the
   // function.
-  ResolveExceptionSpec(CurrentLocation,
+  ResolveExceptionSpec(MoveConstructor, CurrentLocation,
                        MoveConstructor->getType()->castAs<FunctionProtoType>());
   MarkVTableUsed(CurrentLocation, ClassDecl);
 
@@ -18770,7 +18770,7 @@ void Sema::MarkVirtualMemberExceptionSpecsNeeded(SourceLocation Loc,
                                                  const CXXRecordDecl *RD) {
   for (const auto *I : RD->methods())
     if (I->isVirtual() && !I->isPure())
-      ResolveExceptionSpec(Loc, I->getType()->castAs<FunctionProtoType>());
+      ResolveExceptionSpec(I, Loc, I->getType()->castAs<FunctionProtoType>());
 }
 
 void Sema::MarkVirtualMembersReferenced(SourceLocation Loc,

@@ -4522,7 +4522,7 @@ Sema::TemplateDeductionResult Sema::DeduceTemplateArguments(
       Specialization->getType()->castAs<FunctionProtoType>();
   if (getLangOpts().CPlusPlus17 &&
       isUnresolvedExceptionSpec(SpecializationFPT->getExceptionSpecType()) &&
-      !ResolveExceptionSpec(Info.getLocation(), SpecializationFPT))
+      !ResolveExceptionSpec(Specialization, Info.getLocation(), SpecializationFPT))
     return TDK_MiscellaneousDeductionFailure;
 
   // Adjust the exception specification of the argument to match the
