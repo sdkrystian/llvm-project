@@ -209,7 +209,8 @@ public:
         DiagnoseAmbiguous(std::move(Other.DiagnoseAmbiguous)),
         AllowHidden(std::move(Other.AllowHidden)),
         Shadowed(std::move(Other.Shadowed)),
-        TemplateNameLookup(std::move(Other.TemplateNameLookup)) {
+        TemplateNameLookup(std::move(Other.TemplateNameLookup)),
+        FoundInCurrentInstantiation(std::move(Other.FoundInCurrentInstantiation)) {
     Other.Paths = nullptr;
     Other.DiagnoseAccess = false;
     Other.DiagnoseAmbiguous = false;
@@ -235,6 +236,8 @@ public:
     AllowHidden = std::move(Other.AllowHidden);
     Shadowed = std::move(Other.Shadowed);
     TemplateNameLookup = std::move(Other.TemplateNameLookup);
+    FoundInCurrentInstantiation = std::move(Other.FoundInCurrentInstantiation);
+
     Other.Paths = nullptr;
     Other.DiagnoseAccess = false;
     Other.DiagnoseAmbiguous = false;
@@ -500,6 +503,14 @@ public:
     ResultKind = NotFoundInCurrentInstantiation;
   }
 
+  void setFoundInCurrentInstantiation(bool Found) {
+    FoundInCurrentInstantiation = Found;
+  }
+
+  bool wasFoundInCurrentInstantiation() const {
+    return FoundInCurrentInstantiation;
+  }
+
   /// Determine whether the lookup result was shadowed by some other
   /// declaration that lookup ignored.
   bool isShadowed() const { return Shadowed; }
@@ -604,6 +615,7 @@ public:
     Paths = nullptr;
     NamingClass = nullptr;
     Shadowed = false;
+    FoundInCurrentInstantiation = false;
   }
 
   /// Clears out any current state and re-initializes for a
@@ -792,6 +804,7 @@ private:
   CXXBasePaths *Paths = nullptr;
   CXXRecordDecl *NamingClass = nullptr;
   QualType BaseObjectType;
+  bool FoundInCurrentInstantiation = false;
 
   // Parameters.
   Sema *SemaPtr;

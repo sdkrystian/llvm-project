@@ -2445,10 +2445,14 @@ bool Sema::LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
     }
   } QL(LookupCtx);
 
+  CXXRecordDecl *LookupRec = dyn_cast<CXXRecordDecl>(LookupCtx);
+
   if (LookupDirect(*this, R, LookupCtx)) {
     R.resolveKind();
-    if (isa<CXXRecordDecl>(LookupCtx))
-      R.setNamingClass(cast<CXXRecordDecl>(LookupCtx));
+    if (LookupRec) {
+      R.setFoundInCurrentInstantiation(LookupRec->isDependentContext());
+      R.setNamingClass(LookupRec);
+    }
     return true;
   }
 
@@ -2470,7 +2474,6 @@ bool Sema::LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
 
   // If this isn't a C++ class, we aren't allowed to look into base
   // classes, we're done.
-  CXXRecordDecl *LookupRec = dyn_cast<CXXRecordDecl>(LookupCtx);
   if (!LookupRec || !LookupRec->getDefinition())
     return false;
 
@@ -2667,7 +2670,6 @@ bool Sema::LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
   }
 
   // Lookup in a base class succeeded; return these results.
-
   for (DeclContext::lookup_iterator I = Paths.front().Decls, E = I.end();
        I != E; ++I) {
     AccessSpecifier AS = CXXRecordDecl::MergeAccess(SubobjectAccess,
@@ -2675,6 +2677,7 @@ bool Sema::LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
     if (NamedDecl *ND = R.getAcceptableDecl(*I))
       R.addDecl(ND, AS);
   }
+  R.setFoundInCurrentInstantiation(LookupRec->isDependentContext());
   R.resolveKind();
   return true;
 }
