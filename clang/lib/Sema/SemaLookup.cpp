@@ -2486,12 +2486,13 @@ bool Sema::LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
   // dependent base classes, then we either have to delay lookup until
   // template instantiation time (at which point all bases will be available)
   // or we have to fail.
+  #if 0
   if (!InUnqualifiedLookup && LookupRec->isDependentContext() &&
       LookupRec->hasAnyDependentBases()) {
     R.setNotFoundInCurrentInstantiation();
     return false;
   }
-
+  #endif
   // Perform lookup into our base classes.
 
   DeclarationName Name = R.getLookupName();
@@ -2513,8 +2514,14 @@ bool Sema::LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
 
   CXXBasePaths Paths;
   Paths.setOrigin(LookupRec);
-  if (!LookupRec->lookupInBases(BaseCallback, Paths))
+  if (!LookupRec->lookupInBases(BaseCallback, Paths)) {
+    // If we don't find anything and there are any dependent bases,
+    // we must defer lookup until instantiation.
+    if (!InUnqualifiedLookup && LookupRec->hasAnyDependentBases()) {
+      R.setNotFoundInCurrentInstantiation();
+    }
     return false;
+  }
 
   R.setNamingClass(LookupRec);
 
