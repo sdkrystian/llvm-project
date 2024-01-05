@@ -2914,6 +2914,7 @@ public:
         getSema().Diag(MemberNameInfo.getLoc(), diag::err_ambiguous_two_phase_lookup)
             << MemberNameInfo.getName();
 
+        #if 0
         getSema().Diag(FoundDecl->getLocation(), diag::note_ambig_member_ref_defn_context)
             << FoundDecl
             << FoundDecl->getDeclContext();
@@ -2921,6 +2922,13 @@ public:
         getSema().Diag(NewFoundDecl->getLocation(), diag::note_ambig_member_ref_inst_context)
             << NewFoundDecl
             << NewFoundDecl->getDeclContext();
+        #endif
+        getSema().Diag(FoundDecl->getLocation(), diag::note_ambiguous_two_phase_found)
+            << "template definition context"
+            << FoundDecl;
+        getSema().Diag(NewFoundDecl->getLocation(), diag::note_ambiguous_two_phase_found)
+            << "template instantiation context"
+            << NewFoundDecl;
       }
     }
 

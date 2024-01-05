@@ -9414,6 +9414,11 @@ def err_ambiguous_tag_hiding : Error<"a type named %0 is hidden by a "
 def note_hidden_tag : Note<"type declaration hidden">;
 def note_hiding_object : Note<"declaration hides type">;
 
+def err_ambiguous_two_phase_lookup : Error<
+  "the result of lookup for %0 in the template definition context differs from the result "
+  "during instantiation">;
+def note_ambiguous_two_phase_found : Note<"lookup in the %0 found %q1">;
+
 // C++ operator overloading
 def err_operator_overload_needs_class_or_enum : Error<
   "overloaded %0 must have at least one parameter of class "
