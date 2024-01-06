@@ -1047,6 +1047,7 @@ void ASTStmtReader::VisitMemberExpr(MemberExpr *E) {
   E->MemberDNLoc = Record.readDeclarationNameLoc(E->MemberDecl->getDeclName());
   E->MemberLoc = Record.readSourceLocation();
   E->MemberExprBits.IsArrow = CurrentUnpackingBits->getNextBit();
+  E->MemberExprBits.FoundInCurrentInstantiation = CurrentUnpackingBits->getNextBit();
   E->MemberExprBits.HasQualifierOrFoundDecl = HasQualifier || HasFoundDecl;
   E->MemberExprBits.HasTemplateKWAndArgsInfo = HasTemplateInfo;
   E->MemberExprBits.HadMultipleCandidates = CurrentUnpackingBits->getNextBit();
@@ -2087,6 +2088,8 @@ void ASTStmtReader::VisitOverloadExpr(OverloadExpr *E) {
 void ASTStmtReader::VisitUnresolvedMemberExpr(UnresolvedMemberExpr *E) {
   VisitOverloadExpr(E);
   E->UnresolvedMemberExprBits.IsArrow = CurrentUnpackingBits->getNextBit();
+  E->UnresolvedMemberExprBits.FoundInCurrentInstantiation =
+      CurrentUnpackingBits->getNextBit();
   E->UnresolvedMemberExprBits.HasUnresolvedUsing =
       CurrentUnpackingBits->getNextBit();
 

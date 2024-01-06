@@ -991,6 +991,7 @@ void ASTStmtWriter::VisitMemberExpr(MemberExpr *E) {
                                E->getMemberDecl()->getDeclName());
   Record.AddSourceLocation(E->getMemberLoc());
   CurrentPackingBits.addBit(E->isArrow());
+  CurrentPackingBits.addBit(E->wasFoundInCurrentInstantiation());
   CurrentPackingBits.addBit(E->hadMultipleCandidates());
   CurrentPackingBits.addBits(E->isNonOdrUse(), /*Width=*/2);
   Record.AddSourceLocation(E->getOperatorLoc());
@@ -2071,6 +2072,7 @@ void ASTStmtWriter::VisitOverloadExpr(OverloadExpr *E) {
 void ASTStmtWriter::VisitUnresolvedMemberExpr(UnresolvedMemberExpr *E) {
   VisitOverloadExpr(E);
   CurrentPackingBits.addBit(E->isArrow());
+  CurrentPackingBits.addBit(E->wasFoundInCurrentInstantiation());
   CurrentPackingBits.addBit(E->hasUnresolvedUsing());
   CurrentPackingBits.addBit(!E->isImplicitAccess());
   if (!E->isImplicitAccess())

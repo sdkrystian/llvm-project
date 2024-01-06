@@ -666,7 +666,8 @@ ExprResult Sema::DefaultLvalueConversion(Expr *E) {
   // expressions of certain types in C++.
   if (getLangOpts().CPlusPlus &&
       (E->getType() == Context.OverloadTy ||
-       T->isDependentType() ||
+       // T->isDependentType() ||
+       (T->isDependentType() && !T->isPointerType()) ||
        T->isRecordType()))
     return E;
 

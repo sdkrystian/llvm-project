@@ -597,6 +597,9 @@ protected:
     LLVM_PREFERRED_TYPE(bool)
     unsigned HasTemplateKWAndArgsInfo : 1;
 
+    LLVM_PREFERRED_TYPE(bool)
+    unsigned FoundInCurrentInstantiation : 1;
+
     /// True if this member expression refers to a method that
     /// was resolved from an overloaded set having size greater than 1.
     LLVM_PREFERRED_TYPE(bool)
@@ -1081,6 +1084,9 @@ protected:
     /// the '.' operator.
     LLVM_PREFERRED_TYPE(bool)
     unsigned IsArrow : 1;
+
+    LLVM_PREFERRED_TYPE(bool)
+    unsigned FoundInCurrentInstantiation : 1;
 
     /// Whether the lookup results contain an unresolved using declaration.
     LLVM_PREFERRED_TYPE(bool)

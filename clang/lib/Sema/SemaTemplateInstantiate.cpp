@@ -1429,6 +1429,17 @@ namespace {
     ExprResult TransformSubstNonTypeTemplateParmExpr(
                                            SubstNonTypeTemplateParmExpr *E);
 
+    ExprResult RebuildMemberExpr(Expr *Base, SourceLocation OpLoc,
+                                 bool isArrow,
+                                 NestedNameSpecifierLoc QualifierLoc,
+                                 SourceLocation TemplateKWLoc,
+                                 const DeclarationNameInfo &MemberNameInfo,
+                                 ValueDecl *Member,
+                                 NamedDecl *FoundDecl,
+                           const TemplateArgumentListInfo *ExplicitTemplateArgs,
+                                 NamedDecl *FirstQualifierInScope,
+                                 bool MemberOfCurrentInstantiation);
+
     /// Rebuild a DeclRefExpr for a VarDecl reference.
     ExprResult RebuildVarDeclRefExpr(VarDecl *PD, SourceLocation Loc);
 
@@ -2188,6 +2199,48 @@ TemplateInstantiator::TransformDeclRefExpr(DeclRefExpr *E) {
       return TransformFunctionParmPackRefExpr(E, PD);
 
   return inherited::TransformDeclRefExpr(E);
+}
+
+ExprResult
+TemplateInstantiator::RebuildMemberExpr(
+                             Expr *Base, SourceLocation OpLoc,
+                             bool isArrow,
+                             NestedNameSpecifierLoc QualifierLoc,
+                             SourceLocation TemplateKWLoc,
+                             const DeclarationNameInfo &MemberNameInfo,
+                             ValueDecl *Member,
+                             NamedDecl *FoundDecl,
+                       const TemplateArgumentListInfo *ExplicitTemplateArgs,
+                             NamedDecl *FirstQualifierInScope,
+                             bool MemberOfCurrentInstantiation) {
+  ExprResult Result = inherited::RebuildMemberExpr(Base, OpLoc, isArrow,
+                                                   QualifierLoc, TemplateKWLoc,
+                                                   MemberNameInfo,
+                                                   Member, FoundDecl,
+                                                   ExplicitTemplateArgs,
+                                                   FirstQualifierInScope,
+                                                   MemberOfCurrentInstantiation);
+  if (!MemberOfCurrentInstantiation || Result.isInvalid())
+    return Result;
+
+  if (auto *NewE = dyn_cast_if_present<MemberExpr>(Result.get())) {
+    // NamedDecl *FoundDecl = E->getFoundDecl().getDecl();
+    NamedDecl *NewFoundDecl = NewE->getFoundDecl().getDecl();
+    if(!declaresSameEntity(NewFoundDecl, FoundDecl)) {
+
+      getSema().Diag(MemberNameInfo.getLoc(), diag::err_ambiguous_two_phase_lookup)
+          << MemberNameInfo.getName();
+
+      getSema().Diag(FoundDecl->getLocation(), diag::note_ambiguous_two_phase_found)
+          << "template definition context"
+          << FoundDecl;
+      getSema().Diag(NewFoundDecl->getLocation(), diag::note_ambiguous_two_phase_found)
+          << "template instantiation context"
+          << NewFoundDecl;
+    }
+  }
+
+  return Result;
 }
 
 ExprResult TemplateInstantiator::TransformCXXDefaultArgExpr(

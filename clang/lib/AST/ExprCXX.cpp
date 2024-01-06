@@ -1563,6 +1563,7 @@ UnresolvedMemberExpr::UnresolvedMemberExpr(
       Base(Base), BaseType(BaseType), OperatorLoc(OperatorLoc) {
   UnresolvedMemberExprBits.IsArrow = IsArrow;
   UnresolvedMemberExprBits.HasUnresolvedUsing = HasUnresolvedUsing;
+  UnresolvedMemberExprBits.FoundInCurrentInstantiation = false;
 
   // Check whether all of the members are non-static member functions,
   // and if so, mark give this bound-member type instead of overload type.

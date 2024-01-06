@@ -2861,12 +2861,6 @@ public:
     if (isArrow && !BaseType->isPointerType())
       return ExprError();
 
-    // FIXME: this involves duplicating earlier analysis in a lot of
-    // cases; we should avoid this when possible.
-    LookupResult R(getSema(), MemberNameInfo, Sema::LookupMemberName);
-    R.addDecl(FoundDecl);
-    R.resolveKind();
-
     if (getSema().isUnevaluatedContext() && Base->isImplicitCXXThis() &&
         isa<FieldDecl, IndirectFieldDecl, MSPropertyDecl>(Member)) {
       if (auto *ThisClass = cast<CXXThisExpr>(Base)
@@ -2881,58 +2875,27 @@ public:
                                             VK_LValue, Member->getLocation());
       }
     }
-    #if 0
+
+    if (!MemberOfCurrentInstantiation) {
+      // FIXME: this involves duplicating earlier analysis in a lot of
+      // cases; we should avoid this when possible.
+      LookupResult R(getSema(), MemberNameInfo, Sema::LookupMemberName);
+      R.addDecl(FoundDecl);
+      R.resolveKind();
+
+      return getSema().BuildMemberReferenceExpr(Base, BaseType, OpLoc, isArrow,
+                                                SS, TemplateKWLoc,
+                                                FirstQualifierInScope,
+                                                R, ExplicitTemplateArgs,
+                                                /*S*/nullptr);
+    }
+
+    // If this is a member of the current instantiation, we need to relookup the member.
     return getSema().BuildMemberReferenceExpr(Base, BaseType, OpLoc, isArrow,
                                               SS, TemplateKWLoc,
                                               FirstQualifierInScope,
-                                              R, ExplicitTemplateArgs,
+                                              MemberNameInfo, ExplicitTemplateArgs,
                                               /*S*/nullptr);
-    #endif
-
-    if (!MemberOfCurrentInstantiation)
-      return getSema().BuildMemberReferenceExpr(
-                                              Base, BaseType, OpLoc, isArrow,
-                                              SS, TemplateKWLoc,
-                                              FirstQualifierInScope,
-                                              R, ExplicitTemplateArgs,
-                                              /*S*/nullptr);
-
-    ExprResult Result = getSema().BuildMemberReferenceExpr(
-                                              Base, BaseType, OpLoc, isArrow,
-                                              SS, TemplateKWLoc,
-                                              FirstQualifierInScope,
-                                              MemberNameInfo,
-                                              ExplicitTemplateArgs,
-                                              /*S*/nullptr);
-    if (Result.isInvalid())
-      return Result;
-
-    if (auto *Mem = dyn_cast_if_present<MemberExpr>(Result.get())) {
-      NamedDecl *NewFoundDecl = Mem->getFoundDecl().getDecl();
-      if(!declaresSameEntity(NewFoundDecl, FoundDecl)) {
-
-        getSema().Diag(MemberNameInfo.getLoc(), diag::err_ambiguous_two_phase_lookup)
-            << MemberNameInfo.getName();
-
-        #if 0
-        getSema().Diag(FoundDecl->getLocation(), diag::note_ambig_member_ref_defn_context)
-            << FoundDecl
-            << FoundDecl->getDeclContext();
-
-        getSema().Diag(NewFoundDecl->getLocation(), diag::note_ambig_member_ref_inst_context)
-            << NewFoundDecl
-            << NewFoundDecl->getDeclContext();
-        #endif
-        getSema().Diag(FoundDecl->getLocation(), diag::note_ambiguous_two_phase_found)
-            << "template definition context"
-            << FoundDecl;
-        getSema().Diag(NewFoundDecl->getLocation(), diag::note_ambiguous_two_phase_found)
-            << "template instantiation context"
-            << NewFoundDecl;
-      }
-    }
-
-    return Result;
   }
 
   /// Build a new binary operator expression.
@@ -11684,14 +11647,6 @@ TreeTransform<Derived>::TransformCallExpr(CallExpr *E) {
 template<typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformMemberExpr(MemberExpr *E) {
-  bool MemberOfCurrentInstantiation = false;
-  if (E->getBase()->getType()->isDependentType() ||
-      E->getQualifier()->isDependent()) {
-    MemberOfCurrentInstantiation =
-        !E->isImplicitAccess() &&
-        E->getFoundDecl()->isCXXClassMember();
-  }
-
   ExprResult Base = getDerived().TransformExpr(E->getBase());
   if (Base.isInvalid())
     return ExprError();
@@ -11765,6 +11720,15 @@ TreeTransform<Derived>::TransformMemberExpr(MemberExpr *E) {
     if (!MemberNameInfo.getName())
       return ExprError();
   }
+
+  bool MemberOfCurrentInstantiation = false;
+  if (E->getBase()->getType()->isDependentType() ||
+      (E->hasQualifier() && E->getQualifier()->isDependent())) {
+    MemberOfCurrentInstantiation =
+        !E->isImplicitAccess(); //  &&
+        // E->getFoundDecl()->isCXXClassMember();
+  }
+
 
   return getDerived().RebuildMemberExpr(Base.get(), FakeOperatorLoc,
                                         E->isArrow(),

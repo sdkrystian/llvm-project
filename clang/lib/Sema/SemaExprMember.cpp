@@ -679,16 +679,48 @@ static bool LookupMemberExprInRecord(Sema &SemaRef, LookupResult &R,
   SourceRange BaseRange = BaseExpr ? BaseExpr->getSourceRange() : SourceRange();
   RecordDecl *RDecl = RTy->getAsRecordDecl();
 
-  bool IsCurrentInstantiation =
-      isa<InjectedClassNameType>(RTy.getCanonicalType());
+  // DeclContext *DC = RDecl;
+  DeclContext *DC = SemaRef.computeDeclContext(RTy);
   // If the object expression is dependent and isn't the current instantiation,
   // lookup will not find anything and we must defer until instantiation.
-  if (RTy->isDependentType() && !IsCurrentInstantiation) {
+  if (!DC) {
     R.setNotFoundInCurrentInstantiation();
     return false;
   }
 
-  if (!SemaRef.isThisOutsideMemberFunctionBody(RTy) &&
+
+  DeclarationName Name = R.getLookupName();
+  if (Name.getNameKind() == DeclarationName::CXXConversionFunctionName &&
+      Name.getCXXNameType()->isDependentType()) {
+    R.setNotFoundInCurrentInstantiation();
+    return false;
+  }
+
+  #if 0
+  bool ContextIsCurrentInstantiation = DC != nullptr;
+  bool NotInCurrentInstantiation = ContextIsCurrentInstantiation;
+
+  CXXRecordDecl *CurClass = SemaRef.getCurrentClass(nullptr, &SS);
+  if (Name.getNameKind() == DeclarationName::CXXConversionFunctionName &&
+      Name.getCXXNameType()->isDependentType()) {
+    NotInCurrentInstantiation = true;
+  } else if (NameKind == DeclarationName::CXXOperatorName &&
+      // CurClass && CurClass->isTemplated()) {
+      ContextIsCurrentInstantiation) {
+    NotInCurrentInstantiation = true;
+  }
+  // bool IsCurrentInstantiation =
+  //     isa<InjectedClassNameType>(RTy.getCanonicalType());
+  // If the object expression is dependent and isn't the current instantiation,
+  // lookup will not find anything and we must defer until instantiation.
+  if (NotInCurrentInstantiation) {
+    R.setNotFoundInCurrentInstantiation();
+    return false;
+  }
+  #endif
+
+  if (!RTy->isDependentType() &&
+     !SemaRef.isThisOutsideMemberFunctionBody(RTy) &&
       SemaRef.RequireCompleteType(OpLoc, RTy,
                                   diag::err_typecheck_incomplete_tag,
                                   BaseRange))
@@ -706,7 +738,6 @@ static bool LookupMemberExprInRecord(Sema &SemaRef, LookupResult &R,
     return Invalid;
   }
 
-  DeclContext *DC = RDecl;
   if (SS.isSet()) {
     // If the member name was a qualified-id, look into the
     // nested-name-specifier.
@@ -1310,14 +1341,16 @@ static ExprResult LookupMemberExpr(Sema &S, LookupResult &R,
                                    SourceLocation TemplateKWLoc) {
   assert(BaseExpr.get() && "no base expression");
 
-  if (!BaseExpr.get()->getType()->isDependentType()) {
+  QualType BaseType = BaseExpr.get()->getType();
+
+  if (true || !BaseType->isDependentType()) {
     // Perform default conversions.
     BaseExpr = S.PerformMemberExprBaseConversion(BaseExpr.get(), IsArrow);
     if (BaseExpr.isInvalid())
       return ExprError();
+    BaseType = BaseExpr.get()->getType();
   }
 
-  QualType BaseType = BaseExpr.get()->getType();
   // assert(!BaseType->isDependentType());
 
   DeclarationName MemberName = R.getLookupName();
@@ -1330,29 +1363,31 @@ static ExprResult LookupMemberExpr(Sema &S, LookupResult &R,
   if (IsArrow) {
     if (const PointerType *Ptr = BaseType->getAs<PointerType>())
       BaseType = Ptr->getPointeeType();
-    else if (const ObjCObjectPointerType *Ptr
+    else if (!BaseType->isDependentType()) {
+      if (const ObjCObjectPointerType *Ptr
                = BaseType->getAs<ObjCObjectPointerType>())
-      BaseType = Ptr->getPointeeType();
-    else if (BaseType->isRecordType()) {
-      // Recover from arrow accesses to records, e.g.:
-      //   struct MyRecord foo;
-      //   foo->bar
-      // This is actually well-formed in C++ if MyRecord has an
-      // overloaded operator->, but that should have been dealt with
-      // by now--or a diagnostic message already issued if a problem
-      // was encountered while looking for the overloaded operator->.
-      if (!S.getLangOpts().CPlusPlus) {
-        S.Diag(OpLoc, diag::err_typecheck_member_reference_suggestion)
-          << BaseType << int(IsArrow) << BaseExpr.get()->getSourceRange()
-          << FixItHint::CreateReplacement(OpLoc, ".");
+        BaseType = Ptr->getPointeeType();
+      else if (BaseType->isRecordType()) {
+        // Recover from arrow accesses to records, e.g.:
+         //   struct MyRecord foo;
+        //   foo->bar
+        // This is actually well-formed in C++ if MyRecord has an
+        // overloaded operator->, but that should have been dealt with
+        // by now--or a diagnostic message already issued if a problem
+        // was encountered while looking for the overloaded operator->.
+        if (!S.getLangOpts().CPlusPlus) {
+          S.Diag(OpLoc, diag::err_typecheck_member_reference_suggestion)
+              << BaseType << int(IsArrow) << BaseExpr.get()->getSourceRange()
+              << FixItHint::CreateReplacement(OpLoc, ".");
+        }
+        IsArrow = false;
+      } else if (BaseType->isFunctionType()) {
+        goto fail;
+      } else {
+        S.Diag(MemberLoc, diag::err_typecheck_member_reference_arrow)
+            << BaseType << BaseExpr.get()->getSourceRange();
+        return ExprError();
       }
-      IsArrow = false;
-    } else if (BaseType->isFunctionType()) {
-      goto fail;
-    } else {
-      S.Diag(MemberLoc, diag::err_typecheck_member_reference_arrow)
-        << BaseType << BaseExpr.get()->getSourceRange();
-      return ExprError();
     }
   }
 
@@ -1372,7 +1407,7 @@ static ExprResult LookupMemberExpr(Sema &S, LookupResult &R,
   }
 
   // Handle field access to simple records.
-  if (BaseType->getAsRecordDecl()) {
+  if (BaseType->getAsRecordDecl() || BaseType->isDependentType()) {
     TypoExpr *TE = nullptr;
     if (LookupMemberExprInRecord(S, R, BaseExpr.get(), BaseType, OpLoc, IsArrow, SS,
                                  HasTemplateArgs, TemplateKWLoc, TE))

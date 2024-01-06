@@ -3353,6 +3353,14 @@ public:
     return getBase() && getBase()->isImplicitCXXThis();
   }
 
+  bool wasFoundInCurrentInstantiation() const {
+    return MemberExprBits.FoundInCurrentInstantiation;
+  }
+
+  void setWasFoundInCurrentInstantiation(bool V = true) {
+    MemberExprBits.FoundInCurrentInstantiation = V;
+  }
+
   /// Returns true if this member expression refers to a method that
   /// was resolved from an overloaded set having size greater than 1.
   bool hadMultipleCandidates() const {

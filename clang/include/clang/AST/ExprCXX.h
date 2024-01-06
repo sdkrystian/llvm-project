@@ -3996,6 +3996,14 @@ public:
   /// operator; otherwise, it used the '.' operator.
   bool isArrow() const { return UnresolvedMemberExprBits.IsArrow; }
 
+  bool wasFoundInCurrentInstantiation() const {
+    return UnresolvedMemberExprBits.FoundInCurrentInstantiation;
+  }
+
+  void setWasFoundInCurrentInstantiation(bool V = true) {
+    UnresolvedMemberExprBits.FoundInCurrentInstantiation = V;
+  }
+
   /// Retrieve the location of the '->' or '.' operator.
   SourceLocation getOperatorLoc() const { return OperatorLoc; }
 
