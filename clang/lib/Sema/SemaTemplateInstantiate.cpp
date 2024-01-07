@@ -2280,15 +2280,42 @@ TemplateInstantiator::RebuildUnresolvedMemberExpr(
 
   CXXScopeSpec SS;
   SS.Adopt(QualifierLoc);
+
+  DeclarationNameInfo MemberNameInfo = R.getLookupNameInfo();
   ExprResult Result = SemaRef.BuildMemberReferenceExpr(BaseE,
                                                        BaseType,
                                                        OperatorLoc,
                                                        IsArrow,
                                                        SS, TemplateKWLoc,
                                                        FirstQualifierInScope,
-                                                       R.getLookupNameInfo(),
+                                                       MemberNameInfo,
                                                        TemplateArgs,
                                                        /*S*/nullptr);
+  if (Result.isInvalid())
+    return Result;
+
+  const UnresolvedSetImpl& OldDecls = R.asUnresolvedSet();
+  UnresolvedSet<8> NewDecls;
+  if (auto *ME = dyn_cast<MemberExpr>(Result.get())) {
+    NewDecls.addDecl(ME->getFoundDecl());
+  }
+  if (auto *UME = dyn_cast<UnresolvedMemberExpr>(Result.get())) {
+    NewDecls.append(UME->decls_begin(), UME->decls_end());
+    // for (NamedDecl *ND : UME->decls())
+    //  NewDecls.addDecl(ND);
+  }
+
+  bool SameLookup = OldDecls.size() == NewDecls.size() &&
+      llvm::all_of(NewDecls, [&OldDecls](NamedDecl* ND)
+          {
+            return llvm::is_contained(OldDecls, ND);
+          });
+  if (SameLookup)
+    return Result;
+
+  getSema().Diag(MemberNameInfo.getLoc(), diag::err_ambiguous_two_phase_lookup)
+          << MemberNameInfo.getName();
+
   return Result;
 }
 
