@@ -9174,11 +9174,12 @@ ASTRecordReader::readCXXBaseSpecifier() {
   bool isBaseOfClass = readBool();
   AccessSpecifier AS = static_cast<AccessSpecifier>(readInt());
   bool inheritConstructors = readBool();
+  bool instFromDependent = readBool();
   TypeSourceInfo *TInfo = readTypeSourceInfo();
   SourceRange Range = readSourceRange();
   SourceLocation EllipsisLoc = readSourceLocation();
   CXXBaseSpecifier Result(Range, isVirtual, isBaseOfClass, AS, TInfo,
-                          EllipsisLoc);
+                          EllipsisLoc, instFromDependent);
   Result.setInheritConstructors(inheritConstructors);
   return Result;
 }

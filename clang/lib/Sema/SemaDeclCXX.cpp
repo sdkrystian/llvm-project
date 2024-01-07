@@ -2681,7 +2681,8 @@ Sema::CheckBaseSpecifier(CXXRecordDecl *Class,
                          SourceRange SpecifierRange,
                          bool Virtual, AccessSpecifier Access,
                          TypeSourceInfo *TInfo,
-                         SourceLocation EllipsisLoc) {
+                         SourceLocation EllipsisLoc,
+                         bool InstFromDependent) {
   // In HLSL, unspecified class access is public rather than private.
   if (getLangOpts().HLSL && Class->getTagKind() == TagTypeKind::Class &&
       Access == AS_none)
@@ -2738,7 +2739,7 @@ Sema::CheckBaseSpecifier(CXXRecordDecl *Class,
       Class->setInvalidDecl();
     return new (Context) CXXBaseSpecifier(
         SpecifierRange, Virtual, Class->getTagKind() == TagTypeKind::Class,
-        Access, TInfo, EllipsisLoc);
+        Access, TInfo, EllipsisLoc, InstFromDependent);
   }
 
   // Base specifiers must be record types.
@@ -2826,7 +2827,7 @@ Sema::CheckBaseSpecifier(CXXRecordDecl *Class,
   // Create the base specifier.
   return new (Context) CXXBaseSpecifier(
       SpecifierRange, Virtual, Class->getTagKind() == TagTypeKind::Class,
-      Access, TInfo, EllipsisLoc);
+      Access, TInfo, EllipsisLoc, InstFromDependent);
 }
 
 /// ActOnBaseSpecifier - Parsed a base specifier. A base specifier is
@@ -2873,7 +2874,8 @@ BaseResult Sema::ActOnBaseSpecifier(Decl *classdecl, SourceRange SpecifierRange,
 
   if (CXXBaseSpecifier *BaseSpec = CheckBaseSpecifier(Class, SpecifierRange,
                                                       Virtual, Access, TInfo,
-                                                      EllipsisLoc))
+                                                      EllipsisLoc,
+                                                      /*InstFromDependent*/false))
     return BaseSpec;
   else
     Class->setInvalidDecl();

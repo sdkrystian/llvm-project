@@ -2231,6 +2231,7 @@ TemplateInstantiator::RebuildMemberExpr(
                                                    ExplicitTemplateArgs,
                                                    FirstQualifierInScope,
                                                    MemberOfCurrentInstantiation);
+#if 0
   if (!MemberOfCurrentInstantiation || Result.isInvalid())
     return Result;
 
@@ -2250,6 +2251,7 @@ TemplateInstantiator::RebuildMemberExpr(
           << NewFoundDecl;
     }
   }
+#endif
 
   return Result;
 }
@@ -2267,7 +2269,7 @@ TemplateInstantiator::RebuildUnresolvedMemberExpr(
                                            bool MemberOfCurrentInstantiation) {
   assert(!R.empty());
 
-  if (!MemberOfCurrentInstantiation)
+  // if (!MemberOfCurrentInstantiation)
     return inherited::RebuildUnresolvedMemberExpr(BaseE,
                                                   BaseType,
                                                   OperatorLoc,
@@ -2277,7 +2279,7 @@ TemplateInstantiator::RebuildUnresolvedMemberExpr(
                                                   FirstQualifierInScope,
                                                   R, TemplateArgs,
                                                   MemberOfCurrentInstantiation);
-
+#if 0
   CXXScopeSpec SS;
   SS.Adopt(QualifierLoc);
 
@@ -2290,7 +2292,9 @@ TemplateInstantiator::RebuildUnresolvedMemberExpr(
                                                        FirstQualifierInScope,
                                                        MemberNameInfo,
                                                        TemplateArgs,
-                                                       /*S*/nullptr);
+                                                       /*S*/nullptr,
+                                                       /*ExtraArgs*/nullptr,
+                                                       MemberOfCurrentInstantiation);
   if (Result.isInvalid())
     return Result;
 
@@ -2317,6 +2321,7 @@ TemplateInstantiator::RebuildUnresolvedMemberExpr(
           << MemberNameInfo.getName();
 
   return Result;
+#endif
 }
 
 ExprResult TemplateInstantiator::TransformCXXDefaultArgExpr(
@@ -3332,7 +3337,8 @@ Sema::SubstBaseSpecifiers(CXXRecordDecl *Instantiation,
                                      Base.isVirtual(),
                                      Base.getAccessSpecifierAsWritten(),
                                      BaseTypeLoc,
-                                     SourceLocation()))
+                                     SourceLocation(),
+                                     /*InstFromDependent*/true))
             InstantiatedBases.push_back(InstantiatedBase);
           else
             Invalid = true;
@@ -3366,7 +3372,8 @@ Sema::SubstBaseSpecifiers(CXXRecordDecl *Instantiation,
                                Base.isVirtual(),
                                Base.getAccessSpecifierAsWritten(),
                                BaseTypeLoc,
-                               EllipsisLoc))
+                               EllipsisLoc,
+                               /*InstFromDependent*/true))
       InstantiatedBases.push_back(InstantiatedBase);
     else
       Invalid = true;

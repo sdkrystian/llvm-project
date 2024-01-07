@@ -143,7 +143,9 @@ public:
     ///             // different namespace
     /// }
     /// @endcode
-    AmbiguousTagHiding
+    AmbiguousTagHiding,
+
+    AmbiguousDependentBase
   };
 
   /// A little identifier for flagging temporary lookup results.
@@ -599,6 +601,12 @@ public:
   ///
   /// The given paths object is copied and invalidated.
   void setAmbiguousBaseSubobjects(CXXBasePaths &P);
+
+  /// Make these results show that the name was found in the template
+  /// definition context as well as an instantiated dependent base.
+  ///
+  /// The given paths object is copied and invalidated.
+  void setAmbiguousDependentBase(CXXBasePaths &P);
 
   /// Make these results show that the name was found in
   /// different contexts and a tag decl was hidden by an ordinary

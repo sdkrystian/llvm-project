@@ -6057,7 +6057,8 @@ public:
       NamedDecl *FirstQualifierInScope, const DeclarationNameInfo &NameInfo,
       const TemplateArgumentListInfo *TemplateArgs,
       const Scope *S,
-      ActOnMemberAccessExtraArgs *ExtraArgs = nullptr);
+      ActOnMemberAccessExtraArgs *ExtraArgs = nullptr,
+      bool PreviousFoundInCurrentInstantiation = false);
 
   ExprResult
   BuildMemberReferenceExpr(Expr *Base, QualType BaseType, SourceLocation OpLoc,
@@ -8097,7 +8098,8 @@ public:
                                        SourceRange SpecifierRange,
                                        bool Virtual, AccessSpecifier Access,
                                        TypeSourceInfo *TInfo,
-                                       SourceLocation EllipsisLoc);
+                                       SourceLocation EllipsisLoc,
+                                       bool InstFromDependent);
 
   BaseResult ActOnBaseSpecifier(Decl *classdecl, SourceRange SpecifierRange,
                                 const ParsedAttributesView &Attrs, bool Virtual,

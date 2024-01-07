@@ -2895,7 +2895,9 @@ public:
                                               SS, TemplateKWLoc,
                                               FirstQualifierInScope,
                                               MemberNameInfo, ExplicitTemplateArgs,
-                                              /*S*/nullptr);
+                                              /*S*/nullptr,
+                                              /*ExtraArgs*/nullptr,
+                                              MemberOfCurrentInstantiation);
   }
 
   /// Build a new binary operator expression.
@@ -3574,11 +3576,20 @@ public:
     CXXScopeSpec SS;
     SS.Adopt(QualifierLoc);
 
+    if (!MemberOfCurrentInstantiation)
+      return SemaRef.BuildMemberReferenceExpr(BaseE, BaseType,
+                                              OperatorLoc, IsArrow,
+                                              SS, TemplateKWLoc,
+                                              FirstQualifierInScope,
+                                              R, TemplateArgs, /*S*/nullptr);
     return SemaRef.BuildMemberReferenceExpr(BaseE, BaseType,
                                             OperatorLoc, IsArrow,
                                             SS, TemplateKWLoc,
                                             FirstQualifierInScope,
-                                            R, TemplateArgs, /*S*/nullptr);
+                                            R.getLookupNameInfo(), TemplateArgs,
+                                            /*S*/nullptr,
+                                            /*ExtraArgs*/nullptr,
+                                            MemberOfCurrentInstantiation);
   }
 
   /// Build a new noexcept expression.

@@ -5985,6 +5985,7 @@ void ASTRecordWriter::AddCXXBaseSpecifier(const CXXBaseSpecifier &Base) {
   Record->push_back(Base.isBaseOfClass());
   Record->push_back(Base.getAccessSpecifierAsWritten());
   Record->push_back(Base.getInheritConstructors());
+  Record->push_back(Base.wasInstantiatedFromDependent());
   AddTypeSourceInfo(Base.getTypeSourceInfo());
   AddSourceRange(Base.getSourceRange());
   AddSourceLocation(Base.isPackExpansion()? Base.getEllipsisLoc()

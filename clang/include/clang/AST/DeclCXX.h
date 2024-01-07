@@ -176,6 +176,10 @@ class CXXBaseSpecifier {
   LLVM_PREFERRED_TYPE(bool)
   unsigned InheritConstructors : 1;
 
+  // Whether this base was instantiated from a dependent base class.
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned InstantiatedFromDependent : 1;
+
   /// The type of the base class.
   ///
   /// This will be a class or struct (or a typedef of such). The source code
@@ -185,9 +189,11 @@ class CXXBaseSpecifier {
 public:
   CXXBaseSpecifier() = default;
   CXXBaseSpecifier(SourceRange R, bool V, bool BC, AccessSpecifier A,
-                   TypeSourceInfo *TInfo, SourceLocation EllipsisLoc)
+                   TypeSourceInfo *TInfo, SourceLocation EllipsisLoc,
+                   bool InstFromDependent)
     : Range(R), EllipsisLoc(EllipsisLoc), Virtual(V), BaseOfClass(BC),
-      Access(A), InheritConstructors(false), BaseTypeInfo(TInfo) {}
+      Access(A), InheritConstructors(false),
+      InstantiatedFromDependent(InstFromDependent), BaseTypeInfo(TInfo) {}
 
   /// Retrieves the source range that contains the entire base specifier.
   SourceRange getSourceRange() const LLVM_READONLY { return Range; }
@@ -215,6 +221,10 @@ public:
   /// Set that this base class's constructors should be inherited.
   void setInheritConstructors(bool Inherit = true) {
     InheritConstructors = Inherit;
+  }
+
+  bool wasInstantiatedFromDependent() const {
+    return InstantiatedFromDependent;
   }
 
   /// For a pack expansion, determine the location of the ellipsis.

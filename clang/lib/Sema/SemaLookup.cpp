@@ -337,10 +337,12 @@ bool LookupResult::checkDebugAssumptions() const {
   assert(ResultKind != FoundUnresolvedValue || checkUnresolved());
   assert(ResultKind != Ambiguous || Decls.size() > 1 ||
          (Decls.size() == 1 && (Ambiguity == AmbiguousBaseSubobjects ||
-                                Ambiguity == AmbiguousBaseSubobjectTypes)));
+                                Ambiguity == AmbiguousBaseSubobjectTypes ||
+                                Ambiguity == AmbiguousDependentBase)));
   assert((Paths != nullptr) == (ResultKind == Ambiguous &&
                                 (Ambiguity == AmbiguousBaseSubobjectTypes ||
-                                 Ambiguity == AmbiguousBaseSubobjects)));
+                                 Ambiguity == AmbiguousBaseSubobjects ||
+                                 Ambiguity == AmbiguousDependentBase)));
   return true;
 }
 
@@ -673,6 +675,14 @@ void LookupResult::setAmbiguousBaseSubobjectTypes(CXXBasePaths &P) {
   addDeclsFromBasePaths(*Paths);
   resolveKind();
   setAmbiguous(AmbiguousBaseSubobjectTypes);
+}
+
+void LookupResult::setAmbiguousDependentBase(CXXBasePaths &P) {
+  Paths = new CXXBasePaths;
+  Paths->swap(P);
+  addDeclsFromBasePaths(*Paths);
+  resolveKind();
+  setAmbiguous(AmbiguousDependentBase);
 }
 
 void LookupResult::print(raw_ostream &Out) {
@@ -2450,7 +2460,7 @@ bool Sema::LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
   if (LookupDirect(*this, R, LookupCtx)) {
     R.resolveKind();
     if (LookupRec) {
-      R.setFoundInCurrentInstantiation(LookupRec->isDependentContext());
+      // R.setFoundInCurrentInstantiation(LookupRec->isDependentContext());
       R.setNamingClass(LookupRec);
     }
     return true;
@@ -2617,6 +2627,9 @@ bool Sema::LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
     }
   };
 
+  unsigned FromNonDependent = 0;
+  unsigned FromInstantiatedDependent = 0;
+
   for (CXXBasePaths::paths_iterator Path = Paths.begin(), PathEnd = Paths.end();
        Path != PathEnd; ++Path) {
     const CXXBasePathElement &PathElement = Path->back();
@@ -2624,6 +2637,19 @@ bool Sema::LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
     // Pick the best (i.e. most permissive i.e. numerically lowest) access
     // across all paths.
     SubobjectAccess = std::min(SubobjectAccess, Path->Access);
+    if (PathElement.Base->wasInstantiatedFromDependent())
+      ++FromInstantiatedDependent;
+    else
+      ++FromNonDependent;
+
+
+    if (!InUnqualifiedLookup &&
+        R.wasFoundInCurrentInstantiation() &&
+        // FromNonDependent &&
+        PathElement.Base->wasInstantiatedFromDependent()) {
+      R.setAmbiguousDependentBase(Paths);
+      return true;
+    }
 
     // Determine whether we're looking at a distinct sub-object or not.
     if (SubobjectType.isNull()) {
@@ -2677,7 +2703,7 @@ bool Sema::LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
     if (NamedDecl *ND = R.getAcceptableDecl(*I))
       R.addDecl(ND, AS);
   }
-  R.setFoundInCurrentInstantiation(LookupRec->isDependentContext());
+  // R.setFoundInCurrentInstantiation(LookupRec->isDependentContext());
   R.resolveKind();
   return true;
 }
@@ -2895,6 +2921,25 @@ void Sema::DiagnoseAmbiguousLookup(LookupResult &Result) {
 
     for (auto *D : Result)
       Diag(D->getLocation(), diag::note_ambiguous_candidate) << D;
+    break;
+  }
+
+  case LookupResult::AmbiguousDependentBase: {
+    CXXBasePaths *Paths = Result.getBasePaths();
+    QualType SubobjectType = Paths->front().back().Base->getType();
+    Diag(NameLoc, diag::err_ambiguous_two_phase_lookup)
+    #if 0
+      << Name << SubobjectType << getAmbiguousPathsDisplayString(*Paths)
+      << LookupRange;
+    #else
+      << Name;
+    #endif
+
+    // DeclContext::lookup_iterator Found = Paths->front().Decls;
+
+    for (auto *D : Result)
+      Diag(D->getLocation(), diag::note_ambiguous_candidate) << D;
+
     break;
   }
   }

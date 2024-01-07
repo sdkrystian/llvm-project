@@ -769,7 +769,7 @@ static bool LookupMemberExprInRecord(Sema &SemaRef, LookupResult &R,
   // The record definition is complete, now look up the member.
   SemaRef.LookupQualifiedName(R, DC, SS);
 
-  if (!R.empty())
+  if (!R.empty() || R.wasNotFoundInCurrentInstantiation())
     return false;
 
   DeclarationName Typo = R.getLookupName();
@@ -832,7 +832,8 @@ Sema::BuildMemberReferenceExpr(Expr *Base, QualType BaseType,
                                const DeclarationNameInfo &NameInfo,
                                const TemplateArgumentListInfo *TemplateArgs,
                                const Scope *S,
-                               ActOnMemberAccessExtraArgs *ExtraArgs) {
+                               ActOnMemberAccessExtraArgs *ExtraArgs,
+                               bool PreviousFoundInCurrentInstantiation) {
   #if 0
   if (BaseType->isDependentType() ||
       (SS.isSet() && isDependentScopeSpecifier(SS)) ||
@@ -844,6 +845,7 @@ Sema::BuildMemberReferenceExpr(Expr *Base, QualType BaseType,
   #endif
 
   LookupResult R(*this, NameInfo, LookupMemberName);
+  R.setFoundInCurrentInstantiation(PreviousFoundInCurrentInstantiation);
 
   // Implicit member accesses.
   if (!Base) {
@@ -1005,7 +1007,7 @@ MemberExpr *Sema::BuildMemberExpr(
                          Member, FoundDecl, MemberNameInfo, TemplateArgs, Ty,
                          VK, OK, getNonOdrUseReasonInCurrentContext(Member));
   E->setHadMultipleCandidates(HadMultipleCandidates);
-  if (!E->isImplicitAccess()) {
+  if (!E->isImplicitAccess() || NNS) {
     E->setWasFoundInCurrentInstantiation(
       FoundDecl->getDeclContext()->isDependentContext() ||
       Base->getType()->isDependentType());
@@ -1149,14 +1151,14 @@ Sema::BuildMemberReferenceExpr(Expr *BaseExpr, QualType BaseExprType,
     // pick a member.
     R.suppressDiagnostics();
 
+    NestedNameSpecifierLoc NNS = SS.getWithLocInContext(Context);
     UnresolvedMemberExpr *MemExpr
       = UnresolvedMemberExpr::Create(Context, R.isUnresolvableResult(),
                                      BaseExpr, BaseExprType,
-                                     IsArrow, OpLoc,
-                                     SS.getWithLocInContext(Context),
+                                     IsArrow, OpLoc, NNS,
                                      TemplateKWLoc, MemberNameInfo,
                                      TemplateArgs, R.begin(), R.end());
-    if (!MemExpr->isImplicitAccess()) {
+    if (!MemExpr->isImplicitAccess() || NNS) {
       CXXRecordDecl * NC = R.getNamingClass();
       MemExpr->setWasFoundInCurrentInstantiation(
           BaseExprType->isDependentType() ||
