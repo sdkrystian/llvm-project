@@ -3569,7 +3569,8 @@ public:
                                          SourceLocation TemplateKWLoc,
                                          NamedDecl *FirstQualifierInScope,
                                          LookupResult &R,
-                                const TemplateArgumentListInfo *TemplateArgs) {
+                                const TemplateArgumentListInfo *TemplateArgs,
+                                         bool MemberOfCurrentInstantiation) {
     CXXScopeSpec SS;
     SS.Adopt(QualifierLoc);
 
@@ -11721,6 +11722,7 @@ TreeTransform<Derived>::TransformMemberExpr(MemberExpr *E) {
       return ExprError();
   }
 
+  #if 0
   bool MemberOfCurrentInstantiation = false;
   if (E->getBase()->getType()->isDependentType() ||
       (E->hasQualifier() && E->getQualifier()->isDependent())) {
@@ -11728,6 +11730,7 @@ TreeTransform<Derived>::TransformMemberExpr(MemberExpr *E) {
         !E->isImplicitAccess(); //  &&
         // E->getFoundDecl()->isCXXClassMember();
   }
+  #endif
 
 
   return getDerived().RebuildMemberExpr(Base.get(), FakeOperatorLoc,
@@ -11740,7 +11743,7 @@ TreeTransform<Derived>::TransformMemberExpr(MemberExpr *E) {
                                         (E->hasExplicitTemplateArgs()
                                            ? &TransArgs : nullptr),
                                         FirstQualifierInScope,
-                                        MemberOfCurrentInstantiation);
+                                        E->wasFoundInCurrentInstantiation());
 }
 
 template<typename Derived>
@@ -14174,7 +14177,8 @@ ExprResult TreeTransform<Derived>::TransformUnresolvedMemberExpr(
   return getDerived().RebuildUnresolvedMemberExpr(
       Base.get(), BaseType, Old->getOperatorLoc(), Old->isArrow(), QualifierLoc,
       TemplateKWLoc, FirstQualifierInScope, R,
-      (Old->hasExplicitTemplateArgs() ? &TransArgs : nullptr));
+      (Old->hasExplicitTemplateArgs() ? &TransArgs : nullptr),
+      Old->wasFoundInCurrentInstantiation());
 }
 
 template<typename Derived>

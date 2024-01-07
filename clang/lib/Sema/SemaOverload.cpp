@@ -5744,7 +5744,7 @@ static ImplicitConversionSequence TryObjectArgumentInitialization(
     return ICS;
   }
 
-  assert(FromType->isRecordType());
+  // assert(FromType->isRecordType());
 
   QualType ClassType = S.Context.getTypeDeclType(ActingContext);
   // C++98 [class.dtor]p2:

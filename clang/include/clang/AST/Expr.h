@@ -3195,7 +3195,9 @@ class MemberExpr final
   MemberExpr(Expr *Base, bool IsArrow, SourceLocation OperatorLoc,
              ValueDecl *MemberDecl, const DeclarationNameInfo &NameInfo,
              QualType T, ExprValueKind VK, ExprObjectKind OK,
-             NonOdrUseReason NOUR);
+             NonOdrUseReason NOUR, 
+             const TemplateArgumentListInfo *TemplateArgs,
+             SourceLocation TemplateKWLoc);
   MemberExpr(EmptyShell Empty)
       : Expr(MemberExprClass, Empty), Base(), MemberDecl() {}
 
@@ -3359,6 +3361,7 @@ public:
 
   void setWasFoundInCurrentInstantiation(bool V = true) {
     MemberExprBits.FoundInCurrentInstantiation = V;
+    setDependence(computeDependence(this));
   }
 
   /// Returns true if this member expression refers to a method that

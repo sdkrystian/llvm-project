@@ -1684,18 +1684,31 @@ MemberExpr::MemberExpr(Expr *Base, bool IsArrow, SourceLocation OperatorLoc,
                        ValueDecl *MemberDecl,
                        const DeclarationNameInfo &NameInfo, QualType T,
                        ExprValueKind VK, ExprObjectKind OK,
-                       NonOdrUseReason NOUR)
+                       NonOdrUseReason NOUR,
+                       const TemplateArgumentListInfo *TemplateArgs,
+                       SourceLocation TemplateKWLoc)
     : Expr(MemberExprClass, T, VK, OK), Base(Base), MemberDecl(MemberDecl),
       MemberDNLoc(NameInfo.getInfo()), MemberLoc(NameInfo.getLoc()) {
   assert(!NameInfo.getName() ||
          MemberDecl->getDeclName() == NameInfo.getName());
   MemberExprBits.IsArrow = IsArrow;
   MemberExprBits.HasQualifierOrFoundDecl = false;
-  MemberExprBits.HasTemplateKWAndArgsInfo = false;
   MemberExprBits.HadMultipleCandidates = false;
   MemberExprBits.FoundInCurrentInstantiation = false;
   MemberExprBits.NonOdrUseReason = NOUR;
   MemberExprBits.OperatorLoc = OperatorLoc;
+  MemberExprBits.HasTemplateKWAndArgsInfo =
+      TemplateArgs || TemplateKWLoc.isValid();
+  if (TemplateArgs) {
+    auto Deps = TemplateArgumentDependence::None;
+    getTrailingObjects<ASTTemplateKWAndArgsInfo>()->initializeFrom(
+        TemplateKWLoc, *TemplateArgs,
+        getTrailingObjects<TemplateArgumentLoc>(), Deps);
+  } else if (TemplateKWLoc.isValid()) {
+    getTrailingObjects<ASTTemplateKWAndArgsInfo>()->initializeFrom(
+        TemplateKWLoc);
+  }
+
   setDependence(computeDependence(this));
 }
 
@@ -1716,7 +1729,8 @@ MemberExpr *MemberExpr::Create(
 
   void *Mem = C.Allocate(Size, alignof(MemberExpr));
   MemberExpr *E = new (Mem) MemberExpr(Base, IsArrow, OperatorLoc, MemberDecl,
-                                       NameInfo, T, VK, OK, NOUR);
+                                       NameInfo, T, VK, OK, NOUR, TemplateArgs,
+                                       TemplateKWLoc);
 
   if (HasQualOrFound) {
     E->MemberExprBits.HasQualifierOrFoundDecl = true;
@@ -1726,25 +1740,6 @@ MemberExpr *MemberExpr::Create(
     NQ->QualifierLoc = QualifierLoc;
     NQ->FoundDecl = FoundDecl;
   }
-
-  E->MemberExprBits.HasTemplateKWAndArgsInfo =
-      TemplateArgs || TemplateKWLoc.isValid();
-
-  // FIXME: remove remaining dependence computation to computeDependence().
-  auto Deps = E->getDependence();
-  if (TemplateArgs) {
-    auto TemplateArgDeps = TemplateArgumentDependence::None;
-    E->getTrailingObjects<ASTTemplateKWAndArgsInfo>()->initializeFrom(
-        TemplateKWLoc, *TemplateArgs,
-        E->getTrailingObjects<TemplateArgumentLoc>(), TemplateArgDeps);
-    for (const TemplateArgumentLoc &ArgLoc : TemplateArgs->arguments()) {
-      Deps |= toExprDependence(ArgLoc.getArgument().getDependence());
-    }
-  } else if (TemplateKWLoc.isValid()) {
-    E->getTrailingObjects<ASTTemplateKWAndArgsInfo>()->initializeFrom(
-        TemplateKWLoc);
-  }
-  E->setDependence(Deps);
 
   return E;
 }

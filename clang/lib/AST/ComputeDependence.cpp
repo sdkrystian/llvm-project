@@ -480,11 +480,8 @@ ExprDependence clang::computeDependence(DeclRefExpr *E, const ASTContext &Ctx) {
     Deps |= toExprDependence(NNS->getDependence() &
                              ~NestedNameSpecifierDependence::Dependent);
 
-  if (auto *FirstArg = E->getTemplateArgs()) {
-    unsigned NumArgs = E->getNumTemplateArgs();
-    for (auto *Arg = FirstArg, *End = FirstArg + NumArgs; Arg < End; ++Arg)
-      Deps |= toExprDependence(Arg->getArgument().getDependence());
-  }
+  for (const TemplateArgumentLoc& Arg : E->template_arguments())
+    Deps |= toExprDependence(Arg.getArgument().getDependence());
 
   auto *Decl = E->getDecl();
   auto Type = E->getType();
@@ -648,13 +645,26 @@ static inline ExprDependence getDependenceInExpr(DeclarationNameInfo Name) {
 
 ExprDependence clang::computeDependence(MemberExpr *E) {
   auto D = E->getBase()->getDependence();
-  D |= getDependenceInExpr(E->getMemberNameInfo());
-
   if (auto *NNS = E->getQualifier())
     D |= toExprDependence(NNS->getDependence() &
                           ~NestedNameSpecifierDependence::Dependent);
 
+  for (const TemplateArgumentLoc& Arg : E->template_arguments())
+    D |= toExprDependence(Arg.getArgument().getDependence());
+
+  D |= getDependenceInExpr(E->getMemberNameInfo());
+
   auto *MemberDecl = E->getMemberDecl();
+
+  #if 0
+  if (ValueDecl *VD = dyn_cast<ValueDecl>(MemberDecl)) {
+    if (E->wasFoundInCurrentInstantiation() &&
+        !VD->getType()->isDependentType()) {
+        D &= ~ExprDependence::Type;
+    }
+  }
+  #endif
+
   if (FieldDecl *FD = dyn_cast<FieldDecl>(MemberDecl)) {
     DeclContext *DC = MemberDecl->getDeclContext();
     // dyn_cast_or_null is used to handle objC variables which do not

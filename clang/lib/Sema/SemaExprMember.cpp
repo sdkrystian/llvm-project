@@ -733,8 +733,10 @@ static bool LookupMemberExprInRecord(Sema &SemaRef, LookupResult &R,
     bool Invalid = SemaRef.LookupTemplateName(R, nullptr, SS, ObjectType, false,
                                               MemberOfUnknownSpecialization,
                                               TemplateKWLoc);
+    #if 0
     if (MemberOfUnknownSpecialization)
       R.setNotFoundInCurrentInstantiation();
+    #endif
     return Invalid;
   }
 
@@ -1003,6 +1005,11 @@ MemberExpr *Sema::BuildMemberExpr(
                          Member, FoundDecl, MemberNameInfo, TemplateArgs, Ty,
                          VK, OK, getNonOdrUseReasonInCurrentContext(Member));
   E->setHadMultipleCandidates(HadMultipleCandidates);
+  if (!E->isImplicitAccess()) {
+    E->setWasFoundInCurrentInstantiation(
+      FoundDecl->getDeclContext()->isDependentContext() ||
+      Base->getType()->isDependentType());
+  }
   MarkMemberReferenced(E);
 
   // C++ [except.spec]p17:
@@ -1149,6 +1156,12 @@ Sema::BuildMemberReferenceExpr(Expr *BaseExpr, QualType BaseExprType,
                                      SS.getWithLocInContext(Context),
                                      TemplateKWLoc, MemberNameInfo,
                                      TemplateArgs, R.begin(), R.end());
+    if (!MemExpr->isImplicitAccess()) {
+      CXXRecordDecl * NC = R.getNamingClass();
+      MemExpr->setWasFoundInCurrentInstantiation(
+          BaseExprType->isDependentType() ||
+          (NC && NC->isDependentContext()));
+    }
 
     return MemExpr;
   }
@@ -1341,15 +1354,12 @@ static ExprResult LookupMemberExpr(Sema &S, LookupResult &R,
                                    SourceLocation TemplateKWLoc) {
   assert(BaseExpr.get() && "no base expression");
 
+  // Perform default conversions.
+  BaseExpr = S.PerformMemberExprBaseConversion(BaseExpr.get(), IsArrow);
+  if (BaseExpr.isInvalid())
+    return ExprError();
   QualType BaseType = BaseExpr.get()->getType();
 
-  if (true || !BaseType->isDependentType()) {
-    // Perform default conversions.
-    BaseExpr = S.PerformMemberExprBaseConversion(BaseExpr.get(), IsArrow);
-    if (BaseExpr.isInvalid())
-      return ExprError();
-    BaseType = BaseExpr.get()->getType();
-  }
 
   // assert(!BaseType->isDependentType());
 

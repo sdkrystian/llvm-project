@@ -1440,6 +1440,17 @@ namespace {
                                  NamedDecl *FirstQualifierInScope,
                                  bool MemberOfCurrentInstantiation);
 
+
+    ExprResult RebuildUnresolvedMemberExpr(Expr *BaseE, QualType BaseType,
+                                           SourceLocation OperatorLoc,
+                                           bool IsArrow,
+                                           NestedNameSpecifierLoc QualifierLoc,
+                                           SourceLocation TemplateKWLoc,
+                                           NamedDecl *FirstQualifierInScope,
+                                           LookupResult &R,
+                                  const TemplateArgumentListInfo *TemplateArgs,
+                                           bool MemberOfCurrentInstantiation);
+
     /// Rebuild a DeclRefExpr for a VarDecl reference.
     ExprResult RebuildVarDeclRefExpr(VarDecl *PD, SourceLocation Loc);
 
@@ -2240,6 +2251,44 @@ TemplateInstantiator::RebuildMemberExpr(
     }
   }
 
+  return Result;
+}
+
+ExprResult
+TemplateInstantiator::RebuildUnresolvedMemberExpr(
+                                           Expr *BaseE, QualType BaseType,
+                                           SourceLocation OperatorLoc,
+                                           bool IsArrow,
+                                           NestedNameSpecifierLoc QualifierLoc,
+                                           SourceLocation TemplateKWLoc,
+                                           NamedDecl *FirstQualifierInScope,
+                                           LookupResult &R,
+                                  const TemplateArgumentListInfo *TemplateArgs,
+                                           bool MemberOfCurrentInstantiation) {
+  assert(!R.empty());
+
+  if (!MemberOfCurrentInstantiation)
+    return inherited::RebuildUnresolvedMemberExpr(BaseE,
+                                                  BaseType,
+                                                  OperatorLoc,
+                                                  IsArrow,
+                                                  QualifierLoc,
+                                                  TemplateKWLoc,
+                                                  FirstQualifierInScope,
+                                                  R, TemplateArgs,
+                                                  MemberOfCurrentInstantiation);
+
+  CXXScopeSpec SS;
+  SS.Adopt(QualifierLoc);
+  ExprResult Result = SemaRef.BuildMemberReferenceExpr(BaseE,
+                                                       BaseType,
+                                                       OperatorLoc,
+                                                       IsArrow,
+                                                       SS, TemplateKWLoc,
+                                                       FirstQualifierInScope,
+                                                       R.getLookupNameInfo(),
+                                                       TemplateArgs,
+                                                       /*S*/nullptr);
   return Result;
 }
 

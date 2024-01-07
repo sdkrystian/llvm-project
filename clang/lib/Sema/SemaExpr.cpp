@@ -7231,8 +7231,19 @@ ExprResult Sema::BuildCallExpr(Scope *Scope, Expr *Fn, SourceLocation LParenLoc,
       Fn = result.get();
     }
 
+    #if 0
+    bool FoundMemberOfCurrentInstantiation = false;
+    if (auto *ME = dyn_cast<MemberExpr>(Fn))
+      FoundMemberOfCurrentInstantiation = ME->wasFoundInCurrentInstantiation();
+    if (auto *UME = dyn_cast<UnresolvedMemberExpr>(Fn))
+      FoundMemberOfCurrentInstantiation = UME->wasFoundInCurrentInstantiation();
+
     // Determine whether this is a dependent call inside a C++ template,
     // in which case we won't do any semantic analysis now.
+    if (!FoundMemberOfCurrentInstantiation &&
+        (Fn->isTypeDependent() || Expr::hasAnyTypeDependentArguments(ArgExprs))) {
+    #endif
+
     if (Fn->isTypeDependent() || Expr::hasAnyTypeDependentArguments(ArgExprs)) {
       if (ExecConfig) {
         return CUDAKernelCallExpr::Create(Context, Fn,
