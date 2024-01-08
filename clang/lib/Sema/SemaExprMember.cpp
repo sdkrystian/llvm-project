@@ -1007,6 +1007,7 @@ MemberExpr *Sema::BuildMemberExpr(
                          Member, FoundDecl, MemberNameInfo, TemplateArgs, Ty,
                          VK, OK, getNonOdrUseReasonInCurrentContext(Member));
   E->setHadMultipleCandidates(HadMultipleCandidates);
+
   if (!E->isImplicitAccess() || NNS) {
     E->setWasFoundInCurrentInstantiation(
       FoundDecl->getDeclContext()->isDependentContext() ||
@@ -1122,6 +1123,13 @@ Sema::BuildMemberReferenceExpr(Expr *BaseExpr, QualType BaseExprType,
           << MemberName << DC << FixItHint::CreateReplacement(OpLoc, "->");
         return RetryExpr;
       }
+    }
+
+    if(!DC) {
+      Diag(R.getNameLoc(), diag::err_no_member)
+      << MemberName << BaseExprType
+      << (BaseExpr ? BaseExpr->getSourceRange() : SourceRange());
+    return ExprError();
     }
 
     Diag(R.getNameLoc(), diag::err_no_member)

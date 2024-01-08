@@ -2502,8 +2502,13 @@ bool Sema::LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
   #if 0
   if (!InUnqualifiedLookup && LookupRec->isDependentContext() &&
       LookupRec->hasAnyDependentBases()) {
-    R.setNotFoundInCurrentInstantiation();
-    return false;
+
+    // FIXME: We need to still perform lookup and validate the results
+    // during instantiation for types!
+    if (R.getLookupKind() != LookupMemberName) {
+      R.setNotFoundInCurrentInstantiation();
+      return false;
+    }
   }
   #endif
   // Perform lookup into our base classes.

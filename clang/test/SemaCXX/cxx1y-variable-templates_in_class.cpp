@@ -352,7 +352,7 @@ namespace ns2 {
   };
   template<class T> template<class U, T N, U M> T&& A<T>::Var = T(N + M);
   int *AV = &A<int>().Var<char, 5, 'A'>;
-  
+
 } //end ns2
 } // end ns member_access_is_ok
 
@@ -372,7 +372,7 @@ struct Something
     }
 };
 
-int main() { 
+int main() {
     Something<Value>{}.foo();
     return 0;
 }

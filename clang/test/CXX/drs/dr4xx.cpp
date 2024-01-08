@@ -14,7 +14,7 @@ namespace dr400 { // dr400: yes
   struct A { int a; struct a {}; }; // #dr400-A
   struct B { int a; struct a {}; }; // #dr400-B
   struct C : A, B { using A::a; struct a b; };
-  struct D : A, B { 
+  struct D : A, B {
     using A::a;
     // FIXME: we should issue a single diagnostic
     using B::a; // #dr400-using-B-a

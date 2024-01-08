@@ -3195,9 +3195,10 @@ class MemberExpr final
   MemberExpr(Expr *Base, bool IsArrow, SourceLocation OperatorLoc,
              ValueDecl *MemberDecl, const DeclarationNameInfo &NameInfo,
              QualType T, ExprValueKind VK, ExprObjectKind OK,
-             NonOdrUseReason NOUR, 
+             NonOdrUseReason NOUR,
              const TemplateArgumentListInfo *TemplateArgs,
-             SourceLocation TemplateKWLoc);
+             SourceLocation TemplateKWLoc, DeclAccessPair FoundDecl,
+             NestedNameSpecifierLoc NNSLoc);
   MemberExpr(EmptyShell Empty)
       : Expr(MemberExprClass, Empty), Base(), MemberDecl() {}
 

@@ -1686,19 +1686,30 @@ MemberExpr::MemberExpr(Expr *Base, bool IsArrow, SourceLocation OperatorLoc,
                        ExprValueKind VK, ExprObjectKind OK,
                        NonOdrUseReason NOUR,
                        const TemplateArgumentListInfo *TemplateArgs,
-                       SourceLocation TemplateKWLoc)
+                       SourceLocation TemplateKWLoc, DeclAccessPair FoundDecl,
+                       NestedNameSpecifierLoc NNSLoc)
     : Expr(MemberExprClass, T, VK, OK), Base(Base), MemberDecl(MemberDecl),
       MemberDNLoc(NameInfo.getInfo()), MemberLoc(NameInfo.getLoc()) {
   assert(!NameInfo.getName() ||
          MemberDecl->getDeclName() == NameInfo.getName());
   MemberExprBits.IsArrow = IsArrow;
-  MemberExprBits.HasQualifierOrFoundDecl = false;
+  MemberExprBits.HasQualifierOrFoundDecl =
+      NNSLoc || FoundDecl.getDecl() != MemberDecl ||
+      FoundDecl.getAccess() != MemberDecl->getAccess();
   MemberExprBits.HadMultipleCandidates = false;
   MemberExprBits.FoundInCurrentInstantiation = false;
   MemberExprBits.NonOdrUseReason = NOUR;
   MemberExprBits.OperatorLoc = OperatorLoc;
   MemberExprBits.HasTemplateKWAndArgsInfo =
       TemplateArgs || TemplateKWLoc.isValid();
+
+  if (MemberExprBits.HasQualifierOrFoundDecl) {
+    MemberExprNameQualifier *NQ =
+        getTrailingObjects<MemberExprNameQualifier>();
+    NQ->QualifierLoc = NNSLoc;
+    NQ->FoundDecl = FoundDecl;
+  }
+
   if (TemplateArgs) {
     auto Deps = TemplateArgumentDependence::None;
     getTrailingObjects<ASTTemplateKWAndArgsInfo>()->initializeFrom(
@@ -1708,7 +1719,6 @@ MemberExpr::MemberExpr(Expr *Base, bool IsArrow, SourceLocation OperatorLoc,
     getTrailingObjects<ASTTemplateKWAndArgsInfo>()->initializeFrom(
         TemplateKWLoc);
   }
-
   setDependence(computeDependence(this));
 }
 
@@ -1730,17 +1740,7 @@ MemberExpr *MemberExpr::Create(
   void *Mem = C.Allocate(Size, alignof(MemberExpr));
   MemberExpr *E = new (Mem) MemberExpr(Base, IsArrow, OperatorLoc, MemberDecl,
                                        NameInfo, T, VK, OK, NOUR, TemplateArgs,
-                                       TemplateKWLoc);
-
-  if (HasQualOrFound) {
-    E->MemberExprBits.HasQualifierOrFoundDecl = true;
-
-    MemberExprNameQualifier *NQ =
-        E->getTrailingObjects<MemberExprNameQualifier>();
-    NQ->QualifierLoc = QualifierLoc;
-    NQ->FoundDecl = FoundDecl;
-  }
-
+                                       TemplateKWLoc, FoundDecl, QualifierLoc);
   return E;
 }
 
