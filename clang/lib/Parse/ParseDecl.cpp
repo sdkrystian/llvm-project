@@ -3384,6 +3384,12 @@ void Parser::ParseDeclarationSpecifiers(
         (TemplateInfo.Kind == ParsedTemplateInfo::ExplicitInstantiation ||
          TemplateInfo.Kind == ParsedTemplateInfo::ExplicitSpecialization);
 
+    auto ignoreTemplateSpecOrInstSCS = [&] {
+      PrevSpec = "";
+      DiagID = diag::ext_explicit_spec_inst_storage_class;
+      isInvalid = true;
+    };
+
     switch (Tok.getKind()) {
     default:
       if (Tok.isRegularKeywordAttribute())
@@ -4009,6 +4015,12 @@ void Parser::ParseDeclarationSpecifiers(
       isStorageClass = true;
       break;
     case tok::kw_extern:
+      if (IsTemplateSpecOrInst) {
+        PrevSpec = "";
+        DiagID = diag::ext_explicit_spec_inst_storage_class;
+        isInvalid = true;
+        break;
+      }
       if (DS.getThreadStorageClassSpec() == DeclSpec::TSCS___thread)
         Diag(Tok, diag::ext_thread_before) << "extern";
       isInvalid = DS.SetStorageClassSpec(Actions, DeclSpec::SCS_extern, Loc,
@@ -4016,11 +4028,23 @@ void Parser::ParseDeclarationSpecifiers(
       isStorageClass = true;
       break;
     case tok::kw___private_extern__:
+      if (IsTemplateSpecOrInst) {
+        PrevSpec = "";
+        DiagID = diag::ext_explicit_spec_inst_storage_class;
+        isInvalid = true;
+        break;
+      }
       isInvalid = DS.SetStorageClassSpec(Actions, DeclSpec::SCS_private_extern,
                                          Loc, PrevSpec, DiagID, Policy);
       isStorageClass = true;
       break;
     case tok::kw_static:
+      if (IsTemplateSpecOrInst) {
+        PrevSpec = "";
+        DiagID = diag::ext_explicit_spec_inst_storage_class;
+        isInvalid = true;
+        break;
+      }
       if (DS.getThreadStorageClassSpec() == DeclSpec::TSCS___thread)
         Diag(Tok, diag::ext_thread_before) << "static";
       isInvalid = DS.SetStorageClassSpec(Actions, DeclSpec::SCS_static, Loc,
@@ -4032,16 +4056,23 @@ void Parser::ParseDeclarationSpecifiers(
         if (isKnownToBeTypeSpecifier(GetLookAheadToken(1))) {
           isInvalid = DS.SetStorageClassSpec(Actions, DeclSpec::SCS_auto, Loc,
                                              PrevSpec, DiagID, Policy);
+          isStorageClass = true;
           if (!isInvalid && !getLangOpts().C23)
             Diag(Tok, diag::ext_auto_storage_class)
               << FixItHint::CreateRemoval(DS.getStorageClassSpecLoc());
         } else
           isInvalid = DS.SetTypeSpecType(DeclSpec::TST_auto, Loc, PrevSpec,
                                          DiagID, Policy);
-      } else
+      } else {
         isInvalid = DS.SetStorageClassSpec(Actions, DeclSpec::SCS_auto, Loc,
                                            PrevSpec, DiagID, Policy);
-      isStorageClass = true;
+        isStorageClass = true;
+      }
+      if (isStorageClass && IsTemplateSpecOrInst) {
+        PrevSpec = "";
+        DiagID = diag::ext_explicit_spec_inst_storage_class;
+        isInvalid = true;
+      }
       break;
     case tok::kw___auto_type:
       Diag(Tok, diag::ext_auto_type);
@@ -4049,6 +4080,12 @@ void Parser::ParseDeclarationSpecifiers(
                                      DiagID, Policy);
       break;
     case tok::kw_register:
+      if (IsTemplateSpecOrInst) {
+        PrevSpec = "";
+        DiagID = diag::ext_explicit_spec_inst_storage_class;
+        isInvalid = true;
+        break;
+      }
       isInvalid = DS.SetStorageClassSpec(Actions, DeclSpec::SCS_register, Loc,
                                          PrevSpec, DiagID, Policy);
       isStorageClass = true;
@@ -4564,6 +4601,10 @@ void Parser::ParseDeclarationSpecifiers(
       else if (DiagID == diag::err_opencl_unknown_type_specifier) {
         Diag(Loc, DiagID) << getLangOpts().getOpenCLVersionString() << PrevSpec
                           << isStorageClass;
+      } else if (DiagID == diag::ext_explicit_spec_inst_storage_class) {
+        Diag(Loc, DiagID) << (TemplateInfo.Kind ==
+                                 ParsedTemplateInfo::ExplicitInstantiation)
+                          << FixItHint::CreateRemoval(Loc);
       } else
         Diag(Loc, DiagID) << PrevSpec;
     }

@@ -5267,8 +5267,6 @@ def err_template_spec_default_arg : Error<
 def err_not_class_template_specialization : Error<
   "cannot specialize a %select{dependent template|template template "
   "parameter}0">;
-def ext_explicit_specialization_storage_class : ExtWarn<
-  "explicit specialization cannot have a storage class">;
 def err_explicit_specialization_inconsistent_storage_class : Error<
   "explicit specialization has extraneous, inconsistent storage class "
   "'%select{none|extern|static|__private_extern__|auto|register}0'">;
