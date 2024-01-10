@@ -10533,7 +10533,9 @@ DeclResult Sema::ActOnExplicitInstantiation(Scope *S,
     Diag(D.getIdentifierLoc(), diag::err_explicit_instantiation_of_typedef)
       << Name;
     return true;
-  } else if (D.getDeclSpec().getStorageClassSpec()
+  }
+  #if 0
+  else if (D.getDeclSpec().getStorageClassSpec()
                                                 != DeclSpec::SCS_unspecified) {
     // Complain about then remove the storage class specifier.
     Diag(D.getIdentifierLoc(), diag::err_explicit_instantiation_storage_class)
@@ -10541,6 +10543,7 @@ DeclResult Sema::ActOnExplicitInstantiation(Scope *S,
 
     D.getMutableDeclSpec().ClearStorageClassSpecs();
   }
+  #endif
 
   // C++0x [temp.explicit]p1:
   //   [...] An explicit instantiation of a function template shall not use the

@@ -2846,6 +2846,17 @@ Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
   // Turn off colon protection that was set for declspec.
   X.restore();
 
+  if (IsTemplateSpecOrInst &&
+      DS.getStorageClassSpec() != DeclSpec::SCS_unspecified &&
+      DS.getStorageClassSpec() != DeclSpec::SCS_typedef) {
+    unsigned DiagID = TemplateInfo.Kind == ParsedTemplateInfo::ExplicitInstantiation
+        ? diag::err_explicit_instantiation_storage_class
+        : diag::ext_explicit_specialization_storage_class;
+    Diag(DS.getStorageClassSpecLoc(), DiagID) <<
+         FixItHint::CreateRemoval(DS.getStorageClassSpecLoc());
+    // DS.ClearStorageClassSpecs();
+  }
+
   // If we had a free-standing type definition with a missing semicolon, we
   // may get this far before the problem becomes obvious.
   if (DS.hasTagDefinition() &&

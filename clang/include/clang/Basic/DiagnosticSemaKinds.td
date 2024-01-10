@@ -5267,8 +5267,6 @@ def err_template_spec_default_arg : Error<
 def err_not_class_template_specialization : Error<
   "cannot specialize a %select{dependent template|template template "
   "parameter}0">;
-def ext_explicit_specialization_storage_class : ExtWarn<
-  "explicit specialization cannot have a storage class">;
 def err_explicit_specialization_inconsistent_storage_class : Error<
   "explicit specialization has extraneous, inconsistent storage class "
   "'%select{none|extern|static|__private_extern__|auto|register}0'">;
@@ -5517,8 +5515,6 @@ def err_explicit_instantiation_requires_name : Error<
   "explicit instantiation declaration requires a name">;
 def err_explicit_instantiation_of_typedef : Error<
   "explicit instantiation of typedef %0">;
-def err_explicit_instantiation_storage_class : Error<
-  "explicit instantiation cannot have a storage class">;
 def err_explicit_instantiation_internal_linkage : Error<
   "explicit instantiation declaration of %0 with internal linkage">;
 def err_explicit_instantiation_not_known : Error<

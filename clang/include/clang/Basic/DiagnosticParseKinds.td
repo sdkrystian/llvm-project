@@ -434,6 +434,10 @@ def err_typename_invalid_constexpr : Error<
 def err_typename_identifiers_only : Error<
   "typename is allowed for identifiers only">;
 
+def ext_explicit_specialization_storage_class : ExtWarn<
+  "explicit specialization cannot have a storage class">;
+def err_explicit_instantiation_storage_class : Error<
+  "explicit instantiation cannot have a storage class">;
 def err_friend_invalid_in_context : Error<
   "'friend' used outside of class">;
 def err_templated_using_directive_declaration : Error<

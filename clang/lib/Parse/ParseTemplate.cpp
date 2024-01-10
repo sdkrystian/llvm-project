@@ -238,6 +238,21 @@ Decl *Parser::ParseSingleDeclarationAfterTemplate(
   ParseDeclarationSpecifiers(DS, TemplateInfo, AS,
                              getDeclSpecContextFromDeclaratorContext(Context));
 
+  bool IsTemplateSpecOrInst =
+      (TemplateInfo.Kind == ParsedTemplateInfo::ExplicitInstantiation ||
+       TemplateInfo.Kind == ParsedTemplateInfo::ExplicitSpecialization);
+
+  if (IsTemplateSpecOrInst &&
+      DS.getStorageClassSpec() != DeclSpec::SCS_unspecified &&
+      DS.getStorageClassSpec() != DeclSpec::SCS_typedef) {
+    unsigned DiagID = TemplateInfo.Kind == ParsedTemplateInfo::ExplicitInstantiation
+        ? diag::err_explicit_instantiation_storage_class
+        : diag::ext_explicit_specialization_storage_class;
+    Diag(DS.getStorageClassSpecLoc(), DiagID) <<
+         FixItHint::CreateRemoval(DS.getStorageClassSpecLoc());
+    // DS.ClearStorageClassSpecs();
+  }
+
   if (Tok.is(tok::semi)) {
     ProhibitAttributes(prefixAttrs);
     DeclEnd = ConsumeToken();
@@ -278,9 +293,6 @@ Decl *Parser::ParseSingleDeclarationAfterTemplate(
   // - noexcept-specifier;
   // - dynamic-exception-specifications (deprecated in C++11, removed since
   //   C++17).
-  bool IsTemplateSpecOrInst =
-      (TemplateInfo.Kind == ParsedTemplateInfo::ExplicitInstantiation ||
-       TemplateInfo.Kind == ParsedTemplateInfo::ExplicitSpecialization);
   SuppressAccessChecks SAC(*this, IsTemplateSpecOrInst);
 
   ParseDeclarator(DeclaratorInfo);
