@@ -25,24 +25,19 @@ using namespace clang;
 /// and store its tokens for parsing after the C++ class is complete.
 NamedDecl *Parser::ParseCXXInlineMethodDef(
     AccessSpecifier AS, const ParsedAttributesView &AccessAttrs,
-    ParsingDeclarator &D, const ParsedTemplateInfo &TemplateInfo,
+    ParsingDeclarator &D, ParsedTemplateInfo &TemplateInfo,
     const VirtSpecifiers &VS, SourceLocation PureSpecLoc) {
   assert(D.isFunctionDeclarator() && "This isn't a function declarator!");
   assert(Tok.isOneOf(tok::l_brace, tok::colon, tok::kw_try, tok::equal) &&
          "Current token not a '{', ':', '=', or 'try'!");
 
-  MultiTemplateParamsArg TemplateParams(
-      TemplateInfo.TemplateParams ? TemplateInfo.TemplateParams->data()
-                                  : nullptr,
-      TemplateInfo.TemplateParams ? TemplateInfo.TemplateParams->size() : 0);
-
   NamedDecl *FnD;
   if (D.getDeclSpec().isFriendSpecified())
     FnD = Actions.ActOnFriendFunctionDecl(getCurScope(), D,
-                                          TemplateParams);
+                                          TemplateInfo);
   else {
     FnD = Actions.ActOnCXXMemberDeclarator(getCurScope(), AS, D,
-                                           TemplateParams, nullptr,
+                                           TemplateInfo, nullptr,
                                            VS, ICIS_NoInit);
     if (FnD) {
       Actions.ProcessDeclAttributeList(getCurScope(), FnD, AccessAttrs);

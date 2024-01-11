@@ -1941,7 +1941,8 @@ Parser::DeclGroupPtrTy Parser::ParseDeclaration(DeclaratorContext Context,
   case tok::kw_using: {
     ParsedAttributes Attrs(AttrFactory);
     takeAndConcatenateAttrs(DeclAttrs, DeclSpecAttrs, Attrs);
-    return ParseUsingDirectiveOrDeclaration(Context, ParsedTemplateInfo(),
+    ParsedTemplateInfo EmptyTemplateInfo;
+    return ParseUsingDirectiveOrDeclaration(Context, EmptyTemplateInfo,
                                             DeclEnd, Attrs);
   }
   case tok::kw_static_assert:
@@ -1993,9 +1994,9 @@ Parser::DeclGroupPtrTy Parser::ParseSimpleDeclaration(
   // Parse the common declaration-specifiers piece.
   ParsingDeclSpec DS(*this);
   DS.takeAttributesFrom(DeclSpecAttrs);
-
   DeclSpecContext DSContext = getDeclSpecContextFromDeclaratorContext(Context);
-  ParseDeclarationSpecifiers(DS, ParsedTemplateInfo(), AS_none, DSContext);
+  ParsedTemplateInfo EmptyTemplateInfo;
+  ParseDeclarationSpecifiers(DS, EmptyTemplateInfo, AS_none, DSContext);
 
   // If we had a free-standing type definition with a missing semicolon, we
   // may get this far before the problem becomes obvious.
@@ -2268,8 +2269,8 @@ Parser::DeclGroupPtrTy Parser::ParseDeclGroup(ParsingDeclSpec &DS,
             // Recover by treating the 'typedef' as spurious.
             DS.ClearStorageClassSpecs();
           }
-
-          Decl *TheDecl = ParseFunctionDefinition(D, ParsedTemplateInfo(),
+          ParsedTemplateInfo EmptyTemplateInfo;
+          Decl *TheDecl = ParseFunctionDefinition(D, EmptyTemplateInfo,
                                                   &LateParsedAttrs);
           return Actions.ConvertDeclToDeclGroup(TheDecl);
         }
@@ -2334,8 +2335,9 @@ Parser::DeclGroupPtrTy Parser::ParseDeclGroup(ParsingDeclSpec &DS,
   }
 
   SmallVector<Decl *, 8> DeclsInGroup;
+  ParsedTemplateInfo EmptyTemplateInfo;
   Decl *FirstDecl = ParseDeclarationAfterDeclaratorAndAttributes(
-      D, ParsedTemplateInfo(), FRI);
+      D, EmptyTemplateInfo, FRI);
   if (LateParsedAttrs.size() > 0)
     ParseLexedAttributeList(LateParsedAttrs, FirstDecl, true, false);
   D.complete(FirstDecl);
@@ -2387,7 +2389,7 @@ Parser::DeclGroupPtrTy Parser::ParseDeclGroup(ParsingDeclSpec &DS,
       //        declarator requires-clause
       if (Tok.is(tok::kw_requires))
         ParseTrailingRequiresClause(D);
-      Decl *ThisDecl = ParseDeclarationAfterDeclarator(D);
+      Decl *ThisDecl = ParseDeclarationAfterDeclarator(D, EmptyTemplateInfo);
       D.complete(ThisDecl);
       if (ThisDecl)
         DeclsInGroup.push_back(ThisDecl);
@@ -2454,7 +2456,7 @@ bool Parser::ParseAsmAttributesAfterDeclarator(Declarator &D) {
 /// definitions, but that definitely doesn't fit with the parser here.
 ///
 Decl *Parser::ParseDeclarationAfterDeclarator(
-    Declarator &D, const ParsedTemplateInfo &TemplateInfo) {
+    Declarator &D, ParsedTemplateInfo &TemplateInfo) {
   if (ParseAsmAttributesAfterDeclarator(D))
     return nullptr;
 
@@ -2462,7 +2464,7 @@ Decl *Parser::ParseDeclarationAfterDeclarator(
 }
 
 Decl *Parser::ParseDeclarationAfterDeclaratorAndAttributes(
-    Declarator &D, const ParsedTemplateInfo &TemplateInfo, ForRangeInit *FRI) {
+    Declarator &D, ParsedTemplateInfo &TemplateInfo, ForRangeInit *FRI) {
   // RAII type used to track whether we're inside an initializer.
   struct InitializerScopeRAII {
     Parser &P;
@@ -2520,7 +2522,7 @@ Decl *Parser::ParseDeclarationAfterDeclaratorAndAttributes(
   case ParsedTemplateInfo::Template:
   case ParsedTemplateInfo::ExplicitSpecialization: {
     ThisDecl = Actions.ActOnTemplateDeclarator(getCurScope(),
-                                               *TemplateInfo.TemplateParams,
+                                               TemplateInfo,
                                                D);
     if (VarTemplateDecl *VT = dyn_cast_or_null<VarTemplateDecl>(ThisDecl)) {
       // Re-direct this decl to refer to the templated decl so that we can
@@ -2556,15 +2558,15 @@ Decl *Parser::ParseDeclarationAfterDeclaratorAndAttributes(
              diag::err_explicit_instantiation_with_definition)
             << SourceRange(TemplateInfo.TemplateLoc)
             << FixItHint::CreateInsertion(LAngleLoc, "<>");
-
+        SourceLocation TemplateKWLoc = TemplateInfo.TemplateLoc;
         // Recover as if it were an explicit specialization.
-        TemplateParameterLists FakedParamLists;
-        FakedParamLists.push_back(Actions.ActOnTemplateParameterList(
-            0, SourceLocation(), TemplateInfo.TemplateLoc, LAngleLoc,
+        TemplateInfo.clear();
+        TemplateInfo.AddParameterList(Actions.ActOnTemplateParameterList(
+            0, SourceLocation(), TemplateKWLoc, LAngleLoc,
             std::nullopt, LAngleLoc, nullptr));
 
         ThisDecl =
-            Actions.ActOnTemplateDeclarator(getCurScope(), FakedParamLists, D);
+            Actions.ActOnTemplateDeclarator(getCurScope(), TemplateInfo, D);
       }
     }
     break;
@@ -2723,7 +2725,8 @@ void Parser::ParseSpecifierQualifierList(
   /// specifier-qualifier-list is a subset of declaration-specifiers.  Just
   /// parse declaration-specifiers and complain about extra stuff.
   /// TODO: diagnose attribute-specifiers and alignment-specifiers.
-  ParseDeclarationSpecifiers(DS, ParsedTemplateInfo(), AS, DSC, nullptr,
+  ParsedTemplateInfo TemplateInfo;
+  ParseDeclarationSpecifiers(DS, TemplateInfo, AS, DSC, nullptr,
                              AllowImplicitTypename);
 
   // Validate declspec for type-name.
@@ -2802,7 +2805,7 @@ static bool isValidAfterIdentifierInDeclarator(const Token &T) {
 /// other pieces of declspec after it, it returns true.
 ///
 bool Parser::ParseImplicitInt(DeclSpec &DS, CXXScopeSpec *SS,
-                              const ParsedTemplateInfo &TemplateInfo,
+                              ParsedTemplateInfo &TemplateInfo,
                               AccessSpecifier AS, DeclSpecContext DSC,
                               ParsedAttributes &Attrs) {
   assert(Tok.is(tok::identifier) && "should have identifier");
@@ -3316,7 +3319,7 @@ Parser::DiagnoseMissingSemiAfterTagDefinition(DeclSpec &DS, AccessSpecifier AS,
 ///       'friend': [C++ dcl.friend]
 ///       'constexpr': [C++0x dcl.constexpr]
 void Parser::ParseDeclarationSpecifiers(
-    DeclSpec &DS, const ParsedTemplateInfo &TemplateInfo, AccessSpecifier AS,
+    DeclSpec &DS, ParsedTemplateInfo &TemplateInfo, AccessSpecifier AS,
     DeclSpecContext DSContext, LateParsedAttrList *LateAttrs,
     ImplicitTypenameContext AllowImplicitTypename) {
   if (DS.getSourceRange().isInvalid()) {
@@ -3498,8 +3501,7 @@ void Parser::ParseDeclarationSpecifiers(
         goto DoneWithDeclSpec;
 
       CXXScopeSpec SS;
-      if (TemplateInfo.TemplateParams)
-        SS.setTemplateParamLists(*TemplateInfo.TemplateParams);
+      SS.setTemplateParamLists(TemplateInfo.param_lists());
       Actions.RestoreNestedNameSpecifierAnnotation(Tok.getAnnotationValue(),
                                                    Tok.getAnnotationRange(),
                                                    SS);
@@ -4845,7 +4847,7 @@ void Parser::ParseStructUnionBody(SourceLocation RecordLoc,
 /// [C++]   'enum' nested-name-specifier[opt] identifier
 ///
 void Parser::ParseEnumSpecifier(SourceLocation StartLoc, DeclSpec &DS,
-                                const ParsedTemplateInfo &TemplateInfo,
+                                ParsedTemplateInfo &TemplateInfo,
                                 AccessSpecifier AS, DeclSpecContext DSC) {
   // Parse the tag portion of this.
   if (Tok.is(tok::code_completion)) {
@@ -5083,27 +5085,25 @@ void Parser::ParseEnumSpecifier(SourceLocation StartLoc, DeclSpec &DS,
     diagsFromTag.redelay();
   }
 
-  MultiTemplateParamsArg TParams;
-  if (TemplateInfo.Kind != ParsedTemplateInfo::NonTemplate &&
-      TUK != Sema::TUK_Reference) {
+  if (!TemplateInfo.isNonTemplate() && TUK != Sema::TUK_Reference) {
     if (!getLangOpts().CPlusPlus11 || !SS.isSet()) {
       // Skip the rest of this declarator, up until the comma or semicolon.
+      // FIXME: Differentiate between templates/specializations/instantiations.
       Diag(Tok, diag::err_enum_template);
       SkipUntil(tok::comma, StopAtSemi);
       return;
     }
 
-    if (TemplateInfo.Kind == ParsedTemplateInfo::ExplicitInstantiation) {
+    if (TemplateInfo.isExplicitInstantiation()) {
       // Enumerations can't be explicitly instantiated.
       DS.SetTypeSpecError();
       Diag(StartLoc, diag::err_explicit_instantiation_enum);
       return;
     }
 
-    assert(TemplateInfo.TemplateParams && "no template parameters");
-    TParams = MultiTemplateParamsArg(TemplateInfo.TemplateParams->data(),
-                                     TemplateInfo.TemplateParams->size());
-    SS.setTemplateParamLists(TParams);
+    assert(TemplateInfo.HasTemplateParameterLists() && "no template parameters");
+
+    SS.setTemplateParamLists(TemplateInfo.param_lists());
   }
 
   if (!Name && TUK != Sema::TUK_Definition) {
@@ -5152,7 +5152,7 @@ void Parser::ParseEnumSpecifier(SourceLocation StartLoc, DeclSpec &DS,
   Decl *TagDecl =
       Actions.ActOnTag(getCurScope(), DeclSpec::TST_enum, TUK, StartLoc, SS,
                     Name, NameLoc, attrs, AS, DS.getModulePrivateSpecLoc(),
-                    TParams, Owned, IsDependent, ScopedEnumKWLoc,
+                    TemplateInfo, Owned, IsDependent, ScopedEnumKWLoc,
                     IsScopedUsingClassTag,
                     BaseType, DSC == DeclSpecContext::DSC_type_specifier,
                     DSC == DeclSpecContext::DSC_template_param ||
@@ -5846,8 +5846,8 @@ bool Parser::isConstructorDeclarator(bool IsUnqualified, bool DeductionGuide,
   RevertingTentativeParsingAction TPA(*this);
   // Parse the C++ scope specifier.
   CXXScopeSpec SS;
-  if (TemplateInfo && TemplateInfo->TemplateParams)
-    SS.setTemplateParamLists(*TemplateInfo->TemplateParams);
+  if (TemplateInfo)
+    SS.setTemplateParamLists(TemplateInfo->param_lists());
 
   if (ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
                                      /*ObjectHasErrors=*/false,
@@ -7437,8 +7437,8 @@ void Parser::ParseParameterDeclarationClause(
     SourceLocation ThisLoc;
     if (getLangOpts().CPlusPlus && Tok.is(tok::kw_this))
       ThisLoc = ConsumeToken();
-
-    ParseDeclarationSpecifiers(DS, /*TemplateInfo=*/ParsedTemplateInfo(),
+    ParsedTemplateInfo EmptyTemplateInfo;
+    ParseDeclarationSpecifiers(DS, EmptyTemplateInfo,
                                AS_none, DeclSpecContext::DSC_normal,
                                /*LateAttrs=*/nullptr, AllowImplicitTypename);
 

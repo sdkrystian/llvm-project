@@ -474,7 +474,7 @@ Decl *Parser::ParseExportDeclaration() {
 /// ParseUsingDirectiveOrDeclaration - Parse C++ using using-declaration or
 /// using-directive. Assumes that current token is 'using'.
 Parser::DeclGroupPtrTy Parser::ParseUsingDirectiveOrDeclaration(
-    DeclaratorContext Context, const ParsedTemplateInfo &TemplateInfo,
+    DeclaratorContext Context, ParsedTemplateInfo &TemplateInfo,
     SourceLocation &DeclEnd, ParsedAttributes &Attrs) {
   assert(Tok.is(tok::kw_using) && "Not using token");
   ObjCDeclContextSwitch ObjCDC(*this);
@@ -688,7 +688,7 @@ bool Parser::ParseUsingDeclarator(DeclaratorContext Context,
 ///     elaborated-enum-specifier:
 ///       'enum' nested-name-specifier[opt] identifier
 Parser::DeclGroupPtrTy Parser::ParseUsingDeclaration(
-    DeclaratorContext Context, const ParsedTemplateInfo &TemplateInfo,
+    DeclaratorContext Context, ParsedTemplateInfo &TemplateInfo,
     SourceLocation UsingLoc, SourceLocation &DeclEnd,
     ParsedAttributes &PrefixAttrs, AccessSpecifier AS) {
   SourceLocation UELoc;
@@ -866,7 +866,7 @@ Parser::DeclGroupPtrTy Parser::ParseUsingDeclaration(
 }
 
 Decl *Parser::ParseAliasDeclarationAfterDeclarator(
-    const ParsedTemplateInfo &TemplateInfo, SourceLocation UsingLoc,
+    ParsedTemplateInfo &TemplateInfo, SourceLocation UsingLoc,
     UsingDeclarator &D, SourceLocation &DeclEnd, AccessSpecifier AS,
     ParsedAttributes &Attrs, Decl **OwnedType) {
   if (ExpectAndConsume(tok::equal)) {
@@ -934,11 +934,8 @@ Decl *Parser::ParseAliasDeclarationAfterDeclarator(
                                       : "alias declaration"))
     SkipUntil(tok::semi);
 
-  TemplateParameterLists *TemplateParams = TemplateInfo.TemplateParams;
-  MultiTemplateParamsArg TemplateParamsArg(
-      TemplateParams ? TemplateParams->data() : nullptr,
-      TemplateParams ? TemplateParams->size() : 0);
-  return Actions.ActOnAliasDeclaration(getCurScope(), AS, TemplateParamsArg,
+
+  return Actions.ActOnAliasDeclaration(getCurScope(), AS, TemplateInfo,
                                        UsingLoc, D.Name, Attrs, TypeAlias,
                                        DeclFromDeclSpec);
 }
@@ -1544,7 +1541,7 @@ bool Parser::isValidAfterTypeSpecifier(bool CouldBeBitfield) {
 ///         'union'
 void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
                                  SourceLocation StartLoc, DeclSpec &DS,
-                                 const ParsedTemplateInfo &TemplateInfo,
+                                 ParsedTemplateInfo &TemplateInfo,
                                  AccessSpecifier AS, bool EnteringContext,
                                  DeclSpecContext DSC,
                                  ParsedAttributes &Attributes) {
@@ -1702,8 +1699,7 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
     ColonProtectionRAIIObject X(*this);
 
     CXXScopeSpec Spec;
-    if (TemplateInfo.TemplateParams)
-      Spec.setTemplateParamLists(*TemplateInfo.TemplateParams);
+    Spec.setTemplateParamLists(TemplateInfo.param_lists());
 
     bool HasValidSpec = true;
     if (ParseOptionalCXXScopeSpecifier(Spec, /*ObjectType=*/nullptr,
@@ -1721,35 +1717,27 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
       SS = Spec;
   }
 
-  TemplateParameterLists *TemplateParams = TemplateInfo.TemplateParams;
+  //TemplateParameterLists *TemplateParams = TemplateInfo.TemplateParams;
 
   auto RecoverFromUndeclaredTemplateName = [&](IdentifierInfo *Name,
                                                SourceLocation NameLoc,
                                                SourceRange TemplateArgRange,
                                                bool KnownUndeclared) {
     Diag(NameLoc, diag::err_explicit_spec_non_template)
-        << (TemplateInfo.Kind == ParsedTemplateInfo::ExplicitInstantiation)
+        << TemplateInfo.isExplicitInstantiation()
         << TagTokKind << Name << TemplateArgRange << KnownUndeclared;
-
+    auto &TemplateParams = TemplateInfo.TemplateParams;
     // Strip off the last template parameter list if it was empty, since
     // we've removed its template argument list.
-    if (TemplateParams && TemplateInfo.LastParameterListWasEmpty) {
-      if (TemplateParams->size() > 1) {
-        TemplateParams->pop_back();
+    if (!TemplateParams.empty() && TemplateInfo.LastParameterListWasEmpty) {
+      if (TemplateParams.size() > 1) {
+        TemplateParams.pop_back();
       } else {
-        TemplateParams = nullptr;
-        const_cast<ParsedTemplateInfo &>(TemplateInfo).Kind =
-            ParsedTemplateInfo::NonTemplate;
+        TemplateInfo.clear();
       }
-    } else if (TemplateInfo.Kind == ParsedTemplateInfo::ExplicitInstantiation) {
+    } else if (TemplateInfo.isExplicitInstantiation()) {
       // Pretend this is just a forward declaration.
-      TemplateParams = nullptr;
-      const_cast<ParsedTemplateInfo &>(TemplateInfo).Kind =
-          ParsedTemplateInfo::NonTemplate;
-      const_cast<ParsedTemplateInfo &>(TemplateInfo).TemplateLoc =
-          SourceLocation();
-      const_cast<ParsedTemplateInfo &>(TemplateInfo).ExternLoc =
-          SourceLocation();
+      TemplateInfo.clear();
     }
   };
 
@@ -1975,7 +1963,7 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
                                        TemplateId->NumArgs);
     if (TemplateId->isInvalid()) {
       // Can't build the declaration.
-    } else if (TemplateInfo.Kind == ParsedTemplateInfo::ExplicitInstantiation &&
+    } else if (TemplateInfo.isExplicitInstantiation() &&
                TUK == Sema::TUK_Declaration) {
       // This is an explicit instantiation of a class template.
       ProhibitCXX11Attributes(attrs, diag::err_attributes_not_allowed,
@@ -1994,7 +1982,7 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
       // We diagnose this error in ActOnClassTemplateSpecialization.
     } else if (TUK == Sema::TUK_Reference ||
                (TUK == Sema::TUK_Friend &&
-                TemplateInfo.Kind == ParsedTemplateInfo::NonTemplate)) {
+                TemplateInfo.isNonTemplate())) {
       ProhibitCXX11Attributes(attrs, diag::err_attributes_not_allowed,
                               diag::err_keyword_not_allowed,
                               /*DiagnoseEmptyAttrs=*/true);
@@ -2006,7 +1994,7 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
       // This is an explicit specialization or a class template
       // partial specialization.
       TemplateParameterLists FakedParamLists;
-      if (TemplateInfo.Kind == ParsedTemplateInfo::ExplicitInstantiation) {
+      if (TemplateInfo.isExplicitInstantiation()) {
         // This looks like an explicit instantiation, because we have
         // something like
         //
@@ -2023,22 +2011,22 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
 
         if (TUK == Sema::TUK_Friend) {
           Diag(DS.getFriendSpecLoc(), diag::err_friend_explicit_instantiation);
-          TemplateParams = nullptr;
+          TemplateInfo.clear();
         } else {
           SourceLocation LAngleLoc =
               PP.getLocForEndOfToken(TemplateInfo.TemplateLoc);
+          SourceLocation TemplateKWLoc = TemplateInfo.TemplateLoc;
           Diag(TemplateId->TemplateNameLoc,
                diag::err_explicit_instantiation_with_definition)
-              << SourceRange(TemplateInfo.TemplateLoc)
+              << SourceRange(TemplateKWLoc)
               << FixItHint::CreateInsertion(LAngleLoc, "<>");
-
           // Create a fake template parameter list that contains only
           // "template<>", so that we treat this construct as a class
           // template specialization.
-          FakedParamLists.push_back(Actions.ActOnTemplateParameterList(
-              0, SourceLocation(), TemplateInfo.TemplateLoc, LAngleLoc,
+          TemplateInfo.clear();
+          TemplateInfo.AddParameterList(Actions.ActOnTemplateParameterList(
+              0, SourceLocation(), TemplateKWLoc, LAngleLoc,
               std::nullopt, LAngleLoc, nullptr));
-          TemplateParams = &FakedParamLists;
         }
       }
 
@@ -2046,12 +2034,10 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
       TagOrTempResult = Actions.ActOnClassTemplateSpecialization(
           getCurScope(), TagType, TUK, StartLoc, DS.getModulePrivateSpecLoc(),
           SS, *TemplateId, attrs,
-          MultiTemplateParamsArg(TemplateParams ? &(*TemplateParams)[0]
-                                                : nullptr,
-                                 TemplateParams ? TemplateParams->size() : 0),
+          TemplateInfo,
           &SkipBody);
     }
-  } else if (TemplateInfo.Kind == ParsedTemplateInfo::ExplicitInstantiation &&
+  } else if (TemplateInfo.isExplicitInstantiation() &&
              TUK == Sema::TUK_Declaration) {
     // Explicit instantiation of a member of a class template
     // specialization, e.g.,
@@ -2064,16 +2050,14 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
         getCurScope(), TemplateInfo.ExternLoc, TemplateInfo.TemplateLoc,
         TagType, StartLoc, SS, Name, NameLoc, attrs);
   } else if (TUK == Sema::TUK_Friend &&
-             TemplateInfo.Kind != ParsedTemplateInfo::NonTemplate) {
+             !TemplateInfo.isNonTemplate()) {
     ProhibitCXX11Attributes(attrs, diag::err_attributes_not_allowed,
                             diag::err_keyword_not_allowed,
                             /*DiagnoseEmptyAttrs=*/true);
 
     TagOrTempResult = Actions.ActOnTemplatedFriendTag(
         getCurScope(), DS.getFriendSpecLoc(), TagType, StartLoc, SS, Name,
-        NameLoc, attrs,
-        MultiTemplateParamsArg(TemplateParams ? &(*TemplateParams)[0] : nullptr,
-                               TemplateParams ? TemplateParams->size() : 0));
+        NameLoc, attrs, TemplateInfo);
   } else {
     if (TUK != Sema::TUK_Declaration && TUK != Sema::TUK_Definition)
       ProhibitCXX11Attributes(attrs, diag::err_attributes_not_allowed,
@@ -2081,12 +2065,12 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
                               /* DiagnoseEmptyAttrs=*/true);
 
     if (TUK == Sema::TUK_Definition &&
-        TemplateInfo.Kind == ParsedTemplateInfo::ExplicitInstantiation) {
+        TemplateInfo.isExplicitInstantiation()) {
       // If the declarator-id is not a template-id, issue a diagnostic and
       // recover by ignoring the 'template' keyword.
       Diag(Tok, diag::err_template_defn_explicit_instantiation)
           << 1 << FixItHint::CreateRemoval(TemplateInfo.TemplateLoc);
-      TemplateParams = nullptr;
+      TemplateInfo.clear();
     }
 
     bool IsDependent = false;
@@ -2094,17 +2078,17 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
     // Don't pass down template parameter lists if this is just a tag
     // reference.  For example, we don't need the template parameters here:
     //   template <class T> class A *makeA(T t);
-    MultiTemplateParamsArg TParams;
-    if (TUK != Sema::TUK_Reference && TemplateParams)
-      TParams =
-          MultiTemplateParamsArg(&(*TemplateParams)[0], TemplateParams->size());
+    ParsedTemplateInfo EmptyTemplateInfo;
 
     stripTypeAttributesOffDeclSpec(attrs, DS, TUK);
 
     // Declaration or definition of a class type
     TagOrTempResult = Actions.ActOnTag(
         getCurScope(), TagType, TUK, StartLoc, SS, Name, NameLoc, attrs, AS,
-        DS.getModulePrivateSpecLoc(), TParams, Owned, IsDependent,
+        DS.getModulePrivateSpecLoc(),
+        TUK != Sema::TUK_Reference
+            ? TemplateInfo
+            : EmptyTemplateInfo, Owned, IsDependent,
         SourceLocation(), false, clang::TypeResult(),
         DSC == DeclSpecContext::DSC_type_specifier,
         DSC == DeclSpecContext::DSC_template_param ||
@@ -2126,7 +2110,7 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
   if (shouldDelayDiagsInTag) {
     diagsFromTag.done();
     if (TUK == Sema::TUK_Reference &&
-        TemplateInfo.Kind == ParsedTemplateInfo::Template)
+        TemplateInfo.isTemplate())
       diagsFromTag.redelay();
   }
 
@@ -2191,7 +2175,7 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
   // C, since definitions are not permitted in this context in C++.
   if (TUK == Sema::TUK_Definition &&
       (getLangOpts().CPlusPlus || !isTypeSpecifier(DSC)) &&
-      (TemplateInfo.Kind || !isValidAfterTypeSpecifier(false))) {
+      (!TemplateInfo.isNonTemplate() || !isValidAfterTypeSpecifier(false))) {
     if (Tok.isNot(tok::semi)) {
       const PrintingPolicy &PPol = Actions.getASTContext().getPrintingPolicy();
       ExpectAndConsume(tok::semi, diag::err_expected_after,
@@ -2677,7 +2661,7 @@ void Parser::MaybeParseAndDiagnoseDeclSpecAfterCXX11VirtSpecifierSeq(
 Parser::DeclGroupPtrTy
 Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
                                        ParsedAttributes &AccessAttrs,
-                                       const ParsedTemplateInfo &TemplateInfo,
+                                       ParsedTemplateInfo &TemplateInfo,
                                        ParsingDeclRAIIObject *TemplateDiags) {
   assert(getLangOpts().CPlusPlus &&
          "ParseCXXClassMemberDeclaration should only be called in C++ mode");
@@ -2755,7 +2739,7 @@ Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
 
   // static_assert-declaration. A templated static_assert declaration is
   // diagnosed in Parser::ParseSingleDeclarationAfterTemplate.
-  if (!TemplateInfo.Kind &&
+  if (TemplateInfo.isNonTemplate() &&
       Tok.isOneOf(tok::kw_static_assert, tok::kw__Static_assert)) {
     SourceLocation DeclEnd;
     return DeclGroupPtrTy::make(
@@ -2763,7 +2747,7 @@ Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
   }
 
   if (Tok.is(tok::kw_template)) {
-    assert(!TemplateInfo.TemplateParams &&
+    assert(!TemplateInfo.HasTemplateParameterLists() &&
            "Nested template improperly parsed?");
     ObjCDeclContextSwitch ObjCDC(*this);
     SourceLocation DeclEnd;
@@ -2849,15 +2833,10 @@ Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
   // If we had a free-standing type definition with a missing semicolon, we
   // may get this far before the problem becomes obvious.
   if (DS.hasTagDefinition() &&
-      TemplateInfo.Kind == ParsedTemplateInfo::NonTemplate &&
+      TemplateInfo.isNonTemplate() &&
       DiagnoseMissingSemiAfterTagDefinition(DS, AS, DeclSpecContext::DSC_class,
                                             &CommonLateParsedAttrs))
     return nullptr;
-
-  MultiTemplateParamsArg TemplateParams(
-      TemplateInfo.TemplateParams ? TemplateInfo.TemplateParams->data()
-                                  : nullptr,
-      TemplateInfo.TemplateParams ? TemplateInfo.TemplateParams->size() : 0);
 
   if (TryConsumeToken(tok::semi)) {
     if (DS.isFriendSpecified())
@@ -2865,7 +2844,7 @@ Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
 
     RecordDecl *AnonRecord = nullptr;
     Decl *TheDecl = Actions.ParsedFreeStandingDeclSpec(
-        getCurScope(), AS, DS, DeclAttrs, TemplateParams, false, AnonRecord);
+        getCurScope(), AS, DS, DeclAttrs, TemplateInfo, false, AnonRecord);
     Actions.ActOnDefinedDeclarationSpecifier(TheDecl);
     DS.complete(TheDecl);
     if (AnonRecord) {
@@ -2880,8 +2859,7 @@ Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
 
   ParsingDeclarator DeclaratorInfo(*this, DS, DeclAttrs,
                                    DeclaratorContext::Member);
-  if (TemplateInfo.TemplateParams)
-    DeclaratorInfo.setTemplateParameterLists(TemplateParams);
+  DeclaratorInfo.setTemplateParameterLists(TemplateInfo.param_lists());
   VirtSpecifiers VS;
 
   // Hold late-parsed attributes so we can attach a Decl to them later.
@@ -3070,10 +3048,10 @@ Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
         }
 
       ThisDecl = Actions.ActOnFriendFunctionDecl(getCurScope(), DeclaratorInfo,
-                                                 TemplateParams);
+                                                 TemplateInfo);
     } else {
       ThisDecl = Actions.ActOnCXXMemberDeclarator(
-          getCurScope(), AS, DeclaratorInfo, TemplateParams, BitfieldSize.get(),
+          getCurScope(), AS, DeclaratorInfo, TemplateInfo, BitfieldSize.get(),
           VS, HasInClassInit);
 
       if (VarTemplateDecl *VT =
@@ -3342,6 +3320,7 @@ Parser::DeclGroupPtrTy Parser::ParseCXXClassMemberDeclarationWithPragmas(
     AccessSpecifier &AS, ParsedAttributes &AccessAttrs, DeclSpec::TST TagType,
     Decl *TagDecl) {
   ParenBraceBracketBalancer BalancerRAIIObj(*this);
+  ParsedTemplateInfo EmptyTemplateInfo;
 
   switch (Tok.getKind()) {
   case tok::kw___if_exists:
@@ -3386,7 +3365,7 @@ Parser::DeclGroupPtrTy Parser::ParseCXXClassMemberDeclarationWithPragmas(
     // FIXME: We don't accept GNU attributes on access specifiers in OpenCL mode
     // yet.
     if (getLangOpts().OpenCL && !NextToken().is(tok::colon))
-      return ParseCXXClassMemberDeclaration(AS, AccessAttrs);
+      return ParseCXXClassMemberDeclaration(AS, AccessAttrs, EmptyTemplateInfo);
     [[fallthrough]];
   case tok::kw_public:
   case tok::kw_protected: {
@@ -3442,7 +3421,7 @@ Parser::DeclGroupPtrTy Parser::ParseCXXClassMemberDeclarationWithPragmas(
       ConsumeAnnotationToken();
       return nullptr;
     }
-    return ParseCXXClassMemberDeclaration(AS, AccessAttrs);
+    return ParseCXXClassMemberDeclaration(AS, AccessAttrs, EmptyTemplateInfo);
   }
 }
 
@@ -4929,8 +4908,9 @@ void Parser::ParseMicrosoftIfExistsClassDeclaration(
       continue;
     }
 
+    ParsedTemplateInfo EmptyTemplateInfo;
     // Parse all the comma separated declarators.
-    ParseCXXClassMemberDeclaration(CurAS, AccessAttrs);
+    ParseCXXClassMemberDeclaration(CurAS, AccessAttrs, EmptyTemplateInfo);
   }
 
   Braces.consumeClose();

@@ -1140,7 +1140,8 @@ Parser::DeclGroupPtrTy Parser::ParseDeclOrFunctionDefInternal(
 
   MaybeParseMicrosoftAttributes(DS.getAttributes());
   // Parse the common declaration-specifiers piece.
-  ParseDeclarationSpecifiers(DS, ParsedTemplateInfo(), AS,
+  ParsedTemplateInfo EmptyTemplateInfo;
+  ParseDeclarationSpecifiers(DS, EmptyTemplateInfo, AS,
                              DeclSpecContext::DSC_top_level);
 
   // If we had a free-standing type definition with a missing semicolon, we
@@ -1277,7 +1278,7 @@ Parser::DeclGroupPtrTy Parser::ParseDeclarationOrFunctionDefinition(
 ///         decl-specifier-seq[opt] declarator function-try-block
 ///
 Decl *Parser::ParseFunctionDefinition(ParsingDeclarator &D,
-                                      const ParsedTemplateInfo &TemplateInfo,
+                                      ParsedTemplateInfo &TemplateInfo,
                                       LateParsedAttrList *LateParsedAttrs) {
   llvm::TimeTraceScope TimeScope("ParseFunctionDefinition", [&]() {
     return Actions.GetNameForDeclarator(D).getName().getAsString();
@@ -1337,9 +1338,7 @@ Decl *Parser::ParseFunctionDefinition(ParsingDeclarator &D,
   // In delayed template parsing mode, for function template we consume the
   // tokens and store them for late parsing at the end of the translation unit.
   if (getLangOpts().DelayedTemplateParsing && Tok.isNot(tok::equal) &&
-      TemplateInfo.Kind == ParsedTemplateInfo::Template &&
-      Actions.canDelayFunctionBody(D)) {
-    MultiTemplateParamsArg TemplateParameterLists(*TemplateInfo.TemplateParams);
+      TemplateInfo.isTemplate() && Actions.canDelayFunctionBody(D)) {
 
     ParseScope BodyScope(this, Scope::FnScope | Scope::DeclScope |
                                    Scope::CompoundStmtScope);
@@ -1347,7 +1346,7 @@ Decl *Parser::ParseFunctionDefinition(ParsingDeclarator &D,
 
     D.setFunctionDefinitionKind(FunctionDefinitionKind::Definition);
     Decl *DP = Actions.HandleDeclarator(ParentScope, D,
-                                        TemplateParameterLists);
+                                        TemplateInfo);
     D.complete(DP);
     D.getMutableDeclSpec().abort();
 
@@ -1368,7 +1367,7 @@ Decl *Parser::ParseFunctionDefinition(ParsingDeclarator &D,
     return DP;
   }
   else if (CurParsedObjCImpl &&
-           !TemplateInfo.TemplateParams &&
+           TemplateInfo.isNonTemplate() &&
            (Tok.is(tok::l_brace) || Tok.is(tok::kw_try) ||
             Tok.is(tok::colon)) &&
       Actions.CurContext->isTranslationUnit()) {
@@ -1378,7 +1377,7 @@ Decl *Parser::ParseFunctionDefinition(ParsingDeclarator &D,
 
     D.setFunctionDefinitionKind(FunctionDefinitionKind::Definition);
     Decl *FuncDecl = Actions.HandleDeclarator(ParentScope, D,
-                                              MultiTemplateParamsArg());
+                                              TemplateInfo);
     D.complete(FuncDecl);
     D.getMutableDeclSpec().abort();
     if (FuncDecl) {
@@ -1433,9 +1432,7 @@ Decl *Parser::ParseFunctionDefinition(ParsingDeclarator &D,
   // specified Declarator for the function.
   Sema::SkipBodyInfo SkipBody;
   Decl *Res = Actions.ActOnStartOfFunctionDef(getCurScope(), D,
-                                              TemplateInfo.TemplateParams
-                                                  ? *TemplateInfo.TemplateParams
-                                                  : MultiTemplateParamsArg(),
+                                              TemplateInfo,
                                               &SkipBody, BodyKind);
 
   if (SkipBody.ShouldSkip) {
@@ -1550,7 +1547,8 @@ void Parser::ParseKNRParamDeclarations(Declarator &D) {
 
     // Parse the common declaration-specifiers piece.
     DeclSpec DS(AttrFactory);
-    ParseDeclarationSpecifiers(DS);
+    ParsedTemplateInfo EmptyTemplateInfo;
+    ParseDeclarationSpecifiers(DS, EmptyTemplateInfo);
 
     // C99 6.9.1p6: 'each declaration in the declaration list shall have at
     // least one declarator'.

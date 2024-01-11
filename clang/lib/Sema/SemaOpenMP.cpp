@@ -7285,7 +7285,7 @@ Sema::OMPDeclareVariantScope::OMPDeclareVariantScope(OMPTraitInfo &TI)
     : TI(&TI), NameSuffix(TI.getMangledName()) {}
 
 void Sema::ActOnStartOfFunctionDefinitionInOpenMPDeclareVariantScope(
-    Scope *S, Declarator &D, MultiTemplateParamsArg TemplateParamLists,
+    Scope *S, Declarator &D, ParsedTemplateInfo &TemplateInfo,
     SmallVectorImpl<FunctionDecl *> &Bases) {
   if (!D.getIdentifier())
     return;
@@ -7293,7 +7293,7 @@ void Sema::ActOnStartOfFunctionDefinitionInOpenMPDeclareVariantScope(
   OMPDeclareVariantScope &DVScope = OMPDeclareVariantScopes.back();
 
   // Template specialization is an extension, check if we do it.
-  bool IsTemplated = !TemplateParamLists.empty();
+  bool IsTemplated = TemplateInfo.HasTemplateParameterLists();
   if (IsTemplated &
       !DVScope.TI->isExtensionActive(
           llvm::omp::TraitProperty::implementation_extension_allow_templates))
@@ -7317,7 +7317,7 @@ void Sema::ActOnStartOfFunctionDefinitionInOpenMPDeclareVariantScope(
     FunctionDecl *UDecl = nullptr;
     if (IsTemplated && isa<FunctionTemplateDecl>(CandidateDecl)) {
       auto *FTD = cast<FunctionTemplateDecl>(CandidateDecl);
-      if (FTD->getTemplateParameters()->size() == TemplateParamLists.size())
+      if (FTD->getTemplateParameters()->size() == TemplateInfo.numTemplateParameterLists())
         UDecl = FTD->getTemplatedDecl();
     } else if (!IsTemplated)
       UDecl = dyn_cast<FunctionDecl>(CandidateDecl);
@@ -7349,7 +7349,7 @@ void Sema::ActOnStartOfFunctionDefinitionInOpenMPDeclareVariantScope(
   // If no base was found we create a declaration that we use as base.
   if (Bases.empty() && UseImplicitBase) {
     D.setFunctionDefinitionKind(FunctionDefinitionKind::Declaration);
-    Decl *BaseD = HandleDeclarator(S, D, TemplateParamLists);
+    Decl *BaseD = HandleDeclarator(S, D, TemplateInfo);
     BaseD->setImplicit(true);
     if (auto *BaseTemplD = dyn_cast<FunctionTemplateDecl>(BaseD))
       Bases.push_back(BaseTemplD->getTemplatedDecl());

@@ -254,6 +254,107 @@ namespace clang {
     ~TemplateIdAnnotation() = default;
   };
 
+  /// Contains information about any template-specific
+  /// information that has been parsed prior to parsing declaration
+  /// specifiers.
+  struct ParsedTemplateInfo {
+    ParsedTemplateInfo() : Kind(NonTemplate), LastParameterListWasEmpty(false) {}
+
+    #if 0
+    ParsedTemplateInfo(TemplateParameterLists *TemplateParams,
+                       bool isSpecialization,
+                       bool lastParameterListWasEmpty = false)
+      : Kind(isSpecialization? ExplicitSpecialization : Template),
+        TemplateParams(TemplateParams),
+        LastParameterListWasEmpty(lastParameterListWasEmpty) { }
+    #endif
+
+    explicit ParsedTemplateInfo(SourceLocation ExternLoc,
+                                SourceLocation TemplateLoc)
+      : Kind(ExplicitInstantiation),
+        ExternLoc(ExternLoc), TemplateLoc(TemplateLoc),
+        LastParameterListWasEmpty(false){ }
+
+    /// The kind of template we are parsing.
+    enum {
+      /// We are not parsing a template at all.
+      NonTemplate = 0,
+      /// We are parsing a template declaration.
+      Template,
+      /// We are parsing an explicit specialization.
+      ExplicitSpecialization,
+      /// We are parsing an explicit instantiation.
+      ExplicitInstantiation
+    } Kind;
+
+    /// The template parameter lists, for template declarations
+    /// and explicit specializations.
+    SmallVector<TemplateParameterList *, 4> TemplateParams;
+
+    /// The location of the 'extern' keyword, if any, for an explicit
+    /// instantiation
+    SourceLocation ExternLoc;
+
+    /// The location of the 'template' keyword, for an explicit
+    /// instantiation.
+    SourceLocation TemplateLoc;
+
+    /// Whether the last template parameter list was empty.
+    bool LastParameterListWasEmpty;
+
+    void clear() {
+      Kind = NonTemplate;
+      TemplateParams.clear();
+      LastParameterListWasEmpty = false;
+      TemplateLoc = SourceLocation();
+      ExternLoc = SourceLocation();
+    }
+
+    void AddParameterList(TemplateParameterList *TPL);
+
+    bool isNonTemplate() const {
+      return Kind == NonTemplate;
+    }
+
+    bool isTemplate() const {
+      return Kind == Template;
+    }
+
+    bool isExplicitSpecialization() const {
+      return Kind == ExplicitSpecialization;
+    }
+
+    bool isExplicitInstantiation() const {
+      return Kind == ExplicitInstantiation;
+    }
+
+    bool isExplicitSpecializationOrInstantiation() const {
+      return Kind == ExplicitSpecialization ||
+             Kind == ExplicitInstantiation;
+    }
+
+    bool HasTemplateParameterLists() const {
+      return TemplateParams.empty();
+    }
+    size_t numTemplateParameterLists() const {
+      return TemplateParams.size();
+    }
+
+    ArrayRef<TemplateParameterList *> param_lists() const {
+      return TemplateParams;
+    }
+
+    ArrayRef<TemplateParameterList *> outer_param_lists() const {
+      return param_lists().drop_back(1);
+    }
+
+    TemplateParameterList * inner_param_list() const {
+      return param_lists().back();
+    }
+
+    SourceRange getSourceRange() const LLVM_READONLY;
+  };
+
   /// Retrieves the range of the given template parameter lists.
   SourceRange getTemplateParamsRange(TemplateParameterList const *const *Params,
                                      unsigned NumParams);

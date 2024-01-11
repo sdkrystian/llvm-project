@@ -1984,7 +1984,8 @@ Parser::ParseAliasDeclarationInInitStatement(DeclaratorContext Context,
   DeclGroupPtrTy DG;
   SourceLocation DeclStart = ConsumeToken(), DeclEnd;
 
-  DG = ParseUsingDeclaration(Context, {}, DeclStart, DeclEnd, Attrs, AS_none);
+  ParsedTemplateInfo EmptyTemplateInfo;
+  DG = ParseUsingDeclaration(Context, EmptyTemplateInfo, DeclStart, DeclEnd, Attrs, AS_none);
   if (!DG)
     return DG;
 

@@ -1503,55 +1503,6 @@ private:
     }
   };
 
-  /// Contains information about any template-specific
-  /// information that has been parsed prior to parsing declaration
-  /// specifiers.
-  struct ParsedTemplateInfo {
-    ParsedTemplateInfo() : Kind(NonTemplate), TemplateParams(nullptr) {}
-
-    ParsedTemplateInfo(TemplateParameterLists *TemplateParams,
-                       bool isSpecialization,
-                       bool lastParameterListWasEmpty = false)
-      : Kind(isSpecialization? ExplicitSpecialization : Template),
-        TemplateParams(TemplateParams),
-        LastParameterListWasEmpty(lastParameterListWasEmpty) { }
-
-    explicit ParsedTemplateInfo(SourceLocation ExternLoc,
-                                SourceLocation TemplateLoc)
-      : Kind(ExplicitInstantiation), TemplateParams(nullptr),
-        ExternLoc(ExternLoc), TemplateLoc(TemplateLoc),
-        LastParameterListWasEmpty(false){ }
-
-    /// The kind of template we are parsing.
-    enum {
-      /// We are not parsing a template at all.
-      NonTemplate = 0,
-      /// We are parsing a template declaration.
-      Template,
-      /// We are parsing an explicit specialization.
-      ExplicitSpecialization,
-      /// We are parsing an explicit instantiation.
-      ExplicitInstantiation
-    } Kind;
-
-    /// The template parameter lists, for template declarations
-    /// and explicit specializations.
-    TemplateParameterLists *TemplateParams;
-
-    /// The location of the 'extern' keyword, if any, for an explicit
-    /// instantiation
-    SourceLocation ExternLoc;
-
-    /// The location of the 'template' keyword, for an explicit
-    /// instantiation.
-    SourceLocation TemplateLoc;
-
-    /// Whether the last template parameter list was empty.
-    bool LastParameterListWasEmpty;
-
-    SourceRange getSourceRange() const LLVM_READONLY;
-  };
-
   // In ParseCXXInlineMethods.cpp.
   struct ReenterTemplateScopeRAII;
   struct ReenterClassScopeRAII;
@@ -1574,7 +1525,7 @@ private:
   NamedDecl *ParseCXXInlineMethodDef(AccessSpecifier AS,
                                      const ParsedAttributesView &AccessAttrs,
                                      ParsingDeclarator &D,
-                                     const ParsedTemplateInfo &TemplateInfo,
+                                     ParsedTemplateInfo &TemplateInfo,
                                      const VirtSpecifiers &VS,
                                      SourceLocation PureSpecLoc);
   void ParseCXXNonStaticMemberInitializer(Decl *VarD);
@@ -1623,7 +1574,7 @@ private:
 
   void SkipFunctionBody();
   Decl *ParseFunctionDefinition(ParsingDeclarator &D,
-                 const ParsedTemplateInfo &TemplateInfo = ParsedTemplateInfo(),
+                 ParsedTemplateInfo &TemplateInfo,
                  LateParsedAttrList *LateParsedAttrs = nullptr);
   void ParseKNRParamDeclarations(Declarator &D);
   // EndLoc is filled with the location of the last token of the simple-asm.
@@ -2401,11 +2352,11 @@ private:
                                 SourceLocation *DeclEnd = nullptr,
                                 ForRangeInit *FRI = nullptr);
   Decl *ParseDeclarationAfterDeclarator(Declarator &D,
-               const ParsedTemplateInfo &TemplateInfo = ParsedTemplateInfo());
+               ParsedTemplateInfo &TemplateInfo);
   bool ParseAsmAttributesAfterDeclarator(Declarator &D);
   Decl *ParseDeclarationAfterDeclaratorAndAttributes(
       Declarator &D,
-      const ParsedTemplateInfo &TemplateInfo = ParsedTemplateInfo(),
+      ParsedTemplateInfo &TemplateInfo,
       ForRangeInit *FRI = nullptr);
   Decl *ParseFunctionStatementBody(Decl *Decl, ParseScope &BodyScope);
   Decl *ParseFunctionTryBlock(Decl *Decl, ParseScope &BodyScope);
@@ -2417,14 +2368,14 @@ private:
   bool trySkippingFunctionBody();
 
   bool ParseImplicitInt(DeclSpec &DS, CXXScopeSpec *SS,
-                        const ParsedTemplateInfo &TemplateInfo,
+                        ParsedTemplateInfo &TemplateInfo,
                         AccessSpecifier AS, DeclSpecContext DSC,
                         ParsedAttributes &Attrs);
   DeclSpecContext
   getDeclSpecContextFromDeclaratorContext(DeclaratorContext Context);
   void ParseDeclarationSpecifiers(
       DeclSpec &DS,
-      const ParsedTemplateInfo &TemplateInfo = ParsedTemplateInfo(),
+      ParsedTemplateInfo &TemplateInfo,
       AccessSpecifier AS = AS_none,
       DeclSpecContext DSC = DeclSpecContext::DSC_normal,
       LateParsedAttrList *LateAttrs = nullptr) {
@@ -2432,7 +2383,7 @@ private:
                                       getImplicitTypenameContext(DSC));
   }
   void ParseDeclarationSpecifiers(
-      DeclSpec &DS, const ParsedTemplateInfo &TemplateInfo, AccessSpecifier AS,
+      DeclSpec &DS, ParsedTemplateInfo &TemplateInfo, AccessSpecifier AS,
       DeclSpecContext DSC, LateParsedAttrList *LateAttrs,
       ImplicitTypenameContext AllowImplicitTypename);
 
@@ -2455,7 +2406,7 @@ private:
                                   DeclaratorContext Context);
 
   void ParseEnumSpecifier(SourceLocation TagLoc, DeclSpec &DS,
-                          const ParsedTemplateInfo &TemplateInfo,
+                          ParsedTemplateInfo &TemplateInfo,
                           AccessSpecifier AS, DeclSpecContext DSC);
   void ParseEnumBody(SourceLocation StartLoc, Decl *TagDecl);
   void ParseStructUnionBody(SourceLocation StartLoc, DeclSpec::TST TagType,
@@ -3187,7 +3138,7 @@ private:
   Decl *ParseLinkage(ParsingDeclSpec &DS, DeclaratorContext Context);
   Decl *ParseExportDeclaration();
   DeclGroupPtrTy ParseUsingDirectiveOrDeclaration(
-      DeclaratorContext Context, const ParsedTemplateInfo &TemplateInfo,
+      DeclaratorContext Context, ParsedTemplateInfo &TemplateInfo,
       SourceLocation &DeclEnd, ParsedAttributes &Attrs);
   Decl *ParseUsingDirective(DeclaratorContext Context,
                             SourceLocation UsingLoc,
@@ -3209,13 +3160,13 @@ private:
 
   bool ParseUsingDeclarator(DeclaratorContext Context, UsingDeclarator &D);
   DeclGroupPtrTy ParseUsingDeclaration(DeclaratorContext Context,
-                                       const ParsedTemplateInfo &TemplateInfo,
+                                       ParsedTemplateInfo &TemplateInfo,
                                        SourceLocation UsingLoc,
                                        SourceLocation &DeclEnd,
                                        ParsedAttributes &Attrs,
                                        AccessSpecifier AS = AS_none);
   Decl *ParseAliasDeclarationAfterDeclarator(
-      const ParsedTemplateInfo &TemplateInfo, SourceLocation UsingLoc,
+      ParsedTemplateInfo &TemplateInfo, SourceLocation UsingLoc,
       UsingDeclarator &D, SourceLocation &DeclEnd, AccessSpecifier AS,
       ParsedAttributes &Attrs, Decl **OwnedType = nullptr);
 
@@ -3228,7 +3179,7 @@ private:
   // C++ 9: classes [class] and C structs/unions.
   bool isValidAfterTypeSpecifier(bool CouldBeBitfield);
   void ParseClassSpecifier(tok::TokenKind TagTokKind, SourceLocation TagLoc,
-                           DeclSpec &DS, const ParsedTemplateInfo &TemplateInfo,
+                           DeclSpec &DS, ParsedTemplateInfo &TemplateInfo,
                            AccessSpecifier AS, bool EnteringContext,
                            DeclSpecContext DSC, ParsedAttributes &Attributes);
   void SkipCXXMemberSpecification(SourceLocation StartLoc,
@@ -3250,7 +3201,7 @@ private:
                                                                VirtSpecifiers &VS);
   DeclGroupPtrTy ParseCXXClassMemberDeclaration(
       AccessSpecifier AS, ParsedAttributes &Attr,
-      const ParsedTemplateInfo &TemplateInfo = ParsedTemplateInfo(),
+      ParsedTemplateInfo &TemplateInfo,
       ParsingDeclRAIIObject *DiagsFromTParams = nullptr);
   DeclGroupPtrTy
   ParseCXXClassMemberDeclarationWithPragmas(AccessSpecifier &AS,
@@ -3564,7 +3515,7 @@ private:
                                                  ParsedAttributes &AccessAttrs,
                                                  AccessSpecifier AS);
   Decl *ParseSingleDeclarationAfterTemplate(
-      DeclaratorContext Context, const ParsedTemplateInfo &TemplateInfo,
+      DeclaratorContext Context, ParsedTemplateInfo &TemplateInfo,
       ParsingDeclRAIIObject &DiagsFromParams, SourceLocation &DeclEnd,
       ParsedAttributes &AccessAttrs, AccessSpecifier AS = AS_none);
   bool ParseTemplateParameters(MultiParseScope &TemplateScopes, unsigned Depth,
@@ -3621,7 +3572,7 @@ private:
                                    AccessSpecifier AS = AS_none);
   // C++2a: Template, concept definition [temp]
   Decl *
-  ParseConceptDefinition(const ParsedTemplateInfo &TemplateInfo,
+  ParseConceptDefinition(ParsedTemplateInfo &TemplateInfo,
                          SourceLocation &DeclEnd);
 
   //===--------------------------------------------------------------------===//

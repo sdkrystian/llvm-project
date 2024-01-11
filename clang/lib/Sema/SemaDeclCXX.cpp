@@ -736,7 +736,7 @@ void Sema::DiagPlaceholderVariableDefinition(SourceLocation Loc) {
 
 NamedDecl *
 Sema::ActOnDecompositionDeclarator(Scope *S, Declarator &D,
-                                   MultiTemplateParamsArg TemplateParamLists) {
+                                   ParsedTemplateInfo &TemplateInfo) {
   assert(D.isDecompositionDeclarator());
   const DecompositionDeclarator &Decomp = D.getDecompositionDeclarator();
 
@@ -749,13 +749,15 @@ Sema::ActOnDecompositionDeclarator(Scope *S, Declarator &D,
     return nullptr;
   }
 
-  if (!TemplateParamLists.empty()) {
+  // FIXME: Differentiate between specializations and templates
+  if (TemplateInfo.HasTemplateParameterLists()) {
     // FIXME: There's no rule against this, but there are also no rules that
     // would actually make it usable, so we reject it for now.
-    Diag(TemplateParamLists.front()->getTemplateLoc(),
+    Diag(TemplateInfo.param_lists()[0]->getTemplateLoc(),
          diag::err_decomp_decl_template);
     return nullptr;
   }
+  TemplateInfo.clear();
 
   Diag(Decomp.getLSquareLoc(),
        !getLangOpts().CPlusPlus17
@@ -954,7 +956,7 @@ Sema::ActOnDecompositionDeclarator(Scope *S, Declarator &D,
   bool AddToScope = true;
   NamedDecl *New =
       ActOnVariableDeclarator(S, D, DC, TInfo, Previous,
-                              MultiTemplateParamsArg(), AddToScope, Bindings);
+                              TemplateInfo, AddToScope, Bindings);
   if (AddToScope) {
     S->AddDecl(New);
     CurContext->addHiddenDecl(New);
@@ -3438,7 +3440,7 @@ void Sema::CheckShadowInheritedFields(const SourceLocation &Loc,
 /// present (but parsing it has been deferred).
 NamedDecl *
 Sema::ActOnCXXMemberDeclarator(Scope *S, AccessSpecifier AS, Declarator &D,
-                               MultiTemplateParamsArg TemplateParameterLists,
+                               ParsedTemplateInfo &TemplateInfo,
                                Expr *BW, const VirtSpecifiers &VS,
                                InClassInitStyle InitStyle) {
   const DeclSpec &DS = D.getDeclSpec();
@@ -3586,8 +3588,8 @@ Sema::ActOnCXXMemberDeclarator(Scope *S, AccessSpecifier AS, Declarator &D,
 
     // Member field could not be with "template" keyword.
     // So TemplateParameterLists should be empty in this case.
-    if (TemplateParameterLists.size()) {
-      TemplateParameterList* TemplateParams = TemplateParameterLists[0];
+    if (TemplateInfo.HasTemplateParameterLists()) {
+      TemplateParameterList* TemplateParams = TemplateInfo.param_lists()[0];
       if (TemplateParams->size()) {
         // There is no such thing as a member field template.
         Diag(D.getIdentifierLoc(), diag::err_template_member)
@@ -3647,7 +3649,7 @@ Sema::ActOnCXXMemberDeclarator(Scope *S, AccessSpecifier AS, Declarator &D,
 
     CheckShadowInheritedFields(Loc, Name, cast<CXXRecordDecl>(CurContext));
   } else {
-    Member = HandleDeclarator(S, D, TemplateParameterLists);
+    Member = HandleDeclarator(S, D, TemplateInfo);
     if (!Member)
       return nullptr;
 
@@ -13485,7 +13487,7 @@ bool Sema::CheckUsingDeclQualifier(SourceLocation UsingLoc, bool HasTypename,
 }
 
 Decl *Sema::ActOnAliasDeclaration(Scope *S, AccessSpecifier AS,
-                                  MultiTemplateParamsArg TemplateParamLists,
+                                  ParsedTemplateInfo &TemplateInfo,
                                   SourceLocation UsingLoc, UnqualifiedId &Name,
                                   const ParsedAttributesView &AttrList,
                                   TypeResult Type, Decl *DeclFromDeclSpec) {
@@ -13514,7 +13516,7 @@ Decl *Sema::ActOnAliasDeclaration(Scope *S, AccessSpecifier AS,
   }
 
   LookupResult Previous(*this, NameInfo, LookupOrdinaryName,
-                        TemplateParamLists.size()
+                        TemplateInfo.HasTemplateParameterLists()
                             ? forRedeclarationInCurContext()
                             : ForVisibleRedeclaration);
   LookupName(Previous, S);
@@ -13546,10 +13548,11 @@ Decl *Sema::ActOnAliasDeclaration(Scope *S, AccessSpecifier AS,
   bool Redeclaration = false;
 
   NamedDecl *NewND;
-  if (TemplateParamLists.size()) {
+  if (TemplateInfo.HasTemplateParameterLists()) {
     TypeAliasTemplateDecl *OldDecl = nullptr;
     TemplateParameterList *OldTemplateParams = nullptr;
 
+    auto &TemplateParamLists = TemplateInfo.TemplateParams;
     if (TemplateParamLists.size() != 1) {
       Diag(UsingLoc, diag::err_alias_template_extra_headers)
         << SourceRange(TemplateParamLists[1]->getTemplateLoc(),
@@ -17598,7 +17601,7 @@ FriendDecl *Sema::CheckFriendTypeDecl(SourceLocation LocStart,
 DeclResult Sema::ActOnTemplatedFriendTag(
     Scope *S, SourceLocation FriendLoc, unsigned TagSpec, SourceLocation TagLoc,
     CXXScopeSpec &SS, IdentifierInfo *Name, SourceLocation NameLoc,
-    const ParsedAttributesView &Attr, MultiTemplateParamsArg TempParamLists) {
+    const ParsedAttributesView &Attr, ParsedTemplateInfo &TemplateInfo) {
   TagTypeKind Kind = TypeWithKeyword::getTagTypeKindForTypeSpec(TagSpec);
 
   bool IsMemberSpecialization = false;
@@ -17606,7 +17609,7 @@ DeclResult Sema::ActOnTemplatedFriendTag(
 
   if (TemplateParameterList *TemplateParams =
           MatchTemplateParametersToScopeSpecifier(
-              TagLoc, NameLoc, SS, nullptr, TempParamLists, /*friend*/ true,
+              TagLoc, NameLoc, SS, nullptr, TemplateInfo, /*friend*/ true,
               IsMemberSpecialization, Invalid)) {
     if (TemplateParams->size() > 0) {
       // This is a declaration of a class template.
@@ -17616,8 +17619,7 @@ DeclResult Sema::ActOnTemplatedFriendTag(
       return CheckClassTemplate(S, TagSpec, TUK_Friend, TagLoc, SS, Name,
                                 NameLoc, Attr, TemplateParams, AS_public,
                                 /*ModulePrivateLoc=*/SourceLocation(),
-                                FriendLoc, TempParamLists.size() - 1,
-                                TempParamLists.data()).get();
+                                FriendLoc, TemplateInfo.outer_param_lists()).get();
     } else {
       // The "template<>" header is extraneous.
       Diag(TemplateParams->getTemplateLoc(), diag::err_template_tag_noparams)
@@ -17628,27 +17630,20 @@ DeclResult Sema::ActOnTemplatedFriendTag(
 
   if (Invalid) return true;
 
-  bool isAllExplicitSpecializations = true;
-  for (unsigned I = TempParamLists.size(); I-- > 0; ) {
-    if (TempParamLists[I]->size()) {
-      isAllExplicitSpecializations = false;
-      break;
-    }
-  }
-
   // FIXME: don't ignore attributes.
 
   // If it's explicit specializations all the way down, just forget
   // about the template header and build an appropriate non-templated
   // friend.  TODO: for source fidelity, remember the headers.
-  if (isAllExplicitSpecializations) {
+  if (TemplateInfo.isExplicitSpecialization()) {
     if (SS.isEmpty()) {
+      TemplateInfo.clear();
       bool Owned = false;
       bool IsDependent = false;
       return ActOnTag(S, TagSpec, TUK_Friend, TagLoc, SS, Name, NameLoc, Attr,
                       AS_public,
                       /*ModulePrivateLoc=*/SourceLocation(),
-                      MultiTemplateParamsArg(), Owned, IsDependent,
+                      TemplateInfo, Owned, IsDependent,
                       /*ScopedEnumKWLoc=*/SourceLocation(),
                       /*ScopedEnumUsesClassTag=*/false,
                       /*UnderlyingType=*/TypeResult(),
@@ -17679,7 +17674,8 @@ DeclResult Sema::ActOnTemplatedFriendTag(
     }
 
     FriendDecl *Friend = FriendDecl::Create(Context, CurContext, NameLoc,
-                                            TSI, FriendLoc, TempParamLists);
+                                            TSI, FriendLoc,
+                                            TemplateInfo.param_lists());
     Friend->setAccess(AS_public);
     CurContext->addDecl(Friend);
     return Friend;
@@ -17703,7 +17699,8 @@ DeclResult Sema::ActOnTemplatedFriendTag(
   TL.setNameLoc(NameLoc);
 
   FriendDecl *Friend = FriendDecl::Create(Context, CurContext, NameLoc,
-                                          TSI, FriendLoc, TempParamLists);
+                                          TSI, FriendLoc,
+                                          TemplateInfo.param_lists());
   Friend->setAccess(AS_public);
   Friend->setUnsupportedFriend(true);
   CurContext->addDecl(Friend);
@@ -17728,7 +17725,7 @@ DeclResult Sema::ActOnTemplatedFriendTag(
 /// parameters present at all, require proper matching, i.e.
 ///   template <> template \<class T> friend class A<int>::B;
 Decl *Sema::ActOnFriendTypeDecl(Scope *S, const DeclSpec &DS,
-                                MultiTemplateParamsArg TempParams) {
+                                ParsedTemplateInfo &TemplateInfo) {
   SourceLocation Loc = DS.getBeginLoc();
 
   assert(DS.isFriendSpecified());
@@ -17784,7 +17781,8 @@ Decl *Sema::ActOnFriendTypeDecl(Scope *S, const DeclSpec &DS,
   //
   // FIXME: handle "template <> friend class A<T>;", which
   // is possibly well-formed?  Who even knows?
-  if (TempParams.size() && !T->isElaboratedTypeSpecifier()) {
+  if (TemplateInfo.HasTemplateParameterLists() &&
+      !T->isElaboratedTypeSpecifier()) {
     Diag(Loc, diag::err_tagless_friend_type_template)
       << DS.getSourceRange();
     return nullptr;
@@ -17802,9 +17800,9 @@ Decl *Sema::ActOnFriendTypeDecl(Scope *S, const DeclSpec &DS,
   // friend a member of an arbitrary specialization of your template).
 
   Decl *D;
-  if (!TempParams.empty())
+  if (TemplateInfo.isTemplate())
     D = FriendTemplateDecl::Create(Context, CurContext, Loc,
-                                   TempParams,
+                                   TemplateInfo.param_lists(),
                                    TSI,
                                    DS.getFriendSpecLoc());
   else
@@ -17820,7 +17818,7 @@ Decl *Sema::ActOnFriendTypeDecl(Scope *S, const DeclSpec &DS,
 }
 
 NamedDecl *Sema::ActOnFriendFunctionDecl(Scope *S, Declarator &D,
-                                        MultiTemplateParamsArg TemplateParams) {
+                                         ParsedTemplateInfo &TemplateInfo) {
   const DeclSpec &DS = D.getDeclSpec();
 
   assert(DS.isFriendSpecified());
@@ -18031,7 +18029,7 @@ NamedDecl *Sema::ActOnFriendFunctionDecl(Scope *S, Declarator &D,
 
   bool AddToScope = true;
   NamedDecl *ND = ActOnFunctionDeclarator(DCScope, D, DC, TInfo, Previous,
-                                          TemplateParams, AddToScope);
+                                          TemplateInfo, AddToScope);
   if (!ND) return nullptr;
 
   assert(ND->getLexicalDeclContext() == CurContext);
@@ -19269,6 +19267,7 @@ void Sema::ActOnStartFunctionDeclarationDeclarator(
   TemplateParameterList *ExplicitParams = nullptr;
   ArrayRef<TemplateParameterList *> ExplicitLists =
       Declarator.getTemplateParameterLists();
+  #if 0
   if (!ExplicitLists.empty()) {
     bool IsMemberSpecialization, IsInvalid;
     ExplicitParams = MatchTemplateParametersToScopeSpecifier(
@@ -19277,6 +19276,7 @@ void Sema::ActOnStartFunctionDeclarationDeclarator(
         ExplicitLists, /*IsFriend=*/false, IsMemberSpecialization, IsInvalid,
         /*SuppressDiagnostic=*/true);
   }
+  #endif
   if (ExplicitParams) {
     Info.AutoTemplateParameterDepth = ExplicitParams->getDepth();
     llvm::append_range(Info.TemplateParams, *ExplicitParams);

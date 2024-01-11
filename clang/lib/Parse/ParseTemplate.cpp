@@ -107,9 +107,7 @@ Decl *Parser::ParseTemplateDeclarationOrSpecialization(
   // defining A<T>::B receives just the inner template parameter list
   // (and retrieves the outer template parameter list from its
   // context).
-  bool isSpecialization = true;
-  bool LastParamListWasEmpty = false;
-  TemplateParameterLists ParamLists;
+  ParsedTemplateInfo TemplateInfo;
   TemplateParameterDepthRAII CurTemplateDepthTracker(TemplateParameterDepth);
 
   do {
@@ -138,7 +136,6 @@ Decl *Parser::ParseTemplateDeclarationOrSpecialization(
 
     ExprResult OptionalRequiresClauseConstraintER;
     if (!TemplateParams.empty()) {
-      isSpecialization = false;
       ++CurTemplateDepthTracker;
 
       if (TryConsumeToken(tok::kw_requires)) {
@@ -152,26 +149,20 @@ Decl *Parser::ParseTemplateDeclarationOrSpecialization(
           return nullptr;
         }
       }
-    } else {
-      LastParamListWasEmpty = true;
     }
 
-    ParamLists.push_back(Actions.ActOnTemplateParameterList(
+    TemplateInfo.AddParameterList(Actions.ActOnTemplateParameterList(
         CurTemplateDepthTracker.getDepth(), ExportLoc, TemplateLoc, LAngleLoc,
         TemplateParams, RAngleLoc, OptionalRequiresClauseConstraintER.get()));
   } while (Tok.isOneOf(tok::kw_export, tok::kw_template));
 
   // Parse the actual template declaration.
   if (Tok.is(tok::kw_concept))
-    return ParseConceptDefinition(
-        ParsedTemplateInfo(&ParamLists, isSpecialization,
-                           LastParamListWasEmpty),
-        DeclEnd);
+    return ParseConceptDefinition(TemplateInfo, DeclEnd);
 
   return ParseSingleDeclarationAfterTemplate(
-      Context,
-      ParsedTemplateInfo(&ParamLists, isSpecialization, LastParamListWasEmpty),
-      ParsingTemplateParams, DeclEnd, AccessAttrs, AS);
+      Context, TemplateInfo, ParsingTemplateParams,
+      DeclEnd, AccessAttrs, AS);
 }
 
 /// Parse a single declaration that declares a template,
@@ -185,10 +176,10 @@ Decl *Parser::ParseTemplateDeclarationOrSpecialization(
 ///
 /// \returns the new declaration.
 Decl *Parser::ParseSingleDeclarationAfterTemplate(
-    DeclaratorContext Context, const ParsedTemplateInfo &TemplateInfo,
+    DeclaratorContext Context, ParsedTemplateInfo &TemplateInfo,
     ParsingDeclRAIIObject &DiagsFromTParams, SourceLocation &DeclEnd,
     ParsedAttributes &AccessAttrs, AccessSpecifier AS) {
-  assert(TemplateInfo.Kind != ParsedTemplateInfo::NonTemplate &&
+  assert(!TemplateInfo.isNonTemplate() &&
          "Template information required");
 
   if (Tok.is(tok::kw_static_assert)) {
@@ -244,8 +235,7 @@ Decl *Parser::ParseSingleDeclarationAfterTemplate(
     RecordDecl *AnonRecord = nullptr;
     Decl *Decl = Actions.ParsedFreeStandingDeclSpec(
         getCurScope(), AS, DS, ParsedAttributesView::none(),
-        TemplateInfo.TemplateParams ? *TemplateInfo.TemplateParams
-                                    : MultiTemplateParamsArg(),
+        TemplateInfo,
         TemplateInfo.Kind == ParsedTemplateInfo::ExplicitInstantiation,
         AnonRecord);
     Actions.ActOnDefinedDeclarationSpecifier(Decl);
@@ -265,8 +255,7 @@ Decl *Parser::ParseSingleDeclarationAfterTemplate(
   // Parse the declarator.
   ParsingDeclarator DeclaratorInfo(*this, DS, prefixAttrs,
                                    (DeclaratorContext)Context);
-  if (TemplateInfo.TemplateParams)
-    DeclaratorInfo.setTemplateParameterLists(*TemplateInfo.TemplateParams);
+  DeclaratorInfo.setTemplateParameterLists(TemplateInfo.param_lists());
 
   // Turn off usual access checking for template specializations and
   // instantiations.
@@ -335,27 +324,26 @@ Decl *Parser::ParseSingleDeclarationAfterTemplate(
         // If the declarator-id is not a template-id, issue a diagnostic and
         // recover by ignoring the 'template' keyword.
         Diag(Tok, diag::err_template_defn_explicit_instantiation) << 0;
-        return ParseFunctionDefinition(DeclaratorInfo, ParsedTemplateInfo(),
+        TemplateInfo.clear();
+        return ParseFunctionDefinition(DeclaratorInfo, TemplateInfo,
                                        &LateParsedAttrs);
       } else {
         SourceLocation LAngleLoc
           = PP.getLocForEndOfToken(TemplateInfo.TemplateLoc);
+        SourceLocation TemplateKWLoc = TemplateInfo.TemplateLoc;
         Diag(DeclaratorInfo.getIdentifierLoc(),
              diag::err_explicit_instantiation_with_definition)
-            << SourceRange(TemplateInfo.TemplateLoc)
+            << SourceRange(TemplateKWLoc)
             << FixItHint::CreateInsertion(LAngleLoc, "<>");
 
+        TemplateInfo.clear();
         // Recover as if it were an explicit specialization.
-        TemplateParameterLists FakedParamLists;
-        FakedParamLists.push_back(Actions.ActOnTemplateParameterList(
-            0, SourceLocation(), TemplateInfo.TemplateLoc, LAngleLoc,
+        TemplateInfo.AddParameterList(Actions.ActOnTemplateParameterList(
+            0, SourceLocation(), TemplateKWLoc, LAngleLoc,
             std::nullopt, LAngleLoc, nullptr));
 
         return ParseFunctionDefinition(
-            DeclaratorInfo, ParsedTemplateInfo(&FakedParamLists,
-                                               /*isSpecialization=*/true,
-                                               /*lastParameterListWasEmpty=*/true),
-            &LateParsedAttrs);
+            DeclaratorInfo, TemplateInfo, &LateParsedAttrs);
       }
     }
     return ParseFunctionDefinition(DeclaratorInfo, TemplateInfo,
@@ -388,9 +376,9 @@ Decl *Parser::ParseSingleDeclarationAfterTemplate(
 ///
 /// \returns the new declaration.
 Decl *
-Parser::ParseConceptDefinition(const ParsedTemplateInfo &TemplateInfo,
+Parser::ParseConceptDefinition(ParsedTemplateInfo &TemplateInfo,
                                SourceLocation &DeclEnd) {
-  assert(TemplateInfo.Kind != ParsedTemplateInfo::NonTemplate &&
+  assert(!TemplateInfo.isNonTemplate() &&
          "Template information required");
   assert(Tok.is(tok::kw_concept) &&
          "ParseConceptDefinition must be called when at a 'concept' keyword");
@@ -458,7 +446,7 @@ Parser::ParseConceptDefinition(const ParsedTemplateInfo &TemplateInfo,
   ExpectAndConsumeSemi(diag::err_expected_semi_declaration);
   Expr *ConstraintExpr = ConstraintExprResult.get();
   return Actions.ActOnConceptDefinition(getCurScope(),
-                                        *TemplateInfo.TemplateParams,
+                                        TemplateInfo,
                                         Id, IdLoc, ConstraintExpr);
 }
 
@@ -1019,7 +1007,8 @@ Parser::ParseNonTypeTemplateParameter(unsigned Depth, unsigned Position) {
   // FIXME: The type should probably be restricted in some way... Not all
   // declarators (parts of declarators?) are accepted for parameters.
   DeclSpec DS(AttrFactory);
-  ParseDeclarationSpecifiers(DS, ParsedTemplateInfo(), AS_none,
+  ParsedTemplateInfo EmptyTemplateInfo;
+  ParseDeclarationSpecifiers(DS, EmptyTemplateInfo, AS_none,
                              DeclSpecContext::DSC_template_param);
 
   // Parse this as a typename.
@@ -1695,21 +1684,10 @@ Decl *Parser::ParseExplicitInstantiation(DeclaratorContext Context,
   // This isn't really required here.
   ParsingDeclRAIIObject
     ParsingTemplateParams(*this, ParsingDeclRAIIObject::NoParent);
-
+  ParsedTemplateInfo TemplateInfo(ExternLoc, TemplateLoc);
   return ParseSingleDeclarationAfterTemplate(
-      Context, ParsedTemplateInfo(ExternLoc, TemplateLoc),
+      Context, TemplateInfo,
       ParsingTemplateParams, DeclEnd, AccessAttrs, AS);
-}
-
-SourceRange Parser::ParsedTemplateInfo::getSourceRange() const {
-  if (TemplateParams)
-    return getTemplateParamsRange(TemplateParams->data(),
-                                  TemplateParams->size());
-
-  SourceRange R(TemplateLoc);
-  if (ExternLoc.isValid())
-    R.setBegin(ExternLoc);
-  return R;
 }
 
 void Parser::LateTemplateParserCallback(void *P, LateParsedTemplate &LPT) {

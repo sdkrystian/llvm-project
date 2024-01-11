@@ -911,6 +911,29 @@ TemplateDecl *Sema::AdjustDeclIfTemplate(Decl *&D) {
   return nullptr;
 }
 
+void ParsedTemplateInfo::AddParameterList(TemplateParameterList *TPL) {
+  assert(TPL);
+  bool Empty = TPL->size() != 0;
+  if (!Empty) {
+    Kind = Template;
+  } else if (TemplateParams.empty()) {
+    Kind = ExplicitSpecialization;
+  }
+  TemplateParams.push_back(TPL);
+  LastParameterListWasEmpty = Empty;
+}
+
+SourceRange ParsedTemplateInfo::getSourceRange() const {
+  if (!TemplateParams.empty())
+    return getTemplateParamsRange(TemplateParams.data(),
+                                  TemplateParams.size());
+
+  SourceRange R(TemplateLoc);
+  if (ExternLoc.isValid())
+    R.setBegin(ExternLoc);
+  return R;
+}
+
 ParsedTemplateArgument ParsedTemplateArgument::getTemplatePackExpansion(
                                              SourceLocation EllipsisLoc) const {
   assert(Kind == Template &&
@@ -1838,8 +1861,9 @@ DeclResult Sema::CheckClassTemplate(
     CXXScopeSpec &SS, IdentifierInfo *Name, SourceLocation NameLoc,
     const ParsedAttributesView &Attr, TemplateParameterList *TemplateParams,
     AccessSpecifier AS, SourceLocation ModulePrivateLoc,
-    SourceLocation FriendLoc, unsigned NumOuterTemplateParamLists,
-    TemplateParameterList **OuterTemplateParamLists, SkipBodyInfo *SkipBody) {
+    SourceLocation FriendLoc,
+    ArrayRef<TemplateParameterList *> OuterTemplateParamLists,
+    SkipBodyInfo *SkipBody) {
   assert(TemplateParams && TemplateParams->size() > 0 &&
          "No template parameters");
   assert(TUK != TUK_Reference && "Can only declare or define class templates");
@@ -2105,10 +2129,10 @@ DeclResult Sema::CheckClassTemplate(
                             PrevClassTemplate->getTemplatedDecl() : nullptr,
                           /*DelayTypeCreation=*/true);
   SetNestedNameSpecifier(*this, NewClass, SS);
-  if (NumOuterTemplateParamLists > 0)
+  if (!OuterTemplateParamLists.empty())
     NewClass->setTemplateParameterListsInfo(
         Context,
-        llvm::ArrayRef(OuterTemplateParamLists, NumOuterTemplateParamLists));
+        OuterTemplateParamLists);
 
   // Add alignment attributes if necessary; these attributes are checked when
   // the ASTContext lays out the structure.
@@ -3330,8 +3354,9 @@ static SourceRange getRangeOfTypeInNestedNameSpecifier(ASTContext &Context,
 TemplateParameterList *Sema::MatchTemplateParametersToScopeSpecifier(
     SourceLocation DeclStartLoc, SourceLocation DeclLoc, const CXXScopeSpec &SS,
     TemplateIdAnnotation *TemplateId,
-    ArrayRef<TemplateParameterList *> ParamLists, bool IsFriend,
+    ParsedTemplateInfo& TemplateInfo, bool IsFriend,
     bool &IsMemberSpecialization, bool &Invalid, bool SuppressDiagnostic) {
+  ArrayRef<TemplateParameterList *> ParamLists = TemplateInfo.TemplateParams;
   IsMemberSpecialization = false;
   Invalid = false;
 
@@ -8745,13 +8770,13 @@ DeclResult Sema::ActOnClassTemplateSpecialization(
     Scope *S, unsigned TagSpec, TagUseKind TUK, SourceLocation KWLoc,
     SourceLocation ModulePrivateLoc, CXXScopeSpec &SS,
     TemplateIdAnnotation &TemplateId, const ParsedAttributesView &Attr,
-    MultiTemplateParamsArg TemplateParameterLists, SkipBodyInfo *SkipBody) {
+    ParsedTemplateInfo& TemplateInfo, SkipBodyInfo *SkipBody) {
   assert(TUK != TUK_Reference && "References are not specializations");
 
   // NOTE: KWLoc is the location of the tag keyword. This will instead
   // store the location of the outermost template keyword in the declaration.
-  SourceLocation TemplateKWLoc = TemplateParameterLists.size() > 0
-    ? TemplateParameterLists[0]->getTemplateLoc() : KWLoc;
+  SourceLocation TemplateKWLoc = TemplateInfo.HasTemplateParameterLists()
+    ? TemplateInfo.TemplateParams[0]->getTemplateLoc() : KWLoc;
   SourceLocation TemplateNameLoc = TemplateId.TemplateNameLoc;
   SourceLocation LAngleLoc = TemplateId.LAngleLoc;
   SourceLocation RAngleLoc = TemplateId.RAngleLoc;
@@ -8779,7 +8804,7 @@ DeclResult Sema::ActOnClassTemplateSpecialization(
   TemplateParameterList *TemplateParams =
       MatchTemplateParametersToScopeSpecifier(
           KWLoc, TemplateNameLoc, SS, &TemplateId,
-          TemplateParameterLists, TUK == TUK_Friend, isMemberSpecialization,
+          TemplateInfo, TUK == TUK_Friend, isMemberSpecialization,
           Invalid);
   if (Invalid)
     return true;
@@ -8942,8 +8967,7 @@ DeclResult Sema::ActOnClassTemplateSpecialization(
                                 TemplateParams,
                                 AS_none, /*ModulePrivateLoc=*/SourceLocation(),
                                 /*FriendLoc*/SourceLocation(),
-                                TemplateParameterLists.size() - 1,
-                                TemplateParameterLists.data());
+                                TemplateInfo.outer_param_lists());
     }
 
     // Create a new class template partial specialization declaration node.
@@ -8955,9 +8979,9 @@ DeclResult Sema::ActOnClassTemplateSpecialization(
             TemplateNameLoc, TemplateParams, ClassTemplate, CanonicalConverted,
             TemplateArgs, CanonType, PrevPartial);
     SetNestedNameSpecifier(*this, Partial, SS);
-    if (TemplateParameterLists.size() > 1 && SS.isSet()) {
+    if (TemplateInfo.param_lists().size() > 1 && SS.isSet()) {
       Partial->setTemplateParameterListsInfo(
-          Context, TemplateParameterLists.drop_back(1));
+          Context, TemplateInfo.outer_param_lists());
     }
 
     if (!PrevPartial)
@@ -8977,9 +9001,9 @@ DeclResult Sema::ActOnClassTemplateSpecialization(
         Context, Kind, ClassTemplate->getDeclContext(), KWLoc, TemplateNameLoc,
         ClassTemplate, CanonicalConverted, PrevDecl);
     SetNestedNameSpecifier(*this, Specialization, SS);
-    if (TemplateParameterLists.size() > 0) {
+    if (TemplateInfo.HasTemplateParameterLists()) {
       Specialization->setTemplateParameterListsInfo(Context,
-                                                    TemplateParameterLists);
+                                                    TemplateInfo.param_lists());
     }
 
     if (!PrevDecl)
@@ -9108,15 +9132,15 @@ DeclResult Sema::ActOnClassTemplateSpecialization(
 }
 
 Decl *Sema::ActOnTemplateDeclarator(Scope *S,
-                              MultiTemplateParamsArg TemplateParameterLists,
+                                    ParsedTemplateInfo &TemplateInfo,
                                     Declarator &D) {
-  Decl *NewDecl = HandleDeclarator(S, D, TemplateParameterLists);
+  Decl *NewDecl = HandleDeclarator(S, D, TemplateInfo);
   ActOnDocumentableDecl(NewDecl);
   return NewDecl;
 }
 
 Decl *Sema::ActOnConceptDefinition(Scope *S,
-                              MultiTemplateParamsArg TemplateParameterLists,
+                                   ParsedTemplateInfo &TemplateInfo,
                                    IdentifierInfo *Name, SourceLocation NameLoc,
                                    Expr *ConstraintExpr) {
   DeclContext *DC = CurContext;
@@ -9127,12 +9151,12 @@ Decl *Sema::ActOnConceptDefinition(Scope *S,
     return nullptr;
   }
 
-  if (TemplateParameterLists.size() > 1) {
+  if (TemplateInfo.param_lists().size() > 1) {
     Diag(NameLoc, diag::err_concept_extra_headers);
     return nullptr;
   }
 
-  TemplateParameterList *Params = TemplateParameterLists.front();
+  TemplateParameterList *Params = TemplateInfo.inner_param_list();
 
   if (Params->size() == 0) {
     Diag(NameLoc, diag::err_concept_no_parameters);
@@ -10393,9 +10417,10 @@ Sema::ActOnExplicitInstantiation(Scope *S, SourceLocation ExternLoc,
 
   bool Owned = false;
   bool IsDependent = false;
+  ParsedTemplateInfo EmptyTemplateInfo;
   Decl *TagD = ActOnTag(S, TagSpec, Sema::TUK_Reference, KWLoc, SS, Name,
                NameLoc, Attr, AS_none, /*ModulePrivateLoc=*/SourceLocation(),
-               MultiTemplateParamsArg(), Owned, IsDependent, SourceLocation(),
+               EmptyTemplateInfo, Owned, IsDependent, SourceLocation(),
                false, TypeResult(), /*IsTypeSpecifier*/ false,
                /*IsTemplateParamOrArg*/ false, /*OOK=*/OOK_Outside).get();
   assert(!IsDependent && "explicit instantiation of dependent name not yet handled");

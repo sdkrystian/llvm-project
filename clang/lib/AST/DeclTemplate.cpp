@@ -1151,7 +1151,7 @@ void FriendTemplateDecl::anchor() {}
 FriendTemplateDecl *
 FriendTemplateDecl::Create(ASTContext &Context, DeclContext *DC,
                            SourceLocation L,
-                           MutableArrayRef<TemplateParameterList *> Params,
+                           ArrayRef<TemplateParameterList *> Params,
                            FriendUnion Friend, SourceLocation FLoc) {
   TemplateParameterList **TPL = nullptr;
   if (!Params.empty()) {

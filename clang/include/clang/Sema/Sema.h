@@ -178,6 +178,7 @@ namespace clang {
   class ParenListExpr;
   class ParmVarDecl;
   class Preprocessor;
+  struct ParsedTemplateInfo;
   class PseudoDestructorTypeStorage;
   class PseudoObjectExpr;
   class QualType;
@@ -2899,7 +2900,7 @@ public:
   Decl *ActOnDeclarator(Scope *S, Declarator &D);
 
   NamedDecl *HandleDeclarator(Scope *S, Declarator &D,
-                              MultiTemplateParamsArg TemplateParameterLists);
+                              ParsedTemplateInfo &TemplateInfo);
   bool tryToFixVariablyModifiedVarType(TypeSourceInfo *&TInfo,
                                        QualType &T, SourceLocation Loc,
                                        unsigned FailedFoldDiagID);
@@ -2952,11 +2953,11 @@ public:
                                   LookupResult &Previous, bool &Redeclaration);
   NamedDecl *ActOnVariableDeclarator(
       Scope *S, Declarator &D, DeclContext *DC, TypeSourceInfo *TInfo,
-      LookupResult &Previous, MultiTemplateParamsArg TemplateParamLists,
+      LookupResult &Previous, ParsedTemplateInfo &TemplateInfo,
       bool &AddToScope, ArrayRef<BindingDecl *> Bindings = std::nullopt);
   NamedDecl *
   ActOnDecompositionDeclarator(Scope *S, Declarator &D,
-                               MultiTemplateParamsArg TemplateParamLists);
+                               ParsedTemplateInfo &TemplateInfo);
   void DiagPlaceholderVariableDefinition(SourceLocation Loc);
   bool DiagRedefinedPlaceholderFieldDecl(SourceLocation Loc,
                                          RecordDecl *ClassDecl,
@@ -2973,7 +2974,7 @@ public:
   NamedDecl* ActOnFunctionDeclarator(Scope* S, Declarator& D, DeclContext* DC,
                                      TypeSourceInfo *TInfo,
                                      LookupResult &Previous,
-                                     MultiTemplateParamsArg TemplateParamLists,
+                                     ParsedTemplateInfo &TemplateInfo,
                                      bool &AddToScope);
   bool AddOverriddenMethods(CXXRecordDecl *DC, CXXMethodDecl *MD);
 
@@ -3116,7 +3117,7 @@ public:
       FunctionDecl *FD, const FunctionDecl *EffectiveDefinition = nullptr,
       SkipBodyInfo *SkipBody = nullptr);
   Decl *ActOnStartOfFunctionDef(Scope *S, Declarator &D,
-                                MultiTemplateParamsArg TemplateParamLists,
+                                ParsedTemplateInfo &TemplateInfo,
                                 SkipBodyInfo *SkipBody = nullptr,
                                 FnBodyKind BodyKind = FnBodyKind::Other);
   Decl *ActOnStartOfFunctionDef(Scope *S, Decl *D,
@@ -3316,7 +3317,7 @@ public:
                                    RecordDecl *&AnonRecord);
   Decl *ParsedFreeStandingDeclSpec(Scope *S, AccessSpecifier AS, DeclSpec &DS,
                                    const ParsedAttributesView &DeclAttrs,
-                                   MultiTemplateParamsArg TemplateParams,
+                                   ParsedTemplateInfo &TemplateInfo,
                                    bool IsExplicitInstantiation,
                                    RecordDecl *&AnonRecord);
 
@@ -3379,7 +3380,7 @@ public:
                       IdentifierInfo *Name, SourceLocation NameLoc,
                       const ParsedAttributesView &Attr, AccessSpecifier AS,
                       SourceLocation ModulePrivateLoc,
-                      MultiTemplateParamsArg TemplateParameterLists,
+                      ParsedTemplateInfo &TemplateInfo,
                       bool &OwnedDecl, bool &IsDependent,
                       SourceLocation ScopedEnumKWLoc,
                       bool ScopedEnumUsesClassTag, TypeResult UnderlyingType,
@@ -3391,7 +3392,7 @@ public:
                                      CXXScopeSpec &SS, IdentifierInfo *Name,
                                      SourceLocation NameLoc,
                                      const ParsedAttributesView &Attr,
-                                     MultiTemplateParamsArg TempParamLists);
+                                     ParsedTemplateInfo &TemplateInfo);
 
   TypeResult ActOnDependentTag(Scope *S,
                                unsigned TagSpec,
@@ -6326,7 +6327,7 @@ public:
                                   SourceLocation IdentLoc, IdentifierInfo &II,
                                   CXXScopeSpec *SS = nullptr);
   Decl *ActOnAliasDeclaration(Scope *CurScope, AccessSpecifier AS,
-                              MultiTemplateParamsArg TemplateParams,
+                              ParsedTemplateInfo &TemplateInfo,
                               SourceLocation UsingLoc, UnqualifiedId &Name,
                               const ParsedAttributesView &AttrList,
                               TypeResult Type, Decl *DeclFromDeclSpec);
@@ -7690,7 +7691,7 @@ public:
 
   NamedDecl *ActOnCXXMemberDeclarator(Scope *S, AccessSpecifier AS,
                                  Declarator &D,
-                                 MultiTemplateParamsArg TemplateParameterLists,
+                                 ParsedTemplateInfo &TemplateInfo,
                                  Expr *BitfieldWidth, const VirtSpecifiers &VS,
                                  InClassInitStyle InitStyle);
 
@@ -7891,9 +7892,9 @@ public:
                                   SourceLocation FriendLoc,
                                   TypeSourceInfo *TSInfo);
   Decl *ActOnFriendTypeDecl(Scope *S, const DeclSpec &DS,
-                            MultiTemplateParamsArg TemplateParams);
+                            ParsedTemplateInfo &TemplateInfo);
   NamedDecl *ActOnFriendFunctionDecl(Scope *S, Declarator &D,
-                                     MultiTemplateParamsArg TemplateParams);
+                                     ParsedTemplateInfo &TemplateInfo);
 
   QualType CheckConstructorDeclarator(Declarator &D, QualType R,
                                       StorageClass& SC);
@@ -8313,7 +8314,7 @@ public:
   TemplateParameterList *MatchTemplateParametersToScopeSpecifier(
       SourceLocation DeclStartLoc, SourceLocation DeclLoc,
       const CXXScopeSpec &SS, TemplateIdAnnotation *TemplateId,
-      ArrayRef<TemplateParameterList *> ParamLists,
+      ParsedTemplateInfo& TemplateInfo,
       bool IsFriend, bool &IsMemberSpecialization, bool &Invalid,
       bool SuppressDiagnostic = false);
 
@@ -8322,8 +8323,8 @@ public:
       CXXScopeSpec &SS, IdentifierInfo *Name, SourceLocation NameLoc,
       const ParsedAttributesView &Attr, TemplateParameterList *TemplateParams,
       AccessSpecifier AS, SourceLocation ModulePrivateLoc,
-      SourceLocation FriendLoc, unsigned NumOuterTemplateParamLists,
-      TemplateParameterList **OuterTemplateParamLists,
+      SourceLocation FriendLoc,
+      ArrayRef<TemplateParameterList *> OuterTemplateParamLists,
       SkipBodyInfo *SkipBody = nullptr);
 
   TemplateArgumentLoc getTrivialTemplateArgumentLoc(const TemplateArgument &Arg,
@@ -8420,7 +8421,7 @@ public:
       Scope *S, unsigned TagSpec, TagUseKind TUK, SourceLocation KWLoc,
       SourceLocation ModulePrivateLoc, CXXScopeSpec &SS,
       TemplateIdAnnotation &TemplateId, const ParsedAttributesView &Attr,
-      MultiTemplateParamsArg TemplateParameterLists,
+      ParsedTemplateInfo& TemplateInfo,
       SkipBodyInfo *SkipBody = nullptr);
 
   bool CheckTemplatePartialSpecializationArgs(SourceLocation Loc,
@@ -8433,7 +8434,7 @@ public:
       VarTemplatePartialSpecializationDecl *Partial);
 
   Decl *ActOnTemplateDeclarator(Scope *S,
-                                MultiTemplateParamsArg TemplateParameterLists,
+                                ParsedTemplateInfo &TemplateInfo,
                                 Declarator &D);
 
   bool
@@ -8757,7 +8758,7 @@ public:
   // C++ Concepts
   //===--------------------------------------------------------------------===//
   Decl *ActOnConceptDefinition(
-      Scope *S, MultiTemplateParamsArg TemplateParameterLists,
+      Scope *S, ParsedTemplateInfo &TemplateInfo,
       IdentifierInfo *Name, SourceLocation NameLoc, Expr *ConstraintExpr);
 
   void CheckConceptRedefinition(ConceptDecl *NewDecl, LookupResult &Previous,
@@ -11359,7 +11360,7 @@ public:
   /// declaration for \p D and rename \p D according to the OpenMP context
   /// selector of the surrounding scope. Return all base functions in \p Bases.
   void ActOnStartOfFunctionDefinitionInOpenMPDeclareVariantScope(
-      Scope *S, Declarator &D, MultiTemplateParamsArg TemplateParameterLists,
+      Scope *S, Declarator &D, ParsedTemplateInfo &TemplateInfo,
       SmallVectorImpl<FunctionDecl *> &Bases);
 
   /// Register \p D as specialization of all base functions in \p Bases in the

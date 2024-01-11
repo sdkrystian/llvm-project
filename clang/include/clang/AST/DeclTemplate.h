@@ -2471,7 +2471,7 @@ public:
 
   static FriendTemplateDecl *
   Create(ASTContext &Context, DeclContext *DC, SourceLocation Loc,
-         MutableArrayRef<TemplateParameterList *> Params, FriendUnion Friend,
+         ArrayRef<TemplateParameterList *> Params, FriendUnion Friend,
          SourceLocation FriendLoc);
 
   static FriendTemplateDecl *CreateDeserialized(ASTContext &C, unsigned ID);
