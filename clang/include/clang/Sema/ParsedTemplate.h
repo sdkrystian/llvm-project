@@ -334,7 +334,7 @@ namespace clang {
     }
 
     bool HasTemplateParameterLists() const {
-      return TemplateParams.empty();
+      return !TemplateParams.empty();
     }
     size_t numTemplateParameterLists() const {
       return TemplateParams.size();
