@@ -913,7 +913,7 @@ TemplateDecl *Sema::AdjustDeclIfTemplate(Decl *&D) {
 
 void ParsedTemplateInfo::AddParameterList(TemplateParameterList *TPL) {
   assert(TPL);
-  bool Empty = TPL->size() != 0;
+  bool Empty = TPL->size() == 0;
   if (!Empty) {
     Kind = Template;
   } else if (TemplateParams.empty()) {

@@ -5144,6 +5144,10 @@ void Parser::ParseEnumSpecifier(SourceLocation StartLoc, DeclSpec &DS,
     SkipBody = Actions.shouldSkipAnonEnumBody(getCurScope(),
                                               NextToken().getIdentifierInfo(),
                                               NextToken().getLocation());
+  // Don't pass down template parameter lists if this is just a tag
+  // reference.  For example, we don't need the template parameters here:
+  //   template <class T> enum E getE(T t);
+  ParsedTemplateInfo EmptyTemplateInfo;
 
   bool Owned = false;
   bool IsDependent = false;
@@ -5152,7 +5156,10 @@ void Parser::ParseEnumSpecifier(SourceLocation StartLoc, DeclSpec &DS,
   Decl *TagDecl =
       Actions.ActOnTag(getCurScope(), DeclSpec::TST_enum, TUK, StartLoc, SS,
                     Name, NameLoc, attrs, AS, DS.getModulePrivateSpecLoc(),
-                    TemplateInfo, Owned, IsDependent, ScopedEnumKWLoc,
+                    TUK != Sema::TUK_Reference
+                        ? TemplateInfo
+                        : EmptyTemplateInfo,
+                    Owned, IsDependent, ScopedEnumKWLoc,
                     IsScopedUsingClassTag,
                     BaseType, DSC == DeclSpecContext::DSC_type_specifier,
                     DSC == DeclSpecContext::DSC_template_param ||

@@ -7836,7 +7836,9 @@ NamedDecl *Sema::ActOnVariableDeclarator(
         (TemplateParams && !IsExplicitSpecialization) ? 1 : 0;
     if (TemplateInfo.param_lists().size() > VDTemplateParamLists)
       NewVD->setTemplateParameterListsInfo(
-          Context, TemplateInfo.outer_param_lists());
+          Context, VDTemplateParamLists
+                   ? TemplateInfo.outer_param_lists()
+                   : TemplateInfo.param_lists());
   }
 
   if (D.getDeclSpec().isInlineSpecified()) {
@@ -9804,7 +9806,8 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
 
   #endif
   if (TemplateParameterList *Invented = D.getInventedTemplateParameterList()) {
-    if (TemplateInfo.isTemplate() &&
+    // if (TemplateInfo.isTemplate() &&
+    if (TemplateInfo.HasTemplateParameterLists() &&
         Invented->getDepth() == TemplateInfo.TemplateParams.back()->getDepth())
       TemplateInfo.TemplateParams.back() = Invented;
     else

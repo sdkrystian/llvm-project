@@ -19267,16 +19267,26 @@ void Sema::ActOnStartFunctionDeclarationDeclarator(
   TemplateParameterList *ExplicitParams = nullptr;
   ArrayRef<TemplateParameterList *> ExplicitLists =
       Declarator.getTemplateParameterLists();
-  #if 0
+
+  ParsedTemplateInfo TemplateInfo;
+  for (TemplateParameterList *TPL : ExplicitLists)
+    TemplateInfo.AddParameterList(TPL);
   if (!ExplicitLists.empty()) {
     bool IsMemberSpecialization, IsInvalid;
+  #if 1
+    ExplicitParams = MatchTemplateParametersToScopeSpecifier(
+        Declarator.getBeginLoc(), Declarator.getIdentifierLoc(),
+        Declarator.getCXXScopeSpec(), /*TemplateId=*/nullptr,
+        TemplateInfo, /*IsFriend=*/false, IsMemberSpecialization, IsInvalid,
+        /*SuppressDiagnostic=*/true);
+  #else
     ExplicitParams = MatchTemplateParametersToScopeSpecifier(
         Declarator.getBeginLoc(), Declarator.getIdentifierLoc(),
         Declarator.getCXXScopeSpec(), /*TemplateId=*/nullptr,
         ExplicitLists, /*IsFriend=*/false, IsMemberSpecialization, IsInvalid,
         /*SuppressDiagnostic=*/true);
-  }
   #endif
+  }
   if (ExplicitParams) {
     Info.AutoTemplateParameterDepth = ExplicitParams->getDepth();
     llvm::append_range(Info.TemplateParams, *ExplicitParams);
