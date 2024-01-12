@@ -254,7 +254,8 @@ Decl *Parser::ParseSingleDeclarationAfterTemplate(
 
   // Parse the declarator.
   ParsingDeclarator DeclaratorInfo(*this, DS, prefixAttrs,
-                                   (DeclaratorContext)Context);
+                                   (DeclaratorContext)Context,
+                                   &TemplateInfo);
   DeclaratorInfo.setTemplateParameterLists(TemplateInfo.param_lists());
 
   // Turn off usual access checking for template specializations and

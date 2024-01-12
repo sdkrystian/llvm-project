@@ -261,6 +261,10 @@ namespace clang {
     ParsedTemplateInfo() : Kind(NonTemplate), LastParameterListWasEmpty(false) {}
 
     #if 0
+    static ParsedTemplateInfo &none() {
+      static ParsedTemplateInfo TemplateInfo;
+      return TemplateInfo;
+    }
     ParsedTemplateInfo(TemplateParameterLists *TemplateParams,
                        bool isSpecialization,
                        bool lastParameterListWasEmpty = false)

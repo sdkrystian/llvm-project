@@ -2191,9 +2191,10 @@ Parser::DeclGroupPtrTy Parser::ParseDeclGroup(ParsingDeclSpec &DS,
   // Consume all of the attributes from `Attrs` by moving them to our own local
   // list. This ensures that we will not attempt to interpret them as statement
   // attributes higher up the callchain.
+  ParsedTemplateInfo TemplateInfo;
   ParsedAttributes LocalAttrs(AttrFactory);
   LocalAttrs.takeAllFrom(Attrs);
-  ParsingDeclarator D(*this, DS, LocalAttrs, Context);
+  ParsingDeclarator D(*this, DS, LocalAttrs, Context, &TemplateInfo);
   ParseDeclarator(D);
 
   // Bail out if the first declarator didn't seem well-formed.
@@ -2269,8 +2270,7 @@ Parser::DeclGroupPtrTy Parser::ParseDeclGroup(ParsingDeclSpec &DS,
             // Recover by treating the 'typedef' as spurious.
             DS.ClearStorageClassSpecs();
           }
-          ParsedTemplateInfo EmptyTemplateInfo;
-          Decl *TheDecl = ParseFunctionDefinition(D, EmptyTemplateInfo,
+          Decl *TheDecl = ParseFunctionDefinition(D, TemplateInfo,
                                                   &LateParsedAttrs);
           return Actions.ConvertDeclToDeclGroup(TheDecl);
         }
@@ -2335,9 +2335,8 @@ Parser::DeclGroupPtrTy Parser::ParseDeclGroup(ParsingDeclSpec &DS,
   }
 
   SmallVector<Decl *, 8> DeclsInGroup;
-  ParsedTemplateInfo EmptyTemplateInfo;
   Decl *FirstDecl = ParseDeclarationAfterDeclaratorAndAttributes(
-      D, EmptyTemplateInfo, FRI);
+      D, TemplateInfo, FRI);
   if (LateParsedAttrs.size() > 0)
     ParseLexedAttributeList(LateParsedAttrs, FirstDecl, true, false);
   D.complete(FirstDecl);
@@ -2389,7 +2388,7 @@ Parser::DeclGroupPtrTy Parser::ParseDeclGroup(ParsingDeclSpec &DS,
       //        declarator requires-clause
       if (Tok.is(tok::kw_requires))
         ParseTrailingRequiresClause(D);
-      Decl *ThisDecl = ParseDeclarationAfterDeclarator(D, EmptyTemplateInfo);
+      Decl *ThisDecl = ParseDeclarationAfterDeclarator(D, TemplateInfo);
       D.complete(ThisDecl);
       if (ThisDecl)
         DeclsInGroup.push_back(ThisDecl);
@@ -6734,6 +6733,16 @@ void Parser::ParseDirectDeclarator(Declarator &D) {
  PastIdentifier:
   assert(D.isPastIdentifier() &&
          "Haven't past the location of the identifier yet?");
+
+  if (D.hasName() && D.getTemplateInfo() && D.getTemplateInfo()->HasTemplateParameterLists()) {
+    bool IsMemberSpecialization;
+    bool IsInvalid;
+    TemplateParameterList *ExplicitParams = Actions.MatchTemplateParametersToScopeSpecifier(
+        D.getBeginLoc(), D.getIdentifierLoc(),
+        D.getCXXScopeSpec(), /*TemplateId=*/nullptr,
+        *D.getTemplateInfo(), /*IsFriend=*/false, IsMemberSpecialization, IsInvalid,
+        /*SuppressDiagnostic=*/false);
+  }
 
   // Don't parse attributes unless we have parsed an unparenthesized name.
   if (D.hasName() && !D.getNumTypeObjects())

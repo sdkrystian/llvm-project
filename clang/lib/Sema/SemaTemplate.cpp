@@ -934,6 +934,22 @@ SourceRange ParsedTemplateInfo::getSourceRange() const {
   return R;
 }
 
+#if 0
+const ParsedTemplateInfo &
+Declarator::getTemplateInfo() const {
+  return TemplateInfo ? *TemplateInfo : ParsedTemplateInfo::none();
+}
+
+ParsedTemplateInfo &
+Declarator::getTemplateInfo() {
+  return TemplateInfo ? *TemplateInfo : ParsedTemplateInfo::none();
+}
+#endif
+ParsedTemplateInfo *Declarator::getTemplateInfo() {
+  return TemplateInfo;
+}
+
+
 ParsedTemplateArgument ParsedTemplateArgument::getTemplatePackExpansion(
                                              SourceLocation EllipsisLoc) const {
   assert(Kind == Template &&

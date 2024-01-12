@@ -203,8 +203,9 @@ namespace clang {
   public:
     ParsingDeclarator(Parser &P, const ParsingDeclSpec &DS,
                       const ParsedAttributes &DeclarationAttrs,
-                      DeclaratorContext C)
-        : Declarator(DS, DeclarationAttrs, C),
+                      DeclaratorContext C,
+                      ParsedTemplateInfo *TemplateInfo = nullptr)
+        : Declarator(DS, DeclarationAttrs, C, TemplateInfo),
           ParsingRAII(P, &DS.getDelayedDiagnosticPool()) {}
 
     const ParsingDeclSpec &getDeclSpec() const {

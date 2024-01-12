@@ -46,6 +46,7 @@ namespace clang {
   class NamespaceAliasDecl;
   class NamespaceDecl;
   class ObjCDeclSpec;
+  struct ParsedTemplateInfo;
   class Sema;
   class Declarator;
   struct TemplateIdAnnotation;
@@ -1919,6 +1920,8 @@ private:
   /// parameters (if any).
   TemplateParameterList *InventedTemplateParameterList;
 
+  ParsedTemplateInfo *TemplateInfo;
+
 #ifndef _MSC_VER
   union {
 #endif
@@ -1959,7 +1962,7 @@ public:
   /// This attribute appertains to all of the entities declared in the
   /// declaration, i.e. `x` and `y` in this case.
   Declarator(const DeclSpec &DS, const ParsedAttributesView &DeclarationAttrs,
-             DeclaratorContext C)
+             DeclaratorContext C, ParsedTemplateInfo *Template = nullptr)
       : DS(DS), Range(DS.getSourceRange()), Context(C),
         InvalidType(DS.getTypeSpecType() == DeclSpec::TST_error),
         GroupingParens(false), FunctionDefinition(static_cast<unsigned>(
@@ -1969,7 +1972,8 @@ public:
         HasInitializer(false), Attrs(DS.getAttributePool().getFactory()),
         DeclarationAttrs(DeclarationAttrs), AsmLabel(nullptr),
         TrailingRequiresClause(nullptr),
-        InventedTemplateParameterList(nullptr) {
+        InventedTemplateParameterList(nullptr),
+        TemplateInfo(Template) {
     assert(llvm::all_of(DeclarationAttrs,
                         [](const ParsedAttr &AL) {
                           return (AL.isStandardAttributeSyntax() ||
@@ -1984,6 +1988,8 @@ public:
   /// getDeclSpec - Return the declaration-specifier that this declarator was
   /// declared with.
   const DeclSpec &getDeclSpec() const { return DS; }
+
+  ParsedTemplateInfo *getTemplateInfo();
 
   /// getMutableDeclSpec - Return a non-const version of the DeclSpec.  This
   /// should be used with extreme care: declspecs can often be shared between
