@@ -611,6 +611,8 @@ Improvements to Clang's diagnostics
   inside namespace. The original diagnostic message is confusing.
   (`#73893: <https://github.com/llvm/llvm-project/issues/73893>`_)
 
+- Clang now diagnoses member template declarations with multiple declarators.
+
 Improvements to Clang's time-trace
 ----------------------------------
 - Two time-trace scope variables are added. A time trace scope variable of

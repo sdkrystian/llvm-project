@@ -3167,6 +3167,15 @@ Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
 
     DeclaratorInfo.complete(ThisDecl);
 
+    if (TemplateInfo.Kind != ParsedTemplateInfo::NonTemplate) {
+      if (Tok.is(tok::comma)) {
+        Diag(Tok, diag::err_multiple_template_declarators)
+            << (int)TemplateInfo.Kind;
+        SkipUntil(tok::semi, StopBeforeMatch);
+      }
+      break;
+    }
+
     // If we don't have a comma, it is either the end of the list (a ';')
     // or an error, bail out.
     SourceLocation CommaLoc;
