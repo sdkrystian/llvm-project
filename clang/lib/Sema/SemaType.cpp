@@ -6730,6 +6730,8 @@ GetTypeSourceInfoForDeclarator(TypeProcessingState &State,
 
 /// Create a LocInfoType to hold the given QualType and TypeSourceInfo.
 ParsedType Sema::CreateParsedType(QualType T, TypeSourceInfo *TInfo) {
+  assert(TInfo && "null TypeSourceInfo");
+  assert(T == TInfo->getType() && "parsed type mismatch");
   // FIXME: LocInfoTypes are "transient", only needed for passing to/from Parser
   // and Sema during declaration parsing. Try deallocating/caching them when
   // it's appropriate, instead of allocating them and keeping them around.

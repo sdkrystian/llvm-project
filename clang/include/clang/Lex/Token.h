@@ -237,6 +237,7 @@ public:
   void setAnnotationValue(void *val) {
     assert(isAnnotation() && "Used AnnotVal on non-annotation token");
     PtrData = val;
+    Flags = 0;
   }
 
   /// Set the specified flag.

@@ -244,11 +244,13 @@ ParsedType Sema::getDestructorName(IdentifierInfo &II, SourceLocation NameLoc,
 
     if (TypeDecl *Type = Found.getAsSingle<TypeDecl>()) {
       if (IsAcceptableResult(Type)) {
-        QualType T = Context.getTypeDeclType(Type);
+        QualType T = Context.getElaboratedType(
+            ElaboratedTypeKeyword::None,
+            /*NNS=*/nullptr,
+            Context.getTypeDeclType(Type));
         MarkAnyDeclReferenced(Type->getLocation(), Type, /*OdrUse=*/false);
         return CreateParsedType(
-            Context.getElaboratedType(ElaboratedTypeKeyword::None, nullptr, T),
-            Context.getTrivialTypeSourceInfo(T, NameLoc));
+            T, Context.getTrivialTypeSourceInfo(T, NameLoc));
       }
     }
 
