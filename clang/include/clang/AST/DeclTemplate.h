@@ -42,6 +42,138 @@
 #include <optional>
 #include <utility>
 
+namespace llvm {
+
+class OrderedFoldingSetNode : public FoldingSetNode {
+  void *NextInOrder = nullptr;
+
+public:
+  OrderedFoldingSetNode() = default;
+
+  void *getNextInOrder() const { return NextInOrder; }
+  void setNextInOrder(void *N) { NextInOrder = N; }
+};
+
+
+template <class T>
+class OrderedFoldingSet : public FoldingSet<T> {
+  using Super = FoldingSet<T>;
+
+  static_assert(std::is_base_of_v<OrderedFoldingSetNode, T>,
+    "Node type must derive from OrderedFoldingSetNode");
+
+  T *Last = nullptr;
+
+  template<bool IsConst>
+  struct Iterator {
+    using difference_type = ptrdiff_t;
+    using value_type = std::conditional_t<IsConst, const T, T>;
+    using pointer = value_type *;
+    using reference = value_type &;
+    using iterator_category = std::forward_iterator_tag;
+
+    Iterator() = default;
+    explicit Iterator(pointer Entry) : First(Entry), Current(Entry) {}
+
+    reference operator*() const {
+      return *Current;
+    }
+
+    pointer operator->() const {
+      return Current;
+    }
+
+    Iterator& operator++() {
+      assert(Current && "Advancing while iterator has reached end");
+      pointer Next = static_cast<pointer>(
+          Current->getNextInOrder());
+      Current = Next != First ? Next : nullptr;
+      return *this;
+    }
+
+    Iterator operator++(int) {
+      Iterator tmp(*this);
+      ++*this;
+      return tmp;
+    }
+
+    friend bool operator==(const Iterator &x, const Iterator &y) {
+      return x.Current == y.Current;
+    }
+
+    friend bool operator!=(const Iterator &x, const Iterator &y) {
+      return x.Current != y.Current;
+    }
+
+  private:
+    pointer First = nullptr;
+    pointer Current = nullptr;
+  };
+
+  template<typename IteratorTy, bool End>
+  IteratorTy MakeIterator() const {
+    if (End || !Last)
+      return IteratorTy();
+    return IteratorTy(static_cast<T *>(Last->getNextInOrder()));
+  }
+
+  void AppendNode(T *N) {
+    T *First = N;
+    if (T *Previous = std::exchange(Last, N)) {
+      First = static_cast<T *>(Previous->getNextInOrder());
+      Previous->setNextInOrder(N);
+    }
+    N->setNextInOrder(First);
+  }
+
+public:
+  using Super::Super;
+
+  using iterator = Iterator<false>;
+  using const_iterator = Iterator<true>;
+
+  iterator begin() { return MakeIterator<iterator, false>(); }
+  iterator end() { return MakeIterator<iterator, true>(); }
+  const_iterator begin() const { return MakeIterator<const_iterator, false>(); }
+  const_iterator end() const { return MakeIterator<const_iterator, true>(); }
+
+  /// GetOrInsertNode - If there is an existing simple Node exactly
+  /// equal to the specified node, return it.  Otherwise, insert 'N' and
+  /// return it instead.
+  T *GetOrInsertNode(T *N) {
+    T *Existing = Super::GetOrInsertNode(N);
+    if (N == Existing)
+      AppendNode(N);
+    return Existing;
+  }
+
+  /// FindNodeOrInsertPos - Look up the node specified by ID.  If it exists,
+  /// return it.  If not, return the insertion token that will make insertion
+  /// faster.
+  T *FindNodeOrInsertPos(const FoldingSetNodeID &ID, void *&InsertPos) {
+    return Super::FindNodeOrInsertPos(ID, InsertPos);
+  }
+
+  /// InsertNode - Insert the specified node into the folding set, knowing that
+  /// it is not already in the folding set.  InsertPos must be obtained from
+  /// FindNodeOrInsertPos.
+  void InsertNode(T *N, void *InsertPos) {
+    Super::InsertNode(N, InsertPos);
+    AppendNode(N);
+  }
+
+  /// InsertNode - Insert the specified node into the folding set, knowing that
+  /// it is not already in the folding set.
+  void InsertNode(T *N) {
+    T *Inserted = GetOrInsertNode(N);
+    (void)Inserted;
+    assert(Inserted == N && "Node already inserted!");
+  }
+};
+
+} // llvm
+
+
 namespace clang {
 
 enum BuiltinTemplateKind : int;
@@ -461,7 +593,7 @@ public:
 /// which is a FunctionDecl that has been explicitly specialization or
 /// instantiated from a function template.
 class FunctionTemplateSpecializationInfo final
-    : public llvm::FoldingSetNode,
+    : public llvm::OrderedFoldingSetNode,
       private llvm::TrailingObjects<FunctionTemplateSpecializationInfo,
                                     MemberSpecializationInfo *> {
   /// The function template specialization that this structure describes and a
@@ -747,13 +879,13 @@ protected:
   struct SpecIterator
       : llvm::iterator_adaptor_base<
             SpecIterator<EntryType, SETraits, DeclType>,
-            typename llvm::FoldingSetVector<EntryType>::iterator,
-            typename std::iterator_traits<typename llvm::FoldingSetVector<
+            typename llvm::OrderedFoldingSet<EntryType>::iterator,
+            typename std::iterator_traits<typename llvm::OrderedFoldingSet<
                 EntryType>::iterator>::iterator_category,
             DeclType *, ptrdiff_t, DeclType *, DeclType *> {
     SpecIterator() = default;
     explicit SpecIterator(
-        typename llvm::FoldingSetVector<EntryType>::iterator SetIter)
+        typename llvm::OrderedFoldingSet<EntryType>::iterator SetIter)
         : SpecIterator::iterator_adaptor_base(std::move(SetIter)) {}
 
     DeclType *operator*() const {
@@ -765,7 +897,7 @@ protected:
 
   template <typename EntryType>
   static SpecIterator<EntryType>
-  makeSpecIterator(llvm::FoldingSetVector<EntryType> &Specs, bool isEnd) {
+  makeSpecIterator(llvm::OrderedFoldingSet<EntryType> &Specs, bool isEnd) {
     return SpecIterator<EntryType>(isEnd ? Specs.end() : Specs.begin());
   }
 
@@ -773,11 +905,11 @@ protected:
 
   template <class EntryType, typename ...ProfileArguments>
   typename SpecEntryTraits<EntryType>::DeclType*
-  findSpecializationImpl(llvm::FoldingSetVector<EntryType> &Specs,
+  findSpecializationImpl(llvm::OrderedFoldingSet<EntryType> &Specs,
                          void *&InsertPos, ProfileArguments &&...ProfileArgs);
 
   template <class Derived, class EntryType>
-  void addSpecializationImpl(llvm::FoldingSetVector<EntryType> &Specs,
+  void addSpecializationImpl(llvm::OrderedFoldingSet<EntryType> &Specs,
                              EntryType *Entry, void *InsertPos);
 
   struct CommonBase {
@@ -963,7 +1095,7 @@ protected:
   struct Common : CommonBase {
     /// The function template specializations for this function
     /// template, including explicit specializations and instantiations.
-    llvm::FoldingSetVector<FunctionTemplateSpecializationInfo> Specializations;
+    llvm::OrderedFoldingSet<FunctionTemplateSpecializationInfo> Specializations;
 
     Common() = default;
   };
@@ -982,12 +1114,12 @@ protected:
 
   /// Retrieve the set of function template specializations of this
   /// function template.
-  llvm::FoldingSetVector<FunctionTemplateSpecializationInfo> &
+  llvm::OrderedFoldingSet<FunctionTemplateSpecializationInfo> &
   getSpecializations() const;
 
   /// Add a specialization of this function template.
   ///
-  /// \param InsertPos Insert position in the FoldingSetVector, must have been
+  /// \param InsertPos Insert position in the OrderedFoldingSet, must have been
   ///        retrieved by an earlier call to findSpecialization().
   void addSpecialization(FunctionTemplateSpecializationInfo* Info,
                          void *InsertPos);
@@ -1773,7 +1905,7 @@ public:
 /// class array<bool> { }; // class template specialization array<bool>
 /// \endcode
 class ClassTemplateSpecializationDecl
-  : public CXXRecordDecl, public llvm::FoldingSetNode {
+  : public CXXRecordDecl, public llvm::OrderedFoldingSetNode {
   /// Structure that stores information about a class template
   /// specialization that was instantiated from a class template partial
   /// specialization.
@@ -2223,11 +2355,11 @@ protected:
   struct Common : CommonBase {
     /// The class template specializations for this class
     /// template, including explicit specializations and instantiations.
-    llvm::FoldingSetVector<ClassTemplateSpecializationDecl> Specializations;
+    llvm::OrderedFoldingSet<ClassTemplateSpecializationDecl> Specializations;
 
     /// The class template partial specializations for this class
     /// template.
-    llvm::FoldingSetVector<ClassTemplatePartialSpecializationDecl>
+    llvm::OrderedFoldingSet<ClassTemplatePartialSpecializationDecl>
       PartialSpecializations;
 
     /// The injected-class-name type for this class template.
@@ -2237,12 +2369,12 @@ protected:
   };
 
   /// Retrieve the set of specializations of this class template.
-  llvm::FoldingSetVector<ClassTemplateSpecializationDecl> &
+  llvm::OrderedFoldingSet<ClassTemplateSpecializationDecl> &
   getSpecializations() const;
 
   /// Retrieve the set of partial specializations of this class
   /// template.
-  llvm::FoldingSetVector<ClassTemplatePartialSpecializationDecl> &
+  llvm::OrderedFoldingSet<ClassTemplatePartialSpecializationDecl> &
   getPartialSpecializations() const;
 
   ClassTemplateDecl(ASTContext &C, DeclContext *DC, SourceLocation L,
@@ -2576,7 +2708,7 @@ public:
 /// constexpr float pi<float>; // variable template specialization pi<float>
 /// \endcode
 class VarTemplateSpecializationDecl : public VarDecl,
-                                      public llvm::FoldingSetNode {
+                                      public llvm::OrderedFoldingSetNode {
 
   /// Structure that stores information about a variable template
   /// specialization that was instantiated from a variable template partial
@@ -3003,23 +3135,23 @@ protected:
   struct Common : CommonBase {
     /// The variable template specializations for this variable
     /// template, including explicit specializations and instantiations.
-    llvm::FoldingSetVector<VarTemplateSpecializationDecl> Specializations;
+    llvm::OrderedFoldingSet<VarTemplateSpecializationDecl> Specializations;
 
     /// The variable template partial specializations for this variable
     /// template.
-    llvm::FoldingSetVector<VarTemplatePartialSpecializationDecl>
+    llvm::OrderedFoldingSet<VarTemplatePartialSpecializationDecl>
     PartialSpecializations;
 
     Common() = default;
   };
 
   /// Retrieve the set of specializations of this variable template.
-  llvm::FoldingSetVector<VarTemplateSpecializationDecl> &
+  llvm::OrderedFoldingSet<VarTemplateSpecializationDecl> &
   getSpecializations() const;
 
   /// Retrieve the set of partial specializations of this class
   /// template.
-  llvm::FoldingSetVector<VarTemplatePartialSpecializationDecl> &
+  llvm::OrderedFoldingSet<VarTemplatePartialSpecializationDecl> &
   getPartialSpecializations() const;
 
   VarTemplateDecl(ASTContext &C, DeclContext *DC, SourceLocation L,

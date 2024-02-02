@@ -347,7 +347,7 @@ void RedeclarableTemplateDecl::loadLazySpecializationsImpl() const {
 template<class EntryType, typename... ProfileArguments>
 typename RedeclarableTemplateDecl::SpecEntryTraits<EntryType>::DeclType *
 RedeclarableTemplateDecl::findSpecializationImpl(
-    llvm::FoldingSetVector<EntryType> &Specs, void *&InsertPos,
+    llvm::OrderedFoldingSet<EntryType> &Specs, void *&InsertPos,
     ProfileArguments&&... ProfileArgs) {
   using SETraits = SpecEntryTraits<EntryType>;
 
@@ -360,7 +360,7 @@ RedeclarableTemplateDecl::findSpecializationImpl(
 
 template<class Derived, class EntryType>
 void RedeclarableTemplateDecl::addSpecializationImpl(
-    llvm::FoldingSetVector<EntryType> &Specializations, EntryType *Entry,
+    llvm::OrderedFoldingSet<EntryType> &Specializations, EntryType *Entry,
     void *InsertPos) {
   using SETraits = SpecEntryTraits<EntryType>;
 
@@ -434,7 +434,7 @@ void FunctionTemplateDecl::LoadLazySpecializations() const {
   loadLazySpecializationsImpl();
 }
 
-llvm::FoldingSetVector<FunctionTemplateSpecializationInfo> &
+llvm::OrderedFoldingSet<FunctionTemplateSpecializationInfo> &
 FunctionTemplateDecl::getSpecializations() const {
   LoadLazySpecializations();
   return getCommonPtr()->Specializations;
@@ -512,13 +512,13 @@ void ClassTemplateDecl::LoadLazySpecializations() const {
   loadLazySpecializationsImpl();
 }
 
-llvm::FoldingSetVector<ClassTemplateSpecializationDecl> &
+llvm::OrderedFoldingSet<ClassTemplateSpecializationDecl> &
 ClassTemplateDecl::getSpecializations() const {
   LoadLazySpecializations();
   return getCommonPtr()->Specializations;
 }
 
-llvm::FoldingSetVector<ClassTemplatePartialSpecializationDecl> &
+llvm::OrderedFoldingSet<ClassTemplatePartialSpecializationDecl> &
 ClassTemplateDecl::getPartialSpecializations() const {
   LoadLazySpecializations();
   return getCommonPtr()->PartialSpecializations;
@@ -577,7 +577,7 @@ void ClassTemplateDecl::AddPartialSpecialization(
 
 void ClassTemplateDecl::getPartialSpecializations(
     SmallVectorImpl<ClassTemplatePartialSpecializationDecl *> &PS) const {
-  llvm::FoldingSetVector<ClassTemplatePartialSpecializationDecl> &PartialSpecs
+  llvm::OrderedFoldingSet<ClassTemplatePartialSpecializationDecl> &PartialSpecs
     = getPartialSpecializations();
   PS.clear();
   PS.reserve(PartialSpecs.size());
@@ -1229,13 +1229,13 @@ void VarTemplateDecl::LoadLazySpecializations() const {
   loadLazySpecializationsImpl();
 }
 
-llvm::FoldingSetVector<VarTemplateSpecializationDecl> &
+llvm::OrderedFoldingSet<VarTemplateSpecializationDecl> &
 VarTemplateDecl::getSpecializations() const {
   LoadLazySpecializations();
   return getCommonPtr()->Specializations;
 }
 
-llvm::FoldingSetVector<VarTemplatePartialSpecializationDecl> &
+llvm::OrderedFoldingSet<VarTemplatePartialSpecializationDecl> &
 VarTemplateDecl::getPartialSpecializations() const {
   LoadLazySpecializations();
   return getCommonPtr()->PartialSpecializations;
@@ -1292,7 +1292,7 @@ void VarTemplateDecl::AddPartialSpecialization(
 
 void VarTemplateDecl::getPartialSpecializations(
     SmallVectorImpl<VarTemplatePartialSpecializationDecl *> &PS) const {
-  llvm::FoldingSetVector<VarTemplatePartialSpecializationDecl> &PartialSpecs =
+  llvm::OrderedFoldingSet<VarTemplatePartialSpecializationDecl> &PartialSpecs =
       getPartialSpecializations();
   PS.clear();
   PS.reserve(PartialSpecs.size());
