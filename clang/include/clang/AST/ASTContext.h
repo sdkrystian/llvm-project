@@ -1667,6 +1667,14 @@ public:
   void getInjectedTemplateArgs(const TemplateParameterList *Params,
                                SmallVectorImpl<TemplateArgument> &Args);
 
+  /// Get the canonical template argument for each template argument in \p Args.
+  /// \param Args The original template argument list.
+  /// \param Canonical The canonical template argument list.
+  /// \returns \c true if any of the template arguments in \Args were non-canonical,
+  /// \c false otherwise.
+  bool getCanonicalTemplateArguments(ArrayRef<TemplateArgument> Args,
+                                     SmallVectorImpl<TemplateArgument> &Canonical) const;
+
   /// Form a pack expansion type with the given pattern.
   /// \param NumExpansions The number of expansions for the pack, if known.
   /// \param ExpectPackInType If \c false, we should not expect \p Pattern to

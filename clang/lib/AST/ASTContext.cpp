@@ -2983,18 +2983,6 @@ ASTContext::getASTObjCImplementationLayout(
   return getObjCLayout(D->getClassInterface(), D);
 }
 
-static auto getCanonicalTemplateArguments(const ASTContext &C,
-                                          ArrayRef<TemplateArgument> Args,
-                                          bool &AnyNonCanonArgs) {
-  SmallVector<TemplateArgument, 16> CanonArgs(Args);
-  for (auto &Arg : CanonArgs) {
-    TemplateArgument OrigArg = Arg;
-    Arg = C.getCanonicalTemplateArgument(Arg);
-    AnyNonCanonArgs |= !Arg.structurallyEquals(OrigArg);
-  }
-  return CanonArgs;
-}
-
 //===----------------------------------------------------------------------===//
 //                   Type creation/memoization methods
 //===----------------------------------------------------------------------===//
@@ -4990,9 +4978,8 @@ QualType ASTContext::getCanonicalTemplateSpecializationType(
 
   // Build the canonical template specialization type.
   TemplateName CanonTemplate = getCanonicalTemplateName(Template);
-  bool AnyNonCanonArgs = false;
-  auto CanonArgs =
-      ::getCanonicalTemplateArguments(*this, Args, AnyNonCanonArgs);
+  SmallVector<TemplateArgument, 8> CanonArgs;
+  getCanonicalTemplateArguments(Args, CanonArgs);
 
   // Determine whether this canonical template specialization type already
   // exists.
@@ -5149,9 +5136,8 @@ ASTContext::getDependentTemplateSpecializationType(
   if (Keyword == ElaboratedTypeKeyword::None)
     CanonKeyword = ElaboratedTypeKeyword::Typename;
 
-  bool AnyNonCanonArgs = false;
-  auto CanonArgs =
-      ::getCanonicalTemplateArguments(*this, Args, AnyNonCanonArgs);
+  SmallVector<TemplateArgument, 8> CanonArgs;
+  bool AnyNonCanonArgs = getCanonicalTemplateArguments(Args, CanonArgs);
 
   QualType Canon;
   if (AnyNonCanonArgs || CanonNNS != NNS || CanonKeyword != Keyword) {
@@ -5804,14 +5790,14 @@ QualType ASTContext::getAutoTypeInternal(
     if (!DeducedType.isNull()) {
       Canon = DeducedType.getCanonicalType();
     } else if (TypeConstraintConcept) {
-      bool AnyNonCanonArgs = false;
+      false;
       ConceptDecl *CanonicalConcept = TypeConstraintConcept->getCanonicalDecl();
-      auto CanonicalConceptArgs = ::getCanonicalTemplateArguments(
-          *this, TypeConstraintArgs, AnyNonCanonArgs);
+      SmallVector<TemplateArgument, 8> CanonArgs;
+      bool AnyNonCanonArgs = getCanonicalTemplateArguments(TypeConstraintArgs, CanonArgs);
       if (CanonicalConcept != TypeConstraintConcept || AnyNonCanonArgs) {
         Canon =
             getAutoTypeInternal(QualType(), Keyword, IsDependent, IsPack,
-                                CanonicalConcept, CanonicalConceptArgs, true);
+                                CanonicalConcept, CanonArgs, true);
         // Find the insert position again.
         [[maybe_unused]] auto *Nothing =
             AutoTypes.FindNodeOrInsertPos(ID, InsertPos);
@@ -6813,10 +6799,8 @@ ASTContext::getCanonicalTemplateArgument(const TemplateArgument &Arg) const {
                               /*isNullPtr*/ false, Arg.getIsDefaulted());
 
     case TemplateArgument::Pack: {
-      bool AnyNonCanonArgs = false;
-      auto CanonArgs = ::getCanonicalTemplateArguments(
-          *this, Arg.pack_elements(), AnyNonCanonArgs);
-      if (!AnyNonCanonArgs)
+      SmallVector<TemplateArgument, 8> CanonArgs;
+      if (!getCanonicalTemplateArguments(Arg.pack_elements(), CanonArgs))
         return Arg;
       return TemplateArgument::CreatePackCopy(const_cast<ASTContext &>(*this),
                                               CanonArgs);
@@ -6825,6 +6809,16 @@ ASTContext::getCanonicalTemplateArgument(const TemplateArgument &Arg) const {
 
   // Silence GCC warning
   llvm_unreachable("Unhandled template argument kind");
+}
+
+bool ASTContext::getCanonicalTemplateArguments(ArrayRef<TemplateArgument> Args,
+                                               SmallVectorImpl<TemplateArgument> &Canonical) const {
+  bool AnyNonCanonical = false;
+  Canonical.reserve(Args.size());
+  for (const TemplateArgument &Arg : Args)
+    AnyNonCanonical |= !Arg.structurallyEquals(
+        Canonical.emplace_back(getCanonicalTemplateArgument(Arg)));
+  return AnyNonCanonical;
 }
 
 NestedNameSpecifier *

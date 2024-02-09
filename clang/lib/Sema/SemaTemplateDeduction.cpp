@@ -5745,8 +5745,10 @@ UnresolvedSetIterator Sema::getMostSpecialized(
 /// \param T1 The injected-class-name of P1 (faked for a variable template).
 /// \param T2 The injected-class-name of P2 (faked for a variable template).
 template<typename TemplateLikeDecl>
-static bool isAtLeastAsSpecializedAs(Sema &S, QualType T1, QualType T2,
-                                     TemplateLikeDecl *P2,
+static bool isAtLeastAsSpecializedAs(Sema &S,
+                                     TemplateLikeDecl *TemplateLike,
+                                     ArrayRef<TemplateArgument> PArgs,
+                                     ArrayRef<TemplateArgument> AArgs,
                                      TemplateDeductionInfo &Info) {
   // C++ [temp.class.order]p1:
   //   For two class template partial specializations, the first is at least as
@@ -5772,27 +5774,30 @@ static bool isAtLeastAsSpecializedAs(Sema &S, QualType T1, QualType T2,
   // know that every template parameter is deducible from the class
   // template partial specialization's template arguments, for
   // example.
+  TemplateParameterList *TemplateParams = TemplateLike->getTemplateParameters();
   SmallVector<DeducedTemplateArgument, 4> Deduced;
 
   // Determine whether P1 is at least as specialized as P2.
-  Deduced.resize(P2->getTemplateParameters()->size());
-  if (DeduceTemplateArgumentsByTypeMatch(S, P2->getTemplateParameters(),
-                                         T2, T1, Info, Deduced, TDF_None,
-                                         /*PartialOrdering=*/true))
+  Deduced.resize(TemplateParams->size());
+
+  if (DeduceTemplateArguments(S, TemplateParams,
+                                 AArgs,
+                                 PArgs,
+                                 Info, Deduced,
+                                 /*NumberOfArgumentsMustMatch=*/false))
     return false;
 
   SmallVector<TemplateArgument, 4> DeducedArgs(Deduced.begin(),
                                                Deduced.end());
-  Sema::InstantiatingTemplate Inst(S, Info.getLocation(), P2, DeducedArgs,
+  Sema::InstantiatingTemplate Inst(S, Info.getLocation(), TemplateLike, DeducedArgs,
                                    Info);
   if (Inst.isInvalid())
     return false;
 
-  const auto *TST1 = cast<TemplateSpecializationType>(T1);
   bool AtLeastAsSpecialized;
   S.runWithSufficientStackSpace(Info.getLocation(), [&] {
     AtLeastAsSpecialized = !FinishTemplateArgumentDeduction(
-        S, P2, /*IsPartialOrdering=*/true, TST1->template_arguments(), Deduced,
+        S, TemplateLike, /*IsPartialOrdering=*/true, PArgs, Deduced,
         Info);
   });
   return AtLeastAsSpecialized;
@@ -5885,16 +5890,20 @@ struct TemplateArgumentListAreEqual {
 ///            specialized, returns NULL.
 template <typename TemplateLikeDecl, typename PrimaryDel>
 static TemplateLikeDecl *
-getMoreSpecialized(Sema &S, QualType T1, QualType T2, TemplateLikeDecl *P1,
-                   PrimaryDel *P2, TemplateDeductionInfo &Info) {
+getMoreSpecialized(Sema &S,
+                   ArrayRef<TemplateArgument> Args1,
+                   ArrayRef<TemplateArgument> Args2,
+                   TemplateLikeDecl *P1,
+                   PrimaryDel *P2,
+                   TemplateDeductionInfo &Info) {
   constexpr bool IsMoreSpecialThanPrimaryCheck =
       !std::is_same_v<TemplateLikeDecl, PrimaryDel>;
 
-  bool Better1 = isAtLeastAsSpecializedAs(S, T1, T2, P2, Info);
+  bool Better1 = isAtLeastAsSpecializedAs(S, P2, Args1, Args2, Info);
   if (IsMoreSpecialThanPrimaryCheck && !Better1)
     return nullptr;
 
-  bool Better2 = isAtLeastAsSpecializedAs(S, T2, T1, P1, Info);
+  bool Better2 = isAtLeastAsSpecializedAs(S, P1, Args2, Args1, Info);
   if (IsMoreSpecialThanPrimaryCheck && !Better2)
     return P1;
 
@@ -5909,13 +5918,10 @@ getMoreSpecialized(Sema &S, QualType T1, QualType T2, TemplateLikeDecl *P1,
 
   // This a speculative fix for CWG1432 (Similar to the fix for CWG1395) that
   // there is no wording or even resolution for this issue.
-  auto *TST1 = cast<TemplateSpecializationType>(T1);
-  auto *TST2 = cast<TemplateSpecializationType>(T2);
-  const TemplateArgument &TA1 = TST1->template_arguments().back();
+  const TemplateArgument &TA1 = Args1.back();
   if (TA1.getKind() == TemplateArgument::Pack) {
-    assert(TST1->template_arguments().size() ==
-           TST2->template_arguments().size());
-    const TemplateArgument &TA2 = TST2->template_arguments().back();
+    assert(Args1.size() == Args2.size());
+    const TemplateArgument &TA2 = Args2.back();
     assert(TA2.getKind() == TemplateArgument::Pack);
     unsigned PackSize1 = TA1.pack_size();
     unsigned PackSize2 = TA2.pack_size();
@@ -5987,21 +5993,23 @@ Sema::getMoreSpecializedPartialSpecialization(
                                   ClassTemplatePartialSpecializationDecl *PS1,
                                   ClassTemplatePartialSpecializationDecl *PS2,
                                               SourceLocation Loc) {
-  QualType PT1 = PS1->getInjectedSpecializationType();
-  QualType PT2 = PS2->getInjectedSpecializationType();
-
   TemplateDeductionInfo Info(Loc);
-  return getMoreSpecialized(*this, PT1, PT2, PS1, PS2, Info);
+  return getMoreSpecialized(*this,
+                            PS1->getTemplateArgs().asArray(),
+                            PS2->getTemplateArgs().asArray(),
+                            PS1, PS2, Info);
 }
 
 bool Sema::isMoreSpecializedThanPrimary(
     ClassTemplatePartialSpecializationDecl *Spec, TemplateDeductionInfo &Info) {
   ClassTemplateDecl *Primary = Spec->getSpecializedTemplate();
-  QualType PrimaryT = Primary->getInjectedClassNameSpecialization();
-  QualType PartialT = Spec->getInjectedSpecializationType();
-
+  SmallVector<TemplateArgument, 8> CanonInjectedArgs;
+  Context.getCanonicalTemplateArguments(Primary->getInjectedTemplateArgs(), CanonInjectedArgs);
   ClassTemplatePartialSpecializationDecl *MaybeSpec =
-      getMoreSpecialized(*this, PartialT, PrimaryT, Spec, Primary, Info);
+      getMoreSpecialized(*this,
+                         Spec->getTemplateArgs().asArray(),
+                         CanonInjectedArgs,
+                         Spec, Primary, Info);
   if (MaybeSpec)
     Info.clearSFINAEDiagnostic();
   return MaybeSpec;
@@ -6016,29 +6024,23 @@ Sema::getMoreSpecializedPartialSpecialization(
   assert(PS1->getSpecializedTemplate() == PS2->getSpecializedTemplate() &&
          "the partial specializations being compared should specialize"
          " the same template.");
-  TemplateName Name(PS1->getSpecializedTemplate());
-  TemplateName CanonTemplate = Context.getCanonicalTemplateName(Name);
-  QualType PT1 = Context.getTemplateSpecializationType(
-      CanonTemplate, PS1->getTemplateArgs().asArray());
-  QualType PT2 = Context.getTemplateSpecializationType(
-      CanonTemplate, PS2->getTemplateArgs().asArray());
-
   TemplateDeductionInfo Info(Loc);
-  return getMoreSpecialized(*this, PT1, PT2, PS1, PS2, Info);
+  return getMoreSpecialized(*this,
+                            PS1->getTemplateArgs().asArray(),
+                            PS2->getTemplateArgs().asArray(),
+                            PS1, PS2, Info);
 }
 
 bool Sema::isMoreSpecializedThanPrimary(
     VarTemplatePartialSpecializationDecl *Spec, TemplateDeductionInfo &Info) {
   VarTemplateDecl *Primary = Spec->getSpecializedTemplate();
-  TemplateName CanonTemplate =
-      Context.getCanonicalTemplateName(TemplateName(Primary));
-  QualType PrimaryT = Context.getTemplateSpecializationType(
-      CanonTemplate, Primary->getInjectedTemplateArgs());
-  QualType PartialT = Context.getTemplateSpecializationType(
-      CanonTemplate, Spec->getTemplateArgs().asArray());
-
+  SmallVector<TemplateArgument, 8> CanonInjectedArgs;
+  Context.getCanonicalTemplateArguments(Primary->getInjectedTemplateArgs(), CanonInjectedArgs);
   VarTemplatePartialSpecializationDecl *MaybeSpec =
-      getMoreSpecialized(*this, PartialT, PrimaryT, Spec, Primary, Info);
+      getMoreSpecialized(*this,
+                         Spec->getTemplateArgs().asArray(),
+                         CanonInjectedArgs,
+                         Spec, Primary, Info);
   if (MaybeSpec)
     Info.clearSFINAEDiagnostic();
   return MaybeSpec;
@@ -6057,7 +6059,7 @@ bool Sema::isTemplateTemplateParameterAtLeastAsSpecializedAs(
   //
   //   Given an invented class template X with the template parameter list of
   //   A (including default arguments):
-  TemplateName X = Context.getCanonicalTemplateName(TemplateName(AArg));
+  // TemplateName X = Context.getCanonicalTemplateName(TemplateName(AArg));
   TemplateParameterList *A = AArg->getTemplateParameters();
 
   //    - Each function template has a single function parameter whose type is
@@ -6100,14 +6102,11 @@ bool Sema::isTemplateTemplateParameterAtLeastAsSpecializedAs(
       return false;
   }
 
-  QualType AType = Context.getCanonicalTemplateSpecializationType(X, AArgs);
-  QualType PType = Context.getCanonicalTemplateSpecializationType(X, PArgs);
-
   //   ... the function template corresponding to P is at least as specialized
   //   as the function template corresponding to A according to the partial
   //   ordering rules for function templates.
   TemplateDeductionInfo Info(Loc, A->getDepth());
-  return isAtLeastAsSpecializedAs(*this, PType, AType, AArg, Info);
+  return isAtLeastAsSpecializedAs(*this, AArg, PArgs, AArgs, Info);
 }
 
 namespace {
