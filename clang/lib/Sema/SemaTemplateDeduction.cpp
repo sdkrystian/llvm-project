@@ -5746,9 +5746,9 @@ UnresolvedSetIterator Sema::getMostSpecialized(
 /// \param T2 The injected-class-name of P2 (faked for a variable template).
 template<typename TemplateLikeDecl>
 static bool isAtLeastAsSpecializedAs(Sema &S,
-                                     TemplateLikeDecl *TemplateLike,
                                      ArrayRef<TemplateArgument> PArgs,
                                      ArrayRef<TemplateArgument> AArgs,
+                                     TemplateLikeDecl *TemplateLike,
                                      TemplateDeductionInfo &Info) {
   // C++ [temp.class.order]p1:
   //   For two class template partial specializations, the first is at least as
@@ -5899,11 +5899,11 @@ getMoreSpecialized(Sema &S,
   constexpr bool IsMoreSpecialThanPrimaryCheck =
       !std::is_same_v<TemplateLikeDecl, PrimaryDel>;
 
-  bool Better1 = isAtLeastAsSpecializedAs(S, P2, Args1, Args2, Info);
+  bool Better1 = isAtLeastAsSpecializedAs(S, Args1, Args2, P2, Info);
   if (IsMoreSpecialThanPrimaryCheck && !Better1)
     return nullptr;
 
-  bool Better2 = isAtLeastAsSpecializedAs(S, P1, Args2, Args1, Info);
+  bool Better2 = isAtLeastAsSpecializedAs(S, Args2, Args1, P1, Info);
   if (IsMoreSpecialThanPrimaryCheck && !Better2)
     return P1;
 
@@ -6106,7 +6106,7 @@ bool Sema::isTemplateTemplateParameterAtLeastAsSpecializedAs(
   //   as the function template corresponding to A according to the partial
   //   ordering rules for function templates.
   TemplateDeductionInfo Info(Loc, A->getDepth());
-  return isAtLeastAsSpecializedAs(*this, AArg, PArgs, AArgs, Info);
+  return isAtLeastAsSpecializedAs(*this, PArgs, AArgs, AArg, Info);
 }
 
 namespace {
