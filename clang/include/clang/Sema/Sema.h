@@ -9381,13 +9381,6 @@ public:
       TypeSourceInfo *&DeducedType,
       sema::TemplateDeductionInfo &Info);
 
-  UnresolvedSetIterator getMostSpecializedTemplate(
-      UnresolvedSetIterator SpecBegin, UnresolvedSetIterator SpecEnd,
-      TemplateSpecCandidateSet &FailedCandidates,
-      SourceLocation Loc, const PartialDiagnostic &NoneDiag,
-      const PartialDiagnostic &AmbigDiag, const PartialDiagnostic &CandidateDiag,
-      bool Complain = true, QualType TargetType = QualType());
-
 
   TemplateDeductionResult
   DeduceTemplateArguments(FunctionTemplateDecl *FunctionTemplate,
@@ -9478,6 +9471,22 @@ public:
                      const PartialDiagnostic &AmbigDiag,
                      const PartialDiagnostic &CandidateDiag,
                      bool Complain = true, QualType TargetType = QualType());
+
+  using MatchedFunctionTemplateInfoSet =
+      llvm::SmallDenseMap<const FunctionTemplateDecl *,
+                          std::pair<TemplateArgumentList *,
+                                    TypeSourceInfo *>, 8>;
+
+  UnresolvedSetIterator getMostSpecializedTemplate(
+      UnresolvedSetIterator SpecBegin,
+      UnresolvedSetIterator SpecEnd,
+      MatchedFunctionTemplateInfoSet &MatchedCandidateInfo,
+      TemplateSpecCandidateSet &FailedCandidates,
+      SourceLocation Loc,
+      const PartialDiagnostic &NoneDiag,
+      const PartialDiagnostic &AmbigDiag,
+      const PartialDiagnostic &CandidateDiag,
+      bool Complain = true, QualType TargetType = QualType());
 
   ClassTemplatePartialSpecializationDecl *
   getMoreSpecializedPartialSpecialization(

@@ -4851,6 +4851,7 @@ static bool isSameTemplate(TemplateDecl *T1, TemplateDecl *T2) {
 
 UnresolvedSetIterator Sema::getMostSpecializedTemplate(
     UnresolvedSetIterator SpecBegin, UnresolvedSetIterator SpecEnd,
+    MatchedFunctionTemplateInfoSet &MatchedCandidateInfo,
     TemplateSpecCandidateSet &FailedCandidates,
     SourceLocation Loc, const PartialDiagnostic &NoneDiag,
     const PartialDiagnostic &AmbigDiag, const PartialDiagnostic &CandidateDiag,
@@ -4909,11 +4910,12 @@ UnresolvedSetIterator Sema::getMostSpecializedTemplate(
     for (UnresolvedSetIterator I = SpecBegin; I != SpecEnd; ++I) {
       PartialDiagnostic PD = CandidateDiag;
       const auto *FTD = cast<FunctionTemplateDecl >(*I);
+      auto [DeducedTemplateArgs, DeducedTSI] = MatchedCandidateInfo[FTD];
       PD << FTD << getTemplateArgumentBindingsText(
                       FTD->getTemplateParameters(),
-                      *FD->getTemplateSpecializationArgs());
+                      *DeducedTemplateArgs);
       if (!TargetType.isNull())
-        HandleFunctionTypeMismatch(PD, FD->getType(), TargetType);
+        HandleFunctionTypeMismatch(PD, DeducedTSI->getType(), TargetType);
       Diag((*I)->getLocation(), PD);
     }
 #endif

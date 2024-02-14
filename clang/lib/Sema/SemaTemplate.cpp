@@ -9825,9 +9825,7 @@ bool Sema::CheckFunctionTemplateSpecialization(
   TemplateSpecCandidateSet FailedCandidates(FD->getLocation(),
                                             /*ForTakingAddress=*/false);
 
-  llvm::SmallDenseMap<const FunctionTemplateDecl *,
-      std::pair<TemplateArgumentList *, TypeSourceInfo *>, 8>
-      ConvertedTemplateArgs;
+  MatchedFunctionTemplateInfoSet ConvertedTemplateArgs;
 
   DeclContext *FDLookupContext = FD->getDeclContext()->getRedeclContext();
   for (LookupResult::iterator I = Previous.begin(), E = Previous.end();
@@ -9929,7 +9927,10 @@ bool Sema::CheckFunctionTemplateSpecialization(
 
   // Find the most specialized function template.
   UnresolvedSetIterator Result = getMostSpecializedTemplate(
-      Candidates.begin(), Candidates.end(), FailedCandidates, FD->getLocation(),
+      Candidates.begin(), Candidates.end(),
+      ConvertedTemplateArgs,
+      FailedCandidates,
+      FD->getLocation(),
       PDiag(diag::err_function_template_spec_no_match) << FD->getDeclName(),
       PDiag(diag::err_function_template_spec_ambiguous)
           << FD->getDeclName() << (ExplicitTemplateArgs != nullptr),
