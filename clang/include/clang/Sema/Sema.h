@@ -9373,6 +9373,22 @@ public:
       QualType ObjectType, Expr::Classification ObjectClassification,
       llvm::function_ref<bool(ArrayRef<QualType>)> CheckNonDependent);
 
+  TemplateDeductionResult DeduceTemplateArguments(
+      FunctionTemplateDecl *FunctionTemplate,
+      FunctionDecl* Specialized,
+      TemplateArgumentListInfo *ExplicitTemplateArgs,
+      TemplateArgumentList *&DeducedTemplateArgs,
+      TypeSourceInfo *&DeducedType,
+      sema::TemplateDeductionInfo &Info);
+
+  UnresolvedSetIterator getMostSpecializedTemplate(
+      UnresolvedSetIterator SpecBegin, UnresolvedSetIterator SpecEnd,
+      TemplateSpecCandidateSet &FailedCandidates,
+      SourceLocation Loc, const PartialDiagnostic &NoneDiag,
+      const PartialDiagnostic &AmbigDiag, const PartialDiagnostic &CandidateDiag,
+      bool Complain = true, QualType TargetType = QualType());
+
+
   TemplateDeductionResult
   DeduceTemplateArguments(FunctionTemplateDecl *FunctionTemplate,
                           TemplateArgumentListInfo *ExplicitTemplateArgs,
@@ -10348,6 +10364,12 @@ public:
       TypeSourceInfo *T, const MultiLevelTemplateArgumentList &TemplateArgs,
       SourceLocation Loc, DeclarationName Entity, CXXRecordDecl *ThisContext,
       Qualifiers ThisTypeQuals, bool EvaluateConstraints = true);
+
+  TypeSourceInfo *
+  SubstFunctionType(FunctionDecl *D,
+                    const MultiLevelTemplateArgumentList &TemplateArgs,
+                    bool EvaluateConstraints);
+
   void SubstExceptionSpec(FunctionDecl *New, const FunctionProtoType *Proto,
                           const MultiLevelTemplateArgumentList &Args);
   bool SubstExceptionSpec(SourceLocation Loc,

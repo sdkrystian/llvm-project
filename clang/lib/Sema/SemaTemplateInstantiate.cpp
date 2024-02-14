@@ -2764,6 +2764,91 @@ TypeSourceInfo *Sema::SubstFunctionDeclType(TypeSourceInfo *T,
   return TLB.getTypeSourceInfo(Context, Result);
 }
 
+
+
+
+/// Instantiates the full type of a FunctionDecl (including exception
+/// specification after C++17). No local instantiation scope is created
+/// so that instantiated parameter mappings can be subsequently used when
+/// checking for constraint satisfaction.
+TypeSourceInfo *
+Sema::SubstFunctionType(FunctionDecl *D,
+                        const MultiLevelTemplateArgumentList &TemplateArgs,
+                        bool EvaluateConstraints) {
+  assert(!CodeSynthesisContexts.empty() &&
+         "Cannot perform an instantiation without some context on the "
+         "instantiation stack");
+  assert(CurrentInstantiationScope &&
+         "Cannot instantiate function type without a"
+         "local instantiation scope");
+  // BAD! implicitly added cv-quals not respected
+  TypeSourceInfo *TSI = D->getTypeSourceInfo();
+  // TypeSourceInfo *TSI = Context.getTrivialTypeSourceInfo(D->getType());
+  assert(TSI && "FunctionDecl missing TypeSourceInfo");
+  if (!NeedsInstantiationAsFunctionType(TSI))
+    return TSI;
+
+  TypeLoc TL = TSI->getTypeLoc().IgnoreParens();
+  TypeLocBuilder TLB;
+  TLB.reserve(TL.getFullDataSize());
+
+  TemplateInstantiator Instantiator(
+      *this, TemplateArgs, D->getLocation(), D->getDeclName());
+  Instantiator.setEvaluateConstraints(EvaluateConstraints);
+
+  QualType Result;
+  if (auto FPTL = TL.getAs<FunctionProtoTypeLoc>()) {
+    CXXRecordDecl *ThisContext = nullptr;
+    Qualifiers ThisQuals;
+    CXXMethodDecl *Method = dyn_cast<CXXMethodDecl>(D);
+    if (Method) {
+      ThisContext = cast<CXXRecordDecl>(Method->getDeclContext());
+      ThisQuals = Method->getMethodQualifiers();
+    }
+    Result = Instantiator.inherited::TransformFunctionProtoType(
+        TLB, FPTL, ThisContext, ThisQuals,
+        [&](FunctionProtoType::ExceptionSpecInfo &ESI, bool &Changed) {
+          // Exception specification is part of the type after C++17
+          // FIXME: Set the exception specification to EST_Uninstantiated here,
+          // instead of rebuilding the function type again later.
+          if(!getLangOpts().CPlusPlus17)
+            return false;
+          InstantiatingTemplate Instantiation(*this,
+              D->getLocation(), D,
+              InstantiatingTemplate::ExceptionSpecification());
+          if (Instantiation.isInvalid())
+            return true;
+          SmallVector<QualType, 4> ExceptionStorage;
+          return Instantiator.TransformExceptionSpec(
+              D->getLocation(), ESI, ExceptionStorage, Changed);
+        });
+    // Constexpr non-static member function are implicitly const before C++14.
+    if (!getLangOpts().CPlusPlus14 && !Result.isNull() &&
+        Method && !Method->isStatic() && Method->isConstexpr()) {
+      const auto *FPT = Result->castAs<FunctionProtoType>();
+      FunctionProtoType::ExtProtoInfo EPI = FPT->getExtProtoInfo();
+      EPI.TypeQuals.addConst();
+      Result = Context.getFunctionType(
+          FPT->getReturnType(), FPT->getParamTypes(), EPI);
+      TLB.TypeWasModifiedSafely(Result);
+    }
+  } else {
+    Result = Instantiator.TransformType(TLB, TL);
+  }
+
+  if (Result.isNull())
+    return nullptr;
+
+  return TLB.getTypeSourceInfo(Context, Result);
+}
+
+
+
+
+
+
+
+
 bool Sema::SubstExceptionSpec(SourceLocation Loc,
                               FunctionProtoType::ExceptionSpecInfo &ESI,
                               SmallVectorImpl<QualType> &ExceptionStorage,
