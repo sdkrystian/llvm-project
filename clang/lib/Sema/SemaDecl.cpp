@@ -10654,7 +10654,7 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
 
     if (NewFD->isInvalidDecl()) {
       // Ignore all the rest of this.
-    } else if (!D.isRedeclaration()) {
+    } else if (!D.isRedeclaration() && !isFunctionTemplateSpecialization) {
       struct ActOnFDArgs ExtraArgs = { S, D, TemplateParamLists,
                                        AddToScope };
       // Fake up an access specifier if it's supposed to be a class member.
