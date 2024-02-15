@@ -542,7 +542,7 @@ bool Sema::MergeCXXFunctionDecl(FunctionDecl *New, FunctionDecl *Old,
     bool OldParamHasDfl = OldParam ? OldParam->hasDefaultArg() : false;
     bool NewParamHasDfl = NewParam->hasDefaultArg();
 
-    if (OldParamHasDfl && NewParamHasDfl) {
+    if (OldParamHasDfl && NewParamHasDfl && !New->isFunctionTemplateSpecialization()) {
       unsigned DiagDefaultParamID =
         diag::err_param_default_argument_redefinition;
 
