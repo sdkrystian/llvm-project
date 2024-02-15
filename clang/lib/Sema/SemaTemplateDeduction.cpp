@@ -4817,7 +4817,8 @@ TemplateDeductionResult Sema::DeduceTemplateArguments(
 
   #if 1
   ArgFunctionType = adjustCCAndNoReturn(ArgFunctionType, SpecializationType,
-                                        /*AdjustExceptionSpec*/true);
+                                        /*AdjustExceptionSpec*/false);
+                                        ///*AdjustExceptionSpec*/true);
   #endif
 
   // Revert placeholder types in the return type back to undeduced types so

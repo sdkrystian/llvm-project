@@ -18141,7 +18141,12 @@ void Sema::SetDeclDeleted(Decl *Dcl, SourceLocation DelLoc) {
   //   A deleted definition of a function shall be the first declaration of
   //   the function or, for an explicit specialization of a function template,
   //   the first declaration of that specialization.
-  if (const FunctionDecl *Prev = Fn->getPreviousDecl()) {
+  const FunctionDecl *Prev = Fn->getPreviousDecl();
+  bool IsFirstMemberSpecialization = Prev &&
+      Fn->getInstantiatedFromMemberFunction() &&
+      Fn->getTemplateSpecializationKind() == TSK_ExplicitSpecialization &&
+      Prev->isFirstDecl();
+  if (Prev && !IsFirstMemberSpecialization) {
     if (!Prev->isDefined()) {
       Diag(DelLoc, diag::err_deleted_decl_not_first);
       Diag(Prev->getLocation().isInvalid() ? DelLoc : Prev->getLocation(),

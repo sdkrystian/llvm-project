@@ -2811,8 +2811,10 @@ Sema::SubstFunctionType(FunctionDecl *D,
           // Exception specification is part of the type after C++17
           // FIXME: Set the exception specification to EST_Uninstantiated here,
           // instead of rebuilding the function type again later.
+          #if 0
           if(!getLangOpts().CPlusPlus17)
             return false;
+          #endif
           InstantiatingTemplate Instantiation(*this,
               D->getLocation(), D,
               InstantiatingTemplate::ExceptionSpecification());
