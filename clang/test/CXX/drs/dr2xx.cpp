@@ -724,7 +724,7 @@ namespace dr252 { // dr252: 3.1
   struct E {
     void operator delete(void*, int);
     void operator delete(void*) = delete; // #dr252-E
-    // cxx98-error@-1 {{deleted function definitions are a C++11 extension}} 
+    // cxx98-error@-1 {{deleted function definitions are a C++11 extension}}
     virtual ~E();
   };
   E::~E() {}
@@ -831,7 +831,7 @@ namespace dr258 { // dr258: 2.8
 
 namespace dr259 { // dr259: 4
   template<typename T> struct A {};
-  template struct A<int>; // #dr259-A-int 
+  template struct A<int>; // #dr259-A-int
   template struct A<int>;
   // expected-error@-1 {{duplicate explicit instantiation of 'A<int>'}}
   //   expected-note@#dr259-A-int {{previous explicit instantiation is here}}
@@ -992,7 +992,7 @@ namespace dr275 { // dr275: no
     // expected-error@-1 {{no function template matches function template specialization 'f'}}
   }
 
-  template <class T> void g(T) {} // #dr275-g 
+  template <class T> void g(T) {} // #dr275-g
 
   template <> void N::f(char) {}
   template <> void f(int) {}
@@ -1152,14 +1152,14 @@ namespace dr285 { // dr285: yes
   template<typename T> void f(int, T); // #dr285-f-int-T
   template<> void f<int>(int, int) {}
   // expected-error@-1 {{function template specialization 'f' ambiguously refers to more than one function template; explicitly specify additional template arguments to identify a particular function template}}
-  //   expected-note@#dr285-f-int-T {{function template 'dr285::f<int>' matches specialization [with T = int]}}
-  //   expected-note@#dr285-f-T-int {{function template 'dr285::f<int>' matches specialization [with T = int]}}
+  //   expected-note@#dr285-f-int-T {{function template 'dr285::f' matches specialization [with T = int]}}
+  //   expected-note@#dr285-f-T-int {{function template 'dr285::f' matches specialization [with T = int]}}
 }
 
 namespace dr286 { // dr286: 2.8
   template<class T> struct A {
     class C {
-      template<class T2> struct B {}; // #dr286-B 
+      template<class T2> struct B {}; // #dr286-B
     };
   };
 

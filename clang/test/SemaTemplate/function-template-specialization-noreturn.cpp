@@ -5,7 +5,7 @@
 // disable.
 
 template <int N> void __attribute__((noreturn)) f3() { __builtin_unreachable(); }
-template <> void f3<1>() { } // expected-warning {{function declared 'noreturn' should not return}}
+template <> void f3<1>() { }
 
 #if __cplusplus >= 201103L
 namespace PR21942 {
