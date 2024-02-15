@@ -4723,9 +4723,6 @@ TemplateDeductionResult Sema::DeduceTemplateArguments(
     NumExplicitlySpecified = Deduced.size();
   }
 
-  // Allow arbitrary mismatches of calling convention and noreturn.
-  // ArgFunctionType = adjustCCAndNoReturn(ArgFunctionType, FunctionType,
-  //                                       /*AdjustExceptionSpec*/false);
 
   #if 1
   if (CXXMethodDecl *Method = dyn_cast<CXXMethodDecl>(Function)) {
@@ -4742,6 +4739,18 @@ TemplateDeductionResult Sema::DeduceTemplateArguments(
   }
   #endif
 
+  #if 1
+  // C++ [temp.expl.spec]p13:
+  //   Whether an explicit specialization of a function or variable template is
+  //   inline, constexpr, constinit, or consteval is determined by the explicit
+  //   specialization and is independent of those properties of the template.
+  //   Similarly, attributes appearing in the declaration of a template have no
+  //   effect on an explicit specialization of that template.
+  //
+  // We also allow for arbitrary mismatches of calling convention.
+  ArgFunctionType = adjustCCAndNoReturn(ArgFunctionType, FunctionType,
+                                        /*AdjustExceptionSpec*/false);
+  #endif
   // Unevaluated SFINAE context.
   EnterExpressionEvaluationContext Unevaluated(
       *this, Sema::ExpressionEvaluationContext::Unevaluated);
@@ -4806,8 +4815,10 @@ TemplateDeductionResult Sema::DeduceTemplateArguments(
   }
   #endif
 
-  //ArgFunctionType = adjustCCAndNoReturn(ArgFunctionType, SpecializationType,
-  //                                      /*AdjustExceptionSpec*/false);
+  #if 1
+  ArgFunctionType = adjustCCAndNoReturn(ArgFunctionType, SpecializationType,
+                                        /*AdjustExceptionSpec*/true);
+  #endif
 
   // Revert placeholder types in the return type back to undeduced types so
   // that the comparison below compares the declared return types.
