@@ -2808,6 +2808,7 @@ Sema::SubstFunctionType(FunctionDecl *D,
     Result = Instantiator.inherited::TransformFunctionProtoType(
         TLB, FPTL, ThisContext, ThisQuals,
         [&](FunctionProtoType::ExceptionSpecInfo &ESI, bool &Changed) {
+        #if 0
           // Exception specification is part of the type after C++17
           // FIXME: Set the exception specification to EST_Uninstantiated here,
           // instead of rebuilding the function type again later.
@@ -2823,6 +2824,9 @@ Sema::SubstFunctionType(FunctionDecl *D,
           SmallVector<QualType, 4> ExceptionStorage;
           return Instantiator.TransformExceptionSpec(
               D->getLocation(), ESI, ExceptionStorage, Changed);
+        #else
+        return false;
+        #endif
         });
     // Constexpr non-static member function are implicitly const before C++14.
     if (!getLangOpts().CPlusPlus14 && !Result.isNull() &&

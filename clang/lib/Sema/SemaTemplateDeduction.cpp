@@ -4797,7 +4797,7 @@ TemplateDeductionResult Sema::DeduceTemplateArguments(
         Info.getLocation(), Function,
         InstantiatingTemplate::ExceptionSpecification());
     if (ExceptionSpecInstantiation.isInvalid())
-      return TDK_InstantiationDepth;
+      return TemplateDeductionResult::InstantiationDepth;
 
     FunctionProtoType::ExceptionSpecInfo ESI =
         FPT->getExtProtoInfo().ExceptionSpec;
@@ -4808,11 +4808,23 @@ TemplateDeductionResult Sema::DeduceTemplateArguments(
     SmallVector<QualType, 4> ExceptionStorage;
     if (SubstExceptionSpec(Function->getTypeSpecEndLoc(),
                            ESI, ExceptionStorage, MLTAL))
-      return TDK_SubstitutionFailure;
+      return TemplateDeductionResult::SubstitutionFailure;
 
     SpecializationType = Context.getFunctionTypeWithExceptionSpec(
         SpecializationType, ESI);
   }
+  #endif
+
+  #if 0
+  // If the function has a dependent exception specification, resolve it now,
+  // so we can check that the exception specification matches.
+  auto *SpecializationFPT =
+      SpecializationType->castAs<FunctionProtoType>();
+  if (getLangOpts().CPlusPlus17 &&
+      isUnresolvedExceptionSpec(SpecializationFPT->getExceptionSpecType()) &&
+      !ResolveExceptionSpec(Info.getLocation(), SpecializationFPT))
+    return TemplateDeductionResult::MiscellaneousDeductionFailure;
+
   #endif
 
   #if 1
@@ -4833,7 +4845,7 @@ TemplateDeductionResult Sema::DeduceTemplateArguments(
   // If the requested function type does not match the actual type of the
   // specialization with respect to arguments of compatible pointer to function
   // types, template argument deduction fails.
-  if (!Context.hasSameType(SpecializationType, ArgFunctionType)) {
+  if (!Context.hasSameFunctionTypeIgnoringExceptionSpec(SpecializationType, ArgFunctionType)) {
     Info.FirstArg = TemplateArgument(SpecializationType);
     Info.SecondArg = TemplateArgument(ArgFunctionType);
     return TemplateDeductionResult::NonDeducedMismatch;

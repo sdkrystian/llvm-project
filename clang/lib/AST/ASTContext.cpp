@@ -3246,6 +3246,21 @@ void ASTContext::adjustExceptionSpec(
   }
 }
 
+void ASTContext::adjustExceptionSpec(
+    TypeSourceInfo *TSI, const FunctionProtoType::ExceptionSpecInfo &ESI) {
+  // Update the type.
+  QualType Updated =
+      getFunctionTypeWithExceptionSpec(TSI->getType(), ESI);
+  // FIXME: When we get proper type location information for exceptions,
+  // we'll also have to rebuild the TypeSourceInfo. For now, we just patch
+  // up the TypeSourceInfo;
+  assert(TypeLoc::getFullDataSizeForType(TSI->getType()) ==
+             TypeLoc::getFullDataSizeForType(Updated) &&
+         "TypeLoc size mismatch from updating exception specification");
+  TSI->overrideType(Updated);
+}
+
+
 /// getComplexType - Return the uniqued reference to the type for a complex
 /// number with the specified element type.
 QualType ASTContext::getComplexType(QualType T) const {

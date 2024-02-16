@@ -9567,6 +9567,72 @@ bool Sema::CheckDependentFunctionTemplateSpecialization(
   return false;
 }
 
+static bool InstantiateExceptionSpec(Sema &S,
+                                     FunctionDecl *Specialization,
+                                     FunctionTemplateDecl *Primary,
+                                     TypeSourceInfo *DeducedTSI,
+                                     ArrayRef<TemplateArgument> DeducedArgs) {
+  auto FPTL = DeducedTSI->getTypeLoc().castAs<FunctionProtoTypeLoc>();
+  const FunctionProtoType *FPT = FPTL.getTypePtr();
+
+  // if (!isUnresolvedExceptionSpec(FPT->getExceptionSpecType()))
+  if (!FPT->hasExceptionSpec())
+    return false;
+
+  FunctionProtoType::ExceptionSpecInfo ESI =
+        FPT->getExtProtoInfo().ExceptionSpec;
+    SourceLocation ExceptionSpecLoc =
+        FPTL.getExceptionSpecRange().getBegin();
+    Sema::InstantiatingTemplate ExceptionSpecInstantiation(S,
+        Specialization->getLocation(), Primary->getTemplatedDecl(),
+        Sema::InstantiatingTemplate::ExceptionSpecification());
+    if (ExceptionSpecInstantiation.isInvalid())
+      return true;
+    if (ExceptionSpecInstantiation.isAlreadyInstantiating())
+      return true;
+    // ;isUnresolvedExceptionSpec(FPT->getExceptionSpecType()) &&
+    // Enter the scope of this instantiation. We don't use
+    // PushDeclContext because we don't have a scope.
+    Sema::ContextRAII SavedContext(S, Specialization);
+    LocalInstantiationScope Scope(S);
+
+    MultiLevelTemplateArgumentList MLTAL = S.getTemplateInstantiationArgs(
+      Primary, Primary->getDeclContext(), /*Final=*/false, DeducedArgs,
+      /*RelativeToPrimary=*/true, /*Pattern=*/
+      nullptr, /*ForConstraintInstantiation=*/false);
+
+    #if 0
+    MultiLevelTemplateArgumentList MLTAL(
+      Primary, DeducedArgs, /*Final=*/true);
+    #else
+
+    #endif
+
+    if (S.addInstantiatedParametersToScope(FPTL.getParams(),
+                                           Primary->getTemplatedDecl(),
+                                           Scope, MLTAL))
+      return true;
+
+    SmallVector<QualType, 4> ExceptionStorage;
+    if (S.SubstExceptionSpec(FPTL.getExceptionSpecRange().getBegin(),
+                             ESI, ExceptionStorage, MLTAL))
+      return true;
+
+    S.Context.adjustExceptionSpec(DeducedTSI, ESI);
+
+#if 0
+  MultiLevelTemplateArgumentList TemplateArgs =
+      getTemplateInstantiationArgs(Decl, Decl->getLexicalDeclContext(),
+                                   /*Final=*/false, /*Innermost=*/std::nullopt,
+                                   /*RelativeToPrimary*/ true);
+#endif
+
+
+
+  return false;
+
+}
+
 /// Perform semantic analysis for the given function template
 /// specialization.
 ///
@@ -9939,6 +10005,36 @@ bool Sema::CheckFunctionTemplateSpecialization(
   if (Result == Candidates.end())
     return true;
 
+  auto *Primary = cast<FunctionTemplateDecl>(*Result);
+  auto& [DeducedArgs, DeducedType] = ConvertedTemplateArgs[Primary];
+
+  #if 1
+  // DeducedType->getType()->castAs<FunctionProtoType>();
+  if (::InstantiateExceptionSpec(*this, FD, Primary,
+                                 DeducedType, DeducedArgs->asArray()))
+    ; //Context.adjustExceptionSpec(DeducedType, EST_None);
+
+  #endif
+
+  auto FPTL = DeducedType->getTypeLoc().castAs<FunctionProtoTypeLoc>();
+  if (auto FPT = DeducedType->getType()->getAs<FunctionProtoType>();
+      FPT && (FPT->hasExceptionSpec() || FD->getExceptionSpecType() != EST_None)) {
+
+    if (CheckEquivalentExceptionSpec(
+        PDiag(getLangOpts().MicrosoftExt
+            ? diag::ext_mismatched_exception_spec_explicit_specialization
+            : diag::err_mismatched_exception_spec_explicit_specialization) << DeducedType->getType(),
+        PDiag(diag::note_specialized_entity),
+        FPT,
+        Primary->getTemplatedDecl()->getLocation(),
+        FD->getTypeSourceInfo()->getType()->getAs<FunctionProtoType>(),
+        FD->getLocation())) {
+      // In Microsoft mode, mismatching exception specifications just cause a
+      // warning.
+      if (!getLangOpts().MicrosoftExt)
+        return true;
+    }
+  }
   // If this is a friend declaration, then we're only declaring an explicit
   // specialization if it's also a definition.
   // FIXME: Should we really allow these pseudo-explicit specializations
@@ -9952,8 +10048,6 @@ bool Sema::CheckFunctionTemplateSpecialization(
 
   // Ignore access information;  it doesn't figure into redeclaration checking.
   // FunctionDecl *Specialization = cast<FunctionDecl>(*Result);
-  auto *Primary = cast<FunctionTemplateDecl>(*Result);
-  auto *DeducedArgs = ConvertedTemplateArgs[Primary].first;
   assert(DeducedArgs && "missing function template specialization arguments?");
   void* InsertPos = nullptr;
   auto *PrevFD = Primary->findSpecialization(DeducedArgs->asArray(), InsertPos);
@@ -9975,15 +10069,13 @@ bool Sema::CheckFunctionTemplateSpecialization(
       NewMethod->setStorageClass(SC_Static);
   }
 
-  TypeSourceInfo *DeducedType = ConvertedTemplateArgs[Primary].second;
-  auto FPT = DeducedType->getTypeLoc().getAsAdjusted<FunctionProtoTypeLoc>();
 
-  assert(!FPT.isNull() && "Invalid type");
-  assert(FPT.getNumParams() == FD->getNumParams() &&
+  assert(!FPTL.isNull() && "Invalid type");
+  assert(FPTL.getNumParams() == FD->getNumParams() &&
       "Mismatched number of function parameters");
   // FIXME: Diagnose explicit specializations with default arguments.
-  for (unsigned Idx = 0; Idx < FPT.getNumParams(); ++Idx) {
-    auto *OldParm = FPT.getParam(Idx);
+  for (unsigned Idx = 0; Idx < FPTL.getNumParams(); ++Idx) {
+    auto *OldParm = FPTL.getParam(Idx);
     auto *NewParm = FD->getParamDecl(Idx);
     if (!OldParm->hasDefaultArg())
       continue;

@@ -7561,6 +7561,13 @@ private:
       LocalInstantiationScope &Scope,
       const MultiLevelTemplateArgumentList &TemplateArgs);
 
+public:
+  bool addInstantiatedParametersToScope(
+      ArrayRef<ParmVarDecl *> InstParams,
+      const FunctionDecl *PatternDecl,
+      LocalInstantiationScope &Scope,
+      const MultiLevelTemplateArgumentList &TemplateArgs);
+
   /// Introduce the instantiated captures of the lambda into the local
   /// instantiation scope.
   bool addInstantiatedCapturesToScope(

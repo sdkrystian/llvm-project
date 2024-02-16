@@ -5311,6 +5311,13 @@ def note_dependent_function_template_spec_discard_reason : Note<
   "not a member of the enclosing %select{class template|"
   "namespace; did you mean to explicitly qualify the specialization?}1}0">;
 
+def err_mismatched_exception_spec_explicit_specialization : Error<
+  "exception specification in explicit specialization does not match "
+  "the primary template">;
+def ext_mismatched_exception_spec_explicit_specialization : ExtWarn<
+  err_mismatched_exception_spec_explicit_specialization.Summary>,
+  InGroup<MicrosoftExceptionSpec>;
+
 // C++ class template specializations and out-of-line definitions
 def err_template_spec_needs_header : Error<
   "template specialization requires 'template<>'">;

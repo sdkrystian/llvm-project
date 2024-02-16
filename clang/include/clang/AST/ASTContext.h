@@ -1318,6 +1318,11 @@ public:
                            const FunctionProtoType::ExceptionSpecInfo &ESI,
                            bool AsWritten = false);
 
+  /// Change the exception specification on the type source info of a function
+  /// once it is delay-parsed, instantiated, or computed.
+  void adjustExceptionSpec(TypeSourceInfo *TSI,
+                           const FunctionProtoType::ExceptionSpecInfo &ESI);
+
   /// Get a function type and produce the equivalent function type where
   /// pointer size address spaces in the return type and parameter tyeps are
   /// replaced with the default address space.
