@@ -1326,8 +1326,7 @@ template<> void ClassTmpl<int>::importedNormal() {}
 template<> void ClassTmpl<int>::importedStatic() {}
 
 #if !defined(GNU)
-// expected-error@+3{{cannot define non-inline dllimport template specialization}}
-// expected-error@+2{{attribute 'dllimport' cannot be applied to a deleted function}}
+// expected-error@+2{{cannot define non-inline dllimport template specialization}}
 #endif
 template <> void ImportClassTmplMembers<int>::normalDecl() = delete;
 

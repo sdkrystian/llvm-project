@@ -167,9 +167,6 @@ template <typename T> void __stdcall StdcallTemplate(T) {}
 template <> void StdcallTemplate<int>(int) {}
 template <> void __stdcall StdcallTemplate<short>(short) {}
 
-// FIXME: Note the template, not the implicit instantiation.
-// expected-error@+2 {{function declared 'cdecl' here was previously declared 'stdcall}}
-// expected-note@+1 {{previous declaration is here}}
 template <> void __cdecl StdcallTemplate<long>(long) {}
 
 struct ExactlyInt {
