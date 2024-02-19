@@ -10007,6 +10007,46 @@ bool Sema::CheckFunctionTemplateSpecialization(
 
   auto *Primary = cast<FunctionTemplateDecl>(*Result);
   auto& [DeducedArgs, DeducedType] = ConvertedTemplateArgs[Primary];
+  bool isFriend = (FD->getFriendObjectKind() != Decl::FOK_None);
+
+#if 1
+  if (isFriend) {
+
+    // sema::TemplateDeductionInfo Info(FD->getLocation());
+    InstantiatingTemplate Inst(*this, FD->getLocation(), Primary);
+    if (Inst.isInvalid())
+      return true;
+
+    // Substitute the deduced template arguments into the function template
+    // declaration to produce the function template specialization.
+    DeclContext *Owner = Primary->getDeclContext();
+    if (Primary->getFriendObjectKind())
+      Owner = Primary->getLexicalDeclContext();
+    FunctionDecl *Templated = Primary->getTemplatedDecl();
+    // additional check for inline friend,
+    // ```
+    //   template <class F1> int foo(F1 X);
+    //   template <int A1> struct A {
+    //     template <class F1> friend int foo(F1 X) { return A1; }
+    //   };
+    //   template struct A<1>;
+    //   int a = foo(1.0);
+    // ```
+    const FunctionDecl *FDFriend;
+    if (Templated->getFriendObjectKind() == Decl::FriendObjectKind::FOK_None &&
+        Templated->isDefined(FDFriend, /*CheckForPendingFriendDefinition*/ true) &&
+        FDFriend->getFriendObjectKind() != Decl::FriendObjectKind::FOK_None) {
+      Templated = const_cast<FunctionDecl *>(FDFriend);
+      Owner = Templated->getLexicalDeclContext();
+    }
+
+    ContextRAII SavedContext(*this, FD);
+    MultiLevelTemplateArgumentList MArgs(Primary, DeducedArgs->asArray(),
+                                       /*Final=*/false);
+
+    SubstDecl(Templated, Owner, MArgs);
+  }
+#endif
 
   #if 1
   // DeducedType->getType()->castAs<FunctionProtoType>();
@@ -10041,16 +10081,16 @@ bool Sema::CheckFunctionTemplateSpecialization(
   // introduced by friend function definitions? [temp.expl.spec] p19 states:
   //   An explicit specialization declaration shall not be a friend
   //   declaration.
-  bool isFriend = (FD->getFriendObjectKind() != Decl::FOK_None);
+  void* InsertPos = nullptr;
+  auto *PrevFD = Primary->findSpecialization(DeducedArgs->asArray(), InsertPos);
+
   TemplateSpecializationKind TSK = isFriend
-      ? TSK_ImplicitInstantiation
+      ? (PrevFD ? PrevFD->getTemplateSpecializationKind() : TSK_ImplicitInstantiation)
       : TSK_ExplicitSpecialization;
 
   // Ignore access information;  it doesn't figure into redeclaration checking.
   // FunctionDecl *Specialization = cast<FunctionDecl>(*Result);
   assert(DeducedArgs && "missing function template specialization arguments?");
-  void* InsertPos = nullptr;
-  auto *PrevFD = Primary->findSpecialization(DeducedArgs->asArray(), InsertPos);
   FD->setFunctionTemplateSpecialization(
       Primary,
       DeducedArgs,
