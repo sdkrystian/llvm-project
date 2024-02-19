@@ -21,13 +21,10 @@ void fn() throw();  // expected-warning {{does not match previous declaration}}
 }
 
 template <typename T> struct FooPtr {
-  template <typename U> FooPtr(U *p) : m_pT(nullptr) {}
+  template <typename U> FooPtr(U *p) : m_pT(nullptr) {} // expected-note {{explicitly specialized declaration is here}}
 
   template <>
-      // FIXME: It would be better if this note pointed at the primary template
-      // above.
-      // expected-note@+1 {{previous declaration is here}}
-  FooPtr(T *pInterface) throw() // expected-warning {{exception specification in declaration does not match previous declaration}}
+  FooPtr(T *pInterface) throw() // expected-warning {{exception specification in explicit specialization does not match the primary template}}
       : m_pT(pInterface) {}
 
   T *m_pT;

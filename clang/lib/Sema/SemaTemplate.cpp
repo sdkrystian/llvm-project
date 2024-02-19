@@ -9572,7 +9572,7 @@ static bool InstantiateExceptionSpec(Sema &S,
                                      FunctionTemplateDecl *Primary,
                                      TypeSourceInfo *DeducedTSI,
                                      ArrayRef<TemplateArgument> DeducedArgs) {
-  auto FPTL = DeducedTSI->getTypeLoc().castAs<FunctionProtoTypeLoc>();
+  auto FPTL = DeducedTSI->getTypeLoc().getAsAdjusted<FunctionProtoTypeLoc>();
   const FunctionProtoType *FPT = FPTL.getTypePtr();
 
   // if (!isUnresolvedExceptionSpec(FPT->getExceptionSpecType()))
@@ -10016,7 +10016,7 @@ bool Sema::CheckFunctionTemplateSpecialization(
 
   #endif
 
-  auto FPTL = DeducedType->getTypeLoc().castAs<FunctionProtoTypeLoc>();
+  auto FPTL = DeducedType->getTypeLoc().getAsAdjusted<FunctionProtoTypeLoc>();
   if (auto FPT = DeducedType->getType()->getAs<FunctionProtoType>();
       FPT && (FPT->hasExceptionSpec() || FD->getExceptionSpecType() != EST_None)) {
 
