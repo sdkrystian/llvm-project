@@ -10597,12 +10597,7 @@ DeclResult Sema::ActOnExplicitInstantiation(Scope *S,
   // C++ [dcl.stc]p1:
   //   A storage-class-specifier shall not be specified in [...] an explicit
   //   instantiation (14.7.2) directive.
-  if (D.getDeclSpec().getStorageClassSpec() == DeclSpec::SCS_typedef) {
-    Diag(D.getIdentifierLoc(), diag::err_explicit_instantiation_of_typedef)
-      << Name;
-    return true;
-  } else if (D.getDeclSpec().getStorageClassSpec()
-                                                != DeclSpec::SCS_unspecified) {
+  if (D.getDeclSpec().getStorageClassSpec() != DeclSpec::SCS_unspecified) {
     // Complain about then remove the storage class specifier.
     Diag(D.getIdentifierLoc(), diag::err_explicit_instantiation_storage_class)
       << FixItHint::CreateRemoval(D.getDeclSpec().getStorageClassSpecLoc());

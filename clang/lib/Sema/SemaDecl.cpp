@@ -6502,11 +6502,7 @@ NamedDecl *Sema::HandleDeclarator(Scope *S, Declarator &D,
 
   bool AddToScope = true;
   if (D.getDeclSpec().getStorageClassSpec() == DeclSpec::SCS_typedef) {
-    if (TemplateParamLists.size()) {
-      Diag(D.getIdentifierLoc(), diag::err_template_typedef);
-      return nullptr;
-    }
-
+    assert(TemplateParamLists.empty());
     New = ActOnTypedefDeclarator(S, D, DC, TInfo, Previous);
   } else if (R->isFunctionType()) {
     New = ActOnFunctionDeclarator(S, D, DC, TInfo, Previous,

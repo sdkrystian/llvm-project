@@ -439,6 +439,8 @@ def err_typename_identifiers_only : Error<
 
 def err_friend_invalid_in_context : Error<
   "'friend' used outside of class">;
+def err_templated_typedef : Error<
+  "a typedef cannot be %select{|a template|explicitly specialized|explicitly instantiated}0">;
 def err_templated_using_directive_declaration : Error<
   "cannot template a using %select{directive|declaration}0">;
 def err_unexpected_colon_in_nested_name_spec : Error<

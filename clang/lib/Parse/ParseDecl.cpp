@@ -4109,6 +4109,13 @@ void Parser::ParseDeclarationSpecifiers(
 
     // storage-class-specifier
     case tok::kw_typedef:
+      // Typedef declarations cannot be templates, nor can they be
+      // partially/explicitly specialized or explicitly instantiated.
+      if (TemplateInfo.Kind != ParsedTemplateInfo::NonTemplate) {
+        Diag(Tok, diag::err_templated_typedef) << TemplateInfo.Kind;
+        // Just ignore 'typedef' since we can't represent such declarations.
+        break;
+      }
       isInvalid = DS.SetStorageClassSpec(Actions, DeclSpec::SCS_typedef, Loc,
                                          PrevSpec, DiagID, Policy);
       isStorageClass = true;

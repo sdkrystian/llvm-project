@@ -4987,7 +4987,6 @@ def err_template_outside_namespace_or_class_scope : Error<
 def err_template_inside_local_class : Error<
   "templates cannot be declared inside of a local class">;
 def err_template_linkage : Error<"templates must have C++ linkage">;
-def err_template_typedef : Error<"a typedef cannot be a template">;
 def err_template_unnamed_class : Error<
   "cannot declare a class template with no name">;
 def err_template_param_list_different_arity : Error<
@@ -5546,8 +5545,6 @@ def warn_explicit_instantiation_must_be_global_0x : Warning<
 
 def err_explicit_instantiation_requires_name : Error<
   "explicit instantiation declaration requires a name">;
-def err_explicit_instantiation_of_typedef : Error<
-  "explicit instantiation of typedef %0">;
 def err_explicit_instantiation_storage_class : Error<
   "explicit instantiation cannot have a storage class">;
 def err_explicit_instantiation_internal_linkage : Error<
