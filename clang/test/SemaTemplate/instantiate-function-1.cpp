@@ -1,7 +1,7 @@
 // RUN: %clang_cc1 -fcxx-exceptions -fexceptions -fsyntax-only -verify %s
 template<typename T, typename U>
 struct X0 {
-  void f(T x, U y) { 
+  void f(T x, U y) {
     (void)(x + y); // expected-error{{invalid operands}}
   }
 };
@@ -41,7 +41,7 @@ template <typename T> struct X4 {
   T f() const {
     return; // expected-error{{non-void function 'f' should return a value}}
   }
-  
+
   T g() const {
     return 1; // expected-error{{void function 'g' should not return a value}}
   }
@@ -64,7 +64,7 @@ template<typename T, typename U, typename V> struct X6 {
     // IfStmt
     if (t > 0)
       return u;
-    else { 
+    else {
       if (t < 0)
         return v; // expected-error{{cannot initialize return object of type}}
     }
@@ -127,17 +127,19 @@ template<typename T> struct For0 {
 template struct For0<int*>;
 
 template<typename T> struct Member0 {
+  int x;
+
   void f(T t) {
     t;
-    t.f;
-    t->f;
-    
-    T* tp;
-    tp.f; // expected-error{{member reference base type 'T *' is not a structure or union}}
-    tp->f;
+    t.x;
+    t->x;
 
-    this->f;
-    this.f; // expected-error{{member reference base type 'Member0<T> *' is not a structure or union}}
+    T* tp;
+    tp.x; // expected-error{{member reference base type 'T *' is not a structure or union}}
+    tp->x;
+
+    ++this->x;
+    this.x; // expected-error{{member reference base type 'Member0<T> *' is not a structure or union}}
   }
 };
 
@@ -239,11 +241,11 @@ namespace PR9880 {
     static yes_tag check(char[sizeof(&U::luaIndex)]);
     enum { value = sizeof(check<T>(0)) == sizeof(yes_tag) };
   };
-  
+
   class SomeClass {
   public:
     int luaIndex(lua_State* L);
   };
-  
+
   int i = HasIndexMetamethod<SomeClass>::value;
 }
