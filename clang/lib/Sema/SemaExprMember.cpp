@@ -581,6 +581,9 @@ static void DiagnoseQualifiedMemberReference(Sema &SemaRef,
 // an unrelated class, and for us to find an overload set including
 // decls from classes which are not superclasses, as long as the decl
 // we actually pick through overload resolution is from a superclass.
+//
+// FIXME: This wording no longer exists in C++23. This is a defect;
+// see CWG2557.
 bool Sema::CheckQualifiedMemberReference(Expr *BaseExpr,
                                          QualType BaseType,
                                          const CXXScopeSpec &SS,
