@@ -1828,6 +1828,9 @@ protected:
     /// Whether the ElaboratedType has a trailing OwnedTagDecl.
     LLVM_PREFERRED_TYPE(bool)
     unsigned HasOwnedTagDecl : 1;
+
+    LLVM_PREFERRED_TYPE(bool)
+    unsigned FoundInCurrentInstantiation : 1;
   };
 
   class VectorTypeBitfields {
@@ -5925,7 +5928,8 @@ class ElaboratedType final
   /// it, or obtain a null pointer if there is none.
 
   ElaboratedType(ElaboratedTypeKeyword Keyword, NestedNameSpecifier *NNS,
-                 QualType NamedType, QualType CanonType, TagDecl *OwnedTagDecl)
+                 QualType NamedType, QualType CanonType, TagDecl *OwnedTagDecl,
+                 bool MemberOfCurrentInstantiation)
       : TypeWithKeyword(Keyword, Elaborated, CanonType,
                         // Any semantic dependence on the qualifier will have
                         // been incorporated into NamedType. We still need to
@@ -5936,6 +5940,7 @@ class ElaboratedType final
                                        toTypeDependence(NNS->getDependence()))
                                  : TypeDependence::None)),
         NNS(NNS), NamedType(NamedType) {
+    ElaboratedTypeBits.FoundInCurrentInstantiation = MemberOfCurrentInstantiation;
     ElaboratedTypeBits.HasOwnedTagDecl = false;
     if (OwnedTagDecl) {
       ElaboratedTypeBits.HasOwnedTagDecl = true;
@@ -5956,6 +5961,11 @@ public:
   /// Returns whether this type directly provides sugar.
   bool isSugared() const { return true; }
 
+  /// Returns whether this type was found in the current instantiation.
+  bool wasFoundInCurrentInstantiation() const {
+    return ElaboratedTypeBits.FoundInCurrentInstantiation;
+  }
+
   /// Return the (re)declaration of this type owned by this occurrence of this
   /// type, or nullptr if there is none.
   TagDecl *getOwnedTagDecl() const {
@@ -5964,16 +5974,18 @@ public:
   }
 
   void Profile(llvm::FoldingSetNodeID &ID) {
-    Profile(ID, getKeyword(), NNS, NamedType, getOwnedTagDecl());
+    Profile(ID, getKeyword(), NNS, NamedType, getOwnedTagDecl(), wasFoundInCurrentInstantiation());
   }
 
   static void Profile(llvm::FoldingSetNodeID &ID, ElaboratedTypeKeyword Keyword,
                       NestedNameSpecifier *NNS, QualType NamedType,
-                      TagDecl *OwnedTagDecl) {
+                      TagDecl *OwnedTagDecl,
+                      bool MemberOfCurrentInstantiation) {
     ID.AddInteger(llvm::to_underlying(Keyword));
     ID.AddPointer(NNS);
     NamedType.Profile(ID);
     ID.AddPointer(OwnedTagDecl);
+    ID.AddBoolean(MemberOfCurrentInstantiation);
   }
 
   static bool classof(const Type *T) { return T->getTypeClass() == Elaborated; }

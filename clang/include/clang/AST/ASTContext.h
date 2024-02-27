@@ -1646,7 +1646,8 @@ public:
 
   QualType getElaboratedType(ElaboratedTypeKeyword Keyword,
                              NestedNameSpecifier *NNS, QualType NamedType,
-                             TagDecl *OwnedTagDecl = nullptr) const;
+                             TagDecl *OwnedTagDecl = nullptr,
+                             bool MemberOfCurrentInstantiation = false) const;
   QualType getDependentNameType(ElaboratedTypeKeyword Keyword,
                                 NestedNameSpecifier *NNS,
                                 const IdentifierInfo *Name,

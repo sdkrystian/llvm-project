@@ -11245,7 +11245,8 @@ Sema::CheckTypenameType(ElaboratedTypeKeyword Keyword,
                         SourceLocation KeywordLoc,
                         NestedNameSpecifierLoc QualifierLoc,
                         const IdentifierInfo &II,
-                        SourceLocation IILoc, bool DeducedTSTContext) {
+                        SourceLocation IILoc, bool DeducedTSTContext,
+                        bool PreviousFoundInCurrentInstantiation) {
   CXXScopeSpec SS;
   SS.Adopt(QualifierLoc);
 
@@ -11273,6 +11274,7 @@ Sema::CheckTypenameType(ElaboratedTypeKeyword Keyword,
 
   DeclarationName Name(&II);
   LookupResult Result(*this, Name, IILoc, LookupOrdinaryName);
+  Result.setFoundInCurrentInstantiation(PreviousFoundInCurrentInstantiation);
   if (Ctx)
     LookupQualifiedName(Result, Ctx, SS);
   else

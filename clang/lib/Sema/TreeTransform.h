@@ -1102,10 +1102,22 @@ public:
   QualType RebuildElaboratedType(SourceLocation KeywordLoc,
                                  ElaboratedTypeKeyword Keyword,
                                  NestedNameSpecifierLoc QualifierLoc,
-                                 QualType Named) {
-    return SemaRef.Context.getElaboratedType(Keyword,
-                                         QualifierLoc.getNestedNameSpecifier(),
-                                             Named);
+                                 QualType Named,
+                                 bool MemberOfCurrentInstantiation) {
+    if (!MemberOfCurrentInstantiation)
+      return SemaRef.Context.getElaboratedType(Keyword,
+                                               QualifierLoc.getNestedNameSpecifier(),
+                                               Named,
+                                               /*OwnedTagDecl=*/nullptr,
+                                               MemberOfCurrentInstantiation);
+    return getDerived().RebuildDependentNameType(Keyword,
+                                                 KeywordLoc,
+                                                 QualifierLoc,
+                                                 Named.getBaseTypeIdentifier()
+                                                 T->getIdentifier(),
+                                                 TL.getNameLoc(),
+                                                 DeducedTSTContext,
+                                                 MemberOfCurrentInstantiation);
   }
 
   /// Build a new typename type that refers to a template-id.
@@ -1158,7 +1170,8 @@ public:
                                     NestedNameSpecifierLoc QualifierLoc,
                                     const IdentifierInfo *Id,
                                     SourceLocation IdLoc,
-                                    bool DeducedTSTContext) {
+                                    bool DeducedTSTContext,
+                                    bool MemberOfCurrentInstantiation) {
     CXXScopeSpec SS;
     SS.Adopt(QualifierLoc);
 
@@ -1173,7 +1186,8 @@ public:
     if (Keyword == ElaboratedTypeKeyword::None ||
         Keyword == ElaboratedTypeKeyword::Typename) {
       return SemaRef.CheckTypenameType(Keyword, KeywordLoc, QualifierLoc,
-                                       *Id, IdLoc, DeducedTSTContext);
+                                       *Id, IdLoc, DeducedTSTContext,
+                                       MemberOfCurrentInstantiation);
     }
 
     TagTypeKind Kind = TypeWithKeyword::getTagTypeKindForKeyword(Keyword);
@@ -1245,7 +1259,8 @@ public:
     QualType T = SemaRef.Context.getTypeDeclType(Tag);
     return SemaRef.Context.getElaboratedType(Keyword,
                                          QualifierLoc.getNestedNameSpecifier(),
-                                             T);
+                                             T, /*OwnedTagDecl=*/nullptr,
+                                             MemberOfCurrentInstantiation);
   }
 
   /// Build a new pack expansion type.
@@ -7211,10 +7226,12 @@ TreeTransform<Derived>::TransformElaboratedType(TypeLocBuilder &TLB,
   QualType Result = TL.getType();
   if (getDerived().AlwaysRebuild() ||
       QualifierLoc != TL.getQualifierLoc() ||
-      NamedT != T->getNamedType()) {
+      NamedT != T->getNamedType() ||
+      T->wasFoundInCurrentInstantiation()) {
     Result = getDerived().RebuildElaboratedType(TL.getElaboratedKeywordLoc(),
                                                 T->getKeyword(),
-                                                QualifierLoc, NamedT);
+                                                QualifierLoc, NamedT,
+                                                T->wasFoundInCurrentInstantiation());
     if (Result.isNull())
       return QualType();
   }

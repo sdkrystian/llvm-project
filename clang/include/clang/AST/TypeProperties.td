@@ -564,10 +564,14 @@ let Class = ElaboratedType in {
     let Read = [{ makeOptionalFromPointer(
                     const_cast<const TagDecl *>(node->getOwnedTagDecl())) }];
   }
+  def : Property<"foundInCurrentInstantiation", Bool> {
+    let Read = [{ node->wasFoundInCurrentInstantiation() }];
+  }
 
   def : Creator<[{
     return ctx.getElaboratedType(keyword, qualifier, namedType,
-                                 makePointerFromOptional(ownedTag));
+                                 makePointerFromOptional(ownedTag),
+                                 foundInCurrentInstantiation);
   }]>;
 }
 

@@ -2499,7 +2499,7 @@ bool Sema::LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
   // dependent base classes, then we either have to delay lookup until
   // template instantiation time (at which point all bases will be available)
   // or we have to fail.
-  #if 0
+  #if 1
   if (!InUnqualifiedLookup && LookupRec->isDependentContext() &&
       LookupRec->hasAnyDependentBases()) {
 

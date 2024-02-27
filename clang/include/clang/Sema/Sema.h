@@ -8893,7 +8893,8 @@ public:
                              NestedNameSpecifierLoc QualifierLoc,
                              const IdentifierInfo &II,
                              SourceLocation IILoc,
-                             bool DeducedTSTContext = true);
+                             bool DeducedTSTContext = true,
+                             bool PreviousFoundInCurrentInstantiation = false);
 
 
   TypeSourceInfo *RebuildTypeInCurrentInstantiation(TypeSourceInfo *T,
