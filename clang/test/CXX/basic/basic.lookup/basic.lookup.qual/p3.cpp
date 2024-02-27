@@ -13,7 +13,7 @@ namespace N0 {
     using BB = B;
 
     // These should all be diagnosed prior to instantiation
-    void f(B* a, B& b) {
+    void f(B *a, B &b) {
       this->x; // expected-error{{no member named}}
       this->A::x; // expected-error{{no member named}}
       this->B::x; // expected-error{{no member named}}
@@ -100,7 +100,7 @@ namespace N1 {
   struct B : T, A {
     using BB = B;
 
-    void f(B* a, B& b) {
+    void f(B *a, B &b) {
       a->x;
       a->A::x; // expected-error{{no member named}}
       a->B::x;

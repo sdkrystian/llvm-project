@@ -1,7 +1,4 @@
-// RUN: %clang_cc1 -fsyntax-only -verify %s
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused-value"
+// RUN: %clang_cc1 -fsyntax-only -Wno-unused-value -std=c++20 -verify %s
 
 namespace N0 {
 
@@ -10,6 +7,8 @@ namespace N0 {
 
     void f(int); // expected-note 3{{candidate found by name lookup is 'N0::A::f'}}
     void f(char); // expected-note 3{{candidate found by name lookup is 'N0::A::f'}}
+
+    using X = int;
   };
 
   struct B {
@@ -17,6 +16,8 @@ namespace N0 {
 
     void f(int); // expected-note 3{{candidate found by name lookup is 'N0::B::f'}}
     void f(char); // expected-note 3{{candidate found by name lookup is 'N0::B::f'}}
+
+    using X = char;
   };
 
   template<typename T>
@@ -45,6 +46,12 @@ namespace N0 {
       this->B::f(0);
       this->C::f(0);
       this->T::f(0);
+
+      static_cast<X *>(nullptr);
+      static_cast<A::X *>(nullptr);
+      static_cast<B::X *>(nullptr);
+      static_cast<C::X *>(nullptr);
+      static_cast<T::X *>(nullptr);
     }
 
     void instantiated() {
@@ -71,6 +78,14 @@ namespace N0 {
       this->B::f(0);
       this->C::f(0); // expected-error{{the result of lookup for 'f' in the template definition context differs from the result during instantiation}}
       this->T::f(0);
+
+      // FIXME: Diagnose mismatched lookup results in template definition/instantiation context.
+      static_cast<X *>(nullptr);
+      static_cast<A::X *>(nullptr);
+      static_cast<B::X *>(nullptr);
+      // FIXME: Diagnose mismatched lookup results in template definition/instantiation context.
+      static_cast<C::X *>(nullptr);
+      static_cast<T::X *>(nullptr);
     }
   };
 
@@ -85,6 +100,8 @@ namespace N1 {
 
     void f(int);
     void f(char);
+
+    using X = int;
   };
 
   struct B : virtual A {
@@ -96,6 +113,9 @@ namespace N1 {
 
     void g(int); // expected-note 2{{'B::g' declared here}}
     void g(char);
+
+    using X = char;
+    using Y = bool; // expected-note 4{{'B::Y' declared here}}
   };
 
   template<typename T>
@@ -148,6 +168,18 @@ namespace N1 {
       this->B::g(0);
       this->C::g(0);
       this->T::g(0);
+
+      static_cast<X *>(nullptr);
+      static_cast<A::X *>(nullptr);
+      static_cast<B::X *>(nullptr);
+      static_cast<C::X *>(nullptr);
+      static_cast<T::X *>(nullptr);
+
+      static_cast<Y *>(nullptr); // expected-error{{unknown type name 'Y'}}
+      static_cast<A::Y *>(nullptr); // expected-error{{no type named 'Y' in 'N1::A'}}
+      static_cast<B::Y *>(nullptr);
+      static_cast<C::Y *>(nullptr);
+      static_cast<T::Y *>(nullptr);
     }
 
     void instantiated() {
@@ -198,11 +230,22 @@ namespace N1 {
       this->B::g(0);
       this->C::g(0);
       this->T::g(0);
+
+      static_cast<X *>(nullptr);
+      static_cast<A::X *>(nullptr);
+      static_cast<B::X *>(nullptr);
+      // FIXME: Diagnose mismatched lookup results in template definition/instantiation context.
+      static_cast<C::X *>(nullptr);
+      static_cast<T::X *>(nullptr);
+
+      static_cast<Y *>(nullptr); // expected-error{{unknown type name 'Y'}}
+      static_cast<A::Y *>(nullptr); // expected-error{{no type named 'Y' in 'N1::A'}}
+      static_cast<B::Y *>(nullptr);
+      static_cast<C::Y *>(nullptr);
+      static_cast<T::Y *>(nullptr);
     }
   };
 
   template void C<B>::instantiated(); // expected-note{{in instantiation of member function 'N1::C<N1::B>::instantiated' requested here}}
 
 } // namespace N1
-
-#pragma clang diagnostic pop
