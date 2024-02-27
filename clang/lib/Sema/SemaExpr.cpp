@@ -15282,7 +15282,7 @@ static void RecordModifiableNonNullParam(Sema &S, const Expr *Exp) {
 static QualType CheckIndirectionOperand(Sema &S, Expr *Op, ExprValueKind &VK,
                                         SourceLocation OpLoc,
                                         bool IsAfterAmp = false) {
-  if (Op->isTypeDependent())
+  if (Op->isTypeDependent() && !Op->getType()->isAnyPointerType())
     return S.Context.DependentTy;
 
   ExprResult ConvResult = S.UsualUnaryConversions(Op);

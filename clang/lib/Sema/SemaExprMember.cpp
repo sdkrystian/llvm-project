@@ -1065,6 +1065,10 @@ Sema::BuildMemberReferenceExpr(Expr *BaseExpr, QualType BaseExprType,
 
   QualType BaseType = BaseExprType;
   if (IsArrow) {
+    // FIXME: This is a hack! The assert does not always hold when performing
+    // typo-correction
+    if (!BaseType->isPointerType())
+      return ExprError();
     assert(BaseType->isPointerType());
     BaseType = BaseType->castAs<PointerType>()->getPointeeType();
   }
