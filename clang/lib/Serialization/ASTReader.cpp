@@ -7031,8 +7031,10 @@ void TypeLocReader::VisitParenTypeLoc(ParenTypeLoc TL) {
 }
 
 void TypeLocReader::VisitElaboratedTypeLoc(ElaboratedTypeLoc TL) {
+  TL.setIdentifierLoc(readSourceLocation());
   TL.setElaboratedKeywordLoc(readSourceLocation());
   TL.setQualifierLoc(ReadNestedNameSpecifierLoc());
+  TL.setIdentifier(Reader.readIdentifier());
 }
 
 void TypeLocReader::VisitInjectedClassNameTypeLoc(InjectedClassNameTypeLoc TL) {

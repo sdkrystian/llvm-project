@@ -239,6 +239,7 @@ static ParsedType recoverFromTypeInKnownDependentBase(Sema &S,
 /// Build a ParsedType for a simple-type-specifier with a nested-name-specifier.
 static ParsedType buildNamedType(Sema &S, const CXXScopeSpec *SS, QualType T,
                                  SourceLocation NameLoc,
+                                 const IdentifierInfo *NameII,
                                  bool WantNontrivialTypeSourceInfo = true) {
   switch (T->getTypeClass()) {
   case Type::DeducedTemplateSpecialization:
@@ -272,6 +273,10 @@ static ParsedType buildNamedType(Sema &S, const CXXScopeSpec *SS, QualType T,
   ElaboratedTypeLoc ElabTL = Builder.push<ElaboratedTypeLoc>(ElTy);
   ElabTL.setElaboratedKeywordLoc(SourceLocation());
   ElabTL.setQualifierLoc(SS->getWithLocInContext(S.Context));
+  if (ElabTL.getTypePtr()->wasFoundInCurrentInstantiation()) {
+    ElabTL.setIdentifier(NameII);
+    ElabTL.setIdentifierLoc(NameLoc);
+  }
   return S.CreateParsedType(ElTy, Builder.getTypeSourceInfo(S.Context, ElTy));
 }
 
@@ -563,7 +568,7 @@ ParsedType Sema::getTypeName(const IdentifierInfo &II, SourceLocation NameLoc,
   if (FoundUsingShadow)
     T = Context.getUsingType(FoundUsingShadow, T);
 
-  return buildNamedType(*this, SS, T, NameLoc, WantNontrivialTypeSourceInfo);
+  return buildNamedType(*this, SS, T, NameLoc, &II, WantNontrivialTypeSourceInfo);
 }
 
 // Builds a fake NNS for the given decl context.
@@ -1173,7 +1178,7 @@ Corrected:
     QualType T = Context.getTypeDeclType(Type);
     if (const auto *USD = dyn_cast<UsingShadowDecl>(Found))
       T = Context.getUsingType(USD, T);
-    return buildNamedType(*this, &SS, T, NameLoc);
+    return buildNamedType(*this, &SS, T, NameLoc, Name);
   };
 
   NamedDecl *FirstDecl = (*Result.begin())->getUnderlyingDecl();

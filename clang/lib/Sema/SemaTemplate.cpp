@@ -4319,6 +4319,10 @@ TypeResult Sema::ActOnTemplateIdType(
   ElabTL.setElaboratedKeywordLoc(SourceLocation());
   if (!ElabTL.isEmpty())
     ElabTL.setQualifierLoc(SS.getWithLocInContext(Context));
+  if (ElabTL.getTypePtr()->wasFoundInCurrentInstantiation()) {
+    ElabTL.setIdentifier(TemplateII);
+    ElabTL.setIdentifierLoc(TemplateIILoc);
+  }
   return CreateParsedType(ElTy, TLB.getTypeSourceInfo(Context, ElTy));
 }
 
@@ -4415,6 +4419,12 @@ TypeResult Sema::ActOnTagTemplateIdType(TagUseKind TUK,
   ElaboratedTypeLoc ElabTL = TLB.push<ElaboratedTypeLoc>(Result);
   ElabTL.setElaboratedKeywordLoc(TagLoc);
   ElabTL.setQualifierLoc(SS.getWithLocInContext(Context));
+  if (ElabTL.getTypePtr()->wasFoundInCurrentInstantiation()) {
+    if (const TemplateDecl *TD = Template.getAsTemplateDecl())
+      ElabTL.setIdentifier(TD->getIdentifier());
+    ElabTL.setIdentifierLoc(TemplateLoc);
+  }
+
   return CreateParsedType(Result, TLB.getTypeSourceInfo(Context, Result));
 }
 
@@ -11150,11 +11160,19 @@ Sema::ActOnTypenameType(Scope *S,
   for (unsigned I = 0, N = TemplateArgs.size(); I != N; ++I)
     SpecTL.setArgLocInfo(I, TemplateArgs[I].getLocInfo());
 
+#if 0
   T = Context.getElaboratedType(ElaboratedTypeKeyword::Typename,
                                 SS.getScopeRep(), T);
+#else
+  T = getElaboratedType(ElaboratedTypeKeyword::Typename, SS, T);
+#endif
   ElaboratedTypeLoc TL = Builder.push<ElaboratedTypeLoc>(T);
   TL.setElaboratedKeywordLoc(TypenameLoc);
   TL.setQualifierLoc(SS.getWithLocInContext(Context));
+  if (TL.getTypePtr()->wasFoundInCurrentInstantiation()) {
+    TL.setIdentifier(TemplateII);
+    TL.setIdentifierLoc(TemplateIILoc);
+  }
 
   TypeSourceInfo *TSI = Builder.getTypeSourceInfo(Context, T);
   return CreateParsedType(T, TSI);
@@ -11234,6 +11252,10 @@ Sema::CheckTypenameType(ElaboratedTypeKeyword Keyword,
     TL.setElaboratedKeywordLoc(KeywordLoc);
     TL.setQualifierLoc(QualifierLoc);
     TL.getNamedTypeLoc().castAs<TypeSpecTypeLoc>().setNameLoc(IILoc);
+    if (TL.getTypePtr()->wasFoundInCurrentInstantiation()) {
+      TL.setIdentifier(&II);
+      TL.setIdentifierLoc(IILoc);
+    }
   }
   return T;
 }

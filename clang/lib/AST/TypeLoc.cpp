@@ -545,6 +545,8 @@ void ElaboratedTypeLoc::initializeLocal(ASTContext &Context,
   NestedNameSpecifierLocBuilder Builder;
   Builder.MakeTrivial(Context, getTypePtr()->getQualifier(), Loc);
   setQualifierLoc(Builder.getWithLocInContext(Context));
+  getLocalData()->IdentifierLoc = Loc;
+  getLocalData()->Identifier = nullptr;
 }
 
 void DependentNameTypeLoc::initializeLocal(ASTContext &Context,

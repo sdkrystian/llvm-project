@@ -1103,6 +1103,7 @@ public:
                                  ElaboratedTypeKeyword Keyword,
                                  NestedNameSpecifierLoc QualifierLoc,
                                  SourceLocation IdentLoc,
+                                 const IdentifierInfo *II,
                                  QualType Named,
                                  bool MemberOfCurrentInstantiation) {
     if (!MemberOfCurrentInstantiation)
@@ -1114,7 +1115,7 @@ public:
     return getDerived().RebuildDependentNameType(Keyword,
                                                  KeywordLoc,
                                                  QualifierLoc,
-                                                 Named.getBaseTypeIdentifier(),
+                                                 II,
                                                  IdentLoc,
                                                  /*DeducedTSTContext=*/true,
                                                  MemberOfCurrentInstantiation);
@@ -7231,7 +7232,8 @@ TreeTransform<Derived>::TransformElaboratedType(TypeLocBuilder &TLB,
     Result = getDerived().RebuildElaboratedType(TL.getElaboratedKeywordLoc(),
                                                 T->getKeyword(),
                                                 QualifierLoc,
-                                                TL.getNamedTypeLoc().getBeginLoc(),
+                                                TL.getIdentifierLoc(),
+                                                TL.getIdentifier(),
                                                 NamedT,
                                                 T->wasFoundInCurrentInstantiation());
     if (Result.isNull())
@@ -7241,6 +7243,10 @@ TreeTransform<Derived>::TransformElaboratedType(TypeLocBuilder &TLB,
   ElaboratedTypeLoc NewTL = TLB.push<ElaboratedTypeLoc>(Result);
   NewTL.setElaboratedKeywordLoc(TL.getElaboratedKeywordLoc());
   NewTL.setQualifierLoc(QualifierLoc);
+  if (NewTL.getTypePtr()->wasFoundInCurrentInstantiation()) {
+    NewTL.setIdentifierLoc(TL.getIdentifierLoc());
+    NewTL.setIdentifier(TL.getIdentifier());
+  }
   return Result;
 }
 
@@ -7386,6 +7392,10 @@ QualType TreeTransform<Derived>::TransformDependentNameType(
     ElaboratedTypeLoc NewTL = TLB.push<ElaboratedTypeLoc>(Result);
     NewTL.setElaboratedKeywordLoc(TL.getElaboratedKeywordLoc());
     NewTL.setQualifierLoc(QualifierLoc);
+    if (NewTL.getTypePtr()->wasFoundInCurrentInstantiation()) {
+      NewTL.setIdentifier(T->getIdentifier());
+      NewTL.setIdentifierLoc(TL.getNameLoc());
+    }
   } else {
     DependentNameTypeLoc NewTL = TLB.push<DependentNameTypeLoc>(Result);
     NewTL.setElaboratedKeywordLoc(TL.getElaboratedKeywordLoc());

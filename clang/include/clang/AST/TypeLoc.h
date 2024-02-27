@@ -2274,6 +2274,10 @@ public:
 };
 
 struct ElaboratedLocInfo {
+  const IdentifierInfo *Identifier;
+
+  SourceLocation IdentifierLoc;
+
   SourceLocation ElaboratedKWLoc;
 
   /// Data associated with the nested-name-specifier location.
@@ -2295,6 +2299,30 @@ public:
       return;
     }
     getLocalData()->ElaboratedKWLoc = Loc;
+  }
+
+  SourceLocation getIdentifierLoc() const {
+    return getTypePtr()->wasFoundInCurrentInstantiation() ? getLocalData()->IdentifierLoc : SourceLocation();
+  }
+
+  void setIdentifierLoc(SourceLocation Loc) {
+    if (!getTypePtr()->wasFoundInCurrentInstantiation()) {
+      assert(Loc.isInvalid());
+      return;
+    }
+    getLocalData()->IdentifierLoc = Loc;
+  }
+
+  const IdentifierInfo *getIdentifier() const {
+    return getTypePtr()->wasFoundInCurrentInstantiation() ? getLocalData()->Identifier : nullptr;
+  }
+
+  void setIdentifier(const IdentifierInfo *II) {
+    if (!getTypePtr()->wasFoundInCurrentInstantiation()) {
+      assert(!II);
+      return;
+    }
+    getLocalData()->Identifier = II;
   }
 
   NestedNameSpecifierLoc getQualifierLoc() const {
@@ -2333,7 +2361,8 @@ public:
 
   bool isEmpty() const {
     return getTypePtr()->getKeyword() == ElaboratedTypeKeyword::None &&
-           !getTypePtr()->getQualifier();
+           !getTypePtr()->getQualifier() &&
+           !getTypePtr()->wasFoundInCurrentInstantiation();
   }
 
   unsigned getLocalDataAlignment() const {
