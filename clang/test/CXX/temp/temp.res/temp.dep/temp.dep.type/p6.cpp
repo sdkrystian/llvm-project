@@ -8,7 +8,7 @@ namespace N0 {
     void f(int); // expected-note 3{{candidate found by name lookup is 'N0::A::f'}}
     void f(char); // expected-note 3{{candidate found by name lookup is 'N0::A::f'}}
 
-    using X = int;
+    using X = int; // expected-note {{candidate found by name lookup is 'N0::A::X'}}
   };
 
   struct B {
@@ -17,7 +17,7 @@ namespace N0 {
     void f(int); // expected-note 3{{candidate found by name lookup is 'N0::B::f'}}
     void f(char); // expected-note 3{{candidate found by name lookup is 'N0::B::f'}}
 
-    using X = char;
+    using X = char; // expected-note {{candidate found by name lookup is 'N0::B::X'}}
   };
 
   template<typename T>
@@ -79,12 +79,10 @@ namespace N0 {
       this->C::f(0); // expected-error{{the result of lookup for 'f' in the template definition context differs from the result during instantiation}}
       this->T::f(0);
 
-      // FIXME: Diagnose mismatched lookup results in template definition/instantiation context.
       static_cast<X *>(nullptr);
       static_cast<A::X *>(nullptr);
       static_cast<B::X *>(nullptr);
-      // FIXME: Diagnose mismatched lookup results in template definition/instantiation context.
-      static_cast<C::X *>(nullptr);
+      static_cast<C::X *>(nullptr); // expected-error{{the result of lookup for 'X' in the template definition context differs from the result during instantiation}}
       static_cast<T::X *>(nullptr);
     }
   };
@@ -114,7 +112,7 @@ namespace N1 {
     void g(int); // expected-note 2{{'B::g' declared here}}
     void g(char);
 
-    using X = char;
+    using X = char; // expected-note{{candidate found by name lookup is 'N1::B::X'}}
     using Y = bool; // expected-note 4{{'B::Y' declared here}}
   };
 
@@ -234,8 +232,7 @@ namespace N1 {
       static_cast<X *>(nullptr);
       static_cast<A::X *>(nullptr);
       static_cast<B::X *>(nullptr);
-      // FIXME: Diagnose mismatched lookup results in template definition/instantiation context.
-      static_cast<C::X *>(nullptr);
+      static_cast<C::X *>(nullptr); // expected-error{{the result of lookup for 'X' in the template definition context differs from the result during instantiation}}
       static_cast<T::X *>(nullptr);
 
       static_cast<Y *>(nullptr); // expected-error{{unknown type name 'Y'}}
