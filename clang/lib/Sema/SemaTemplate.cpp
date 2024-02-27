@@ -11362,12 +11362,16 @@ Sema::CheckTypenameType(ElaboratedTypeKeyword Keyword,
         Diag(IILoc, diag::ext_out_of_line_qualified_id_type_names_constructor)
             << &II << 1 << 0 /*'typename' keyword used*/;
 
+      bool FoundMemberOfCurrentInstantiation = Ctx && Ctx->isDependentContext();
+
       // We found a type. Build an ElaboratedType, since the
       // typename-specifier was just sugar.
       MarkAnyDeclReferenced(Type->getLocation(), Type, /*OdrUse=*/false);
       return Context.getElaboratedType(Keyword,
                                        QualifierLoc.getNestedNameSpecifier(),
-                                       Context.getTypeDeclType(Type));
+                                       Context.getTypeDeclType(Type),
+                                       /*OwnedTagDecl=*/nullptr,
+                                       FoundMemberOfCurrentInstantiation);
     }
 
     // C++ [dcl.type.simple]p2:

@@ -1401,6 +1401,7 @@ namespace {
     QualType RebuildElaboratedType(SourceLocation KeywordLoc,
                                    ElaboratedTypeKeyword Keyword,
                                    NestedNameSpecifierLoc QualifierLoc,
+                                   SourceLocation IdentLoc,
                                    QualType T,
                                    bool MemberOfCurrentInstantiation);
 
@@ -1773,6 +1774,7 @@ QualType
 TemplateInstantiator::RebuildElaboratedType(SourceLocation KeywordLoc,
                                             ElaboratedTypeKeyword Keyword,
                                             NestedNameSpecifierLoc QualifierLoc,
+                                            SourceLocation IdentLoc,
                                             QualType T,
                                             bool MemberOfCurrentInstantiation) {
   if (const TagType *TT = T->getAs<TagType>()) {
@@ -1798,7 +1800,7 @@ TemplateInstantiator::RebuildElaboratedType(SourceLocation KeywordLoc,
     }
   }
 
-  return inherited::RebuildElaboratedType(KeywordLoc, Keyword, QualifierLoc, T, MemberOfCurrentInstantiation);
+  return inherited::RebuildElaboratedType(KeywordLoc, Keyword, QualifierLoc, IdentLoc, T, MemberOfCurrentInstantiation);
 }
 
 TemplateName TemplateInstantiator::TransformTemplateName(

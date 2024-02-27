@@ -1102,6 +1102,7 @@ public:
   QualType RebuildElaboratedType(SourceLocation KeywordLoc,
                                  ElaboratedTypeKeyword Keyword,
                                  NestedNameSpecifierLoc QualifierLoc,
+                                 SourceLocation IdentLoc,
                                  QualType Named,
                                  bool MemberOfCurrentInstantiation) {
     if (!MemberOfCurrentInstantiation)
@@ -1113,10 +1114,9 @@ public:
     return getDerived().RebuildDependentNameType(Keyword,
                                                  KeywordLoc,
                                                  QualifierLoc,
-                                                 Named.getBaseTypeIdentifier()
-                                                 T->getIdentifier(),
-                                                 TL.getNameLoc(),
-                                                 DeducedTSTContext,
+                                                 Named.getBaseTypeIdentifier(),
+                                                 IdentLoc,
+                                                 /*DeducedTSTContext=*/true,
                                                  MemberOfCurrentInstantiation);
   }
 
@@ -7230,7 +7230,9 @@ TreeTransform<Derived>::TransformElaboratedType(TypeLocBuilder &TLB,
       T->wasFoundInCurrentInstantiation()) {
     Result = getDerived().RebuildElaboratedType(TL.getElaboratedKeywordLoc(),
                                                 T->getKeyword(),
-                                                QualifierLoc, NamedT,
+                                                QualifierLoc,
+                                                TL.getNamedTypeLoc().getBeginLoc(),
+                                                NamedT,
                                                 T->wasFoundInCurrentInstantiation());
     if (Result.isNull())
       return QualType();
@@ -7372,7 +7374,8 @@ QualType TreeTransform<Derived>::TransformDependentNameType(
                                             QualifierLoc,
                                             T->getIdentifier(),
                                             TL.getNameLoc(),
-                                            DeducedTSTContext);
+                                            DeducedTSTContext,
+                                            /*MemberOfCurrentInstantiation=*/false);
   if (Result.isNull())
     return QualType();
 

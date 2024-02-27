@@ -9726,8 +9726,13 @@ QualType Sema::getElaboratedType(ElaboratedTypeKeyword Keyword,
                                  TagDecl *OwnedTagDecl) {
   if (T.isNull())
     return T;
+  bool MemberOfCurrentInstantiation = false;
+  if (SS.isValid()) {
+    DeclContext *Ctx = computeDeclContext(SS, false);
+    MemberOfCurrentInstantiation = Ctx && Ctx->isDependentContext();
+  }
   return Context.getElaboratedType(
-      Keyword, SS.isValid() ? SS.getScopeRep() : nullptr, T, OwnedTagDecl);
+      Keyword, SS.isValid() ? SS.getScopeRep() : nullptr, T, OwnedTagDecl, MemberOfCurrentInstantiation);
 }
 
 QualType Sema::BuildTypeofExprType(Expr *E, TypeOfKind Kind) {
