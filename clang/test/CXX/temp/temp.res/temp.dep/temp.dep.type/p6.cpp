@@ -55,69 +55,65 @@ namespace N1 {
   };
 
   struct B : virtual A {
-  };
-
-  struct C : virtual A {
-    char x; // expected-note 3{{candidate found by name lookup is 'N1::C::x'}}
-    bool y; // expected-note 4{{'C::y' declared here}}
+    char x; // expected-note 3{{candidate found by name lookup is 'N1::B::x'}}
+    bool y; // expected-note 2{{'B::y' declared here}}
   };
 
   template<typename T>
-  struct D : B, T {
+  struct C : virtual A, T {
     void not_instantiated() {
       x;
-      D::x;
-      C::x;
-      B::x;
       A::x;
+      B::x;
+      C::x;
+      T::x;
 
       this->x;
-      this->D::x;
-      this->C::x;
-      this->B::x;
       this->A::x;
+      this->B::x;
+      this->C::x;
+      this->T::x;
 
       y; // expected-error{{use of undeclared identifier 'y'}}
-      D::y;
-      C::y;
-      B::y; // expected-error{{no member named 'y' in 'N1::B'}}
       A::y; // expected-error{{no member named 'y' in 'N1::A'}}
+      B::y;
+      C::y;
+      T::y;
 
       this->y;
-      this->D::y;
-      this->C::y;
-      this->B::y; // expected-error{{no member named 'y' in 'N1::B'}}
       this->A::y; // expected-error{{no member named 'y' in 'N1::A'}}
+      this->B::y;
+      this->C::y;
+      this->T::y;
     }
 
     void instantiated() {
       x;
-      D::x; // expected-error{{the result of lookup for 'x' in the template definition context differs from the result during instantiation}}
-      C::x;
-      B::x;
       A::x;
+      B::x;
+      C::x; // expected-error{{the result of lookup for 'x' in the template definition context differs from the result during instantiation}}
 
       this->x; // expected-error{{the result of lookup for 'x' in the template definition context differs from the result during instantiation}}
-      this->D::x; // expected-error{{the result of lookup for 'x' in the template definition context differs from the result during instantiation}}
-      this->C::x;
-      this->B::x;
       this->A::x;
+      this->B::x;
+      this->C::x; // expected-error{{the result of lookup for 'x' in the template definition context differs from the result during instantiation}}
+      this->T::x;
 
       y; // expected-error{{use of undeclared identifier 'y'}}
-      D::y;
-      C::y;
-      B::y; // expected-error{{no member named 'y' in 'N1::B'}}
       A::y; // expected-error{{no member named 'y' in 'N1::A'}}
+      B::y;
+      C::y;
+      T::y;
 
       this->y;
-      this->D::y;
-      this->C::y;
-      this->B::y; // expected-error{{no member named 'y' in 'N1::B'}}
       this->A::y; // expected-error{{no member named 'y' in 'N1::A'}}
+      this->B::y;
+      this->C::y;
+      this->T::y;
     }
   };
 
-  template void D<C>::instantiated(); // expected-note{{in instantiation of member function 'N1::D<N1::C>::instantiated' requested here}}
+  template void C<B>::instantiated(); // expected-note{{in instantiation of member function 'N1::C<N1::B>::instantiated' requested here}}
 
 } // namespace N1
 
