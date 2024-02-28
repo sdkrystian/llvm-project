@@ -2941,9 +2941,58 @@ void Sema::DiagnoseAmbiguousLookup(LookupResult &Result) {
     #endif
 
     // DeclContext::lookup_iterator Found = Paths->front().Decls;
-
+    #if 0
     for (auto *D : Result)
       Diag(D->getLocation(), diag::note_ambiguous_candidate) << D;
+    #else
+
+    llvm::SmallPtrSet<const NamedDecl *, 8> FoundDefinition;
+    llvm::SmallPtrSet<const NamedDecl *, 8> FoundInstantiation;
+
+    for (const CXXBasePath &Path : *Paths) {
+      const CXXBaseSpecifier *Base = Path.front().Base;
+      for (auto First = Path.Decls, Last = First.end(); First != Last; ++First) {
+        const NamedDecl *ND = *First;
+        if (!ND->isInIdentifierNamespace(Result.getIdentifierNamespace()))
+          continue;
+        FoundInstantiation.insert(ND);
+        if (!Base->wasInstantiatedFromDependent())
+          FoundDefinition.insert(ND);
+
+      }
+    }
+
+    for (const NamedDecl *ND : FoundDefinition) {
+      Diag(ND->getLocation(), diag::note_ambiguous_two_phase_found)
+          << false
+          << ND;
+    }
+
+    for (const NamedDecl *ND : FoundInstantiation) {
+      Diag(ND->getLocation(), diag::note_ambiguous_two_phase_found)
+          << true
+          << ND;
+    }
+
+    #if 0
+    std::set<const NamedDecl *> DeclsPrinted;
+    for (CXXBasePaths::paths_iterator Path = Paths->begin(),
+                                      PathEnd = Paths->end();
+         Path != PathEnd; ++Path) {
+      const NamedDecl *D = *Path->Decls;
+      if (!D->isInIdentifierNamespace(Result.getIdentifierNamespace()))
+        continue;
+      if (DeclsPrinted.insert(D).second) {
+
+
+      }
+    }
+    #endif
+
+
+
+
+    #endif
 
     break;
   }
