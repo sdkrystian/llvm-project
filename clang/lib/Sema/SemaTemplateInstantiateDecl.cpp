@@ -1389,6 +1389,50 @@ Decl *TemplateDeclInstantiator::VisitIndirectFieldDecl(IndirectFieldDecl *D) {
   return IndirectField;
 }
 
+bool TemplateDeclInstantiator::instantiateFriendDeclPack(FriendDecl *D) {
+  assert(D->getEllipsisLoc().isValid());
+  TypeLoc Pattern = D->getFriendType()->getTypeLoc();
+  SmallVector<UnexpandedParameterPack, 2> Unexpanded;
+  SemaRef.collectUnexpandedParameterPacks(Pattern, Unexpanded);
+
+  // Determine whether the set of unexpanded parameter packs can and should
+  // be expanded.
+  bool Expand = true;
+  bool RetainExpansion = false;
+  std::optional<unsigned> NumExpansions;
+  if (SemaRef.CheckParameterPacksForExpansion(
+        D->getEllipsisLoc(), D->getSourceRange(), Unexpanded, TemplateArgs,
+        Expand, RetainExpansion, NumExpansions))
+    return true;
+
+  // This declaration cannot appear within a function template signature,
+  // so we can't have a partial argument list for a parameter pack.
+  assert(!RetainExpansion &&
+         "should never need to retain an expansion for UsingPackDecl");
+
+  if (!Expand) {
+    // We cannot fully expand the pack expansion now, so substitute into the
+    // pattern and create a new pack expansion.
+    Sema::ArgumentPackSubstitutionIndexRAII SubstIndex(SemaRef, -1);
+    return true;
+  }
+
+  for (unsigned I = 0; I != *NumExpansions; ++I) {
+    Sema::ArgumentPackSubstitutionIndexRAII SubstIndex(SemaRef, I);
+    TypeSourceInfo *NewDI = SemaRef.SubstType(Pattern, TemplateArgs,
+                                              D->getLocation(),
+                                              DeclarationName());
+    if (!NewDI)
+      return true;
+    FriendDecl *FD = FriendDecl::Create(
+        SemaRef.Context, Owner, D->getLocation(), NewDI, D->getFriendLoc());
+    FD->setAccess(AS_public);
+    FD->setUnsupportedFriend(D->isUnsupportedFriend());
+    Owner->addDecl(FD);
+  }
+  return false;
+}
+
 Decl *TemplateDeclInstantiator::VisitFriendDecl(FriendDecl *D) {
   // Handle friend type expressions by simply substituting template
   // parameters into the pattern type and checking the result.
@@ -1401,6 +1445,10 @@ Decl *TemplateDeclInstantiator::VisitFriendDecl(FriendDecl *D) {
     if (D->isUnsupportedFriend()) {
       InstTy = Ty;
     } else {
+      if (D->getEllipsisLoc().isValid()) {
+        instantiateFriendDeclPack(D);
+        return nullptr;
+      }
       InstTy = SemaRef.SubstType(Ty, TemplateArgs,
                                  D->getLocation(), DeclarationName());
     }

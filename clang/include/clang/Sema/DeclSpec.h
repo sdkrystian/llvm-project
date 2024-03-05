@@ -617,6 +617,7 @@ public:
   SourceLocation getUnalignedSpecLoc() const { return TQ_unalignedLoc; }
   SourceLocation getPipeLoc() const { return TQ_pipeLoc; }
   SourceLocation getEllipsisLoc() const { return EllipsisLoc; }
+  void setEllipsisLoc(SourceLocation Loc) { EllipsisLoc = Loc; }
 
   /// Clear out all of the type qualifiers.
   void ClearTypeQualifiers() {

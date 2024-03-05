@@ -2960,6 +2960,12 @@ Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
                                   : nullptr,
       TemplateInfo.TemplateParams ? TemplateInfo.TemplateParams->size() : 0);
 
+  SourceLocation EllipsisLoc;
+  if (DS.isFriendSpecified() &&
+      DS.getTypeSpecType() == DeclSpec::TST_typename &&
+      TryConsumeToken(tok::ellipsis, EllipsisLoc))
+    DS.setEllipsisLoc(EllipsisLoc);
+
   if (TryConsumeToken(tok::semi)) {
     if (DS.isFriendSpecified())
       ProhibitAttributes(DeclAttrs);

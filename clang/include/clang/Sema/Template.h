@@ -725,6 +725,8 @@ enum class TemplateSubstitutionKind : char {
     template<typename T>
     Decl *instantiateUnresolvedUsingDecl(T *D,
                                          bool InstantiatingPackElement = false);
+
+    bool instantiateFriendDeclPack(FriendDecl *D);
   };
 
 } // namespace clang

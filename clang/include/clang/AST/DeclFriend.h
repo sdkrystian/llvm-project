@@ -70,6 +70,9 @@ private:
   // Location of the 'friend' specifier.
   SourceLocation FriendLoc;
 
+  // Location of the ellipsis.
+  SourceLocation EllipsisLoc;
+
   /// True if this 'friend' declaration is unsupported.  Eventually we
   /// will support every possible friend declaration, but for now we
   /// silently ignore some and set this flag to authorize all access.
@@ -175,6 +178,14 @@ public:
   }
   void setUnsupportedFriend(bool Unsupported) {
     UnsupportedFriend = Unsupported;
+  }
+
+  SourceLocation getEllipsisLoc() const {
+    return EllipsisLoc;
+  }
+
+  void setEllipsisLoc(SourceLocation Loc) {
+    EllipsisLoc = Loc;
   }
 
   // Implement isa/cast/dyncast/etc.

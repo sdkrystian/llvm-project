@@ -17722,7 +17722,8 @@ Decl *Sema::ActOnFriendTypeDecl(Scope *S, const DeclSpec &DS,
   if (TheDeclarator.isInvalidType())
     return nullptr;
 
-  if (DiagnoseUnexpandedParameterPack(Loc, TSI, UPPC_FriendDeclaration))
+  if (DS.getEllipsisLoc().isInvalid() &&
+      DiagnoseUnexpandedParameterPack(Loc, TSI, UPPC_FriendDeclaration))
     return nullptr;
 
   if (!T->isElaboratedTypeSpecifier()) {
@@ -17768,12 +17769,15 @@ Decl *Sema::ActOnFriendTypeDecl(Scope *S, const DeclSpec &DS,
   // friend a member of an arbitrary specialization of your template).
 
   Decl *D;
-  if (!TempParams.empty())
+  if (!TempParams.empty()) {
     D = FriendTemplateDecl::Create(Context, CurContext, Loc, TempParams, TSI,
                                    FriendLoc);
-  else
-    D = FriendDecl::Create(Context, CurContext, TSI->getTypeLoc().getBeginLoc(),
-                           TSI, FriendLoc);
+  } else {
+    FriendDecl *FD = FriendDecl::Create(Context, CurContext, TSI->getTypeLoc().getBeginLoc(),
+                                        TSI, FriendLoc);
+    FD->setEllipsisLoc(DS.getEllipsisLoc());
+    D = FD;
+  }
 
   if (!D)
     return nullptr;
