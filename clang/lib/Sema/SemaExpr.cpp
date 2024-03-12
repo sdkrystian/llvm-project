@@ -2751,7 +2751,7 @@ Sema::ActOnIdExpression(Scope *S, CXXScopeSpec &SS,
     // results until we get here but it's likely not worth it.
     bool MemberOfUnknownSpecialization;
     AssumedTemplateKind AssumedTemplate;
-    if (LookupTemplateName(R, S, SS, QualType(), /*EnteringContext=*/false,
+    if (LookupTemplateName(R, S, SS, /*ObjectType=*/QualType(), /*EnteringContext=*/false,
                            MemberOfUnknownSpecialization, TemplateKWLoc,
                            &AssumedTemplate))
       return ExprError();
@@ -2796,6 +2796,9 @@ Sema::ActOnIdExpression(Scope *S, CXXScopeSpec &SS,
   // Determine whether this name might be a candidate for
   // argument-dependent lookup.
   bool ADL = UseArgumentDependentLookup(SS, R, HasTrailingLParen);
+
+  if (TemplateKWLoc.isValid() || TemplateArgs)
+    FilterAcceptableTemplateNames(R);
 
   if (R.empty() && !ADL) {
     if (SS.isEmpty() && getLangOpts().MSVCCompat) {

@@ -214,6 +214,9 @@ TemplateNameKind Sema::isTemplateName(Scope *S,
                          /*AllowTypoCorrection=*/!Disambiguation))
     return TNK_Non_template;
 
+  if (!R.isAmbiguous())
+    FilterAcceptableTemplateNames(R);
+
   if (AssumedTemplate != AssumedTemplateKind::None) {
     TemplateResult = TemplateTy::make(Context.getAssumedTemplateName(TName));
     // Let the parser know whether we found nothing or found functions; if we
@@ -325,10 +328,12 @@ bool Sema::isDeductionGuideName(Scope *S, const IdentifierInfo &Name,
   // syntactic form of a deduction guide is enough to identify it even
   // if we can't look up the template name at all.
   LookupResult R(*this, DeclarationName(&Name), NameLoc, LookupOrdinaryName);
-  if (LookupTemplateName(R, S, SS, /*ObjectType*/ QualType(),
-                         /*EnteringContext*/ false,
+  if (LookupTemplateName(R, S, SS, /*ObjectType=*/QualType(),
+                         /*EnteringContext=*/false,
                          MemberOfUnknownSpecialization))
     return false;
+  if (!R.isAmbiguous())
+    FilterAcceptableTemplateNames(R);
 
   if (R.empty()) return false;
   if (R.isAmbiguous()) {
@@ -473,6 +478,8 @@ bool Sema::LookupTemplateName(LookupResult &Found,
       //  and template template parameters is a wording defect.
       AllowFunctionTemplatesInLookup = false;
       ObjectTypeSearchedInScope = true;
+
+      FilterAcceptableTemplateNames(Found, false, false);
     }
 
     IsDependent |= Found.wasNotFoundInCurrentInstantiation();
@@ -491,6 +498,7 @@ bool Sema::LookupTemplateName(LookupResult &Found,
     // To keep our behavior consistent, we apply the "finds nothing" part in
     // all language modes, and diagnose the empty lookup in ActOnCallExpr if we
     // successfully form a call to an undeclared template-id.
+    #if 0
     bool AllFunctions =
         getLangOpts().CPlusPlus20 && llvm::all_of(Found, [](NamedDecl *ND) {
           return isa<FunctionDecl>(ND->getUnderlyingDecl());
@@ -505,6 +513,26 @@ bool Sema::LookupTemplateName(LookupResult &Found,
       Found.clear();
       return false;
     }
+    #else
+    bool AnyFunctions =
+        getLangOpts().CPlusPlus20 && llvm::any_of(Found, [](NamedDecl *ND) {
+          return isa<FunctionDecl>(ND->getUnderlyingDecl());
+        });
+    if (AnyFunctions || (Found.empty() && !IsDependent)) {
+      // If lookup found any functions, or if this is a name that can only be
+      // used for a function, then strongly assume this is a function
+      // template-id.
+      *ATK = (Found.empty() && Found.getLookupName().isIdentifier())
+                 ? AssumedTemplateKind::FoundNothing
+                 : AssumedTemplateKind::FoundFunctions;
+      #if 0
+      FilterAcceptableTemplateNames(Found,
+                                    /*AllowFunctionTemplates*/ true,
+                                    /*AllowDependent*/ true);
+      #endif
+      return false;
+    }
+    #endif
   }
 
   if (Found.empty() && !IsDependent && AllowTypoCorrection) {
@@ -544,8 +572,15 @@ bool Sema::LookupTemplateName(LookupResult &Found,
 
   NamedDecl *ExampleLookupResult =
       Found.empty() ? nullptr : Found.getRepresentativeDecl();
+  #if 0
   FilterAcceptableTemplateNames(Found, AllowFunctionTemplatesInLookup);
   if (Found.empty()) {
+  #else
+  if (!hasAnyAcceptableTemplateNames(Found,
+                                     AllowFunctionTemplatesInLookup,
+                                     AllowFunctionTemplatesInLookup,
+                                     /*AllowNonTemplateFunctions=*/false)) {
+  #endif
     if (IsDependent) {
       MemberOfUnknownSpecialization = true;
       return false;
@@ -5433,19 +5468,22 @@ Sema::BuildQualifiedTemplateIdExpr(CXXScopeSpec &SS,
 
   bool MemberOfUnknownSpecialization;
   LookupResult R(*this, NameInfo, LookupOrdinaryName);
-  if (LookupTemplateName(R, (Scope *)nullptr, SS, QualType(),
-                         /*Entering*/false, MemberOfUnknownSpecialization,
+  if (LookupTemplateName(R, /*S=*/nullptr, SS, /*ObjectType=*/QualType(),
+                         /*EnteringContext*/false, MemberOfUnknownSpecialization,
                          TemplateKWLoc))
     return ExprError();
 
   if (R.isAmbiguous())
     return ExprError();
 
+
   if (R.empty()) {
     Diag(NameInfo.getLoc(), diag::err_no_member)
       << NameInfo.getName() << DC << SS.getRange();
     return ExprError();
   }
+
+  FilterAcceptableTemplateNames(R);
 
   auto DiagnoseTypeTemplateDecl = [&](TemplateDecl *Temp,
                                       bool isTypeAliasTemplateDecl) {
@@ -5563,14 +5601,16 @@ TemplateNameKind Sema::ActOnTemplateName(Scope *S,
                                    ? RequiredTemplateKind(TemplateKWLoc)
                                    : TemplateNameIsRequired;
     if (!LookupTemplateName(R, S, SS, ObjectType.get(), EnteringContext, MOUS,
-                            RTK, nullptr, /*AllowTypoCorrection=*/false) &&
-        !R.isAmbiguous()) {
-      if (LookupCtx)
-        Diag(Name.getBeginLoc(), diag::err_no_member)
-            << DNI.getName() << LookupCtx << SS.getRange();
-      else
-        Diag(Name.getBeginLoc(), diag::err_undeclared_use)
-            << DNI.getName() << SS.getRange();
+                            RTK, /*ATK=*/nullptr, /*AllowTypoCorrection=*/false)) {
+      // FilterAcceptableTemplateNames(R);
+      if (!R.isAmbiguous()) {
+        if (LookupCtx)
+          Diag(Name.getBeginLoc(), diag::err_no_member)
+              << DNI.getName() << LookupCtx << SS.getRange();
+        else
+          Diag(Name.getBeginLoc(), diag::err_undeclared_use)
+              << DNI.getName() << SS.getRange();
+      }
     }
     return TNK_Non_template;
   }

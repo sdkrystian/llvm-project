@@ -689,8 +689,13 @@ static bool LookupMemberExprInRecord(Sema &SemaRef, LookupResult &R,
     QualType ObjectType = SS.isSet() ? QualType() : QualType(RTy, 0);
 
     bool MOUS;
-    return SemaRef.LookupTemplateName(R, nullptr, SS, ObjectType, false, MOUS,
-                                      TemplateKWLoc);
+    if (SemaRef.LookupTemplateName(R, /*S=*/nullptr, SS, ObjectType,
+                                   /*EnteringContext=*/false, MOUS,
+                                   TemplateKWLoc))
+      return true;
+    if (!R.isAmbiguous())
+      SemaRef.FilterAcceptableTemplateNames(R);
+    return false;
   }
 
   DeclContext *DC = RDecl;
