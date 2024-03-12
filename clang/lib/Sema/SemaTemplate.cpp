@@ -451,10 +451,9 @@ bool Sema::LookupTemplateName(LookupResult &Found,
     // of the postfix-expression finds a type template. In the latter case, the
     // name is nonetheless dependent, and we may resolve it to a member of an
     // unknown specialization when we come to instantiate the template.
-    IsDependent |= Found.wasNotFoundInCurrentInstantiation();
   }
 
-  if (SS.isEmpty() && (ObjectType.isNull() || Found.empty())) {
+  if (SS.isEmpty() && !IsDependent && (ObjectType.isNull() || Found.empty())) {
     // C++ [basic.lookup.classref]p1:
     //   In a class member access expression (5.2.5), if the . or -> token is
     //   immediately followed by an identifier followed by a <, the
@@ -475,8 +474,9 @@ bool Sema::LookupTemplateName(LookupResult &Found,
       ObjectTypeSearchedInScope = true;
     }
 
-    IsDependent |= Found.wasNotFoundInCurrentInstantiation();
+    // IsDependent |= Found.wasNotFoundInCurrentInstantiation();
   }
+  IsDependent |= Found.wasNotFoundInCurrentInstantiation();
 
   if (Found.isAmbiguous())
     return false;

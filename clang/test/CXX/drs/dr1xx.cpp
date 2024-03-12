@@ -507,7 +507,7 @@ namespace dr136 { // dr136: 3.4
   void q() {
     j(A(), A()); // ok, has default argument
   }
-  extern "C" void k(int, int, int, int); // #dr136-k 
+  extern "C" void k(int, int, int, int); // #dr136-k
   namespace NSA {
   struct A {
     friend void dr136::k(int, int, int, int = 0);
@@ -617,10 +617,12 @@ namespace dr141 { // dr141: 3.1
       // expected-error@-1 {{use 'template' keyword to treat 'f' as a dependent template name}}
     }
     void h() {
-      (void)t.S<int>::n; // ok
+      (void)t.S<int>::n;
+      // expected-error@-1 {{use 'template' keyword to treat 'S' as a dependent template name}}
     }
     void i() {
-      (void)t.S<int>(); // ok!
+      (void)t.S<int>();
+      // expected-error@-1 {{use 'template' keyword to treat 'S' as a dependent template name}}
     }
   };
   void h() { C<B>().h(); } // ok
