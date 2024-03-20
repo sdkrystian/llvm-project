@@ -2340,6 +2340,35 @@ Parser::TPResult Parser::isTemplateArgumentList(unsigned TokensToSkip) {
   return TPResult::False;
 }
 
+bool Parser::isColonColonAfterTemplateArgumentList() {
+  assert(Tok.is(tok::identifier) &&
+         "expected to be looking at an identifier");
+
+  RevertingTentativeParsingAction PA(*this);
+
+  // Consume the identifier.
+  ConsumeToken();
+
+  SourceLocation LAngleLoc;
+  if (!TryConsumeToken(tok::less, LAngleLoc))
+    return false;
+
+  if (getLangOpts().CPlusPlus11)
+    SkipUntil(tok::greater, tok::greatergreater,
+              tok::greatergreatergreater, StopAtSemi | StopBeforeMatch);
+  else
+    SkipUntil(tok::greater, StopAtSemi | StopBeforeMatch);
+
+  SourceLocation RAngleLoc;
+  if (ParseGreaterThanInTemplateList(LAngleLoc, RAngleLoc,
+                                 /*ConsumeLastToken=*/true,
+                                 /*ObjCGenericList=*/false,
+                                 /*Complain=*/false))
+    return false;
+
+  return Tok.is(tok::coloncolon);
+}
+
 /// Determine whether we might be looking at the '(' of a C++20 explicit(bool)
 /// in an earlier language mode.
 Parser::TPResult Parser::isExplicitBool() {

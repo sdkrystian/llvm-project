@@ -310,6 +310,10 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
 
       UnqualifiedId TemplateName;
       if (Tok.is(tok::identifier)) {
+        if (!isColonColonAfterTemplateArgumentList()) {
+          TPA.Revert();
+          break;
+        }
         // Consume the identifier.
         TemplateName.setIdentifier(Tok.getIdentifierInfo(), Tok.getLocation());
         ConsumeToken();
@@ -502,6 +506,9 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
     }
 
     CheckForTemplateAndDigraph(Next, ObjectType, EnteringContext, II, SS);
+
+    if (!isColonColonAfterTemplateArgumentList())
+      break;
 
     // nested-name-specifier:
     //   type-name '<'

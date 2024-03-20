@@ -991,7 +991,8 @@ void Parser::DiagnoseMisplacedEllipsisInDeclarator(SourceLocation EllipsisLoc,
 bool Parser::ParseGreaterThanInTemplateList(SourceLocation LAngleLoc,
                                             SourceLocation &RAngleLoc,
                                             bool ConsumeLastToken,
-                                            bool ObjCGenericList) {
+                                            bool ObjCGenericList,
+                                            bool Complain) {
   // What will be left once we've consumed the '>'.
   tok::TokenKind RemainingToken;
   const char *ReplacementStr = "> >";
@@ -999,8 +1000,10 @@ bool Parser::ParseGreaterThanInTemplateList(SourceLocation LAngleLoc,
 
   switch (Tok.getKind()) {
   default:
-    Diag(getEndOfPreviousToken(), diag::err_expected) << tok::greater;
-    Diag(LAngleLoc, diag::note_matching) << tok::less;
+    if (Complain) {
+      Diag(getEndOfPreviousToken(), diag::err_expected) << tok::greater;
+      Diag(LAngleLoc, diag::note_matching) << tok::less;
+    }
     return true;
 
   case tok::greater:
@@ -1062,7 +1065,7 @@ bool Parser::ParseGreaterThanInTemplateList(SourceLocation LAngleLoc,
       areTokensAdjacent(Tok, Next);
 
   // Diagnose this situation as appropriate.
-  if (!ObjCGenericList) {
+  if (!ObjCGenericList && Complain) {
     // The source range of the replaced token(s).
     CharSourceRange ReplacementRange = CharSourceRange::getCharRange(
         TokLoc, Lexer::AdvanceToTokenCharacter(TokLoc, 2, PP.getSourceManager(),
