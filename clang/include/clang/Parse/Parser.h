@@ -1921,6 +1921,7 @@ private:
   ExprResult ParseCXXIdExpression(bool isAddressOfOperand = false);
 
   bool areTokensAdjacent(const Token &A, const Token &B);
+  bool isTemplateArgumentListDigraphTypo(const Token &Next);
 
   void CheckForTemplateAndDigraph(Token &Next, ParsedType ObjectTypePtr,
                                   bool EnteringContext, IdentifierInfo &II,
@@ -1934,7 +1935,8 @@ private:
                                       bool IsTypename = false,
                                       IdentifierInfo **LastII = nullptr,
                                       bool OnlyNamespace = false,
-                                      bool InUsingDeclaration = false);
+                                      bool InUsingDeclaration = false,
+                                      bool TerminalIsTypeOnly = false);
 
   //===--------------------------------------------------------------------===//
   // C++11 5.1.2: Lambda expressions
@@ -3691,6 +3693,12 @@ private:
                                UnqualifiedId &TemplateName,
                                bool AllowTypeAnnotation = true,
                                bool TypeConstraint = false);
+
+  bool TryAnnotateSimpleTemplateId(CXXScopeSpec &SS,
+                                   QualType ObjectType,
+                                   bool EnteringContext = false);
+
+
   void
   AnnotateTemplateIdTokenAsType(CXXScopeSpec &SS,
                                 ImplicitTypenameContext AllowImplicitTypename,

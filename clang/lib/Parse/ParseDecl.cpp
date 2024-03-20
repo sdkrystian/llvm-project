@@ -3615,6 +3615,8 @@ void Parser::ParseDeclarationSpecifiers(
       // We are looking for a qualified typename.
       Token Next = NextToken();
 
+      TryAnnotateSimpleTemplateId(SS, QualType(), EnteringContext);
+
       TemplateIdAnnotation *TemplateId = Next.is(tok::annot_template_id)
                                              ? takeTemplateIdAnnotation(Next)
                                              : nullptr;

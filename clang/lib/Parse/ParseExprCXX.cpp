@@ -52,6 +52,14 @@ bool Parser::areTokensAdjacent(const Token &First, const Token &Second) {
   return FirstEnd == SM.getSpellingLoc(Second.getLocation());
 }
 
+bool Parser::isTemplateArgumentListDigraphTypo(const Token &Next) {
+  if (!Next.is(tok::l_square) || Next.getLength() != 2)
+    return false;
+
+  Token SecondToken = GetLookAheadToken(2);
+  return SecondToken.is(tok::colon) && areTokensAdjacent(Next, SecondToken);
+}
+
 // Suggest fixit for "<::" after a cast.
 static void FixDigraph(Parser &P, Preprocessor &PP, Token &DigraphToken,
                        Token &ColonToken, tok::TokenKind Kind, bool AtDigraph) {
@@ -103,6 +111,55 @@ void Parser::CheckForTemplateAndDigraph(Token &Next, ParsedType ObjectType,
 
   FixDigraph(*this, PP, Next, SecondToken, tok::unknown,
              /*AtDigraph*/false);
+}
+
+
+bool Parser::TryAnnotateSimpleTemplateId(CXXScopeSpec &SS,
+                                         QualType ObjectType,
+                                         bool EnteringContext) {
+  if (Tok.is(tok::annot_template_id))
+    return false;
+
+  TentativeParsingAction TPA(*this);
+
+  SourceLocation TemplateKWLoc;
+  TryConsumeToken(tok::kw_template, TemplateKWLoc);
+
+  if (Tok.isNot(tok::identifier)) {
+    TPA.Revert();
+    return false;
+  }
+
+  TemplateTy Template;
+  UnqualifiedId TemplateName;
+  TemplateName.setIdentifier(Tok.getIdentifierInfo(), Tok.getLocation());
+  ConsumeToken();
+
+  if (Tok.isNot(tok::less)) {
+    TPA.Revert();
+    return false;
+  }
+
+  bool MemberOfUnknownSpecialization;
+  if (TemplateNameKind TNK = Actions.isTemplateName(getCurScope(), SS,
+                                                    TemplateKWLoc.isValid(),
+                                                    TemplateName,
+                                                    ParsedType::make(ObjectType),
+                                                    EnteringContext,
+                                                    Template,
+                                                    MemberOfUnknownSpecialization)) {
+    if (AnnotateTemplateIdToken(Template, TNK, SS, TemplateKWLoc,
+                                TemplateName, false)) {
+      TPA.Revert();
+      return true;
+    }
+
+    TPA.Commit();
+    return false;
+  }
+
+  TPA.Revert();
+  return false;
 }
 
 /// Parse global scope or nested-name-specifier if present.
@@ -157,7 +214,8 @@ void Parser::CheckForTemplateAndDigraph(Token &Next, ParsedType ObjectType,
 bool Parser::ParseOptionalCXXScopeSpecifier(
     CXXScopeSpec &SS, ParsedType ObjectType, bool ObjectHadErrors,
     bool EnteringContext, bool *MayBePseudoDestructor, bool IsTypename,
-    IdentifierInfo **LastII, bool OnlyNamespace, bool InUsingDeclaration) {
+    IdentifierInfo **LastII, bool OnlyNamespace, bool InUsingDeclaration,
+    bool TerminalIsTypeOnly) {
   assert(getLangOpts().CPlusPlus &&
          "Call sites of this function should be guarded by checking for C++");
 
@@ -505,14 +563,17 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
       continue;
     }
 
-    CheckForTemplateAndDigraph(Next, ObjectType, EnteringContext, II, SS);
+    // CheckForTemplateAndDigraph(Next, ObjectType, EnteringContext, II, SS);
 
-    if (!isColonColonAfterTemplateArgumentList())
-      break;
+
+
+    bool IsDigraphTypo = isTemplateArgumentListDigraphTypo(Next);
+    // if (!isColonColonAfterTemplateArgumentList())
+    //  break;
 
     // nested-name-specifier:
     //   type-name '<'
-    if (Next.is(tok::less)) {
+    if (Next.is(tok::less) || IsDigraphTypo) {
 
       TemplateTy Template;
       UnqualifiedId TemplateName;
@@ -525,6 +586,15 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
                                                         EnteringContext,
                                                         Template,
                                               MemberOfUnknownSpecialization)) {
+        if (IsDigraphTypo) {
+          Token SecondToken = GetLookAheadToken(2);
+          FixDigraph(*this, PP, Next, SecondToken, tok::unknown,
+                     /*AtDigraph*/false);
+        }
+
+        if (isColonColonAfterTemplateArgumentList())
+          break;
+
         // If lookup didn't find anything, we treat the name as a template-name
         // anyway. C++20 requires this, and in prior language modes it improves
         // error recovery. But before we commit to this, check that we actually
@@ -549,6 +619,9 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
 
       if (MemberOfUnknownSpecialization && (ObjectType || SS.isSet()) &&
           (IsTypename || isTemplateArgumentList(1) == TPResult::True)) {
+
+        if (isColonColonAfterTemplateArgumentList())
+          break;
         // If we had errors before, ObjectType can be dependent even without any
         // templates. Do not report missing template keyword in that case.
         if (!ObjectHadErrors) {
