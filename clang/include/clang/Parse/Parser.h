@@ -3695,7 +3695,7 @@ private:
                                bool TypeConstraint = false);
 
   bool TryAnnotateSimpleTemplateId(CXXScopeSpec &SS,
-                                   QualType ObjectType,
+                                   ParsedType ObjectType,
                                    bool EnteringContext = false);
 
 

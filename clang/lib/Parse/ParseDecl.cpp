@@ -3615,7 +3615,7 @@ void Parser::ParseDeclarationSpecifiers(
       // We are looking for a qualified typename.
       Token Next = NextToken();
 
-      TryAnnotateSimpleTemplateId(SS, QualType(), EnteringContext);
+      TryAnnotateSimpleTemplateId(SS, /*ObjectType=*/nullptr, EnteringContext);
 
       TemplateIdAnnotation *TemplateId = Next.is(tok::annot_template_id)
                                              ? takeTemplateIdAnnotation(Next)
@@ -3853,8 +3853,12 @@ void Parser::ParseDeclarationSpecifiers(
           goto DoneWithDeclSpec;
         }
 
+        CXXScopeSpec SS;
+        TryAnnotateSimpleTemplateId(SS, /*ObjectType=*/nullptr, EnteringContext);
+
         if (!Tok.is(tok::identifier))
           continue;
+
       }
 
       // Check for need to substitute AltiVec keyword tokens.
@@ -5973,6 +5977,9 @@ bool Parser::isConstructorDeclarator(bool IsUnqualified, bool DeductionGuide,
                                      /*EnteringContext=*/true)) {
     return false;
   }
+
+  if (TryAnnotateSimpleTemplateId(SS, /*ObjectType=*/nullptr, /*EnteringContext=*/false))
+    return false;
 
   // Parse the constructor name.
   if (Tok.is(tok::identifier)) {

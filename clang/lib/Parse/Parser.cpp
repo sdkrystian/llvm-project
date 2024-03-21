@@ -1784,12 +1784,19 @@ Parser::TryAnnotateName(CorrectionCandidateCallback *CCC,
                                      EnteringContext))
     return ANK_Error;
 
+  #if 0
+  if (getLangOpts().CPlusPlus &&
+    TryAnnotateSimpleTemplateId(SS, /*ObjectType=*/nullptr, /*EnteringContext=*/false))
+    return ANK_Error;
+  #endif
+
   if (Tok.isNot(tok::identifier) || SS.isInvalid()) {
     if (TryAnnotateTypeOrScopeTokenAfterScopeSpec(SS, !WasScopeAnnotation,
                                                   AllowImplicitTypename))
       return ANK_Error;
     return ANK_Unresolved;
   }
+
 
   IdentifierInfo *Name = Tok.getIdentifierInfo();
   SourceLocation NameLoc = Tok.getLocation();

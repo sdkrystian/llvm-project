@@ -115,7 +115,7 @@ void Parser::CheckForTemplateAndDigraph(Token &Next, ParsedType ObjectType,
 
 
 bool Parser::TryAnnotateSimpleTemplateId(CXXScopeSpec &SS,
-                                         QualType ObjectType,
+                                         ParsedType ObjectType,
                                          bool EnteringContext) {
   if (Tok.is(tok::annot_template_id))
     return false;
@@ -144,7 +144,7 @@ bool Parser::TryAnnotateSimpleTemplateId(CXXScopeSpec &SS,
   if (TemplateNameKind TNK = Actions.isTemplateName(getCurScope(), SS,
                                                     TemplateKWLoc.isValid(),
                                                     TemplateName,
-                                                    ParsedType::make(ObjectType),
+                                                    ObjectType,
                                                     EnteringContext,
                                                     Template,
                                                     MemberOfUnknownSpecialization)) {
@@ -592,7 +592,7 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
                      /*AtDigraph*/false);
         }
 
-        if (isColonColonAfterTemplateArgumentList())
+        if (!isColonColonAfterTemplateArgumentList())
           break;
 
         // If lookup didn't find anything, we treat the name as a template-name
@@ -620,7 +620,7 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
       if (MemberOfUnknownSpecialization && (ObjectType || SS.isSet()) &&
           (IsTypename || isTemplateArgumentList(1) == TPResult::True)) {
 
-        if (isColonColonAfterTemplateArgumentList())
+        if (!isColonColonAfterTemplateArgumentList())
           break;
         // If we had errors before, ObjectType can be dependent even without any
         // templates. Do not report missing template keyword in that case.
