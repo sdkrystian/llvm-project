@@ -9139,7 +9139,8 @@ public:
       LookupResult &R, Scope *S, CXXScopeSpec &SS, QualType ObjectType,
       bool EnteringContext, bool &MemberOfUnknownSpecialization,
       RequiredTemplateKind RequiredTemplate = SourceLocation(),
-      AssumedTemplateKind *ATK = nullptr, bool AllowTypoCorrection = true);
+      AssumedTemplateKind *ATK = nullptr, bool AllowTypoCorrection = true,
+      bool PerformSecondLookup = false);
 
   TemplateNameKind isTemplateName(Scope *S, CXXScopeSpec &SS,
                                   bool hasTemplateKeyword,
@@ -9147,7 +9148,8 @@ public:
                                   ParsedType ObjectType, bool EnteringContext,
                                   TemplateTy &Template,
                                   bool &MemberOfUnknownSpecialization,
-                                  bool Disambiguation = false);
+                                  bool Disambiguation = false,
+                                  bool PerformSecondLookup = false);
 
   /// Try to resolve an undeclared template name as a type template.
   ///
@@ -9358,7 +9360,8 @@ public:
                                      const UnqualifiedId &Name,
                                      ParsedType ObjectType,
                                      bool EnteringContext, TemplateTy &Template,
-                                     bool AllowInjectedClassName = false);
+                                     bool AllowInjectedClassName = false,
+                                     bool PerformSecondLookup = false);
 
   DeclResult ActOnClassTemplateSpecialization(
       Scope *S, unsigned TagSpec, TagUseKind TUK, SourceLocation KWLoc,

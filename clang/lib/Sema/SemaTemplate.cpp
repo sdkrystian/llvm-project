@@ -180,7 +180,8 @@ TemplateNameKind Sema::isTemplateName(Scope *S,
                                       bool EnteringContext,
                                       TemplateTy &TemplateResult,
                                       bool &MemberOfUnknownSpecialization,
-                                      bool Disambiguation) {
+                                      bool Disambiguation,
+                                      bool PerformSecondLookup) {
   assert(getLangOpts().CPlusPlus && "No template names in C!");
 
   DeclarationName TName;
@@ -211,7 +212,8 @@ TemplateNameKind Sema::isTemplateName(Scope *S,
   if (LookupTemplateName(R, S, SS, ObjectType, EnteringContext,
                          MemberOfUnknownSpecialization, SourceLocation(),
                          &AssumedTemplate,
-                         /*AllowTypoCorrection=*/!Disambiguation))
+                         /*AllowTypoCorrection=*/!Disambiguation,
+                         PerformSecondLookup))
     return TNK_Non_template;
 
   if (AssumedTemplate != AssumedTemplateKind::None) {
@@ -380,7 +382,8 @@ bool Sema::LookupTemplateName(LookupResult &Found,
                               bool &MemberOfUnknownSpecialization,
                               RequiredTemplateKind RequiredTemplate,
                               AssumedTemplateKind *ATK,
-                              bool AllowTypoCorrection) {
+                              bool AllowTypoCorrection,
+                              bool PerformSecondLookup) {
   if (ATK)
     *ATK = AssumedTemplateKind::None;
 
@@ -454,7 +457,7 @@ bool Sema::LookupTemplateName(LookupResult &Found,
     IsDependent |= Found.wasNotFoundInCurrentInstantiation();
   }
 
-  if (SS.isEmpty() && (ObjectType.isNull() || Found.empty())) {
+  if (SS.isEmpty() && (ObjectType.isNull() || (PerformSecondLookup && Found.empty()))) {
     // C++ [basic.lookup.classref]p1:
     //   In a class member access expression (5.2.5), if the . or -> token is
     //   immediately followed by an identifier followed by a <, the
@@ -5502,7 +5505,8 @@ TemplateNameKind Sema::ActOnTemplateName(Scope *S,
                                          ParsedType ObjectType,
                                          bool EnteringContext,
                                          TemplateTy &Result,
-                                         bool AllowInjectedClassName) {
+                                         bool AllowInjectedClassName,
+                                         bool PerformSecondLookup) {
   if (TemplateKWLoc.isValid() && S && !S->getTemplateParamParent())
     Diag(TemplateKWLoc,
          getLangOpts().CPlusPlus11 ?
@@ -5539,7 +5543,9 @@ TemplateNameKind Sema::ActOnTemplateName(Scope *S,
   bool MemberOfUnknownSpecialization;
   TemplateNameKind TNK = isTemplateName(S, SS, TemplateKWLoc.isValid(), Name,
                                         ObjectType, EnteringContext, Result,
-                                        MemberOfUnknownSpecialization);
+                                        MemberOfUnknownSpecialization,
+                                        /*Disambiguation=*/false,
+                                        PerformSecondLookup);
   if (TNK != TNK_Non_template) {
     // We resolved this to a (non-dependent) template name. Return it.
     auto *LookupRD = dyn_cast_or_null<CXXRecordDecl>(LookupCtx);
@@ -5579,7 +5585,8 @@ TemplateNameKind Sema::ActOnTemplateName(Scope *S,
                                    ? RequiredTemplateKind(TemplateKWLoc)
                                    : TemplateNameIsRequired;
     if (!LookupTemplateName(R, S, SS, ObjectType.get(), EnteringContext, MOUS,
-                            RTK, nullptr, /*AllowTypoCorrection=*/false) &&
+                            RTK, nullptr, /*AllowTypoCorrection=*/false,
+                            PerformSecondLookup) &&
         !R.isAmbiguous()) {
       if (LookupCtx)
         Diag(Name.getBeginLoc(), diag::err_no_member)

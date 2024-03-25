@@ -98,7 +98,9 @@ void Parser::CheckForTemplateAndDigraph(Token &Next, ParsedType ObjectType,
   bool MemberOfUnknownSpecialization;
   if (!Actions.isTemplateName(getCurScope(), SS, /*hasTemplateKeyword=*/false,
                               TemplateName, ObjectType, EnteringContext,
-                              Template, MemberOfUnknownSpecialization))
+                              Template, MemberOfUnknownSpecialization,
+                              /*Disambiguation=*/false,
+                              /*PerformSecondLookup=*/true))
     return;
 
   FixDigraph(*this, PP, Next, SecondToken, tok::unknown,
@@ -345,16 +347,25 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
         break;
       }
 
-      // Commit to parsing the template-id.
-      TPA.Commit();
       TemplateTy Template;
       TemplateNameKind TNK = Actions.ActOnTemplateName(
           getCurScope(), SS, TemplateKWLoc, TemplateName, ObjectType,
-          EnteringContext, Template, /*AllowInjectedClassName*/ true);
+          EnteringContext, Template, /*AllowInjectedClassName*/ true,
+          /*PerformSecondLookup=*/true);
       if (AnnotateTemplateIdToken(Template, TNK, SS, TemplateKWLoc,
-                                  TemplateName, false))
+                                  TemplateName, false)) {
+        // If we failed to annotate the template-id, commit whatever we have and bail.
+        TPA.Commit();
         return true;
+      }
 
+      if (!HasScopeSpecifier && ObjectType && NextToken().isNot(tok::coloncolon)) {
+        TPA.Revert();
+        break;
+      }
+
+      // Commit to parsing the template-id.
+      TPA.Commit();
       continue;
     }
 
@@ -517,7 +528,9 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
                                                         ObjectType,
                                                         EnteringContext,
                                                         Template,
-                                              MemberOfUnknownSpecialization)) {
+                                              MemberOfUnknownSpecialization,
+                                              /*Disambiguation=*/false,
+                                              /*PerformSecondLookup=*/true)) {
         // If lookup didn't find anything, we treat the name as a template-name
         // anyway. C++20 requires this, and in prior language modes it improves
         // error recovery. But before we commit to this, check that we actually
@@ -526,6 +539,7 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
             isTemplateArgumentList(1) == TPResult::False)
           break;
 
+        TentativeParsingAction TPA(*this);
         // We have found a template name, so annotate this token
         // with a template-id annotation. We do not permit the
         // template-id to be translated into a type annotation,
@@ -535,8 +549,18 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
         // type-constraint).
         ConsumeToken();
         if (AnnotateTemplateIdToken(Template, TNK, SS, SourceLocation(),
-                                    TemplateName, false))
+                                    TemplateName, false)) {
+          // If we failed to annotate the template-id, commit whatever we have and bail.
+          TPA.Commit();
           return true;
+        }
+
+        if (!HasScopeSpecifier && ObjectType && NextToken().isNot(tok::coloncolon)) {
+          TPA.Revert();
+          break;
+        }
+
+        TPA.Commit();
         continue;
       }
 
@@ -562,7 +586,8 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
 
         TemplateNameKind TNK = Actions.ActOnTemplateName(
             getCurScope(), SS, TemplateNameLoc, TemplateName, ObjectType,
-            EnteringContext, Template, /*AllowInjectedClassName*/ true);
+            EnteringContext, Template, /*AllowInjectedClassName*/ true,
+            /*PerformSecondLookup=*/true);
         if (AnnotateTemplateIdToken(Template, TNK, SS, SourceLocation(),
                                     TemplateName, false))
           return true;

@@ -2166,6 +2166,7 @@ bool Parser::TryAnnotateTypeOrScopeTokenAfterScopeSpec(
     // FIXME: This appears to be dead code. We already have formed template-id
     // tokens when parsing the scope specifier; this can never form a new one.
     if (NextToken().is(tok::less)) {
+      // assert(false && "dead code?");
       TemplateTy Template;
       UnqualifiedId TemplateName;
       TemplateName.setIdentifier(Tok.getIdentifierInfo(), Tok.getLocation());
