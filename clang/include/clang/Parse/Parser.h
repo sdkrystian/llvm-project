@@ -2691,6 +2691,8 @@ private:
   /// rather than a less-than expression.
   TPResult isTemplateArgumentList(unsigned TokensToSkip);
 
+  bool isColonColonAfterTemplateArgumentList();
+
   /// Determine whether an '(' after an 'explicit' keyword is part of a C++20
   /// 'explicit(bool)' declaration, in earlier language modes where that is an
   /// extension.
@@ -3322,7 +3324,8 @@ private:
                                     SourceLocation NameLoc,
                                     bool EnteringContext,
                                     UnqualifiedId &Id,
-                                    bool AssumeTemplateId);
+                                    bool AssumeTemplateId,
+                                    bool HasTilde = false);
   bool ParseUnqualifiedIdOperator(CXXScopeSpec &SS, bool EnteringContext,
                                   ParsedType ObjectType,
                                   UnqualifiedId &Result);
@@ -3680,7 +3683,8 @@ private:
   bool ParseGreaterThanInTemplateList(SourceLocation LAngleLoc,
                                       SourceLocation &RAngleLoc,
                                       bool ConsumeLastToken,
-                                      bool ObjCGenericList);
+                                      bool ObjCGenericList,
+                                      bool Disambiguation = false);
   bool ParseTemplateIdAfterTemplateName(bool ConsumeLastToken,
                                         SourceLocation &LAngleLoc,
                                         TemplateArgList &TemplateArgs,
