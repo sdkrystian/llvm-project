@@ -2056,7 +2056,7 @@ protected:
 
   /// FirstDecl - The first declaration stored within this declaration
   /// context.
-  mutable Decl *FirstDecl = nullptr;
+  // mutable Decl *FirstDecl = nullptr;
 
   /// LastDecl - The last declaration stored within this declaration
   /// context. FIXME: We could probably cache this value somewhere
@@ -2323,7 +2323,10 @@ public:
     value_type operator->() const { return Current; }
 
     decl_iterator& operator++() {
-      Current = Current->getNextDeclInContext();
+      if (Current == Current->getLexicalDeclContext()->getLastDeclInContext())
+        Current = nullptr;
+      else
+        Current = Current->getNextDeclInContext();
       return *this;
     }
 
@@ -2357,7 +2360,7 @@ public:
   decl_range noload_decls() const {
     return decl_range(noload_decls_begin(), noload_decls_end());
   }
-  decl_iterator noload_decls_begin() const { return decl_iterator(FirstDecl); }
+  decl_iterator noload_decls_begin() const { return decl_iterator(getFirstDeclInContext()); }
   decl_iterator noload_decls_end() const { return decl_iterator(); }
 
   /// specific_decl_iterator - Iterates over a subrange of
@@ -2685,11 +2688,12 @@ public:
       DeclContextBits.NeedToReconcileExternalVisibleStorage = true;
   }
 
-  /// Determine whether the given declaration is stored in the list of
-  /// declarations lexically within this context.
-  bool isDeclInLexicalTraversal(const Decl *D) const {
-    return D && (D->NextInContextAndBits.getPointer() || D == FirstDecl ||
-                 D == LastDecl);
+  Decl *getFirstDeclInContext() const {
+    return LastDecl ? LastDecl->NextInContextAndBits.getPointer() : nullptr;
+  }
+
+  Decl *getLastDeclInContext() const {
+    return LastDecl;
   }
 
   void setUseQualifiedLookup(bool use = true) const {

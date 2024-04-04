@@ -5059,7 +5059,7 @@ RecordDecl::field_iterator RecordDecl::field_begin() const {
   // FIXME: Come up with a test case that breaks without definition.
   if (RecordDecl *D = getDefinition(); D && D != this)
     return D->field_begin();
-  return field_iterator(decl_iterator(FirstDecl));
+  return field_iterator(decl_iterator(getFirstDeclInContext()));
 }
 
 /// completeDefinition - Notes that the definition of this type is now
@@ -5090,8 +5090,10 @@ bool RecordDecl::isMsStruct(const ASTContext &C) const {
 }
 
 void RecordDecl::reorderDecls(const SmallVectorImpl<Decl *> &Decls) {
-  std::tie(FirstDecl, LastDecl) = DeclContext::BuildDeclChain(Decls, false);
-  LastDecl->NextInContextAndBits.setPointer(nullptr);
+  auto [NewFirst, NewLast] = DeclContext::BuildDeclChain(Decls, false);
+  if (NewLast)
+    NewLast->NextInContextAndBits.setPointer(NewFirst);
+  LastDecl = NewLast;
   setIsRandomized(true);
 }
 
@@ -5117,13 +5119,12 @@ void RecordDecl::LoadFieldsFromExternalStorage() const {
   if (Decls.empty())
     return;
 
-  auto [ExternalFirst, ExternalLast] =
-      BuildDeclChain(Decls,
-                     /*FieldsAlreadyLoaded=*/false);
-  ExternalLast->NextInContextAndBits.setPointer(FirstDecl);
-  FirstDecl = ExternalFirst;
-  if (!LastDecl)
+  auto [ExternalFirst, ExternalLast] = BuildDeclChain(Decls, /*FieldsAlreadyLoaded=*/false);
+  if (LastDecl)
+    ExternalLast->NextInContextAndBits.setPointer(LastDecl->NextInContextAndBits.getPointer());
+  else
     LastDecl = ExternalLast;
+  LastDecl->NextInContextAndBits.setPointer(ExternalFirst);
 }
 
 bool RecordDecl::mayInsertExtraPadding(bool EmitRemark) const {

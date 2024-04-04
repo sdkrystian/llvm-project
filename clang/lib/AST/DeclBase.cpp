@@ -1578,13 +1578,12 @@ DeclContext::LoadLexicalDeclsFromExternalStorage() const {
 
   // Splice the newly-read declarations into the beginning of the list
   // of declarations.
-  Decl *ExternalFirst, *ExternalLast;
-  std::tie(ExternalFirst, ExternalLast) =
-      BuildDeclChain(Decls, FieldsAlreadyLoaded);
-  ExternalLast->NextInContextAndBits.setPointer(FirstDecl);
-  FirstDecl = ExternalFirst;
-  if (!LastDecl)
+  auto [ExternalFirst, ExternalLast] = BuildDeclChain(Decls, FieldsAlreadyLoaded);
+  if (LastDecl)
+    ExternalLast->NextInContextAndBits.setPointer(LastDecl->NextInContextAndBits.getPointer());
+  else
     LastDecl = ExternalLast;
+  LastDecl->NextInContextAndBits.setPointer(ExternalFirst);
   return true;
 }
 
@@ -1622,19 +1621,18 @@ ExternalASTSource::SetExternalVisibleDeclsForName(const DeclContext *DC,
 DeclContext::decl_iterator DeclContext::decls_begin() const {
   if (hasExternalLexicalStorage())
     LoadLexicalDeclsFromExternalStorage();
-  return decl_iterator(FirstDecl);
+  return decl_iterator(getFirstDeclInContext());
 }
 
 bool DeclContext::decls_empty() const {
   if (hasExternalLexicalStorage())
     LoadLexicalDeclsFromExternalStorage();
 
-  return !FirstDecl;
+  return !LastDecl;
 }
 
 bool DeclContext::containsDecl(Decl *D) const {
-  return (D->getLexicalDeclContext() == this &&
-          (D->NextInContextAndBits.getPointer() || D == LastDecl));
+  return D->getLexicalDeclContext() == this && D->getNextDeclInContext();
 }
 
 bool DeclContext::containsDeclAndLoad(Decl *D) const {
@@ -1685,23 +1683,26 @@ static bool shouldBeHidden(NamedDecl *D) {
 void DeclContext::removeDecl(Decl *D) {
   assert(D->getLexicalDeclContext() == this &&
          "decl being removed from non-lexical context");
-  assert((D->NextInContextAndBits.getPointer() || D == LastDecl) &&
+  assert((D->NextInContextAndBits.getPointer()) &&
          "decl is not in decls list");
 
-  // Remove D from the decl chain.  This is O(n) but hopefully rare.
+  Decl *FirstDecl = LastDecl->NextInContextAndBits.getPointer();
   if (D == FirstDecl) {
     if (D == LastDecl)
-      FirstDecl = LastDecl = nullptr;
+      LastDecl = nullptr;
     else
-      FirstDecl = D->NextInContextAndBits.getPointer();
+      LastDecl->NextInContextAndBits.setPointer(
+          D->NextInContextAndBits.getPointer());
   } else {
-    for (Decl *I = FirstDecl; true; I = I->NextInContextAndBits.getPointer()) {
-      assert(I && "decl not found in linked list");
-      if (I->NextInContextAndBits.getPointer() == D) {
-        I->NextInContextAndBits.setPointer(D->NextInContextAndBits.getPointer());
-        if (D == LastDecl) LastDecl = I;
+    // Remove D from the decl chain.  This is O(n) but hopefully rare.
+    while (true) {
+      Decl *NextDecl = FirstDecl->NextInContextAndBits.getPointer();
+      if (D == NextDecl) {
+        FirstDecl->NextInContextAndBits.setPointer(
+            D->NextInContextAndBits.getPointer());
         break;
       }
+      FirstDecl = NextDecl;
     }
   }
 
@@ -1743,11 +1744,14 @@ void DeclContext::addHiddenDecl(Decl *D) {
   assert(!D->getNextDeclInContext() && D != LastDecl &&
          "Decl already inserted into a DeclContext");
 
-  if (FirstDecl) {
+  if (LastDecl) {
+    D->NextInContextAndBits.setPointer(
+        LastDecl->NextInContextAndBits.getPointer());
     LastDecl->NextInContextAndBits.setPointer(D);
     LastDecl = D;
   } else {
-    FirstDecl = LastDecl = D;
+    D->NextInContextAndBits.setPointer(D);
+    LastDecl = D;
   }
 
   // Notify a C++ record declaration that we've added a member, so it can
@@ -1978,7 +1982,7 @@ void DeclContext::localUncachedLookup(DeclarationName Name,
   // matches.
   // FIXME: If we have lazy external declarations, this will not find them!
   // FIXME: Should we CollectAllContexts and walk them all here?
-  for (Decl *D = FirstDecl; D; D = D->getNextDeclInContext()) {
+  for (Decl *D = getFirstDeclInContext(); D != getLastDeclInContext(); D = D->getNextDeclInContext()) {
     if (auto *ND = dyn_cast<NamedDecl>(D))
       if (ND->getDeclName() == Name)
         Results.push_back(ND);
