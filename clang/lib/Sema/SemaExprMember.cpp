@@ -1323,24 +1323,24 @@ static ExprResult LookupMemberExpr(Sema &S, LookupResult &R,
   if (IsArrow) {
     if (const PointerType *Ptr = BaseType->getAs<PointerType>())
       BaseType = Ptr->getPointeeType();
-    else if (!BaseType->isDependentType()) {
+    else if (BaseType->getAsRecordDecl()) {
+      // Recover from arrow accesses to records, e.g.:
+      //   struct MyRecord foo;
+      //   foo->bar
+      // This is actually well-formed in C++ if MyRecord has an
+      // overloaded operator->, but that should have been dealt with
+      // by now--or a diagnostic message already issued if a problem
+      // was encountered while looking for the overloaded operator->.
+      if (!S.getLangOpts().CPlusPlus) {
+        S.Diag(OpLoc, diag::err_typecheck_member_reference_suggestion)
+            << BaseType << int(IsArrow) << BaseExpr.get()->getSourceRange()
+            << FixItHint::CreateReplacement(OpLoc, ".");
+      }
+      IsArrow = false;
+    } else if (!BaseType->isDependentType()) {
       if (const ObjCObjectPointerType *Ptr =
-              BaseType->getAs<ObjCObjectPointerType>())
+              BaseType->getAs<ObjCObjectPointerType>()) {
         BaseType = Ptr->getPointeeType();
-      else if (BaseType->isRecordType()) {
-        // Recover from arrow accesses to records, e.g.:
-        //   struct MyRecord foo;
-        //   foo->bar
-        // This is actually well-formed in C++ if MyRecord has an
-        // overloaded operator->, but that should have been dealt with
-        // by now--or a diagnostic message already issued if a problem
-        // was encountered while looking for the overloaded operator->.
-        if (!S.getLangOpts().CPlusPlus) {
-          S.Diag(OpLoc, diag::err_typecheck_member_reference_suggestion)
-              << BaseType << int(IsArrow) << BaseExpr.get()->getSourceRange()
-              << FixItHint::CreateReplacement(OpLoc, ".");
-        }
-        IsArrow = false;
       } else if (BaseType->isFunctionType()) {
         goto fail;
       } else {
