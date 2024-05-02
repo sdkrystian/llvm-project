@@ -176,6 +176,10 @@ class CXXBaseSpecifier {
   LLVM_PREFERRED_TYPE(bool)
   unsigned InheritConstructors : 1;
 
+  // Whether this base was instantiated from a dependent base class.
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned InstantiatedFromDependent : 1;
+
   /// The type of the base class.
   ///
   /// This will be a class or struct (or a typedef of such). The source code
@@ -184,10 +188,12 @@ class CXXBaseSpecifier {
 
 public:
   CXXBaseSpecifier() = default;
-  CXXBaseSpecifier(SourceRange R, bool V, bool BC, AccessSpecifier A,
-                   TypeSourceInfo *TInfo, SourceLocation EllipsisLoc)
-    : Range(R), EllipsisLoc(EllipsisLoc), Virtual(V), BaseOfClass(BC),
-      Access(A), InheritConstructors(false), BaseTypeInfo(TInfo) {}
+  CXXBaseSpecifier(SourceRange R, bool V, bool BC, bool WasDependent,
+                   AccessSpecifier A, TypeSourceInfo *TInfo,
+                   SourceLocation EllipsisLoc)
+      : Range(R), EllipsisLoc(EllipsisLoc), Virtual(V), BaseOfClass(BC),
+        InstantiatedFromDependent(WasDependent), Access(A),
+        InheritConstructors(false), BaseTypeInfo(TInfo) {}
 
   /// Retrieves the source range that contains the entire base specifier.
   SourceRange getSourceRange() const LLVM_READONLY { return Range; }
@@ -205,6 +211,12 @@ public:
   /// Determine whether this base class is a base of a class declared
   /// with the 'class' keyword (vs. one declared with the 'struct' keyword).
   bool isBaseOfClass() const { return BaseOfClass; }
+
+  /// Determine whether this base specifier was in.instantiated from
+  /// a dependent base specifier.
+  bool wasInstantiatedFromDependent() const {
+    return InstantiatedFromDependent;
+  }
 
   /// Determine whether this base specifier is a pack expansion.
   bool isPackExpansion() const { return EllipsisLoc.isValid(); }

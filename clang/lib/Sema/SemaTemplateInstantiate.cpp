@@ -3424,13 +3424,11 @@ Sema::SubstBaseSpecifiers(CXXRecordDecl *Instantiation,
             continue;
           }
 
-          if (CXXBaseSpecifier *InstantiatedBase
-                = CheckBaseSpecifier(Instantiation,
-                                     Base.getSourceRange(),
-                                     Base.isVirtual(),
-                                     Base.getAccessSpecifierAsWritten(),
-                                     BaseTypeLoc,
-                                     SourceLocation()))
+          if (CXXBaseSpecifier *InstantiatedBase = CheckBaseSpecifier(
+                  Instantiation, Base.getSourceRange(), Base.isVirtual(),
+                  Base.getAccessSpecifierAsWritten(), BaseTypeLoc,
+                  /*EllipsisLoc=*/SourceLocation(),
+                  /*InstantiatedFromDependent=*/true))
             InstantiatedBases.push_back(InstantiatedBase);
           else
             Invalid = true;
@@ -3458,13 +3456,10 @@ Sema::SubstBaseSpecifiers(CXXRecordDecl *Instantiation,
       continue;
     }
 
-    if (CXXBaseSpecifier *InstantiatedBase
-          = CheckBaseSpecifier(Instantiation,
-                               Base.getSourceRange(),
-                               Base.isVirtual(),
-                               Base.getAccessSpecifierAsWritten(),
-                               BaseTypeLoc,
-                               EllipsisLoc))
+    if (CXXBaseSpecifier *InstantiatedBase = CheckBaseSpecifier(
+            Instantiation, Base.getSourceRange(), Base.isVirtual(),
+            Base.getAccessSpecifierAsWritten(), BaseTypeLoc, EllipsisLoc,
+            /*InstantiatedFromDependent=*/true))
       InstantiatedBases.push_back(InstantiatedBase);
     else
       Invalid = true;

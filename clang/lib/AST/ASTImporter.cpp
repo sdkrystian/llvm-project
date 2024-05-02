@@ -2306,14 +2306,10 @@ Error ASTNodeImporter::ImportDefinition(
       if (!TSIOrErr)
         return TSIOrErr.takeError();
 
-      Bases.push_back(
-          new (Importer.getToContext()) CXXBaseSpecifier(
-              *RangeOrErr,
-              Base1.isVirtual(),
-              Base1.isBaseOfClass(),
-              Base1.getAccessSpecifierAsWritten(),
-              *TSIOrErr,
-              EllipsisLoc));
+      Bases.push_back(new (Importer.getToContext()) CXXBaseSpecifier(
+          *RangeOrErr, Base1.isVirtual(), Base1.isBaseOfClass(),
+          Base1.wasInstantiatedFromDependent(),
+          Base1.getAccessSpecifierAsWritten(), *TSIOrErr, EllipsisLoc));
     }
     if (!Bases.empty())
       ToCXX->setBases(Bases.data(), Bases.size());
@@ -10088,6 +10084,7 @@ ASTImporter::Import(const CXXBaseSpecifier *BaseSpec) {
     return ToEllipsisLoc.takeError();
   CXXBaseSpecifier *Imported = new (ToContext) CXXBaseSpecifier(
       *ToSourceRange, BaseSpec->isVirtual(), BaseSpec->isBaseOfClass(),
+      BaseSpec->wasInstantiatedFromDependent(),
       BaseSpec->getAccessSpecifierAsWritten(), *ToTSI, *ToEllipsisLoc);
   ImportedCXXBaseSpecifiers[BaseSpec] = Imported;
   return Imported;

@@ -4520,7 +4520,8 @@ public:
                                        SourceRange SpecifierRange, bool Virtual,
                                        AccessSpecifier Access,
                                        TypeSourceInfo *TInfo,
-                                       SourceLocation EllipsisLoc);
+                                       SourceLocation EllipsisLoc,
+                                       bool InstantiatedFromDependent);
 
   BaseResult ActOnBaseSpecifier(Decl *classdecl, SourceRange SpecifierRange,
                                 const ParsedAttributesView &Attrs, bool Virtual,

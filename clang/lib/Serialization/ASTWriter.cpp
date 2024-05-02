@@ -6338,6 +6338,7 @@ void ASTRecordWriter::AddUnresolvedSet(const ASTUnresolvedSet &Set) {
 void ASTRecordWriter::AddCXXBaseSpecifier(const CXXBaseSpecifier &Base) {
   Record->push_back(Base.isVirtual());
   Record->push_back(Base.isBaseOfClass());
+  Record->push_back(Base.wasInstantiatedFromDependent());
   Record->push_back(Base.getAccessSpecifierAsWritten());
   Record->push_back(Base.getInheritConstructors());
   AddTypeSourceInfo(Base.getTypeSourceInfo());
