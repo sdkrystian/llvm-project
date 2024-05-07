@@ -16035,7 +16035,9 @@ TreeTransform<Derived>::RebuildTemplateName(CXXScopeSpec &SS,
   getSema().ActOnTemplateName(/*Scope=*/nullptr, SS, TemplateKWLoc,
                               TemplateName, ParsedType::make(ObjectType),
                               /*EnteringContext=*/false, Template,
-                              AllowInjectedClassName);
+                              AllowInjectedClassName,
+                              FirstQualifierInScope != nullptr,
+                              FirstQualifierInScope);
   return Template.get();
 }
 

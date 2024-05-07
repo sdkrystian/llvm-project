@@ -397,11 +397,17 @@ NamedDecl *Sema::FindFirstQualifierInScope(Scope *S, NestedNameSpecifier *NNS) {
   while (NNS->getPrefix())
     NNS = NNS->getPrefix();
 
-  if (NNS->getKind() != NestedNameSpecifier::Identifier)
+  const IdentifierInfo *Name = NNS->getAsIdentifier();
+  bool IsTemplateName = false;
+  if (const auto *DTST = dyn_cast_if_present<DependentTemplateSpecializationType>(NNS->getAsType())) {
+    IsTemplateName = true;
+    Name = DTST->getIdentifier();
+  } else if (!Name) {
     return nullptr;
+  }
 
-  LookupResult Found(*this, NNS->getAsIdentifier(), SourceLocation(),
-                     LookupNestedNameSpecifierName);
+  LookupResult Found(*this, Name, SourceLocation(),
+                     IsTemplateName ? LookupOrdinaryName : LookupNestedNameSpecifierName);
   LookupName(Found, S);
   assert(!Found.isAmbiguous() && "Cannot handle ambiguities here yet");
 
@@ -409,10 +415,10 @@ NamedDecl *Sema::FindFirstQualifierInScope(Scope *S, NestedNameSpecifier *NNS) {
     return nullptr;
 
   NamedDecl *Result = Found.getFoundDecl();
-  if (isAcceptableNestedNameSpecifier(Result))
-    return Result;
+  //if (isAcceptableNestedNameSpecifier(Result))
+  return Result;
 
-  return nullptr;
+  //return nullptr;
 }
 
 namespace {
