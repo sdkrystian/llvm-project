@@ -5425,7 +5425,7 @@ public:
   ExprResult
   BuildQualifiedDeclarationNameExpr(CXXScopeSpec &SS,
                                     const DeclarationNameInfo &NameInfo,
-                                    bool IsAddressOfOperand, const Scope *S,
+                                    bool IsAddressOfOperand,
                                     TypeSourceInfo **RecoveryTSI = nullptr);
 
   ExprResult BuildDeclarationNameExpr(const CXXScopeSpec &SS, LookupResult &R,
@@ -9093,7 +9093,8 @@ public:
   ExprResult
   BuildQualifiedTemplateIdExpr(CXXScopeSpec &SS, SourceLocation TemplateKWLoc,
                                const DeclarationNameInfo &NameInfo,
-                               const TemplateArgumentListInfo *TemplateArgs);
+                               const TemplateArgumentListInfo *TemplateArgs,
+                               bool IsAddressOfOperand);
 
   TemplateNameKind ActOnTemplateName(Scope *S, CXXScopeSpec &SS,
                                      SourceLocation TemplateKWLoc,

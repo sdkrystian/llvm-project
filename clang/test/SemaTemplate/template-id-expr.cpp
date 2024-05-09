@@ -19,7 +19,7 @@ template<typename T>
 struct X0 {
   template<typename U>
   void f1();
-  
+
   template<typename U>
   void f2(U) {
     f1<U>();
@@ -39,9 +39,9 @@ struct Y {
 template<int I>
 struct X {
   X(int, int);
-  void f() { 
-    Y<X<I> >(X<I>(0, 0)); 
-    Y<X<I> >(::X<I>(0, 0)); 
+  void f() {
+    Y<X<I> >(X<I>(0, 0));
+    Y<X<I> >(::X<I>(0, 0));
   }
 };
 
@@ -184,7 +184,7 @@ class E {
 #if __cplusplus <= 199711L
 // expected-warning@+2 {{extension}}
 #endif
-template<typename T> using D = int; // expected-note {{declared here}} 
+template<typename T> using D = int; // expected-note {{declared here}}
 E<D> ed; // expected-note {{instantiation of}}
 
 namespace non_functions {
@@ -262,7 +262,6 @@ template <typename T1> struct A {
 
     foo(C<T1>::template Type<2>());
     // expected-error@-1 {{'C<float>::Type' is expected to be a non-type template, but instantiated to a class template}}
-    // expected-error@-2 {{called object type '<dependent type>' is not a function or function pointer}}
     // expected-note@#ClassTemplate {{class template declared here}}
 
     foo(typename C<T1>::template Type<2>());

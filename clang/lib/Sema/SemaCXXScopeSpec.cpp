@@ -796,8 +796,13 @@ bool Sema::BuildCXXNestedNameSpecifier(Scope *S, NestedNameSpecInfo &IdInfo,
         Diag(IdInfo.IdentifierLoc,
              diag::ext_undeclared_unqual_id_with_dependent_base)
             << IdInfo.Identifier << ContainingClass;
-        SS.Extend(Context, IdInfo.Identifier, IdInfo.IdentifierLoc,
-                  IdInfo.CCLoc);
+
+        SS.Extend(Context, /*TemplateKWLoc=*/SourceLocation(),
+            Context.getTrivialTypeSourceInfo(
+                Context.getTypeDeclType(ContainingClass),
+            IdInfo.IdentifierLoc)->getTypeLoc(),
+            IdInfo.CCLoc);
+        SS.Extend(Context, IdInfo.Identifier, IdInfo.IdentifierLoc, IdInfo.CCLoc);
         return false;
       }
     }

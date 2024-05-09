@@ -70,7 +70,7 @@ namespace test2 {
     }
 
     void test1() {
-      B<T>::foo();
+      B<T>::foo(); // expected-error {{call to non-static member function without an object argument}}
     }
 
     static void test2() {
@@ -91,7 +91,7 @@ namespace test2 {
   int test() {
     A<int> a;
     a.test0(); // no instantiation note here, decl is ill-formed
-    a.test1();
+    a.test1(); // expected-note {{in instantiation}}
     a.test2(); // expected-note {{in instantiation}}
     a.test3(); // expected-note {{in instantiation}}
   }

@@ -726,6 +726,7 @@ Sema::ActOnDependentIdExpression(const CXXScopeSpec &SS,
                                  const DeclarationNameInfo &NameInfo,
                                  bool isAddressOfOperand,
                            const TemplateArgumentListInfo *TemplateArgs) {
+  #if 0
   QualType ThisType = getCurrentThisType();
 
   // C++11 [expr.prim.general]p12:
@@ -759,6 +760,24 @@ Sema::ActOnDependentIdExpression(const CXXScopeSpec &SS,
         /*Op=*/SourceLocation(), SS.getWithLocInContext(Context), TemplateKWLoc,
         FirstQualifierInScope, NameInfo, TemplateArgs);
   }
+  #endif
+
+  if (SS.isEmpty()) {
+    LookupResult R(*this, NameInfo, LookupOrdinaryName);
+
+    return UnresolvedLookupExpr::Create(
+        Context, /*NamingClass=*/nullptr, SS.getWithLocInContext(Context),
+        TemplateKWLoc, NameInfo, /*RequiresADL=*/false,
+        TemplateArgs, R.begin(), R.end(), /*KnownDependent=*/true);
+
+    #if 0
+    if (TemplateArgs || TemplateKWLoc.isValid())
+      return BuildTemplateIdExpr(SS, TemplateKWLoc, R, /*NeedsADL=*/false, TemplateArgs);
+
+    return BuildDeclarationNameExpr(SS, R, /*NeedsADL=*/false);
+    #endif
+  }
+
 
   return BuildDependentDeclRefExpr(SS, TemplateKWLoc, NameInfo, TemplateArgs);
 }
@@ -5542,7 +5561,8 @@ ExprResult
 Sema::BuildQualifiedTemplateIdExpr(CXXScopeSpec &SS,
                                    SourceLocation TemplateKWLoc,
                                    const DeclarationNameInfo &NameInfo,
-                             const TemplateArgumentListInfo *TemplateArgs) {
+                             const TemplateArgumentListInfo *TemplateArgs,
+                                   bool IsAddressOfOperand) {
 
   assert(TemplateArgs || TemplateKWLoc.isValid());
   DeclContext *DC;
@@ -5552,8 +5572,8 @@ Sema::BuildQualifiedTemplateIdExpr(CXXScopeSpec &SS,
     return BuildDependentDeclRefExpr(SS, TemplateKWLoc, NameInfo, TemplateArgs);
 
   LookupResult R(*this, NameInfo, LookupOrdinaryName);
-  if (LookupTemplateName(R, (Scope *)nullptr, SS, QualType(),
-                         /*Entering*/ false, TemplateKWLoc))
+  if (LookupTemplateName(R, /*S=*/nullptr, SS, /*ObjectType=*/QualType(),
+                         /*EnteringContext*/false, TemplateKWLoc))
     return ExprError();
 
   if (R.isAmbiguous())
@@ -5581,7 +5601,11 @@ Sema::BuildQualifiedTemplateIdExpr(CXXScopeSpec &SS,
   if (TypeAliasTemplateDecl *Temp = R.getAsSingle<TypeAliasTemplateDecl>())
     return DiagnoseTypeTemplateDecl(Temp, true);
 
-  return BuildTemplateIdExpr(SS, TemplateKWLoc, R, /*ADL*/ false, TemplateArgs);
+  if (isPotentialImplicitMemberAccess(SS, R, IsAddressOfOperand))
+    return BuildPossibleImplicitMemberExpr(SS, TemplateKWLoc, R,
+                                           TemplateArgs, /*S=*/nullptr);
+
+  return BuildTemplateIdExpr(SS, TemplateKWLoc, R, /*ADL=*/false, TemplateArgs);
 }
 
 /// Form a template name from a name that is syntactically required to name a
