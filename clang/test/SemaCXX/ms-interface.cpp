@@ -109,7 +109,7 @@ static_assert(!__is_interface_class(IFaceInheritsStruct), "oops");
 
 template<typename>
 class TemplateContext {
-  class Base;
+  class Base; // expected-note {{forward declaration of 'TemplateContext::Base'}}
   // Should not crash on an incomplete-type and dependent base specifier.
-  __interface Foo : Base {};
+  __interface Foo : Base {}; // expected-error {{base class has incomplete type}}
 };

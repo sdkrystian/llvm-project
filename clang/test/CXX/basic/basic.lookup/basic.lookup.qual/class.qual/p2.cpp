@@ -141,13 +141,13 @@ namespace InhCtor {
   // ill-formed.
   template<typename T>
   struct S : T {
-    struct U : S { // expected-note 6{{candidate}}
-      using S::S;
+    struct U : S { // expected-error {{base class has incomplete type}}
+      using S::S; // expected-error {{using declaration refers into 'S<T>::', which is not a base class of 'U'}}
     };
     using T::T;
   };
-  S<A>::U ua(0); // expected-error {{no match}}
-  S<B>::U ub(0); // expected-error {{no match}}
+  S<A>::U ua(0);
+  S<B>::U ub(0);
 
   template<typename T>
   struct X : T {

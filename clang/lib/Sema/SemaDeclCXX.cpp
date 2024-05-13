@@ -2724,26 +2724,25 @@ Sema::CheckBaseSpecifier(CXXRecordDecl *Class,
   }
 
   SourceLocation BaseLoc = TInfo->getTypeLoc().getBeginLoc();
+  CXXRecordDecl *BaseDecl = BaseType->getAsCXXRecordDecl();
 
-  if (BaseType->isDependentType()) {
-    // Make sure that we don't have circular inheritance among our dependent
-    // bases. For non-dependent bases, the check for completeness below handles
-    // this.
-    if (CXXRecordDecl *BaseDecl = BaseType->getAsCXXRecordDecl()) {
-      if (BaseDecl->getCanonicalDecl() == Class->getCanonicalDecl() ||
-          ((BaseDecl = BaseDecl->getDefinition()) &&
-           findCircularInheritance(Class, BaseDecl))) {
-        Diag(BaseLoc, diag::err_circular_inheritance)
-          << BaseType << Context.getTypeDeclType(Class);
-
-        if (BaseDecl->getCanonicalDecl() != Class->getCanonicalDecl())
-          Diag(BaseDecl->getLocation(), diag::note_previous_decl)
-            << BaseType;
-
-        return nullptr;
-      }
+  if (BaseDecl) {
+    // C++ [class.union]p1:
+    //   A union shall not be used as a base class.
+    if (BaseDecl->isUnion()) {
+      Diag(BaseLoc, diag::err_union_as_base_class) << SpecifierRange;
+      return nullptr;
     }
 
+    // C++ [class.derived]p2:
+    //   The class-name in a base-specifier shall not be an incompletely
+    //   defined class.
+    if (RequireCompleteType(BaseLoc, BaseType,
+                            diag::err_incomplete_base_class, SpecifierRange)) {
+      Class->setInvalidDecl();
+      return nullptr;
+    }
+  } else if (BaseType->isDependentType()) {
     // Make sure that we don't make an ill-formed AST where the type of the
     // Class is non-dependent and its attached base class specifier is an
     // dependent type, which violates invariants in many clang code paths (e.g.
@@ -2755,18 +2754,8 @@ Sema::CheckBaseSpecifier(CXXRecordDecl *Class,
     return new (Context) CXXBaseSpecifier(
         SpecifierRange, Virtual, Class->getTagKind() == TagTypeKind::Class,
         Access, TInfo, EllipsisLoc);
-  }
-
-  // Base specifiers must be record types.
-  if (!BaseType->isRecordType()) {
+  } else {
     Diag(BaseLoc, diag::err_base_must_be_class) << SpecifierRange;
-    return nullptr;
-  }
-
-  // C++ [class.union]p1:
-  //   A union shall not be used as a base class.
-  if (BaseType->isUnionType()) {
-    Diag(BaseLoc, diag::err_union_as_base_class) << SpecifierRange;
     return nullptr;
   }
 
@@ -2782,17 +2771,7 @@ Sema::CheckBaseSpecifier(CXXRecordDecl *Class,
     }
   }
 
-  // C++ [class.derived]p2:
-  //   The class-name in a base-specifier shall not be an incompletely
-  //   defined class.
-  if (RequireCompleteType(BaseLoc, BaseType,
-                          diag::err_incomplete_base_class, SpecifierRange)) {
-    Class->setInvalidDecl();
-    return nullptr;
-  }
-
   // If the base class is polymorphic or isn't empty, the new one is/isn't, too.
-  RecordDecl *BaseDecl = BaseType->castAs<RecordType>()->getDecl();
   assert(BaseDecl && "Record type has no declaration");
   BaseDecl = BaseDecl->getDefinition();
   assert(BaseDecl && "Base type is not incomplete, but has no definition");

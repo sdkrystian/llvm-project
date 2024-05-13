@@ -9,11 +9,10 @@ template <typename T> class Foo {
 
 
 template <typename T> struct Foo2 {
-  struct Base1; // expected-note{{member is declared here}}
-  struct Base2; // expected-note{{member is declared here}}
+  struct Base1; // expected-note{{forward declaration of 'Foo2::Base1'}}
+  struct Base2; // expected-note{{forward declaration of 'Foo2::Base2'}}
   // Should not crash on an incomplete-type and dependent base specifier.
-  struct Derived : Base1, Base2 {}; // expected-error {{implicit instantiation of undefined member 'Foo2<int>::Base1'}} \
-                                       expected-error {{implicit instantiation of undefined member 'Foo2<int>::Base2'}}
+  struct Derived : Base1, Base2 {}; // expected-error2 {{base class has incomplete type}}
 };
 
-Foo2<int>::Derived a; // expected-note{{in instantiation of member class}}
+Foo2<int>::Derived a;

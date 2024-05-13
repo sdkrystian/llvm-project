@@ -31,15 +31,17 @@ struct Y {
   static int z;
 
   template<int U>
-  struct Inner : Y { // expected-note {{declared here}}
+  struct Inner : Y { // expected-error {{base class has incomplete type}}
+                     // expected-note@-1 {{declared here}}
   };
 
   bool f(T other) {
     // We can determine that 'inner' does not exist at parse time, so can
     // perform typo correction in this case.
     return this->inner<other>::z; // expected-error {{no template named 'inner' in 'Y<T>'; did you mean 'Inner'?}}
+                                  // expected-error@-1 {{no member named 'z' in 'Y<Q>::Inner<0>'}}
   }
 };
 
 struct Q { constexpr operator int() { return 0; } };
-void use_y(Y<Q> x) { x.f(Q()); }
+void use_y(Y<Q> x) { x.f(Q()); } // expected-note {{in instantiation of member function 'Y<Q>::f' requested here}}

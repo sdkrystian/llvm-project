@@ -2,7 +2,7 @@
 
 template<typename A> class s0 {
 
-  template<typename B> class s1 : public s0<A> {
+  template<typename B> class s1 : public s0<A> { // expected-error {{base class has incomplete type}}
     ~s1() {}
     s0<A> ms0;
   };
@@ -28,7 +28,7 @@ namespace PR6152 {
     y->template Y<T>::~Y<T>();
     y->~Y();
   }
-  
+
   template struct X<int>;
 }
 
