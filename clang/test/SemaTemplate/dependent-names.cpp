@@ -347,9 +347,9 @@ namespace rdar12629723 {
     struct C : public C { }; // expected-error{{base class has incomplete type}}
                              // expected-note@-1{{definition of 'rdar12629723::X::C' is not complete until the closing '}'}}
 
-    struct B; // expected-note{{forward declaration of 'rdar12629723::X::B'}}
+    struct B;
 
-    struct A : public B { // expected-error{{base class has incomplete type}}
+    struct A : public B {
       virtual void foo() { }
     };
 

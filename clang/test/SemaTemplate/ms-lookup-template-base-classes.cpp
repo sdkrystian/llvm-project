@@ -102,7 +102,7 @@ public:
 };
 template class B<int>; // expected-note {{requested here}}
 
-}
+} 
 
 
 
@@ -111,8 +111,8 @@ namespace lookup_dependent_base_class_default_argument {
 template<class T>
 class A {
 public:
-  static int f1(); // expected-note {{must qualify identifier to find this declaration in dependent base class}}
-  int f2(); // expected-note {{must qualify identifier to find this declaration in dependent base class}}
+  static int f1(); // expected-note {{must qualify identifier to find this declaration in dependent base class}} 
+  int f2(); // expected-note {{must qualify identifier to find this declaration in dependent base class}} 
 };
 
 template<class T>
@@ -137,7 +137,7 @@ namespace lookup_dependent_base_class_friend {
 template <class T>
 class B {
 public:
-  static void g();  // expected-note {{must qualify identifier to find this declaration in dependent base class}}
+  static void g();  // expected-note {{must qualify identifier to find this declaration in dependent base class}} 
 };
 
 template <class T>
@@ -438,12 +438,12 @@ C<int> c; // expected-note {{in instantiation of template class 'type_in_base_of
 namespace type_in_dependent_base_of_non_dependent_type {
 template<typename T> struct A { typedef int NameFromBase; };
 template<typename T> struct B : A<T> {
-  struct C; // expected-note2 {{forward declaration of 'type_in_dependent_base_of_non_dependent_type::B::C'}}
+  struct C;
   template<typename TT>
-  struct D : C { // expected-error {{base class has incomplete type}}
+  struct D : C {
     NameFromBase m; // expected-warning {{use of member 'NameFromBase' found via unqualified lookup into dependent bases of class templates is a Microsoft extension}}
   };
-  struct E : C { // expected-error {{base class has incomplete type}}
+  struct E : C {
     NameFromBase m; // expected-warning {{use of member 'NameFromBase' found via unqualified lookup into dependent bases of class templates is a Microsoft extension}}
   };
 };

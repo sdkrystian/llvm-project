@@ -2726,7 +2726,7 @@ Sema::CheckBaseSpecifier(CXXRecordDecl *Class,
   SourceLocation BaseLoc = TInfo->getTypeLoc().getBeginLoc();
   CXXRecordDecl *BaseDecl = BaseType->getAsCXXRecordDecl();
 
-  if (BaseDecl) {
+  if (BaseDecl && (!BaseDecl->isDependentContext() || BaseDecl->isCurrentInstantiation(Class))) {
     // C++ [class.union]p1:
     //   A union shall not be used as a base class.
     if (BaseDecl->isUnion()) {
@@ -2742,6 +2742,17 @@ Sema::CheckBaseSpecifier(CXXRecordDecl *Class,
       Class->setInvalidDecl();
       return nullptr;
     }
+
+    // For the MS ABI, propagate DLL attributes to base class templates.
+    if (Context.getTargetInfo().getCXXABI().isMicrosoft() ||
+        Context.getTargetInfo().getTriple().isPS()) {
+      if (Attr *ClassAttr = getDLLAttr(Class)) {
+        if (auto *BaseTemplate = dyn_cast<ClassTemplateSpecializationDecl>(BaseDecl)) {
+          propagateDLLAttrToBaseClassTemplate(Class, ClassAttr, BaseTemplate,
+                                              BaseLoc);
+        }
+      }
+    }
   } else if (BaseType->isDependentType()) {
     // Make sure that we don't make an ill-formed AST where the type of the
     // Class is non-dependent and its attached base class specifier is an
@@ -2749,7 +2760,7 @@ Sema::CheckBaseSpecifier(CXXRecordDecl *Class,
     // constexpr evaluator). If this case happens (in errory-recovery mode), we
     // explicitly mark the Class decl invalid. The diagnostic was already
     // emitted.
-    if (!Class->getTypeForDecl()->isDependentType())
+    if (!Class->isDependentContext())
       Class->setInvalidDecl();
     return new (Context) CXXBaseSpecifier(
         SpecifierRange, Virtual, Class->getTagKind() == TagTypeKind::Class,
@@ -2759,17 +2770,6 @@ Sema::CheckBaseSpecifier(CXXRecordDecl *Class,
     return nullptr;
   }
 
-  // For the MS ABI, propagate DLL attributes to base class templates.
-  if (Context.getTargetInfo().getCXXABI().isMicrosoft() ||
-      Context.getTargetInfo().getTriple().isPS()) {
-    if (Attr *ClassAttr = getDLLAttr(Class)) {
-      if (auto *BaseTemplate = dyn_cast_or_null<ClassTemplateSpecializationDecl>(
-              BaseType->getAsCXXRecordDecl())) {
-        propagateDLLAttrToBaseClassTemplate(Class, ClassAttr, BaseTemplate,
-                                            BaseLoc);
-      }
-    }
-  }
 
   // If the base class is polymorphic or isn't empty, the new one is/isn't, too.
   assert(BaseDecl && "Record type has no declaration");
