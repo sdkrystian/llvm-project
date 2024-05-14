@@ -48,7 +48,7 @@ void CXXBasePaths::clear() {
   ClassSubobjects.clear();
   VisitedDependentRecords.clear();
   ScratchPath.clear();
-  DetectedVirtual = nullptr;
+  DetectedVirtual = QualType();
 }
 
 /// Swaps the contents of this CXXBasePaths structure with the
@@ -108,6 +108,8 @@ bool CXXRecordDecl::isVirtuallyDerivedFrom(const CXXRecordDecl *Base) const {
 
 bool CXXRecordDecl::isProvablyNotDerivedFrom(const CXXRecordDecl *Base) const {
   const CXXRecordDecl *TargetDecl = Base->getCanonicalDecl();
+  if (getCanonicalDecl() == TargetDecl)
+    return true;
   return forallBases([TargetDecl](const CXXRecordDecl *Base) {
     return Base->getCanonicalDecl() != TargetDecl;
   });
@@ -130,13 +132,10 @@ bool CXXRecordDecl::forallBases(ForallBasesCallback BaseMatches) const {
   const CXXRecordDecl *Record = this;
   while (true) {
     for (const auto &I : Record->bases()) {
-      const RecordType *Ty = I.getType()->getAs<RecordType>();
-      if (!Ty)
+      const CXXRecordDecl *Base = I.getType()->getAsCXXRecordDecl();
+      if (!Base)
         return false;
-
-      CXXRecordDecl *Base =
-            cast_or_null<CXXRecordDecl>(Ty->getDecl()->getDefinition());
-      if (!Base ||
+      if (!(Base = Base->getDefinition()) ||
           (Base->isDependentContext() &&
            !Base->isCurrentInstantiation(Record))) {
         return false;
@@ -170,13 +169,16 @@ bool CXXBasePaths::lookupInBases(ASTContext &Context,
     QualType BaseType =
         Context.getCanonicalType(BaseSpec.getType()).getUnqualifiedType();
 
+    CXXRecordDecl *BaseRec = BaseType->getAsCXXRecordDecl();
     // C++ [temp.dep]p3:
     //   In the definition of a class template or a member of a class template,
     //   if a base class of the class template depends on a template-parameter,
     //   the base class scope is not examined during unqualified name lookup
     //   either at the point of definition of the class template or member or
     //   during an instantiation of the class tem- plate or member.
-    if (!LookupInDependent && BaseType->isDependentType())
+    if (!LookupInDependent &&
+        (!BaseRec || (BaseRec->isDependentContext() &&
+            !BaseRec->isCurrentInstantiation(Record))))
       continue;
 
     // Determine whether we need to visit this base class at all,
@@ -187,10 +189,10 @@ bool CXXBasePaths::lookupInBases(ASTContext &Context,
     if (BaseSpec.isVirtual()) {
       VisitBase = !Subobjects.IsVirtBase;
       Subobjects.IsVirtBase = true;
-      if (isDetectingVirtual() && DetectedVirtual == nullptr) {
+      if (isDetectingVirtual() && DetectedVirtual.isNull()) {
         // If this is the first virtual we find, remember it. If it turns out
         // there is no base path here, we'll reset it later.
-        DetectedVirtual = BaseType->getAs<RecordType>();
+        DetectedVirtual = BaseType;
         SetVirtual = true;
       }
     } else {
@@ -267,8 +269,7 @@ bool CXXBasePaths::lookupInBases(ASTContext &Context,
           }
         }
       } else {
-        BaseRecord = cast<CXXRecordDecl>(
-            BaseSpec.getType()->castAs<RecordType>()->getDecl());
+        BaseRecord = BaseSpec.getType()->getAsCXXRecordDecl();
       }
       if (BaseRecord &&
           lookupInBases(Context, BaseRecord, BaseMatches, LookupInDependent)) {
@@ -294,7 +295,7 @@ bool CXXBasePaths::lookupInBases(ASTContext &Context,
 
     // If we set a virtual earlier, and this isn't a path, forget it again.
     if (SetVirtual && !FoundPathThroughBase) {
-      DetectedVirtual = nullptr;
+      DetectedVirtual = QualType();
     }
   }
 
@@ -332,9 +333,7 @@ bool CXXRecordDecl::lookupInBases(BaseMatchesCallback BaseMatches,
       if (!PE.Base->isVirtual())
         continue;
 
-      CXXRecordDecl *VBase = nullptr;
-      if (const RecordType *Record = PE.Base->getType()->getAs<RecordType>())
-        VBase = cast<CXXRecordDecl>(Record->getDecl());
+      CXXRecordDecl *VBase = PE.Base->getType()->getAsCXXRecordDecl();
       if (!VBase)
         break;
 
@@ -343,10 +342,7 @@ bool CXXRecordDecl::lookupInBases(BaseMatchesCallback BaseMatches,
       // base is a subobject of any other path; if so, then the
       // declaration in this path are hidden by that patch.
       for (const CXXBasePath &HidingP : Paths) {
-        CXXRecordDecl *HidingClass = nullptr;
-        if (const RecordType *Record =
-                HidingP.back().Base->getType()->getAs<RecordType>())
-          HidingClass = cast<CXXRecordDecl>(Record->getDecl());
+        CXXRecordDecl *HidingClass = HidingP.back().Base->getType()->getAsCXXRecordDecl();
         if (!HidingClass)
           break;
 
@@ -365,7 +361,7 @@ bool CXXRecordDecl::FindBaseClass(const CXXBaseSpecifier *Specifier,
                                   const CXXRecordDecl *BaseRecord) {
   assert(BaseRecord->getCanonicalDecl() == BaseRecord &&
          "User data for FindBaseClass is not canonical!");
-  return Specifier->getType()->castAs<RecordType>()->getDecl()
+  return Specifier->getType()->getAsCXXRecordDecl()
             ->getCanonicalDecl() == BaseRecord;
 }
 
@@ -375,7 +371,7 @@ bool CXXRecordDecl::FindVirtualBaseClass(const CXXBaseSpecifier *Specifier,
   assert(BaseRecord->getCanonicalDecl() == BaseRecord &&
          "User data for FindBaseClass is not canonical!");
   return Specifier->isVirtual() &&
-         Specifier->getType()->castAs<RecordType>()->getDecl()
+         Specifier->getType()->getAsCXXRecordDecl()
             ->getCanonicalDecl() == BaseRecord;
 }
 
@@ -518,8 +514,7 @@ void FinalOverriderCollector::Collect(const CXXRecordDecl *RD,
       = ++SubobjectCount[cast<CXXRecordDecl>(RD->getCanonicalDecl())];
 
   for (const auto &Base : RD->bases()) {
-    if (const RecordType *RT = Base.getType()->getAs<RecordType>()) {
-      const CXXRecordDecl *BaseDecl = cast<CXXRecordDecl>(RT->getDecl());
+    if (const CXXRecordDecl *BaseDecl = Base.getType()->getAsCXXRecordDecl()) {
       if (!BaseDecl->isPolymorphic())
         continue;
 
@@ -685,11 +680,9 @@ AddIndirectPrimaryBases(const CXXRecordDecl *RD, ASTContext &Context,
     Bases.insert(Layout.getPrimaryBase());
 
   for (const auto &I : RD->bases()) {
-    assert(!I.getType()->isDependentType() &&
+    const CXXRecordDecl *BaseDecl = I.getType()->getAsCXXRecordDecl();
+    assert(BaseDecl &&
            "Cannot get indirect primary bases for class with dependent bases.");
-
-    const CXXRecordDecl *BaseDecl =
-      cast<CXXRecordDecl>(I.getType()->castAs<RecordType>()->getDecl());
 
     // Only bases with virtual bases participate in computing the
     // indirect primary virtual base classes.
@@ -707,12 +700,9 @@ CXXRecordDecl::getIndirectPrimaryBases(CXXIndirectPrimaryBaseSet& Bases) const {
     return;
 
   for (const auto &I : bases()) {
-    assert(!I.getType()->isDependentType() &&
+    const CXXRecordDecl *BaseDecl = I.getType()->getAsCXXRecordDecl();
+    assert(BaseDecl &&
            "Cannot get indirect primary bases for class with dependent bases.");
-
-    const CXXRecordDecl *BaseDecl =
-      cast<CXXRecordDecl>(I.getType()->castAs<RecordType>()->getDecl());
-
     // Only bases with virtual bases participate in computing the
     // indirect primary virtual base classes.
     if (BaseDecl->getNumVBases())

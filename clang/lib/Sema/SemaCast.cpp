@@ -1726,10 +1726,9 @@ TryStaticDowncast(Sema &Self, CanQualType SrcType, CanQualType DestType,
     return TC_Failed;
   }
 
-  if (Paths.getDetectedVirtual() != nullptr) {
-    QualType VirtualBase(Paths.getDetectedVirtual(), 0);
+  if (!Paths.getDetectedVirtual().isNull()) {
     Self.Diag(OpRange.getBegin(), diag::err_static_downcast_via_virtual)
-      << OrigSrcType << OrigDestType << VirtualBase << OpRange;
+      << OrigSrcType << OrigDestType << Paths.getDetectedVirtual() << OpRange;
     msg = 0;
     return TC_Failed;
   }
@@ -1826,9 +1825,9 @@ TryStaticMemberPointerUpcast(Sema &Self, ExprResult &SrcExpr, QualType SrcType,
     return TC_Failed;
   }
 
-  if (const RecordType *VBase = Paths.getDetectedVirtual()) {
+  if (!Paths.getDetectedVirtual().isNull()) {
     Self.Diag(OpRange.getBegin(), diag::err_memptr_conv_via_virtual)
-      << SrcClass << DestClass << QualType(VBase, 0) << OpRange;
+      << SrcClass << DestClass << Paths.getDetectedVirtual() << OpRange;
     msg = 0;
     return TC_Failed;
   }

@@ -463,10 +463,14 @@ struct NegativeIncompleteArrayMember {
   char e[];
 };
 
-template <typename T> class NoCrash {
-  class B : public NoCrash {
-    template <typename U> B(U u) {}
-  };
+template <typename T>
+class NoCrash {
+  class B;
+};
+
+template <typename T>
+class NoCrash<T>::B : public NoCrash {
+  template <typename U> B(U u) {}
 };
 
 struct PositiveBitfieldMember {

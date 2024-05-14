@@ -518,7 +518,7 @@ namespace cwg136 { // cwg136: 3.4
   void q() {
     j(A(), A()); // ok, has default argument
   }
-  extern "C" void k(int, int, int, int); // #cwg136-k 
+  extern "C" void k(int, int, int, int); // #cwg136-k
   namespace NSA {
   struct A {
     friend void cwg136::k(int, int, int, int = 0);

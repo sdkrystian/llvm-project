@@ -142,7 +142,7 @@ class CXXBasePaths {
   llvm::SmallPtrSet<const CXXRecordDecl *, 4> VisitedDependentRecords;
 
   /// DetectedVirtual - The base class that is virtual.
-  const RecordType *DetectedVirtual = nullptr;
+  QualType DetectedVirtual;
 
   /// ScratchPath - A BasePath that is used by Sema::lookupInBases
   /// to help build the set of paths.
@@ -208,7 +208,7 @@ public:
 
   /// The virtual base discovered on the path (if we are merely
   /// detecting virtuals).
-  const RecordType* getDetectedVirtual() const {
+  QualType getDetectedVirtual() const {
     return DetectedVirtual;
   }
 

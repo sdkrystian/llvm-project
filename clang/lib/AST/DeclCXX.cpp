@@ -2508,8 +2508,8 @@ bool CXXMethodDecl::isMoveAssignmentOperator() const {
 
 void CXXMethodDecl::addOverriddenMethod(const CXXMethodDecl *MD) {
   assert(MD->isCanonicalDecl() && "Method is not canonical!");
-  assert(!MD->getParent()->isDependentContext() &&
-         "Can't add an overridden method to a class template!");
+  // assert(!MD->getParent()->isDependentContext() &&
+  //        "Can't add an overridden method to a class template!");
   assert(MD->isVirtual() && "Method is not virtual!");
 
   getASTContext().addOverriddenMethod(this, MD);

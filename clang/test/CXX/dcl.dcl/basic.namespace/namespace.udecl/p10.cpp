@@ -1,5 +1,4 @@
 // RUN: %clang_cc1 -fsyntax-only -verify %s
-// expected-no-diagnostics
 
 namespace test0 {
   namespace ns0 {
@@ -38,7 +37,7 @@ namespace PR14768 {
   template<typename eT> class Mat;
   template<typename eT> class Col : public Mat<eT>   {
     using Mat<eT>::operator();
-    using Col<eT>::operator();
+    using Col<eT>::operator(); // expected-error {{using declaration refers to its own class}}
     void operator() ();
   };
 }

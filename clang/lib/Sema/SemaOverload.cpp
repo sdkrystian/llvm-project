@@ -3513,9 +3513,9 @@ bool Sema::CheckMemberPointerConversion(Expr *From, QualType ToType,
     return true;
   }
 
-  if (const RecordType *VBase = Paths.getDetectedVirtual()) {
+  if (!Paths.getDetectedVirtual().isNull()) {
     Diag(From->getExprLoc(), diag::err_memptr_conv_via_virtual)
-      << FromClass << ToClass << QualType(VBase, 0)
+      << FromClass << ToClass << Paths.getDetectedVirtual()
       << From->getSourceRange();
     return true;
   }

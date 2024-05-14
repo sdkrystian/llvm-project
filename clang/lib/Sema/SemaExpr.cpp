@@ -15995,7 +15995,7 @@ ExprResult Sema::BuildBuiltinOffsetOf(SourceLocation BuiltinLoc,
     CXXBasePaths Paths;
     if (IsDerivedFrom(OC.LocStart, CurrentType, Context.getTypeDeclType(Parent),
                       Paths)) {
-      if (Paths.getDetectedVirtual()) {
+      if (!Paths.getDetectedVirtual().isNull()) {
         Diag(OC.LocEnd, diag::err_offsetof_field_of_virtual_base)
           << MemberDecl->getDeclName()
           << SourceRange(BuiltinLoc, RParenLoc);
