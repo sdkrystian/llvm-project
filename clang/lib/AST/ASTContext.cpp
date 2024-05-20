@@ -7010,6 +7010,8 @@ QualType ASTContext::getAdjustedParameterType(QualType T) const {
 QualType ASTContext::getSignatureParameterType(QualType T) const {
   T = getVariableArrayDecayedType(T);
   T = getAdjustedParameterType(T);
+  if (T->isDependentType())
+    return T;
   return T.getUnqualifiedType();
 }
 
