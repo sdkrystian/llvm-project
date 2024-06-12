@@ -1077,7 +1077,41 @@ private:
     ~RevertingTentativeParsingAction() { Revert(); }
   };
 
-  class UnannotatedTentativeParsingAction;
+  /// A tentative parsing action that can also revert token annotations.
+  class UnannotatedTentativeParsingAction
+      : public TentativeParsingAction {
+  public:
+    explicit UnannotatedTentativeParsingAction(Parser &Self,
+                                               tok::TokenKind EndKind)
+        : TentativeParsingAction(Self), Self(Self), EndKind(EndKind) {
+      // Stash away the old token stream, so we can restore it once the
+      // tentative parse is complete.
+      TentativeParsingAction Inner(Self);
+      Self.ConsumeAndStoreUntil(EndKind, Toks, true, /*ConsumeFinalToken*/false);
+      Inner.Revert();
+    }
+
+    void RevertAnnotations() {
+      Revert();
+
+      // Put back the original tokens.
+      Self.SkipUntil(EndKind, StopAtSemi | StopBeforeMatch);
+      if (Toks.size()) {
+        auto Buffer = std::make_unique<Token[]>(Toks.size());
+        std::copy(Toks.begin() + 1, Toks.end(), Buffer.get());
+        Buffer[Toks.size() - 1] = Self.Tok;
+        Self.PP.EnterTokenStream(std::move(Buffer), Toks.size(), true,
+                                 /*IsReinject*/ true);
+
+        Self.Tok = Toks.front();
+      }
+    }
+
+  private:
+    Parser &Self;
+    CachedTokens Toks;
+    tok::TokenKind EndKind;
+  };
 
   /// ObjCDeclContextSwitch - An object used to switch context from
   /// an objective-c decl context to its enclosing decl context and
@@ -1979,7 +2013,8 @@ private:
       CXXScopeSpec &SS, ParsedType ObjectType, bool ObjectHasErrors,
       bool EnteringContext, bool *MayBePseudoDestructor = nullptr,
       bool IsTypename = false, const IdentifierInfo **LastII = nullptr,
-      bool OnlyNamespace = false, bool InUsingDeclaration = false);
+      bool OnlyNamespace = false, bool InUsingDeclaration = false,
+      bool Disambiguation = false);
 
   //===--------------------------------------------------------------------===//
   // C++11 5.1.2: Lambda expressions
