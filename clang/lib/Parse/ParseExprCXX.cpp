@@ -160,7 +160,7 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
     CXXScopeSpec &SS, ParsedType ObjectType, bool ObjectHadErrors,
     bool EnteringContext, bool *MayBePseudoDestructor, bool IsTypename,
     const IdentifierInfo **LastII, bool OnlyNamespace,
-    bool InUsingDeclaration) {
+    bool InUsingDeclaration, bool Disambiguation) {
   assert(getLangOpts().CPlusPlus &&
          "Call sites of this function should be guarded by checking for C++");
 
@@ -557,7 +557,7 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
         continue;
       }
 
-      if (MemberOfUnknownSpecialization && (ObjectType || SS.isSet()) &&
+      if (MemberOfUnknownSpecialization && !Disambiguation && (ObjectType || SS.isSet()) &&
           (IsTypename || isTemplateArgumentList(1) == TPResult::True)) {
         // If we had errors before, ObjectType can be dependent even without any
         // templates. Do not report missing template keyword in that case.
