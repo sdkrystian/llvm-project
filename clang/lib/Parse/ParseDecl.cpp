@@ -6668,6 +6668,7 @@ void Parser::ParseDeclaratorInternal(Declarator &D,
         (NextToken().is(tok::coloncolon) || NextToken().is(tok::less))) ||
        Tok.is(tok::annot_cxxscope))) {
 
+    #if 0
     UnannotatedTentativeParsingAction TPA(*this, tok::semi);
     bool EnteringContext = D.getContext() == DeclaratorContext::File;
 
@@ -6732,6 +6733,75 @@ void Parser::ParseDeclaratorInternal(Declarator &D,
 
       if (DirectDeclParser)
         (this->*DirectDeclParser)(D);
+      return;
+    }
+    #endif
+
+    UnannotatedTentativeParsingAction TPA(*this, tok::semi);
+    bool EnteringContext = D.getContext() == DeclaratorContext::File ||
+                           D.getContext() == DeclaratorContext::Member;
+
+    CXXScopeSpec SS;
+    SS.setTemplateParamLists(D.getTemplateParameterLists());
+
+    if (ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
+                                   /*ObjectHasErrors=*/false,
+                                   /*EnteringContext=*/false,
+                                   /*MayBePseudoDestructor=*/nullptr,
+                                   /*IsTypename=*/false, /*LastII=*/nullptr,
+                                   /*OnlyNamespace=*/false,
+                                   /*InUsingDeclaration=*/false,
+                                   /*Disambiguation=*/EnteringContext) ||
+
+        SS.isEmpty() || SS.isInvalid() || !EnteringContext || Tok.is(tok::star)) {
+      TPA.Commit();
+    } else {
+      TPA.RevertAnnotations();
+      SS.clear();
+      ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
+                                     /*ObjectHasErrors=*/false,
+                                     /*EnteringContext=*/true);
+
+    }
+
+    if (SS.isNotEmpty()) {
+      if (Tok.isNot(tok::star)) {
+        // if (EnteringContext)
+        //  Actions.RebuildNestedNameSpecifierInCurrentInstantiation(SS);
+
+        // The scope spec really belongs to the direct-declarator.
+        if (D.mayHaveIdentifier())
+          D.getCXXScopeSpec() = SS;
+        else
+          AnnotateScopeToken(SS, true);
+
+        if (DirectDeclParser)
+          (this->*DirectDeclParser)(D);
+        return;
+      }
+
+      if (SS.isValid()) {
+        checkCompoundToken(SS.getEndLoc(), tok::coloncolon,
+                           CompoundToken::MemberPtr);
+      }
+
+      SourceLocation StarLoc = ConsumeToken();
+      D.SetRangeEnd(StarLoc);
+      DeclSpec DS(AttrFactory);
+      ParseTypeQualifierListOpt(DS);
+      D.ExtendWithDeclSpec(DS);
+
+      // Recurse to parse whatever is left.
+      Actions.runWithSufficientStackSpace(D.getBeginLoc(), [&] {
+        ParseDeclaratorInternal(D, DirectDeclParser);
+      });
+
+      // Sema will have to catch (syntactically invalid) pointers into global
+      // scope. It has to catch pointers into namespace scope anyway.
+      D.AddTypeInfo(DeclaratorChunk::getMemberPointer(
+                        SS, DS.getTypeQualifiers(), StarLoc, DS.getEndLoc()),
+                    std::move(DS.getAttributes()),
+                    /* Don't replace range end. */ SourceLocation());
       return;
     }
   }
@@ -6925,7 +6995,8 @@ void Parser::ParseDirectDeclarator(Declarator &D) {
 
     // ParseDeclaratorInternal might already have parsed the scope.
     if (D.getCXXScopeSpec().isEmpty()) {
-      bool EnteringContext = D.getContext() == DeclaratorContext::File;
+      bool EnteringContext = D.getContext() == DeclaratorContext::File ||
+                             D.getContext() == DeclaratorContext::Member;
       ParseOptionalCXXScopeSpecifier(
           D.getCXXScopeSpec(), /*ObjectType=*/nullptr,
           /*ObjectHasErrors=*/false, EnteringContext);
