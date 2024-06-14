@@ -6610,133 +6610,11 @@ void Parser::ParseDeclaratorInternal(Declarator &D,
   // C++ member pointers start with a '::' or a nested-name.
   // Member pointers get special handling, since there's no place for the
   // scope spec in the generic path below.
-#if 0
   if (getLangOpts().CPlusPlus &&
       (Tok.is(tok::coloncolon) || Tok.is(tok::kw_decltype) ||
        (Tok.is(tok::identifier) &&
         (NextToken().is(tok::coloncolon) || NextToken().is(tok::less))) ||
        Tok.is(tok::annot_cxxscope))) {
-    bool EnteringContext = D.getContext() == DeclaratorContext::File ||
-                           D.getContext() == DeclaratorContext::Member;
-    CXXScopeSpec SS;
-    SS.setTemplateParamLists(D.getTemplateParameterLists());
-    ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
-                                   /*ObjectHasErrors=*/false, EnteringContext);
-
-    if (SS.isNotEmpty()) {
-      if (Tok.isNot(tok::star)) {
-        // The scope spec really belongs to the direct-declarator.
-        if (D.mayHaveIdentifier())
-          D.getCXXScopeSpec() = SS;
-        else
-          AnnotateScopeToken(SS, true);
-
-        if (DirectDeclParser)
-          (this->*DirectDeclParser)(D);
-        return;
-      }
-
-      if (SS.isValid()) {
-        checkCompoundToken(SS.getEndLoc(), tok::coloncolon,
-                           CompoundToken::MemberPtr);
-      }
-
-      SourceLocation StarLoc = ConsumeToken();
-      D.SetRangeEnd(StarLoc);
-      DeclSpec DS(AttrFactory);
-      ParseTypeQualifierListOpt(DS);
-      D.ExtendWithDeclSpec(DS);
-
-      // Recurse to parse whatever is left.
-      Actions.runWithSufficientStackSpace(D.getBeginLoc(), [&] {
-        ParseDeclaratorInternal(D, DirectDeclParser);
-      });
-
-      // Sema will have to catch (syntactically invalid) pointers into global
-      // scope. It has to catch pointers into namespace scope anyway.
-      D.AddTypeInfo(DeclaratorChunk::getMemberPointer(
-                        SS, DS.getTypeQualifiers(), StarLoc, DS.getEndLoc()),
-                    std::move(DS.getAttributes()),
-                    /* Don't replace range end. */ SourceLocation());
-      return;
-    }
-  }
-  #else
-  if (getLangOpts().CPlusPlus &&
-      (Tok.is(tok::coloncolon) || Tok.is(tok::kw_decltype) ||
-       (Tok.is(tok::identifier) &&
-        (NextToken().is(tok::coloncolon) || NextToken().is(tok::less))) ||
-       Tok.is(tok::annot_cxxscope))) {
-
-    #if 0
-    UnannotatedTentativeParsingAction TPA(*this, tok::semi);
-    bool EnteringContext = D.getContext() == DeclaratorContext::File;
-
-    CXXScopeSpec SS;
-    SS.setTemplateParamLists(D.getTemplateParameterLists());
-
-    auto CheckPointerToMember = [&]() -> bool {
-      if (ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
-                                         /*ObjectHasErrors=*/false,
-                                         /*EnteringContext=*/false,
-                                         /*MayBePseudoDestructor=*/nullptr,
-                                         /*IsTypename=*/false,
-                                         /*LastII=*/nullptr,
-                                         /*OnlyNamespace=*/false,
-                                         /*InUsingDeclaration=*/false,
-                                         /*Disambiguation=*/EnteringContext))
-        return false;
-      if (SS.isEmpty())
-        return false;
-      return Tok.is(tok::star);
-    };
-
-    if (CheckPointerToMember()) {
-      TPA.Commit();
-
-      checkCompoundToken(SS.getEndLoc(), tok::coloncolon,
-                         CompoundToken::MemberPtr);
-      SourceLocation StarLoc = ConsumeToken();
-      D.SetRangeEnd(StarLoc);
-      DeclSpec DS(AttrFactory);
-      ParseTypeQualifierListOpt(DS);
-      D.ExtendWithDeclSpec(DS);
-
-      // Recurse to parse whatever is left.
-      Actions.runWithSufficientStackSpace(D.getBeginLoc(), [&] {
-        ParseDeclaratorInternal(D, DirectDeclParser);
-      });
-
-      // Sema will have to catch (syntactically invalid) pointers into global
-      // scope. It has to catch pointers into namespace scope anyway.
-      D.AddTypeInfo(DeclaratorChunk::getMemberPointer(
-                        SS, DS.getTypeQualifiers(), StarLoc, DS.getEndLoc()),
-                    std::move(DS.getAttributes()),
-                    /* Don't replace range end. */ SourceLocation());
-      return;
-    } else if (EnteringContext) {
-      TPA.RevertAnnotations();
-      SS.clear();
-      ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
-                                     /*ObjectHasErrors=*/false, EnteringContext);
-    } else {
-      TPA.Commit();
-    }
-
-
-    if (SS.isNotEmpty()) {
-      // The scope spec really belongs to the direct-declarator.
-      if (D.mayHaveIdentifier())
-        D.getCXXScopeSpec() = SS;
-      else
-        AnnotateScopeToken(SS, true);
-
-      if (DirectDeclParser)
-        (this->*DirectDeclParser)(D);
-      return;
-    }
-    #endif
-
     UnannotatedTentativeParsingAction TPA(*this, tok::semi);
     bool EnteringContext = D.getContext() == DeclaratorContext::File ||
                            D.getContext() == DeclaratorContext::Member;
@@ -6766,9 +6644,6 @@ void Parser::ParseDeclaratorInternal(Declarator &D,
 
     if (SS.isNotEmpty()) {
       if (Tok.isNot(tok::star)) {
-        // if (EnteringContext)
-        //  Actions.RebuildNestedNameSpecifierInCurrentInstantiation(SS);
-
         // The scope spec really belongs to the direct-declarator.
         if (D.mayHaveIdentifier())
           D.getCXXScopeSpec() = SS;
@@ -6805,7 +6680,6 @@ void Parser::ParseDeclaratorInternal(Declarator &D,
       return;
     }
   }
-  #endif
 
   tok::TokenKind Kind = Tok.getKind();
 
