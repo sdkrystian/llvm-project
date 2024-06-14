@@ -6615,7 +6615,7 @@ void Parser::ParseDeclaratorInternal(Declarator &D,
        (Tok.is(tok::identifier) &&
         (NextToken().is(tok::coloncolon) || NextToken().is(tok::less))) ||
        Tok.is(tok::annot_cxxscope))) {
-    UnannotatedTentativeParsingAction TPA(*this, tok::semi);
+    UnannotatedTentativeParsingAction TPA(*this, tok::l_brace);
     bool EnteringContext = D.getContext() == DeclaratorContext::File ||
                            D.getContext() == DeclaratorContext::Member;
 
