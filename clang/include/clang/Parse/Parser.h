@@ -1078,8 +1078,7 @@ private:
   };
 
   /// A tentative parsing action that can also revert token annotations.
-  class UnannotatedTentativeParsingAction
-      : public TentativeParsingAction {
+  class UnannotatedTentativeParsingAction : public TentativeParsingAction {
   public:
     explicit UnannotatedTentativeParsingAction(Parser &Self,
                                                tok::TokenKind EndKind)
@@ -1087,7 +1086,8 @@ private:
       // Stash away the old token stream, so we can restore it once the
       // tentative parse is complete.
       TentativeParsingAction Inner(Self);
-      Self.ConsumeAndStoreUntil(EndKind, Toks, true, /*ConsumeFinalToken*/false);
+      Self.ConsumeAndStoreUntil(EndKind, Toks, true,
+                                /*ConsumeFinalToken*/ false);
       Inner.Revert();
     }
 

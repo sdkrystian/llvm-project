@@ -6623,15 +6623,16 @@ void Parser::ParseDeclaratorInternal(Declarator &D,
     SS.setTemplateParamLists(D.getTemplateParameterLists());
 
     if (ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
-                                   /*ObjectHasErrors=*/false,
-                                   /*EnteringContext=*/false,
-                                   /*MayBePseudoDestructor=*/nullptr,
-                                   /*IsTypename=*/false, /*LastII=*/nullptr,
-                                   /*OnlyNamespace=*/false,
-                                   /*InUsingDeclaration=*/false,
-                                   /*Disambiguation=*/EnteringContext) ||
+                                       /*ObjectHasErrors=*/false,
+                                       /*EnteringContext=*/false,
+                                       /*MayBePseudoDestructor=*/nullptr,
+                                       /*IsTypename=*/false, /*LastII=*/nullptr,
+                                       /*OnlyNamespace=*/false,
+                                       /*InUsingDeclaration=*/false,
+                                       /*Disambiguation=*/EnteringContext) ||
 
-        SS.isEmpty() || SS.isInvalid() || !EnteringContext || Tok.is(tok::star)) {
+        SS.isEmpty() || SS.isInvalid() || !EnteringContext ||
+        Tok.is(tok::star)) {
       TPA.Commit();
       if (SS.isNotEmpty() && Tok.is(tok::star)) {
         if (SS.isValid()) {
