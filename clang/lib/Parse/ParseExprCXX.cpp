@@ -534,7 +534,8 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
                                                         ObjectType,
                                                         EnteringContext,
                                                         Template,
-                                              MemberOfUnknownSpecialization)) {
+                                                MemberOfUnknownSpecialization,
+                                                        Disambiguation)) {
         // If lookup didn't find anything, we treat the name as a template-name
         // anyway. C++20 requires this, and in prior language modes it improves
         // error recovery. But before we commit to this, check that we actually
