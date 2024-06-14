@@ -20,9 +20,8 @@ template<typename T> A<T>::C<T> f2(); // expected-warning {{missing 'typename'}}
 template<typename T> A<T>::C<X>::X(T) {}
 template<typename T> A<T>::C<X>::X::Y::Y(T) {}
 
-// FIXME: This is ill-formed
-template<typename T> int A<T>::B<T>::*f3() {}
-template<typename T> int A<T>::C<X>::*f4() {}
+template<typename T> int A<T>::B<T>::*f3() {} // expected-error {{expected unqualified-id}}
+template<typename T> int A<T>::C<X>::*f4() {} // expected-error {{expected unqualified-id}}
 
 template<typename T> int A<T>::template C<int>::*f5() {}
 

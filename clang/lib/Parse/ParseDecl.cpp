@@ -6633,50 +6633,48 @@ void Parser::ParseDeclaratorInternal(Declarator &D,
 
         SS.isEmpty() || SS.isInvalid() || !EnteringContext || Tok.is(tok::star)) {
       TPA.Commit();
+      if (SS.isNotEmpty() && Tok.is(tok::star)) {
+        if (SS.isValid()) {
+          checkCompoundToken(SS.getEndLoc(), tok::coloncolon,
+                             CompoundToken::MemberPtr);
+        }
+
+        SourceLocation StarLoc = ConsumeToken();
+        D.SetRangeEnd(StarLoc);
+        DeclSpec DS(AttrFactory);
+        ParseTypeQualifierListOpt(DS);
+        D.ExtendWithDeclSpec(DS);
+
+        // Recurse to parse whatever is left.
+        Actions.runWithSufficientStackSpace(D.getBeginLoc(), [&] {
+          ParseDeclaratorInternal(D, DirectDeclParser);
+        });
+
+        // Sema will have to catch (syntactically invalid) pointers into global
+        // scope. It has to catch pointers into namespace scope anyway.
+        D.AddTypeInfo(DeclaratorChunk::getMemberPointer(
+                          SS, DS.getTypeQualifiers(), StarLoc, DS.getEndLoc()),
+                      std::move(DS.getAttributes()),
+                      /*EndLoc=*/SourceLocation());
+        return;
+      }
     } else {
       TPA.RevertAnnotations();
       SS.clear();
       ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
                                      /*ObjectHasErrors=*/false,
                                      /*EnteringContext=*/true);
-
     }
 
     if (SS.isNotEmpty()) {
-      if (Tok.isNot(tok::star)) {
-        // The scope spec really belongs to the direct-declarator.
-        if (D.mayHaveIdentifier())
-          D.getCXXScopeSpec() = SS;
-        else
-          AnnotateScopeToken(SS, true);
+      // The scope spec really belongs to the direct-declarator.
+      if (D.mayHaveIdentifier())
+        D.getCXXScopeSpec() = SS;
+      else
+        AnnotateScopeToken(SS, true);
 
-        if (DirectDeclParser)
-          (this->*DirectDeclParser)(D);
-        return;
-      }
-
-      if (SS.isValid()) {
-        checkCompoundToken(SS.getEndLoc(), tok::coloncolon,
-                           CompoundToken::MemberPtr);
-      }
-
-      SourceLocation StarLoc = ConsumeToken();
-      D.SetRangeEnd(StarLoc);
-      DeclSpec DS(AttrFactory);
-      ParseTypeQualifierListOpt(DS);
-      D.ExtendWithDeclSpec(DS);
-
-      // Recurse to parse whatever is left.
-      Actions.runWithSufficientStackSpace(D.getBeginLoc(), [&] {
-        ParseDeclaratorInternal(D, DirectDeclParser);
-      });
-
-      // Sema will have to catch (syntactically invalid) pointers into global
-      // scope. It has to catch pointers into namespace scope anyway.
-      D.AddTypeInfo(DeclaratorChunk::getMemberPointer(
-                        SS, DS.getTypeQualifiers(), StarLoc, DS.getEndLoc()),
-                    std::move(DS.getAttributes()),
-                    /* Don't replace range end. */ SourceLocation());
+      if (DirectDeclParser)
+        (this->*DirectDeclParser)(D);
       return;
     }
   }
