@@ -1225,9 +1225,7 @@ bool Parser::ConsumeAndStoreInitializer(CachedTokens &Toks,
       //    syntactically-valid init-declarator-list, then this comma ends
       //    the default initializer.
       {
-        UnannotatedTentativeParsingAction PA(*this,
-                                             CIK == CIK_DefaultInitializer
-                                               ? tok::semi : tok::r_paren);
+        TentativeParsingAction TPA(*this, /*Unannotated=*/true);
         Sema::TentativeAnalysisScope Scope(Actions);
 
         TPResult Result = TPResult::Error;
@@ -1255,7 +1253,7 @@ bool Parser::ConsumeAndStoreInitializer(CachedTokens &Toks,
         // Put the token stream back and undo any annotations we performed
         // after the comma. They may reflect a different parse than the one
         // we will actually perform at the end of the class.
-        PA.RevertAnnotations();
+        TPA.Revert();
 
         // If what follows could be a declaration, it is a declaration.
         if (Result != TPResult::False && Result != TPResult::Error)
