@@ -6615,7 +6615,8 @@ void Parser::ParseDeclaratorInternal(Declarator &D,
        (Tok.is(tok::identifier) &&
         (NextToken().is(tok::coloncolon) || NextToken().is(tok::less))) ||
        Tok.is(tok::annot_cxxscope))) {
-    UnannotatedTentativeParsingAction TPA(*this, tok::l_brace);
+    // UnannotatedTentativeParsingAction TPA(*this, tok::l_brace);
+    TentativeParsingAction TPA(*this, /*Unannotated=*/true);
     bool EnteringContext = D.getContext() == DeclaratorContext::File ||
                            D.getContext() == DeclaratorContext::Member;
 
@@ -6660,7 +6661,8 @@ void Parser::ParseDeclaratorInternal(Declarator &D,
         return;
       }
     } else {
-      TPA.RevertAnnotations();
+      // TPA.RevertAnnotations();
+      TPA.Revert();
       SS.clear();
       ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
                                      /*ObjectHasErrors=*/false,
