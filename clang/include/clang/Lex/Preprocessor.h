@@ -1150,7 +1150,8 @@ private:
   /// invoked (at which point the last position is popped).
   std::vector<CachedTokensTy::size_type> BacktrackPositions;
 
-  std::vector<std::pair<CachedTokensTy, CachedTokensTy::size_type>> UnannotatedBacktrackPositions;
+  std::vector<std::pair<CachedTokensTy, CachedTokensTy::size_type>>
+      UnannotatedBacktrackPositions;
 
   /// True if \p Preprocessor::SkipExcludedConditionalBlock() is running.
   /// This is used to guard against calling this function recursively.
@@ -1727,7 +1728,9 @@ public:
   /// caching of tokens is on.
 
   bool isBacktrackEnabled() const { return !BacktrackPositions.empty(); }
-  bool isUnannotatedBacktrackEnabled() const { return !UnannotatedBacktrackPositions.empty(); }
+  bool isUnannotatedBacktrackEnabled() const {
+    return !UnannotatedBacktrackPositions.empty();
+  }
 
   /// Lex the next token for this preprocessor.
   void Lex(Token &Result);
@@ -1831,8 +1834,9 @@ public:
   void RevertCachedTokens(unsigned N) {
     assert(isBacktrackEnabled() &&
            "Should only be called when tokens are cached for backtracking");
-    assert(signed(CachedLexPos) - signed(N) >= signed(BacktrackPositions.back() >> 1)
-         && "Should revert tokens up to the last backtrack position, not more");
+    assert(signed(CachedLexPos) - signed(N) >=
+               signed(BacktrackPositions.back() >> 1) &&
+           "Should revert tokens up to the last backtrack position, not more");
     assert(signed(CachedLexPos) - signed(N) >= 0 &&
            "Corrupted backtrack positions ?");
     CachedLexPos -= N;
