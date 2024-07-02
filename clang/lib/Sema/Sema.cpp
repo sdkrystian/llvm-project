@@ -2226,10 +2226,8 @@ static void checkEscapingByref(VarDecl *VD, Sema &S) {
   // The destructor's exception specification is needed when IRGen generates
   // block copy/destroy functions. Resolve it here.
   if (const CXXRecordDecl *RD = T->getAsCXXRecordDecl())
-    if (CXXDestructorDecl *DD = RD->getDestructor()) {
-      auto *FPT = DD->getType()->castAs<FunctionProtoType>();
-      S.ResolveExceptionSpec(Loc, FPT);
-    }
+    if (CXXDestructorDecl *DD = RD->getDestructor())
+      S.ResolveExceptionSpec(Loc, DD);
 }
 
 static void markEscapingByrefs(const FunctionScopeInfo &FSI, Sema &S) {

@@ -945,10 +945,10 @@ MemberExpr *Sema::BuildMemberExpr(
   //   An exception-specification is considered to be needed when:
   //   - in an expression the function is the unique lookup result or the
   //     selected member of a set of overloaded functions
-  if (auto *FPT = Ty->getAs<FunctionProtoType>()) {
-    if (isUnresolvedExceptionSpec(FPT->getExceptionSpecType())) {
-      if (auto *NewFPT = ResolveExceptionSpec(MemberNameInfo.getLoc(), FPT))
-        E->setType(Context.getQualifiedType(NewFPT, Ty.getQualifiers()));
+  if (auto *FD = dyn_cast<FunctionDecl>(Member)) {
+    if (isUnresolvedExceptionSpec(FD->getExceptionSpecType()) &&
+        !ResolveExceptionSpec(MemberNameInfo.getLoc(), FD)) {
+      E->setType(Context.getQualifiedType(FD->getType(), Ty.getQualifiers()));
     }
   }
 

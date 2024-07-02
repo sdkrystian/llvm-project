@@ -6142,6 +6142,7 @@ public:
                                        SourceLocation Loc = SourceLocation());
   const FunctionProtoType *ResolveExceptionSpec(SourceLocation Loc,
                                                 const FunctionProtoType *FPT);
+  bool ResolveExceptionSpec(SourceLocation Loc, FunctionDecl *FD);
   void UpdateExceptionSpec(FunctionDecl *FD,
                            const FunctionProtoType::ExceptionSpecInfo &ESI);
 

@@ -236,6 +236,36 @@ Sema::ResolveExceptionSpec(SourceLocation Loc, const FunctionProtoType *FPT) {
   return Proto;
 }
 
+bool Sema::ResolveExceptionSpec(SourceLocation Loc, FunctionDecl *FD) {
+  ExceptionSpecificationType EST = FD->getExceptionSpecType();
+  if (EST == EST_Unparsed) {
+    Diag(Loc, diag::err_exception_spec_not_parsed);
+    return true;
+  }
+
+  // If the exception specification has already been resolved, we don't
+  // have to do anything.
+  if (!isUnresolvedExceptionSpec(EST))
+    return false;
+
+  const FunctionProtoType *SourceFPT =
+      FD->getType()->castAs<FunctionProtoType>();
+
+  // Compute or instantiate the exception specification now.
+  if (EST == EST_Unevaluated)
+    EvaluateImplicitExceptionSpec(Loc, FD);
+  else
+    InstantiateExceptionSpec(Loc, FD);
+
+  const FunctionProtoType *Proto =
+    FD->getType()->castAs<FunctionProtoType>();
+  if (Proto->getExceptionSpecType() == clang::EST_Unparsed) {
+    Diag(Loc, diag::err_exception_spec_not_parsed);
+    return true;
+  }
+  return false;
+}
+
 void
 Sema::UpdateExceptionSpec(FunctionDecl *FD,
                           const FunctionProtoType::ExceptionSpecInfo &ESI) {

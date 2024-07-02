@@ -5118,8 +5118,9 @@ static bool HasNoThrowOperator(const RecordType *RT, OverloadedOperatorKind Op,
       CXXMethodDecl *Operator = cast<CXXMethodDecl>(*Op);
       if((Operator->*IsDesiredOp)()) {
         FoundOperator = true;
+        if (Self.ResolveExceptionSpec(KeyLoc, Operator))
+          return false;
         auto *CPT = Operator->getType()->castAs<FunctionProtoType>();
-        CPT = Self.ResolveExceptionSpec(KeyLoc, CPT);
         if (!CPT || !CPT->isNothrow())
           return false;
       }
@@ -5391,8 +5392,9 @@ static bool EvaluateUnaryTypeTrait(Sema &Self, TypeTrait UTT,
       if (C.getLangOpts().AccessControl && Destructor->getAccess() != AS_public)
         return false;
       if (UTT == UTT_IsNothrowDestructible) {
+        if (Self.ResolveExceptionSpec(KeyLoc, Destructor))
+            return false;
         auto *CPT = Destructor->getType()->castAs<FunctionProtoType>();
-        CPT = Self.ResolveExceptionSpec(KeyLoc, CPT);
         if (!CPT || !CPT->isNothrow())
           return false;
       }
@@ -5479,10 +5481,9 @@ static bool EvaluateUnaryTypeTrait(Sema &Self, TypeTrait UTT,
         auto *Constructor = cast<CXXConstructorDecl>(ND->getUnderlyingDecl());
         if (Constructor->isCopyConstructor(FoundTQs)) {
           FoundConstructor = true;
-          auto *CPT = Constructor->getType()->castAs<FunctionProtoType>();
-          CPT = Self.ResolveExceptionSpec(KeyLoc, CPT);
-          if (!CPT)
+          if (Self.ResolveExceptionSpec(KeyLoc, const_cast<CXXConstructorDecl *>(Constructor)))
             return false;
+          auto *CPT = Constructor->getType()->castAs<FunctionProtoType>();
           // TODO: check whether evaluating default arguments can throw.
           // For now, we'll be conservative and assume that they can throw.
           if (!CPT->isNothrow() || CPT->getNumParams() > 1)
@@ -5517,10 +5518,9 @@ static bool EvaluateUnaryTypeTrait(Sema &Self, TypeTrait UTT,
         auto *Constructor = cast<CXXConstructorDecl>(ND->getUnderlyingDecl());
         if (Constructor->isDefaultConstructor()) {
           FoundConstructor = true;
-          auto *CPT = Constructor->getType()->castAs<FunctionProtoType>();
-          CPT = Self.ResolveExceptionSpec(KeyLoc, CPT);
-          if (!CPT)
+          if (Self.ResolveExceptionSpec(KeyLoc, const_cast<CXXConstructorDecl *>(Constructor)))
             return false;
+          auto *CPT = Constructor->getType()->castAs<FunctionProtoType>();
           // FIXME: check whether evaluating default arguments can throw.
           // For now, we'll be conservative and assume that they can throw.
           if (!CPT->isNothrow() || CPT->getNumParams() > 0)

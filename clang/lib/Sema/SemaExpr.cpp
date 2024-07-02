@@ -2277,13 +2277,12 @@ Sema::BuildDeclRefExpr(ValueDecl *D, QualType Ty, ExprValueKind VK,
   //  b) if the function is a defaulted comparison, we can use the body we
   //     build when defining it as input to the exception specification
   //     computation rather than computing a new body.
-  if (const auto *FPT = Ty->getAs<FunctionProtoType>()) {
-    if (isUnresolvedExceptionSpec(FPT->getExceptionSpecType())) {
-      if (const auto *NewFPT = ResolveExceptionSpec(NameInfo.getLoc(), FPT))
-        E->setType(Context.getQualifiedType(NewFPT, Ty.getQualifiers()));
+  if (auto *FD = dyn_cast<FunctionDecl>(D)) {
+    if (isUnresolvedExceptionSpec(FD->getExceptionSpecType()) &&
+        !ResolveExceptionSpec(NameInfo.getLoc(), FD)) {
+      E->setType(Context.getQualifiedType(FD->getType(), Ty.getQualifiers()));
     }
   }
-
   if (getLangOpts().ObjCWeak && isa<VarDecl>(D) &&
       Ty.getObjCLifetime() == Qualifiers::OCL_Weak && !isUnevaluatedContext() &&
       !Diags.isIgnored(diag::warn_arc_repeated_use_of_weak, E->getBeginLoc()))
