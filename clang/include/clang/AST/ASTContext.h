@@ -463,6 +463,8 @@ class ASTContext : public RefCountedBase<ASTContext> {
   /// merged into.
   llvm::DenseMap<Decl*, Decl*> MergedDecls;
 
+  llvm::DenseSet<const Decl*> TopLevelDeclsInObjCContainer;
+
   /// A mapping from a defining declaration to a list of modules (other
   /// than the owning module of the declaration) that contain merged
   /// definitions of that entity.
@@ -996,6 +998,17 @@ public:
 
   /// Erase the attributes corresponding to the given declaration.
   void eraseDeclAttrs(const Decl *D);
+
+  bool isTopLevelDeclInObjCContainer(const Decl *D) const {
+    return TopLevelDeclsInObjCContainer.contains(D);
+  }
+
+  void setTopLevelDeclInObjCContainer(const Decl *D, bool Val) {
+    if (Val)
+      TopLevelDeclsInObjCContainer.insert(D);
+    else
+      TopLevelDeclsInObjCContainer.erase(D);
+  }
 
   /// If this variable is an instantiated static data member of a
   /// class template specialization, returns the templated static data member

@@ -314,12 +314,6 @@ private:
   LLVM_PREFERRED_TYPE(bool)
   unsigned Referenced : 1;
 
-  /// Whether this declaration is a top-level declaration (function,
-  /// global variable, etc.) that is lexically inside an objc container
-  /// definition.
-  LLVM_PREFERRED_TYPE(bool)
-  unsigned TopLevelDeclInObjCContainer : 1;
-
   /// Whether statistic collection is enabled.
   static bool StatisticsEnabled;
 
@@ -397,7 +391,7 @@ protected:
       : NextInContextAndBits(nullptr, getModuleOwnershipKindForChildOf(DC)),
         DeclCtx(DC), Loc(L), DeclKind(DK), InvalidDecl(false), HasAttrs(false),
         Implicit(false), Used(false), Referenced(false),
-        TopLevelDeclInObjCContainer(false), Access(AS_none), FromASTFile(0),
+        Access(AS_none), FromASTFile(0),
         IdentifierNamespace(getIdentifierNamespaceForKind(DK)),
         CacheValidAndLinkage(llvm::to_underlying(Linkage::Invalid)) {
     if (StatisticsEnabled) add(DK);
@@ -405,7 +399,7 @@ protected:
 
   Decl(Kind DK, EmptyShell Empty)
       : DeclKind(DK), InvalidDecl(false), HasAttrs(false), Implicit(false),
-        Used(false), Referenced(false), TopLevelDeclInObjCContainer(false),
+        Used(false), Referenced(false),
         Access(AS_none), FromASTFile(0),
         IdentifierNamespace(getIdentifierNamespaceForKind(DK)),
         CacheValidAndLinkage(llvm::to_underlying(Linkage::Invalid)) {
@@ -632,13 +626,9 @@ public:
   /// Whether this declaration is a top-level declaration (function,
   /// global variable, etc.) that is lexically inside an objc container
   /// definition.
-  bool isTopLevelDeclInObjCContainer() const {
-    return TopLevelDeclInObjCContainer;
-  }
+  bool isTopLevelDeclInObjCContainer() const;
 
-  void setTopLevelDeclInObjCContainer(bool V = true) {
-    TopLevelDeclInObjCContainer = V;
-  }
+  void setTopLevelDeclInObjCContainer(bool V = true);
 
   /// Looks on this and related declarations for an applicable
   /// external source symbol attribute.

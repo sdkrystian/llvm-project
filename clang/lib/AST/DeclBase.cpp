@@ -229,6 +229,14 @@ void Decl::add(Kind k) {
   }
 }
 
+bool Decl::isTopLevelDeclInObjCContainer() const {
+  return getASTContext().isTopLevelDeclInObjCContainer(this);
+}
+
+void Decl::setTopLevelDeclInObjCContainer(bool V) {
+  getASTContext().setTopLevelDeclInObjCContainer(this, V);
+}
+
 bool Decl::isTemplateParameterPack() const {
   if (const auto *TTP = dyn_cast<TemplateTypeParmDecl>(this))
     return TTP->isParameterPack();
