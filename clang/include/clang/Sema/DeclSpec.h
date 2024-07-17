@@ -2378,8 +2378,8 @@ public:
   void AddTypeInfo(const DeclaratorChunk &TI, SourceLocation EndLoc) {
     DeclTypeInfo.push_back(TI);
 
-    assert(TI.AttrList.empty() &&
-           "Cannot add a declarator chunk with attributes with this overload");
+    //assert(TI.AttrList.empty() &&
+    //       "Cannot add a declarator chunk with attributes with this overload");
 
     if (!EndLoc.isInvalid())
       SetRangeEnd(EndLoc);

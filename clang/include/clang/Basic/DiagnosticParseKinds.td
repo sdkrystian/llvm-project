@@ -344,8 +344,6 @@ def warn_atimport_in_framework_header : Warning<
 
 def err_invalid_reference_qualifier_application : Error<
   "'%0' qualifier may not be applied to a reference">;
-def err_illegal_decl_reference_to_reference : Error<
-  "%0 declared as a reference to a reference">;
 def ext_rvalue_reference : ExtWarn<
   "rvalue references are a C++11 extension">, InGroup<CXX11>;
 def warn_cxx98_compat_rvalue_reference : Warning<

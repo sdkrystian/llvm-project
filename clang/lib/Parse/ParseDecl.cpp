@@ -6639,194 +6639,182 @@ static bool isPipeDeclarator(const Declarator &D) {
 ///         '::'[opt] nested-name-specifier '*' cv-qualifier-seq[opt]
 void Parser::ParseDeclaratorInternal(Declarator &D,
                                      DirectDeclParseFunction DirectDeclParser) {
-  if (Diags.hasAllExtensionsSilenced())
-    D.setExtension();
+  SmallVector<DeclaratorChunk, 8> DeclTypeInfo;
+  auto AddTypeInfo = [&](DeclaratorChunk &&Chunk, ParsedAttributes &&Attrs) {
+    Chunk.getAttrs().addAll(Attrs.begin(), Attrs.end());
+    DeclTypeInfo.emplace_back(std::move(Chunk));
+    D.getAttributePool().takeAllFrom(Attrs.getPool());
+  };
 
-  // C++ member pointers start with a '::' or a nested-name.
-  // Member pointers get special handling, since there's no place for the
-  // scope spec in the generic path below.
-  if (getLangOpts().CPlusPlus &&
-      (Tok.is(tok::coloncolon) || Tok.is(tok::kw_decltype) ||
-       (Tok.is(tok::identifier) &&
-        (NextToken().is(tok::coloncolon) || NextToken().is(tok::less))) ||
-       Tok.is(tok::annot_cxxscope))) {
-    CXXScopeSpec SS;
-    SS.setTemplateParamLists(D.getTemplateParameterLists());
+  while (true) {
+    if (Diags.hasAllExtensionsSilenced())
+      D.setExtension();
 
-    bool EnteringContext = D.getContext() == DeclaratorContext::File ||
-                           D.getContext() == DeclaratorContext::Member;
+    // C++ member pointers start with a '::' or a nested-name.
+    // Member pointers get special handling, since there's no place for the
+    // scope spec in the generic path below.
+    if (getLangOpts().CPlusPlus &&
+        (Tok.is(tok::coloncolon) || Tok.is(tok::kw_decltype) ||
+         (Tok.is(tok::identifier) &&
+          (NextToken().is(tok::coloncolon) || NextToken().is(tok::less))) ||
+         Tok.is(tok::annot_cxxscope))) {
+      CXXScopeSpec SS;
+      SS.setTemplateParamLists(D.getTemplateParameterLists());
 
-    std::optional<TentativeParsingAction> TPA;
-    if (EnteringContext)
-      TPA.emplace(*this, /*Unannotated=*/true);
+      bool EnteringContext = D.getContext() == DeclaratorContext::File ||
+                             D.getContext() == DeclaratorContext::Member;
 
-    if (ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
-                                       /*ObjectHasErrors=*/false,
-                                       /*EnteringContext=*/false,
-                                       /*MayBePseudoDestructor=*/nullptr,
-                                       /*IsTypename=*/false, /*LastII=*/nullptr,
-                                       /*OnlyNamespace=*/false,
-                                       /*InUsingDeclaration=*/false,
-                                       /*Disambiguation=*/EnteringContext) ||
-
-        SS.isEmpty() || SS.isInvalid() || !EnteringContext ||
-        Tok.is(tok::star)) {
+      std::optional<TentativeParsingAction> TPA;
       if (EnteringContext)
-        TPA->Commit();
-      if (SS.isNotEmpty() && Tok.is(tok::star)) {
-        if (SS.isValid()) {
-          checkCompoundToken(SS.getEndLoc(), tok::coloncolon,
-                             CompoundToken::MemberPtr);
+        TPA.emplace(*this, /*Unannotated=*/true);
+
+      if (ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
+                                         /*ObjectHasErrors=*/false,
+                                         /*EnteringContext=*/false,
+                                         /*MayBePseudoDestructor=*/nullptr,
+                                         /*IsTypename=*/false, /*LastII=*/nullptr,
+                                         /*OnlyNamespace=*/false,
+                                         /*InUsingDeclaration=*/false,
+                                         /*Disambiguation=*/EnteringContext) ||
+
+          SS.isEmpty() || SS.isInvalid() || !EnteringContext ||
+          Tok.is(tok::star)) {
+        if (EnteringContext)
+          TPA->Commit();
+        if (SS.isNotEmpty() && Tok.is(tok::star)) {
+          if (SS.isValid()) {
+            checkCompoundToken(SS.getEndLoc(), tok::coloncolon,
+                               CompoundToken::MemberPtr);
+          }
+
+          SourceLocation StarLoc = ConsumeToken();
+          D.SetRangeEnd(StarLoc);
+          DeclSpec DS(AttrFactory);
+          ParseTypeQualifierListOpt(DS);
+          D.ExtendWithDeclSpec(DS);
+
+          // Sema will have to catch (syntactically invalid) pointers into global
+          // scope. It has to catch pointers into namespace scope anyway.
+          AddTypeInfo(DeclaratorChunk::getMemberPointer(
+                            SS, DS.getTypeQualifiers(), StarLoc, DS.getEndLoc()),
+                        std::move(DS.getAttributes()));
+
+
+          continue;
+
         }
+      } else {
+        TPA->Revert();
+        SS.clear();
+        ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
+                                       /*ObjectHasErrors=*/false,
+                                       /*EnteringContext=*/true);
+      }
 
-        SourceLocation StarLoc = ConsumeToken();
-        D.SetRangeEnd(StarLoc);
-        DeclSpec DS(AttrFactory);
-        ParseTypeQualifierListOpt(DS);
-        D.ExtendWithDeclSpec(DS);
+      if (SS.isNotEmpty()) {
+        // The scope spec really belongs to the direct-declarator.
+        if (D.mayHaveIdentifier())
+          D.getCXXScopeSpec() = SS;
+        else
+          AnnotateScopeToken(SS, true);
 
-        // Recurse to parse whatever is left.
-        Actions.runWithSufficientStackSpace(D.getBeginLoc(), [&] {
-          ParseDeclaratorInternal(D, DirectDeclParser);
-        });
+        break;
+      }
+    }
 
-        // Sema will have to catch (syntactically invalid) pointers into global
-        // scope. It has to catch pointers into namespace scope anyway.
-        D.AddTypeInfo(DeclaratorChunk::getMemberPointer(
-                          SS, DS.getTypeQualifiers(), StarLoc, DS.getEndLoc()),
-                      std::move(DS.getAttributes()),
-                      /*EndLoc=*/SourceLocation());
-        return;
+    tok::TokenKind Kind = Tok.getKind();
+
+    if (D.getDeclSpec().isTypeSpecPipe() && !isPipeDeclarator(D)) {
+      DeclSpec DS(AttrFactory);
+      ParseTypeQualifierListOpt(DS);
+
+      AddTypeInfo(
+          DeclaratorChunk::getPipe(DS.getTypeQualifiers(), DS.getPipeLoc()),
+          std::move(DS.getAttributes()));
+    }
+
+    // Not a pointer, C++ reference, or block.
+    if (!isPtrOperatorToken(Kind, getLangOpts(), D.getContext()))
+      break;
+
+    // Otherwise, '*' -> pointer, '^' -> block, '&' -> lvalue reference,
+    // '&&' -> rvalue reference
+    SourceLocation Loc = ConsumeToken();  // Eat the *, ^, & or &&.
+    D.SetRangeEnd(Loc);
+
+    if (Kind == tok::star || Kind == tok::caret) {
+      // Is a pointer.
+      DeclSpec DS(AttrFactory);
+
+      // GNU attributes are not allowed here in a new-type-id, but Declspec and
+      // C++11 attributes are allowed.
+      unsigned Reqs = AR_CXX11AttributesParsed | AR_DeclspecAttributesParsed |
+                      ((D.getContext() != DeclaratorContext::CXXNew)
+                           ? AR_GNUAttributesParsed
+                           : AR_GNUAttributesParsedAndRejected);
+      ParseTypeQualifierListOpt(DS, Reqs, true, !D.mayOmitIdentifier());
+      D.ExtendWithDeclSpec(DS);
+
+      if (Kind == tok::star) {
+        // Remember that we parsed a pointer type, and remember the type-quals.
+        AddTypeInfo(DeclaratorChunk::getPointer(
+                          DS.getTypeQualifiers(), Loc, DS.getConstSpecLoc(),
+                          DS.getVolatileSpecLoc(), DS.getRestrictSpecLoc(),
+                          DS.getAtomicSpecLoc(), DS.getUnalignedSpecLoc()),
+                      std::move(DS.getAttributes()));
+      } else {
+        // Remember that we parsed a Block type, and remember the type-quals.
+        AddTypeInfo(
+            DeclaratorChunk::getBlockPointer(DS.getTypeQualifiers(), Loc),
+            std::move(DS.getAttributes()));
       }
     } else {
-      TPA->Revert();
-      SS.clear();
-      ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
-                                     /*ObjectHasErrors=*/false,
-                                     /*EnteringContext=*/true);
-    }
+      // Is a reference
+      DeclSpec DS(AttrFactory);
 
-    if (SS.isNotEmpty()) {
-      // The scope spec really belongs to the direct-declarator.
-      if (D.mayHaveIdentifier())
-        D.getCXXScopeSpec() = SS;
-      else
-        AnnotateScopeToken(SS, true);
+      // Complain about rvalue references in C++03, but then go on and build
+      // the declarator.
+      if (Kind == tok::ampamp)
+        Diag(Loc, getLangOpts().CPlusPlus11 ?
+             diag::warn_cxx98_compat_rvalue_reference :
+             diag::ext_rvalue_reference);
 
-      if (DirectDeclParser)
-        (this->*DirectDeclParser)(D);
-      return;
-    }
-  }
+      // GNU-style and C++11 attributes are allowed here, as is restrict.
+      ParseTypeQualifierListOpt(DS);
+      D.ExtendWithDeclSpec(DS);
 
-  tok::TokenKind Kind = Tok.getKind();
-
-  if (D.getDeclSpec().isTypeSpecPipe() && !isPipeDeclarator(D)) {
-    DeclSpec DS(AttrFactory);
-    ParseTypeQualifierListOpt(DS);
-
-    D.AddTypeInfo(
-        DeclaratorChunk::getPipe(DS.getTypeQualifiers(), DS.getPipeLoc()),
-        std::move(DS.getAttributes()), SourceLocation());
-  }
-
-  // Not a pointer, C++ reference, or block.
-  if (!isPtrOperatorToken(Kind, getLangOpts(), D.getContext())) {
-    if (DirectDeclParser)
-      (this->*DirectDeclParser)(D);
-    return;
-  }
-
-  // Otherwise, '*' -> pointer, '^' -> block, '&' -> lvalue reference,
-  // '&&' -> rvalue reference
-  SourceLocation Loc = ConsumeToken();  // Eat the *, ^, & or &&.
-  D.SetRangeEnd(Loc);
-
-  if (Kind == tok::star || Kind == tok::caret) {
-    // Is a pointer.
-    DeclSpec DS(AttrFactory);
-
-    // GNU attributes are not allowed here in a new-type-id, but Declspec and
-    // C++11 attributes are allowed.
-    unsigned Reqs = AR_CXX11AttributesParsed | AR_DeclspecAttributesParsed |
-                    ((D.getContext() != DeclaratorContext::CXXNew)
-                         ? AR_GNUAttributesParsed
-                         : AR_GNUAttributesParsedAndRejected);
-    ParseTypeQualifierListOpt(DS, Reqs, true, !D.mayOmitIdentifier());
-    D.ExtendWithDeclSpec(DS);
-
-    // Recursively parse the declarator.
-    Actions.runWithSufficientStackSpace(
-        D.getBeginLoc(), [&] { ParseDeclaratorInternal(D, DirectDeclParser); });
-    if (Kind == tok::star)
-      // Remember that we parsed a pointer type, and remember the type-quals.
-      D.AddTypeInfo(DeclaratorChunk::getPointer(
-                        DS.getTypeQualifiers(), Loc, DS.getConstSpecLoc(),
-                        DS.getVolatileSpecLoc(), DS.getRestrictSpecLoc(),
-                        DS.getAtomicSpecLoc(), DS.getUnalignedSpecLoc()),
-                    std::move(DS.getAttributes()), SourceLocation());
-    else
-      // Remember that we parsed a Block type, and remember the type-quals.
-      D.AddTypeInfo(
-          DeclaratorChunk::getBlockPointer(DS.getTypeQualifiers(), Loc),
-          std::move(DS.getAttributes()), SourceLocation());
-  } else {
-    // Is a reference
-    DeclSpec DS(AttrFactory);
-
-    // Complain about rvalue references in C++03, but then go on and build
-    // the declarator.
-    if (Kind == tok::ampamp)
-      Diag(Loc, getLangOpts().CPlusPlus11 ?
-           diag::warn_cxx98_compat_rvalue_reference :
-           diag::ext_rvalue_reference);
-
-    // GNU-style and C++11 attributes are allowed here, as is restrict.
-    ParseTypeQualifierListOpt(DS);
-    D.ExtendWithDeclSpec(DS);
-
-    // C++ 8.3.2p1: cv-qualified references are ill-formed except when the
-    // cv-qualifiers are introduced through the use of a typedef or of a
-    // template type argument, in which case the cv-qualifiers are ignored.
-    if (DS.getTypeQualifiers() != DeclSpec::TQ_unspecified) {
-      if (DS.getTypeQualifiers() & DeclSpec::TQ_const)
-        Diag(DS.getConstSpecLoc(),
-             diag::err_invalid_reference_qualifier_application) << "const";
-      if (DS.getTypeQualifiers() & DeclSpec::TQ_volatile)
-        Diag(DS.getVolatileSpecLoc(),
-             diag::err_invalid_reference_qualifier_application) << "volatile";
-      // 'restrict' is permitted as an extension.
-      if (DS.getTypeQualifiers() & DeclSpec::TQ_atomic)
-        Diag(DS.getAtomicSpecLoc(),
-             diag::err_invalid_reference_qualifier_application) << "_Atomic";
-    }
-
-    // Recursively parse the declarator.
-    Actions.runWithSufficientStackSpace(
-        D.getBeginLoc(), [&] { ParseDeclaratorInternal(D, DirectDeclParser); });
-
-    if (D.getNumTypeObjects() > 0) {
-      // C++ [dcl.ref]p4: There shall be no references to references.
-      DeclaratorChunk& InnerChunk = D.getTypeObject(D.getNumTypeObjects() - 1);
-      if (InnerChunk.Kind == DeclaratorChunk::Reference) {
-        if (const IdentifierInfo *II = D.getIdentifier())
-          Diag(InnerChunk.Loc, diag::err_illegal_decl_reference_to_reference)
-           << II;
-        else
-          Diag(InnerChunk.Loc, diag::err_illegal_decl_reference_to_reference)
-            << "type name";
-
-        // Once we've complained about the reference-to-reference, we
-        // can go ahead and build the (technically ill-formed)
-        // declarator: reference collapsing will take care of it.
+      // C++ 8.3.2p1: cv-qualified references are ill-formed except when the
+      // cv-qualifiers are introduced through the use of a typedef or of a
+      // template type argument, in which case the cv-qualifiers are ignored.
+      if (DS.getTypeQualifiers() != DeclSpec::TQ_unspecified) {
+        if (DS.getTypeQualifiers() & DeclSpec::TQ_const)
+          Diag(DS.getConstSpecLoc(),
+               diag::err_invalid_reference_qualifier_application) << "const";
+        if (DS.getTypeQualifiers() & DeclSpec::TQ_volatile)
+          Diag(DS.getVolatileSpecLoc(),
+               diag::err_invalid_reference_qualifier_application) << "volatile";
+        // 'restrict' is permitted as an extension.
+        if (DS.getTypeQualifiers() & DeclSpec::TQ_atomic)
+          Diag(DS.getAtomicSpecLoc(),
+               diag::err_invalid_reference_qualifier_application) << "_Atomic";
       }
+
+      // Remember that we parsed a reference type.
+      AddTypeInfo(DeclaratorChunk::getReference(DS.getTypeQualifiers(), Loc,
+                                                  Kind == tok::amp),
+                    std::move(DS.getAttributes()));
     }
 
-    // Remember that we parsed a reference type.
-    D.AddTypeInfo(DeclaratorChunk::getReference(DS.getTypeQualifiers(), Loc,
-                                                Kind == tok::amp),
-                  std::move(DS.getAttributes()), SourceLocation());
+    // Recursively parse the declarator.
+    continue;
   }
+
+  if (DirectDeclParser)
+    (this->*DirectDeclParser)(D);
+
+  for (auto First = DeclTypeInfo.rbegin(), Last = DeclTypeInfo.rend();
+      First != Last; ++First)
+    D.AddTypeInfo(*First, SourceLocation());
 }
 
 // When correcting from misplaced brackets before the identifier, the location

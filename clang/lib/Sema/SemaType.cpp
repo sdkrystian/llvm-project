@@ -4664,6 +4664,20 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
         D.setInvalidType(true);
         // Build the type anyway.
       }
+
+      if (chunkIndex != 0) {
+        // C++ [dcl.ref]p4: There shall be no references to references.
+        DeclaratorChunk &NextDeclType = D.getTypeObject(chunkIndex - 1);
+        if (NextDeclType.Kind == DeclaratorChunk::Reference) {
+          if (const IdentifierInfo *II = D.getIdentifier())
+            S.Diag(NextDeclType.Loc, diag::err_illegal_decl_reference_to_reference)
+                << II;
+          else
+            S.Diag(NextDeclType.Loc, diag::err_illegal_decl_reference_to_reference)
+                << "type name";
+        }
+      }
+
       T = S.BuildReferenceType(T, DeclType.Ref.LValueRef, DeclType.Loc, Name);
 
       if (DeclType.Ref.HasRestrict)
