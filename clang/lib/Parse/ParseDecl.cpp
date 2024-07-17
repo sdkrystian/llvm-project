@@ -6667,7 +6667,7 @@ void Parser::ParseDeclaratorInternal(Declarator &D,
                                        /*Disambiguation=*/EnteringContext) ||
 
         SS.isEmpty() || SS.isInvalid() || !EnteringContext ||
-        Tok.is(tok::star)) {
+        !D.mayHaveIdentifier() || Tok.is(tok::star)) {
       TPA.Commit();
       if (SS.isNotEmpty() && Tok.is(tok::star)) {
         if (SS.isValid()) {
