@@ -6650,12 +6650,15 @@ void Parser::ParseDeclaratorInternal(Declarator &D,
        (Tok.is(tok::identifier) &&
         (NextToken().is(tok::coloncolon) || NextToken().is(tok::less))) ||
        Tok.is(tok::annot_cxxscope))) {
-    TentativeParsingAction TPA(*this, /*Unannotated=*/true);
+    CXXScopeSpec SS;
+    SS.setTemplateParamLists(D.getTemplateParameterLists());
+
     bool EnteringContext = D.getContext() == DeclaratorContext::File ||
                            D.getContext() == DeclaratorContext::Member;
 
-    CXXScopeSpec SS;
-    SS.setTemplateParamLists(D.getTemplateParameterLists());
+    std::optional<TentativeParsingAction> TPA;
+    if (EnteringContext)
+      TPA.emplace(*this, /*Unannotated=*/true);
 
     if (ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
                                        /*ObjectHasErrors=*/false,
@@ -6667,8 +6670,9 @@ void Parser::ParseDeclaratorInternal(Declarator &D,
                                        /*Disambiguation=*/EnteringContext) ||
 
         SS.isEmpty() || SS.isInvalid() || !EnteringContext ||
-        !D.mayHaveIdentifier() || Tok.is(tok::star)) {
-      TPA.Commit();
+        Tok.is(tok::star)) {
+      if (EnteringContext)
+        TPA->Commit();
       if (SS.isNotEmpty() && Tok.is(tok::star)) {
         if (SS.isValid()) {
           checkCompoundToken(SS.getEndLoc(), tok::coloncolon,
@@ -6695,7 +6699,7 @@ void Parser::ParseDeclaratorInternal(Declarator &D,
         return;
       }
     } else {
-      TPA.Revert();
+      TPA->Revert();
       SS.clear();
       ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
                                      /*ObjectHasErrors=*/false,
