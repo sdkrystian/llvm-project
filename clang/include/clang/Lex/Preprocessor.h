@@ -1158,12 +1158,11 @@ private:
   /// The EnableBacktrackAtThisPos() method pushes a position to
   /// indicate where CachedLexPos should be set when the BackTrack() method is
   /// invoked (at which point the last position is popped).
-  std::vector<CachedTokensTy::size_type> BacktrackPositions;
+  unsigned BacktrackDepth = 0;
 
-  /// Stack of cached tokens/initial number of cached tokens pairs, allowing
-  /// nested unannotated backtracks.
-  std::vector<std::pair<CachedTokensTy, CachedTokensTy::size_type>>
-      UnannotatedBacktrackTokens;
+  CachedTokensTy UnannotatedCachedTokens;
+
+  unsigned UnannotatedBacktrackDepth = 0;
 
   /// True if \p Preprocessor::SkipExcludedConditionalBlock() is running.
   /// This is used to guard against calling this function recursively.
@@ -1714,44 +1713,79 @@ public:
   /// top-of-stack lexer is known.
   void RemoveTopOfLexerStack();
 
-  /// From the point that this method is called, and until
-  /// CommitBacktrackedTokens() or Backtrack() is called, the Preprocessor
-  /// keeps track of the lexed tokens so that a subsequent Backtrack() call will
-  /// make the Preprocessor re-lex the same tokens.
-  ///
-  /// Nested backtracks are allowed, meaning that EnableBacktrackAtThisPos can
-  /// be called multiple times and CommitBacktrackedTokens/Backtrack calls will
-  /// be combined with the EnableBacktrackAtThisPos calls in reverse order.
-  ///
-  /// NOTE: *DO NOT* forget to call either CommitBacktrackedTokens or Backtrack
-  /// at some point after EnableBacktrackAtThisPos. If you don't, caching of
-  /// tokens will continue indefinitely.
-  ///
-  /// \param Unannotated Whether token annotations are reverted upon calling
-  /// Backtrack().
-  void EnableBacktrackAtThisPos(bool Unannotated = false);
+  class BacktrackRAII {
+    Preprocessor &PP;
+    CachedTokensTy::size_type BacktrackPos;
 
-private:
-  std::pair<CachedTokensTy::size_type, bool> LastBacktrackPos();
+  public:
+    BacktrackRAII(Preprocessor &PP) : PP(PP), BacktrackPos(PP.CachedLexPos) {
+      assert(PP.LexLevel == 0 && "cannot use lookahead while lexing");
+      ++PP.BacktrackDepth;
+      PP.EnterCachingLexMode();
+    }
 
-  CachedTokensTy PopUnannotatedBacktrackTokens();
+    void Commit() {
+      assert(PP.isBacktrackEnabled() && "backtracking not active!");
+      --PP.BacktrackDepth;
+    }
 
-public:
-  /// Disable the last EnableBacktrackAtThisPos call.
-  void CommitBacktrackedTokens();
+    void Revert() {
+      assert(PP.isBacktrackEnabled() && "backtracking not active!");
+      --PP.BacktrackDepth;
+      PP.CachedLexPos = BacktrackPos;
+      PP.recomputeCurLexerKind();
+    }
+  };
 
-  /// Make Preprocessor re-lex the tokens that were lexed since
-  /// EnableBacktrackAtThisPos() was previously called.
-  void Backtrack();
+  class UnannotatedBacktrackRAII {
+    Preprocessor &PP;
+    CachedTokensTy::size_type BacktrackPos;
+    CachedTokensTy::size_type UnannotatedBacktrackPos;
+    CachedTokensTy SavedCachedTokens;
 
-  /// True if EnableBacktrackAtThisPos() was called and
-  /// caching of tokens is on.
-  bool isBacktrackEnabled() const { return !BacktrackPositions.empty(); }
+  public:
+    UnannotatedBacktrackRAII(Preprocessor &PP)
+        : PP(PP), BacktrackPos(PP.CachedLexPos),
+          UnannotatedBacktrackPos(PP.UnannotatedCachedTokens.size()) {
+      assert(PP.LexLevel == 0 && "cannot use lookahead while lexing");
+      SavedCachedTokens.assign(PP.CachedTokens.begin() + BacktrackPos,
+                               PP.CachedTokens.end());
+      ++PP.BacktrackDepth;
+      ++PP.UnannotatedBacktrackDepth;
+      PP.EnterCachingLexMode();
+    }
 
-  /// True if EnableBacktrackAtThisPos() was called and
-  /// caching of unannotated tokens is on.
+    void Commit() {
+      assert(PP.isUnannotatedBacktrackEnabled() && "backtracking not active!");
+      --PP.BacktrackDepth;
+      --PP.UnannotatedBacktrackDepth;
+      if (!PP.isUnannotatedBacktrackEnabled())
+        PP.UnannotatedCachedTokens.clear();
+    }
+
+    void Revert() {
+      assert(PP.isUnannotatedBacktrackEnabled() && "backtracking not active!");
+      PP.CachedLexPos = BacktrackPos;
+      PP.CachedTokens.erase(PP.CachedTokens.begin() + BacktrackPos,
+                            PP.CachedTokens.end());
+      PP.CachedTokens.append(SavedCachedTokens);
+      PP.CachedTokens.append(PP.UnannotatedCachedTokens.begin() +
+                                 UnannotatedBacktrackPos,
+                             PP.UnannotatedCachedTokens.end());
+      --PP.BacktrackDepth;
+      --PP.UnannotatedBacktrackDepth;
+      if (!PP.isUnannotatedBacktrackEnabled())
+        PP.UnannotatedCachedTokens.clear();
+      PP.recomputeCurLexerKind();
+    }
+  };
+
+  /// True if backtracking is active and caching of tokens is on.
+  bool isBacktrackEnabled() const { return BacktrackDepth; }
+
+  /// True if unannotated backtracking is active and caching of tokens is on.
   bool isUnannotatedBacktrackEnabled() const {
-    return !UnannotatedBacktrackTokens.empty();
+    return UnannotatedBacktrackDepth;
   }
 
   /// Lex the next token for this preprocessor.
@@ -1860,9 +1894,6 @@ public:
   void RevertCachedTokens(unsigned N) {
     assert(isBacktrackEnabled() &&
            "Should only be called when tokens are cached for backtracking");
-    assert(signed(CachedLexPos) - signed(N) >=
-               signed(LastBacktrackPos().first) &&
-           "Should revert tokens up to the last backtrack position, not more");
     assert(signed(CachedLexPos) - signed(N) >= 0 &&
            "Corrupted backtrack positions ?");
     CachedLexPos -= N;

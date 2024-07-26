@@ -1242,7 +1242,7 @@ bool Parser::ConsumeAndStoreInitializer(CachedTokens &Toks,
       //    syntactically-valid init-declarator-list, then this comma ends
       //    the default initializer.
       {
-        TentativeParsingAction TPA(*this, /*Unannotated=*/true);
+        UnannotatedTentativeParsingAction TPA(*this);
         Sema::TentativeAnalysisScope Scope(Actions);
 
         TPResult Result = TPResult::Error;

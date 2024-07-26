@@ -1027,7 +1027,7 @@ private:
   ///
   /// If the Unannotated parameter is true, any token annotations created
   /// during the tentative parse are reverted.
-  class TentativeParsingAction {
+  class TentativeParsingAction : private Preprocessor::BacktrackRAII {
     Parser &P;
     PreferredTypeBuilder PrevPreferredType;
     Token PrevTok;
@@ -1036,27 +1036,26 @@ private:
     bool isActive;
 
   public:
-    explicit TentativeParsingAction(Parser &p, bool Unannotated = false)
-        : P(p), PrevPreferredType(P.PreferredType) {
+    explicit TentativeParsingAction(Parser &p)
+        : BacktrackRAII(p.PP), P(p), PrevPreferredType(P.PreferredType) {
       PrevTok = P.Tok;
       PrevTentativelyDeclaredIdentifierCount =
           P.TentativelyDeclaredIdentifiers.size();
       PrevParenCount = P.ParenCount;
       PrevBracketCount = P.BracketCount;
       PrevBraceCount = P.BraceCount;
-      P.PP.EnableBacktrackAtThisPos(Unannotated);
       isActive = true;
     }
     void Commit() {
       assert(isActive && "Parsing action was finished!");
+      BacktrackRAII::Commit();
       P.TentativelyDeclaredIdentifiers.resize(
           PrevTentativelyDeclaredIdentifierCount);
-      P.PP.CommitBacktrackedTokens();
       isActive = false;
     }
     void Revert() {
       assert(isActive && "Parsing action was finished!");
-      P.PP.Backtrack();
+      BacktrackRAII::Revert();
       P.PreferredType = PrevPreferredType;
       P.Tok = PrevTok;
       P.TentativelyDeclaredIdentifiers.resize(
@@ -1078,6 +1077,51 @@ private:
     using TentativeParsingAction::TentativeParsingAction;
 
     ~RevertingTentativeParsingAction() { Revert(); }
+  };
+
+  class UnannotatedTentativeParsingAction
+      : private Preprocessor::UnannotatedBacktrackRAII {
+    Parser &P;
+    PreferredTypeBuilder PrevPreferredType;
+    Token PrevTok;
+    size_t PrevTentativelyDeclaredIdentifierCount;
+    unsigned short PrevParenCount, PrevBracketCount, PrevBraceCount;
+    bool isActive;
+
+  public:
+    explicit UnannotatedTentativeParsingAction(Parser &p)
+        : UnannotatedBacktrackRAII(p.PP), P(p),
+          PrevPreferredType(P.PreferredType) {
+      PrevTok = P.Tok;
+      PrevTentativelyDeclaredIdentifierCount =
+          P.TentativelyDeclaredIdentifiers.size();
+      PrevParenCount = P.ParenCount;
+      PrevBracketCount = P.BracketCount;
+      PrevBraceCount = P.BraceCount;
+      isActive = true;
+    }
+    void Commit() {
+      assert(isActive && "Parsing action was finished!");
+      UnannotatedBacktrackRAII::Commit();
+      P.TentativelyDeclaredIdentifiers.resize(
+          PrevTentativelyDeclaredIdentifierCount);
+      isActive = false;
+    }
+    void Revert() {
+      assert(isActive && "Parsing action was finished!");
+      UnannotatedBacktrackRAII::Revert();
+      P.PreferredType = PrevPreferredType;
+      P.Tok = PrevTok;
+      P.TentativelyDeclaredIdentifiers.resize(
+          PrevTentativelyDeclaredIdentifierCount);
+      P.ParenCount = PrevParenCount;
+      P.BracketCount = PrevBracketCount;
+      P.BraceCount = PrevBraceCount;
+      isActive = false;
+    }
+    ~UnannotatedTentativeParsingAction() {
+      assert(!isActive && "Forgot to call Commit or Revert!");
+    }
   };
 
   /// ObjCDeclContextSwitch - An object used to switch context from
