@@ -4746,7 +4746,7 @@ void Sema::InstantiateExceptionSpec(SourceLocation PointOfInstantiation,
   MultiLevelTemplateArgumentList TemplateArgs =
       getTemplateInstantiationArgs(Decl, Decl->getLexicalDeclContext(),
                                    /*Final=*/false, /*Innermost=*/std::nullopt,
-                                   /*RelativeToPrimary*/ true);
+                                   /*RelativeToPrimary=*/true);
 
   // FIXME: We can't use getTemplateInstantiationPattern(false) in general
   // here, because for a non-defining friend declaration in a class template,
