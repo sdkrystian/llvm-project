@@ -180,6 +180,8 @@ private:
   /// The files and decls are only local (and non-preamble) ones.
   FileDeclsTy FileDecls;
 
+  llvm::DenseSet<Decl *> TopLevelDeclsInObjCContainer;
+
   /// The name of the original source file used to generate this ASTUnit.
   std::string OriginalSourceFile;
 
@@ -529,6 +531,10 @@ public:
   /// Add a new top-level declaration.
   void addTopLevelDecl(Decl *D) {
     TopLevelDecls.push_back(D);
+  }
+
+  void addTopLevelDeclInObjCContainer(Decl *D) {
+    TopLevelDeclsInObjCContainer.insert(D);
   }
 
   /// Add a new local file-level declaration.

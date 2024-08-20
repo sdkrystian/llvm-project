@@ -156,6 +156,8 @@ namespace {
     llvm::DenseMap<std::pair<const ObjCInterfaceDecl*, unsigned>, QualType> GroupRecordType;
     SmallVector<FunctionDecl*, 32> FunctionDefinitionsSeen;
 
+    llvm::DenseSet<Decl *> TopLevelDeclsInObjCContainer;
+
     // This maps an original source AST to it's rewritten form. This allows
     // us to avoid rewriting the same node twice (which is very uncommon).
     // This is needed to support some of the exotic property rewriting.
@@ -214,7 +216,7 @@ namespace {
           // into their grouping struct.
           if (FDecl->isThisDeclarationADefinition() &&
               // Not c functions defined inside an objc container.
-              !FDecl->isTopLevelDeclInObjCContainer()) {
+              !TopLevelDeclsInObjCContainer.contains(FDecl)) {
             FunctionDefinitionsSeen.push_back(FDecl);
             break;
           }
@@ -226,6 +228,7 @@ namespace {
 
     void HandleTopLevelDeclInObjCContainer(DeclGroupRef D) override {
       for (DeclGroupRef::iterator I = D.begin(), E = D.end(); I != E; ++I) {
+        TopLevelDeclsInObjCContainer.insert(*I);
         if (TypedefNameDecl *TD = dyn_cast<TypedefNameDecl>(*I)) {
           if (isTopLevelBlockPointerType(TD->getUnderlyingType()))
             RewriteBlockPointerDecl(TD);
