@@ -1030,8 +1030,10 @@ public:
   void HandleInterestingDecl(DeclGroupRef) override {}
 
   void HandleTopLevelDeclInObjCContainer(DeclGroupRef D) override {
-    for (auto *TopLevelDecl : D)
+    for (auto *TopLevelDecl : D) {
+      Unit.addTopLevelDeclInObjCContainer(TopLevelDecl);
       handleTopLevelDecl(TopLevelDecl);
+    }
   }
 
   ASTMutationListener *GetASTMutationListener() override {
@@ -2509,7 +2511,7 @@ void ASTUnit::findFileRegionDecls(FileID File, unsigned Offset, unsigned Length,
   // to backtrack until we find it otherwise we will fail to report that the
   // region overlaps with an objc container.
   while (BeginIt != LocDecls.begin() &&
-         BeginIt->second->isTopLevelDeclInObjCContainer())
+         TopLevelDeclsInObjCContainer.contains(BeginIt->second))
     --BeginIt;
 
   LocDeclsTy::iterator EndIt = llvm::upper_bound(
