@@ -1568,8 +1568,15 @@ void Sema::ActOnLambdaError(SourceLocation StartLoc, Scope *CurScope,
   if (!IsInstantiation)
     PopDeclContext();
 
+
   // Finalize the lambda.
   CXXRecordDecl *Class = LSI->Lambda;
+  CXXMethodDecl *CallOperator = LSI->CallOperator;
+
+  CallOperator->setLexicalDeclContext(Class);
+  if (FunctionTemplateDecl *CallOperatorTemplate = CallOperator->getDescribedFunctionTemplate())
+    CallOperatorTemplate->setLexicalDeclContext(Class);
+
   Class->setInvalidDecl();
   SmallVector<Decl*, 4> Fields(Class->fields());
   ActOnFields(nullptr, Class->getLocation(), Class, Fields, SourceLocation(),

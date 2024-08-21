@@ -10195,13 +10195,14 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
           getTagInjectionContext(NewFD->getLexicalDeclContext());
       for (NamedDecl *NonParmDecl : FTI.getDeclsInPrototype()) {
         auto *TD = dyn_cast<TagDecl>(NonParmDecl);
-
+        #if 1
         // We don't want to reparent enumerators. Look at their parent enum
         // instead.
         if (!TD) {
           if (auto *ECD = dyn_cast<EnumConstantDecl>(NonParmDecl))
             TD = cast<EnumDecl>(ECD->getDeclContext());
         }
+        #endif
         if (!TD)
           continue;
         DeclContext *TagDC = TD->getLexicalDeclContext();

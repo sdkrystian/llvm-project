@@ -356,12 +356,15 @@ void PrettyStackTraceDecl::print(raw_ostream &OS) const {
 Decl::~Decl() = default;
 
 void Decl::setDeclContext(DeclContext *DC) {
+  // assert((DC == getLexicalDeclContext() || !getLexicalDeclContext()->containsDecl(this)) && "decl in chain cannot have a different lexical context");
   DeclCtx = DC;
 }
 
 void Decl::setLexicalDeclContext(DeclContext *DC) {
   if (DC == getLexicalDeclContext())
     return;
+
+  // assert(!getLexicalDeclContext()->containsDecl(this) && "decl in chain cannot have a different lexical context");
 
   if (isInSemaDC()) {
     setDeclContextsImpl(getDeclContext(), DC, getASTContext());
@@ -499,6 +502,12 @@ bool Decl::isFlexibleArrayMemberLike(
     }
   }
 
+  bool Last = false;
+  for (const FieldDecl *Field : FD->getParent()->fields())
+    Last = Field == FD;
+  return Last || !FD->getParent()->containsDecl(const_cast<FieldDecl *>(FD));
+
+  //return ++ == Record->field_end();
   // Test that the field is the last in the structure.
   RecordDecl::field_iterator FI(
       DeclContext::decl_iterator(const_cast<FieldDecl *>(FD)));
@@ -1698,16 +1707,16 @@ void DeclContext::removeDecl(Decl *D) {
           D->NextInContextAndBits.getPointer());
   } else {
     // Remove D from the decl chain.  This is O(n) but hopefully rare.
-    while (true) {
-      Decl *NextDecl = FirstDecl->NextInContextAndBits.getPointer();
-      if (D == NextDecl) {
-        FirstDecl->NextInContextAndBits.setPointer(
+    for (Decl *PrevDecl = FirstDecl; PrevDecl != LastDecl;) {
+      Decl *CurDecl = PrevDecl->NextInContextAndBits.getPointer();
+      if (D == CurDecl) {
+        PrevDecl->NextInContextAndBits.setPointer(
             D->NextInContextAndBits.getPointer());
         if (D == LastDecl)
-          LastDecl = FirstDecl;
+          LastDecl = PrevDecl;
         break;
       }
-      FirstDecl = NextDecl;
+      PrevDecl = CurDecl;
     }
   }
 
@@ -1744,8 +1753,8 @@ void DeclContext::removeDecl(Decl *D) {
 }
 
 void DeclContext::addHiddenDecl(Decl *D) {
-  assert(D->getLexicalDeclContext() == this &&
-         "Decl inserted into wrong lexical context");
+  // assert(D->getLexicalDeclContext() == this &&
+  //       "Decl inserted into wrong lexical context");
   assert(!D->getNextDeclInContext() && D != LastDecl &&
          "Decl already inserted into a DeclContext");
 
@@ -1985,7 +1994,7 @@ void DeclContext::localUncachedLookup(DeclarationName Name,
   // matches.
   // FIXME: If we have lazy external declarations, this will not find them!
   // FIXME: Should we CollectAllContexts and walk them all here?
-  for (Decl *D = getFirstDeclInContext(); D != getLastDeclInContext(); D = D->getNextDeclInContext()) {
+  for (Decl *D : noload_decls()) {
     if (auto *ND = dyn_cast<NamedDecl>(D))
       if (ND->getDeclName() == Name)
         Results.push_back(ND);

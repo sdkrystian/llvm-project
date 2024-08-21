@@ -2306,6 +2306,7 @@ public:
   class decl_iterator {
     /// Current - The current declaration.
     Decl *Current = nullptr;
+    Decl *Starter = nullptr;
 
   public:
     using value_type = Decl *;
@@ -2315,7 +2316,7 @@ public:
     using difference_type = std::ptrdiff_t;
 
     decl_iterator() = default;
-    explicit decl_iterator(Decl *C) : Current(C) {}
+    explicit decl_iterator(Decl *C) : Current(C), Starter(C) {}
 
     reference operator*() const { return Current; }
 
@@ -2324,11 +2325,7 @@ public:
 
     decl_iterator& operator++() {
       Decl *Next = Current->getNextDeclInContext();
-      // if (Current == Next || Current == Current->getLexicalDeclContext()->getLastDeclInContext())
-      if (Current == Current->getLexicalDeclContext()->getLastDeclInContext())
-        Current = nullptr;
-      else
-        Current = Next;
+      Current = Next == Starter ? nullptr : Next;
       return *this;
     }
 

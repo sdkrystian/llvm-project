@@ -2894,19 +2894,17 @@ InitListChecker::CheckDesignatedInitializer(const InitializedEntity &Entity,
       NumBases = CXXRD->getNumBases();
 
     unsigned FieldIndex = NumBases;
+    auto Field = RD->field_begin();
 
-    for (auto *FI : RD->fields()) {
-      if (FI->isUnnamedBitField())
+    for (auto LastField = RD->field_end(); Field != LastField; ++Field) {
+      if (Field->isUnnamedBitField())
         continue;
-      if (declaresSameEntity(KnownField, FI)) {
-        KnownField = FI;
+      if (declaresSameEntity(KnownField, *Field)) {
+        KnownField = *Field;
         break;
       }
       ++FieldIndex;
     }
-
-    RecordDecl::field_iterator Field =
-        RecordDecl::field_iterator(DeclContext::decl_iterator(KnownField));
 
     // All of the fields of a union are located at the same place in
     // the initializer list.
