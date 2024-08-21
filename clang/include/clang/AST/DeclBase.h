@@ -2323,10 +2323,12 @@ public:
     value_type operator->() const { return Current; }
 
     decl_iterator& operator++() {
+      Decl *Next = Current->getNextDeclInContext();
+      // if (Current == Next || Current == Current->getLexicalDeclContext()->getLastDeclInContext())
       if (Current == Current->getLexicalDeclContext()->getLastDeclInContext())
         Current = nullptr;
       else
-        Current = Current->getNextDeclInContext();
+        Current = Next;
       return *this;
     }
 

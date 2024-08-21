@@ -1537,6 +1537,9 @@ DeclContext::BuildDeclChain(ArrayRef<Decl *> Decls,
     PrevDecl = D;
   }
 
+  if (PrevDecl)
+    PrevDecl->NextInContextAndBits.setPointer(FirstNewDecl);
+
   return std::make_pair(FirstNewDecl, PrevDecl);
 }
 
@@ -1700,6 +1703,8 @@ void DeclContext::removeDecl(Decl *D) {
       if (D == NextDecl) {
         FirstDecl->NextInContextAndBits.setPointer(
             D->NextInContextAndBits.getPointer());
+        if (D == LastDecl)
+          LastDecl = FirstDecl;
         break;
       }
       FirstDecl = NextDecl;
@@ -1744,15 +1749,13 @@ void DeclContext::addHiddenDecl(Decl *D) {
   assert(!D->getNextDeclInContext() && D != LastDecl &&
          "Decl already inserted into a DeclContext");
 
+  Decl *FirstDecl = D;
   if (LastDecl) {
-    D->NextInContextAndBits.setPointer(
-        LastDecl->NextInContextAndBits.getPointer());
+    FirstDecl = LastDecl->NextInContextAndBits.getPointer();
     LastDecl->NextInContextAndBits.setPointer(D);
-    LastDecl = D;
-  } else {
-    D->NextInContextAndBits.setPointer(D);
-    LastDecl = D;
   }
+  D->NextInContextAndBits.setPointer(FirstDecl);
+  LastDecl = D;
 
   // Notify a C++ record declaration that we've added a member, so it can
   // update its class-specific state.

@@ -5091,8 +5091,6 @@ bool RecordDecl::isMsStruct(const ASTContext &C) const {
 
 void RecordDecl::reorderDecls(const SmallVectorImpl<Decl *> &Decls) {
   auto [NewFirst, NewLast] = DeclContext::BuildDeclChain(Decls, false);
-  if (NewLast)
-    NewLast->NextInContextAndBits.setPointer(NewFirst);
   LastDecl = NewLast;
   setIsRandomized(true);
 }
