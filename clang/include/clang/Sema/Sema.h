@@ -11392,7 +11392,8 @@ public:
       CXXScopeSpec &SS, IdentifierInfo *Name, SourceLocation NameLoc,
       const ParsedAttributesView &Attr, TemplateParameterList *TemplateParams,
       AccessSpecifier AS, SourceLocation ModulePrivateLoc,
-      SourceLocation FriendLoc, ArrayRef<TemplateParameterList *> OuterTemplateParamLists,
+      SourceLocation FriendLoc,
+      ArrayRef<TemplateParameterList *> OuterTemplateParamLists,
       bool IsMemberSpecialization, SkipBodyInfo *SkipBody = nullptr);
 
   /// Translates template arguments as provided by the parser
@@ -11432,7 +11433,8 @@ public:
   DeclResult ActOnVarTemplateSpecialization(
       Scope *S, Declarator &D, TypeSourceInfo *DI, LookupResult &Previous,
       SourceLocation TemplateKWLoc, TemplateParameterList *TemplateParams,
-      StorageClass SC, bool IsPartialSpecialization, bool IsMemberSpecialization);
+      StorageClass SC, bool IsPartialSpecialization,
+      bool IsMemberSpecialization);
 
   /// Get the specialization of the given variable template corresponding to
   /// the specified argument list, or a null-but-valid result if the arguments
