@@ -57,7 +57,7 @@ TemplateParameterList::TemplateParameterList(const ASTContext& C,
                                              ArrayRef<NamedDecl *> Params,
                                              SourceLocation RAngleLoc,
                                              Expr *RequiresClause)
-    : TemplateLoc(TemplateLoc), LAngleLoc(LAngleLoc), RAngleLoc(RAngleLoc),
+    : InjectedArgs(&C), TemplateLoc(TemplateLoc), LAngleLoc(LAngleLoc), RAngleLoc(RAngleLoc),
       NumParams(Params.size()), ContainsUnexpandedParameterPack(false),
       HasRequiresClause(RequiresClause != nullptr),
       HasConstrainedParameters(false) {
@@ -244,6 +244,12 @@ bool TemplateParameterList::hasAssociatedConstraints() const {
   return HasRequiresClause || HasConstrainedParameters;
 }
 
+ArrayRef<TemplateArgument> TemplateParameterList::getInjectedTemplateArgs() {
+  if (const auto *Context = InjectedArgs.dyn_cast<const ASTContext *>())
+    InjectedArgs = Context->getInjectedTemplateArgs(this);
+  return {InjectedArgs.get<TemplateArgument *>(), NumParams};
+}
+
 bool TemplateParameterList::shouldIncludeTypeForArgument(
     const PrintingPolicy &Policy, const TemplateParameterList *TPL,
     unsigned Idx) {
@@ -394,22 +400,6 @@ void RedeclarableTemplateDecl::addSpecializationImpl(
   if (ASTMutationListener *L = getASTMutationListener())
     L->AddedCXXTemplateSpecialization(cast<Derived>(this),
                                       SETraits::getDecl(Entry));
-}
-
-ArrayRef<TemplateArgument> RedeclarableTemplateDecl::getInjectedTemplateArgs() {
-  TemplateParameterList *Params = getTemplateParameters();
-  auto *CommonPtr = getCommonPtr();
-  if (!CommonPtr->InjectedArgs) {
-    auto &Context = getASTContext();
-    SmallVector<TemplateArgument, 16> TemplateArgs;
-    Context.getInjectedTemplateArgs(Params, TemplateArgs);
-    CommonPtr->InjectedArgs =
-        new (Context) TemplateArgument[TemplateArgs.size()];
-    std::copy(TemplateArgs.begin(), TemplateArgs.end(),
-              CommonPtr->InjectedArgs);
-  }
-
-  return llvm::ArrayRef(CommonPtr->InjectedArgs, Params->size());
 }
 
 //===----------------------------------------------------------------------===//

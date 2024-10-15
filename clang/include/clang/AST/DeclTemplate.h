@@ -69,8 +69,12 @@ NamedDecl *getAsNamedDecl(TemplateParameter P);
 /// Stores a list of template parameters for a TemplateDecl and its
 /// derived classes.
 class TemplateParameterList final
-    : private llvm::TrailingObjects<TemplateParameterList, NamedDecl *,
+    : public llvm::FoldingSetNode,
+      private llvm::TrailingObjects<TemplateParameterList, NamedDecl *,
                                     Expr *> {
+  /// The template argument list of the template parameter list.
+  llvm::PointerUnion<const ASTContext *, TemplateArgument *> InjectedArgs;
+
   /// The location of the 'template' keyword.
   SourceLocation TemplateLoc;
 
@@ -109,6 +113,7 @@ protected:
   }
 
 public:
+  friend class ASTContext;
   template <size_t N, bool HasRequiresClause>
   friend class FixedSizeTemplateParameterListStorage;
   friend TrailingObjects;
@@ -195,6 +200,9 @@ public:
   void getAssociatedConstraints(llvm::SmallVectorImpl<const Expr *> &AC) const;
 
   bool hasAssociatedConstraints() const;
+
+  /// Get the template argument lisr of the template parameter list.
+  ArrayRef<TemplateArgument> getInjectedTemplateArgs();
 
   SourceLocation getTemplateLoc() const { return TemplateLoc; }
   SourceLocation getLAngleLoc() const { return LAngleLoc; }
@@ -793,15 +801,6 @@ protected:
     /// The first value in the array is the number of specializations/partial
     /// specializations that follow.
     GlobalDeclID *LazySpecializations = nullptr;
-
-    /// The set of "injected" template arguments used within this
-    /// template.
-    ///
-    /// This pointer refers to the template arguments (there are as
-    /// many template arguments as template parameters) for the
-    /// template, and is allocated lazily, since most templates do not
-    /// require the use of this information.
-    TemplateArgument *InjectedArgs = nullptr;
   };
 
   /// Pointer to the common data shared by all declarations of this
@@ -927,7 +926,9 @@ public:
   /// Although the C++ standard has no notion of the "injected" template
   /// arguments for a template, the notion is convenient when
   /// we need to perform substitutions inside the definition of a template.
-  ArrayRef<TemplateArgument> getInjectedTemplateArgs();
+  ArrayRef<TemplateArgument> getInjectedTemplateArgs() const {
+    return getTemplateParameters()->getInjectedTemplateArgs();
+  }
 
   using redecl_range = redeclarable_base::redecl_range;
   using redecl_iterator = redeclarable_base::redecl_iterator;
@@ -2136,9 +2137,10 @@ public:
     return TemplateParams;
   }
 
-  /// Retrieve the template arguments list of the template parameter list
-  /// of this template.
-  ArrayRef<TemplateArgument> getInjectedTemplateArgs();
+  /// Get the template argument lisr of the template parameter list.
+  ArrayRef<TemplateArgument> getInjectedTemplateArgs() const {
+    return getTemplateParameters()->getInjectedTemplateArgs();
+  }
 
   /// \brief All associated constraints of this partial specialization,
   /// including the requires clause and any constraints derived from
@@ -2914,9 +2916,10 @@ public:
     return TemplateParams;
   }
 
-  /// Retrieve the template arguments list of the template parameter list
-  /// of this template.
-  ArrayRef<TemplateArgument> getInjectedTemplateArgs();
+  /// Get the template argument lisr of the template parameter list.
+  ArrayRef<TemplateArgument> getInjectedTemplateArgs() const {
+    return getTemplateParameters()->getInjectedTemplateArgs();
+  }
 
   /// \brief All associated constraints of this partial specialization,
   /// including the requires clause and any constraints derived from
