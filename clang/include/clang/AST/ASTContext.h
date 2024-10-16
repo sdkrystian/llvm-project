@@ -1783,9 +1783,6 @@ public:
   /// Get a template argument list with one argument per template parameter
   /// in a template parameter list, such as for the injected class name of
   /// a class template.
-  void getInjectedTemplateArgs(const TemplateParameterList *Params,
-                               SmallVectorImpl<TemplateArgument> &Args) const;
-
   TemplateArgument *getInjectedTemplateArgs(TemplateParameterList *Params) const;
 
   /// Form a pack expansion type with the given pattern.

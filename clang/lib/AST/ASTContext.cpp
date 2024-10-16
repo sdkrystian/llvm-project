@@ -5671,15 +5671,6 @@ TemplateArgument ASTContext::getInjectedTemplateArg(NamedDecl *Param) const {
   return Arg;
 }
 
-void
-ASTContext::getInjectedTemplateArgs(const TemplateParameterList *Params,
-                                    SmallVectorImpl<TemplateArgument> &Args) const {
-  Args.reserve(Args.size() + Params->size());
-
-  for (NamedDecl *Param : *Params)
-    Args.push_back(getInjectedTemplateArg(Param));
-}
-
 TemplateArgument *ASTContext::getInjectedTemplateArgs(TemplateParameterList *Params) const {
   TemplateArgument *Args = new (*this) TemplateArgument[Params->size()];
   TemplateArgument *Arg = Args;

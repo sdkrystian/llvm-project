@@ -621,13 +621,10 @@ ClassTemplateDecl::getInjectedClassNameSpecialization() {
   //  expansion (14.5.3) whose pattern is the name of the template parameter
   //  pack.
   ASTContext &Context = getASTContext();
-  TemplateParameterList *Params = getTemplateParameters();
-  SmallVector<TemplateArgument, 16> TemplateArgs;
-  Context.getInjectedTemplateArgs(Params, TemplateArgs);
   TemplateName Name = Context.getQualifiedTemplateName(
       /*NNS=*/nullptr, /*TemplateKeyword=*/false, TemplateName(this));
   CommonPtr->InjectedClassNameType =
-      Context.getTemplateSpecializationType(Name, TemplateArgs);
+      Context.getTemplateSpecializationType(Name, getTemplateParameters()->getInjectedTemplateArgs());
   return CommonPtr->InjectedClassNameType;
 }
 
