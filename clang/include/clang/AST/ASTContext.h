@@ -999,17 +999,6 @@ public:
   /// Erase the attributes corresponding to the given declaration.
   void eraseDeclAttrs(const Decl *D);
 
-  bool isTopLevelDeclInObjCContainer(const Decl *D) const {
-    return TopLevelDeclsInObjCContainer.contains(D);
-  }
-
-  void setTopLevelDeclInObjCContainer(const Decl *D, bool Val) {
-    if (Val)
-      TopLevelDeclsInObjCContainer.insert(D);
-    else
-      TopLevelDeclsInObjCContainer.erase(D);
-  }
-
   /// If this variable is an instantiated static data member of a
   /// class template specialization, returns the templated static data member
   /// from which it was instantiated.
@@ -3215,6 +3204,23 @@ public:
   /// an Objective-C method/property/ivar etc. that is part of an interface,
   /// otherwise returns null.
   const ObjCInterfaceDecl *getObjContainingInterface(const NamedDecl *ND) const;
+
+#if 0
+  bool isTopLevelDeclInObjCContainer(const Decl *D) const {
+    return TopLevelDeclsInObjCContainer.contains(D);
+  }
+
+  void setTopLevelDeclInObjCContainer(const Decl *D, bool Val = true) {
+    if (Val)
+      TopLevelDeclsInObjCContainer.insert(D);
+    else
+      TopLevelDeclsInObjCContainer.erase(D);
+  }
+#endif
+
+  bool isTopLevelDeclInObjCContainer(const Decl *D) const;
+
+  void setTopLevelDeclInObjCContainer(const Decl *D, bool Val = true);
 
   /// Set the copy initialization expression of a block var decl. \p CanThrow
   /// indicates whether the copy expression can throw or not.

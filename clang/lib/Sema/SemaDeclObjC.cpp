@@ -2124,7 +2124,7 @@ SemaObjC::ActOnFinishObjCImplementation(Decl *ObjCImpDecl,
     if (!Dcl)
       continue;
     if (Dcl->getDeclContext()->isFileContext())
-      Dcl->setTopLevelDeclInObjCContainer();
+      SemaRef.Context.setTopLevelDeclInObjCContainer(Dcl);
     DeclsInGroup.push_back(Dcl);
   }
 
@@ -4219,7 +4219,7 @@ Decl *SemaObjC::ActOnAtEnd(Scope *S, SourceRange AtEnd,
   for (unsigned i = 0, e = allTUVars.size(); i != e; i++) {
     DeclGroupRef DG = allTUVars[i].get();
     for (DeclGroupRef::iterator I = DG.begin(), E = DG.end(); I != E; ++I)
-      (*I)->setTopLevelDeclInObjCContainer();
+      Context.setTopLevelDeclInObjCContainer(*I);
     SemaRef.Consumer.HandleTopLevelDeclInObjCContainer(DG);
   }
 

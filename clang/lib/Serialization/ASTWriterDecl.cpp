@@ -377,7 +377,7 @@ void ASTDeclWriter::VisitDecl(Decl *D) {
   DeclBits.addBit(D->isImplicit());
   DeclBits.addBit(D->getDeclContext() != D->getLexicalDeclContext());
   DeclBits.addBit(D->hasAttrs());
-  DeclBits.addBit(D->isTopLevelDeclInObjCContainer());
+  DeclBits.addBit(Context.isTopLevelDeclInObjCContainer(D));
   DeclBits.addBit(D->isInvalidDecl());
   Record.push_back(DeclBits);
 
@@ -463,14 +463,10 @@ void ASTDeclWriter::VisitTypedefNameDecl(TypedefNameDecl *D) {
 
 void ASTDeclWriter::VisitTypedefDecl(TypedefDecl *D) {
   VisitTypedefNameDecl(D);
-  if (D->getDeclContext() == D->getLexicalDeclContext() &&
-      !D->hasAttrs() &&
-      !D->isImplicit() &&
-      D->getFirstDecl() == D->getMostRecentDecl() &&
-      !D->isInvalidDecl() &&
-      !D->isTopLevelDeclInObjCContainer() &&
-      !D->isModulePrivate() &&
-      !needsAnonymousDeclarationNumber(D) &&
+  if (D->getDeclContext() == D->getLexicalDeclContext() && !D->hasAttrs() &&
+      !D->isImplicit() && D->getFirstDecl() == D->getMostRecentDecl() &&
+      !D->isInvalidDecl() && !Context.isTopLevelDeclInObjCContainer(D) &&
+      !D->isModulePrivate() && !needsAnonymousDeclarationNumber(D) &&
       D->getDeclName().getNameKind() == DeclarationName::Identifier)
     AbbrevToUse = Writer.getDeclTypedefAbbrev();
 
@@ -546,7 +542,7 @@ void ASTDeclWriter::VisitEnumDecl(EnumDecl *D) {
       !D->isInvalidDecl() && !D->isImplicit() && !D->hasExtInfo() &&
       !D->getTypedefNameForAnonDecl() &&
       D->getFirstDecl() == D->getMostRecentDecl() &&
-      !D->isTopLevelDeclInObjCContainer() &&
+      !Context.isTopLevelDeclInObjCContainer(D) &&
       !CXXRecordDecl::classofKind(D->getKind()) &&
       !D->getIntegerTypeSourceInfo() && !D->getMemberSpecializationInfo() &&
       !needsAnonymousDeclarationNumber(D) &&
@@ -587,7 +583,7 @@ void ASTDeclWriter::VisitRecordDecl(RecordDecl *D) {
       !D->isImplicit() && !D->isInvalidDecl() && !D->hasExtInfo() &&
       !D->getTypedefNameForAnonDecl() &&
       D->getFirstDecl() == D->getMostRecentDecl() &&
-      !D->isTopLevelDeclInObjCContainer() &&
+      !Context.isTopLevelDeclInObjCContainer(D) &&
       !CXXRecordDecl::classofKind(D->getKind()) &&
       !needsAnonymousDeclarationNumber(D) &&
       D->getDeclName().getNameKind() == DeclarationName::Identifier)
@@ -1041,21 +1037,13 @@ void ASTDeclWriter::VisitFieldDecl(FieldDecl *D) {
   if (!D->getDeclName())
     Record.AddDeclRef(Context.getInstantiatedFromUnnamedFieldDecl(D));
 
-  if (D->getDeclContext() == D->getLexicalDeclContext() &&
-      !D->hasAttrs() &&
-      !D->isImplicit() &&
-      !D->isUsed(false) &&
-      !D->isInvalidDecl() &&
-      !D->isReferenced() &&
-      !D->isTopLevelDeclInObjCContainer() &&
-      !D->isModulePrivate() &&
-      !D->getBitWidth() &&
-      !D->hasInClassInitializer() &&
-      !D->hasCapturedVLAType() &&
-      !D->hasExtInfo() &&
-      !ObjCIvarDecl::classofKind(D->getKind()) &&
-      !ObjCAtDefsFieldDecl::classofKind(D->getKind()) &&
-      D->getDeclName())
+  if (D->getDeclContext() == D->getLexicalDeclContext() && !D->hasAttrs() &&
+      !D->isImplicit() && !D->isUsed(false) && !D->isInvalidDecl() &&
+      !D->isReferenced() && !Context.isTopLevelDeclInObjCContainer(D) &&
+      !D->isModulePrivate() && !D->getBitWidth() &&
+      !D->hasInClassInitializer() && !D->hasCapturedVLAType() &&
+      !D->hasExtInfo() && !ObjCIvarDecl::classofKind(D->getKind()) &&
+      !ObjCAtDefsFieldDecl::classofKind(D->getKind()) && D->getDeclName())
     AbbrevToUse = Writer.getDeclFieldAbbrev();
 
   Code = serialization::DECL_FIELD;
@@ -1186,7 +1174,7 @@ void ASTDeclWriter::VisitVarDecl(VarDecl *D) {
   }
 
   if (D->getDeclContext() == D->getLexicalDeclContext() && !D->hasAttrs() &&
-      !D->isTopLevelDeclInObjCContainer() &&
+      !Context.isTopLevelDeclInObjCContainer(D) &&
       !needsAnonymousDeclarationNumber(D) &&
       D->getDeclName().getNameKind() == DeclarationName::Identifier &&
       !D->hasExtInfo() && D->getFirstDecl() == D->getMostRecentDecl() &&
@@ -1236,7 +1224,7 @@ void ASTDeclWriter::VisitParmVarDecl(ParmVarDecl *D) {
   // know are true of all PARM_VAR_DECLs.
   if (D->getDeclContext() == D->getLexicalDeclContext() && !D->hasAttrs() &&
       !D->hasExtInfo() && D->getStorageClass() == 0 && !D->isInvalidDecl() &&
-      !D->isTopLevelDeclInObjCContainer() &&
+      !Context.isTopLevelDeclInObjCContainer(D) &&
       D->getInitStyle() == VarDecl::CInit && // Can params have anything else?
       D->getInit() == nullptr)               // No default expr.
     AbbrevToUse = Writer.getDeclParmVarAbbrev();
@@ -1562,7 +1550,7 @@ void ASTDeclWriter::VisitCXXMethodDecl(CXXMethodDecl *D) {
 
   if (D->getDeclContext() == D->getLexicalDeclContext() &&
       D->getFirstDecl() == D->getMostRecentDecl() && !D->isInvalidDecl() &&
-      !D->hasAttrs() && !D->isTopLevelDeclInObjCContainer() &&
+      !D->hasAttrs() && !Context.isTopLevelDeclInObjCContainer(D) &&
       D->getDeclName().getNameKind() == DeclarationName::Identifier &&
       !D->hasExtInfo() && !D->isExplicitlyDefaulted()) {
     if (D->getTemplatedKind() == FunctionDecl::TK_NonTemplate ||
@@ -1917,7 +1905,7 @@ void ASTDeclWriter::VisitTemplateTypeParmDecl(TemplateTypeParmDecl *D) {
   if (!TC && !OwnsDefaultArg &&
       D->getDeclContext() == D->getLexicalDeclContext() &&
       !D->isInvalidDecl() && !D->hasAttrs() &&
-      !D->isTopLevelDeclInObjCContainer() && !D->isImplicit() &&
+      !Context.isTopLevelDeclInObjCContainer(D) && !D->isImplicit() &&
       D->getDeclName().getNameKind() == DeclarationName::Identifier)
     AbbrevToUse = Writer.getDeclTemplateTypeParmAbbrev();
 

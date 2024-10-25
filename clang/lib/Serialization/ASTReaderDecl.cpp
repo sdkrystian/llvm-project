@@ -595,7 +595,8 @@ void ASTDeclReader::VisitDecl(Decl *D) {
   D->setImplicit(DeclBits.getNextBit());
   bool HasStandaloneLexicalDC = DeclBits.getNextBit();
   bool HasAttrs = DeclBits.getNextBit();
-  D->setTopLevelDeclInObjCContainer(DeclBits.getNextBit());
+  if (DeclBits.getNextBit())
+    Reader.getContext().setTopLevelDeclInObjCContainer(D);
   D->InvalidDecl = DeclBits.getNextBit();
   D->FromASTFile = true;
 

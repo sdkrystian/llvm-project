@@ -214,7 +214,7 @@ namespace {
           // into their grouping struct.
           if (FDecl->isThisDeclarationADefinition() &&
               // Not c functions defined inside an objc container.
-              !FDecl->isTopLevelDeclInObjCContainer()) {
+              !Context->isTopLevelDeclInObjCContainer(FDecl)) {
             FunctionDefinitionsSeen.push_back(FDecl);
             break;
           }

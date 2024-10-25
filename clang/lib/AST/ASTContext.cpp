@@ -3018,6 +3018,18 @@ const ObjCInterfaceDecl *ASTContext::getObjContainingInterface(
   return nullptr;
 }
 
+bool ASTContext::isTopLevelDeclInObjCContainer(const Decl *D) const {
+  return TopLevelDeclsInObjCContainer.contains(D);
+}
+
+void ASTContext::setTopLevelDeclInObjCContainer(const Decl *D,
+                                                bool Val) {
+  if (Val)
+    TopLevelDeclsInObjCContainer.insert(D);
+  else
+    TopLevelDeclsInObjCContainer.erase(D);
+}
+
 /// Get the copy initialization expression of VarDecl, or nullptr if
 /// none exists.
 BlockVarCopyInit ASTContext::getBlockVarCopyInit(const VarDecl *VD) const {

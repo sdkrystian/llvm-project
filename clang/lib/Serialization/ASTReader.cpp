@@ -8140,9 +8140,8 @@ void ASTReader::FindFileRegionDecls(FileID File,
   // to backtrack until we find it otherwise we will fail to report that the
   // region overlaps with an objc container.
   while (BeginIt != DInfo.Decls.begin() &&
-         GetDecl(getGlobalDeclID(*DInfo.Mod,
-                                 LocalDeclID::get(*this, *DInfo.Mod, *BeginIt)))
-             ->isTopLevelDeclInObjCContainer())
+         ContextObj->isTopLevelDeclInObjCContainer(GetDecl(getGlobalDeclID(
+             *DInfo.Mod, LocalDeclID::get(*this, *DInfo.Mod, *BeginIt)))))
     --BeginIt;
 
   ArrayRef<unaligned_decl_id_t>::iterator EndIt =
