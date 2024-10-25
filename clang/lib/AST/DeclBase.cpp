@@ -233,6 +233,7 @@ bool Decl::isTopLevelDeclInObjCContainer() const {
   return getASTContext().isTopLevelDeclInObjCContainer(this);
 }
 
+
 void Decl::setTopLevelDeclInObjCContainer(bool V) {
   getASTContext().setTopLevelDeclInObjCContainer(this, V);
 }
