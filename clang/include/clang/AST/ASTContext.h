@@ -3205,19 +3205,6 @@ public:
   /// otherwise returns null.
   const ObjCInterfaceDecl *getObjContainingInterface(const NamedDecl *ND) const;
 
-#if 0
-  bool isTopLevelDeclInObjCContainer(const Decl *D) const {
-    return TopLevelDeclsInObjCContainer.contains(D);
-  }
-
-  void setTopLevelDeclInObjCContainer(const Decl *D, bool Val = true) {
-    if (Val)
-      TopLevelDeclsInObjCContainer.insert(D);
-    else
-      TopLevelDeclsInObjCContainer.erase(D);
-  }
-#endif
-
   bool isTopLevelDeclInObjCContainer(const Decl *D) const;
 
   void setTopLevelDeclInObjCContainer(const Decl *D, bool Val = true);
