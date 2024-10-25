@@ -6065,10 +6065,6 @@ Decl *Sema::ActOnDeclarator(Scope *S, Declarator &D) {
 
   Decl *Dcl = HandleDeclarator(S, D, MultiTemplateParamsArg());
 
-  if (OriginalLexicalContext && OriginalLexicalContext->isObjCContainer() &&
-      Dcl && Dcl->getDeclContext()->isFileContext())
-    Dcl->setTopLevelDeclInObjCContainer();
-
   if (!Bases.empty())
     OpenMP().ActOnFinishedFunctionDefinitionInOpenMPDeclareVariantScope(Dcl,
                                                                         Bases);
@@ -9775,9 +9771,6 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
   FunctionDecl *NewFD = CreateNewFunctionDecl(*this, D, DC, R, TInfo, SC,
                                               isVirtualOkay);
   if (!NewFD) return nullptr;
-
-  if (OriginalLexicalContext && OriginalLexicalContext->isObjCContainer())
-    NewFD->setTopLevelDeclInObjCContainer();
 
   // Set the lexical context. If this is a function-scope declaration, or has a
   // C++ scope specifier, or is the object of a friend declaration, the lexical
@@ -18151,10 +18144,6 @@ void Sema::ActOnTagFinishDefinition(Scope *S, Decl *TagD,
 
   // Exit this scope of this tag's definition.
   PopDeclContext();
-
-  if (getCurLexicalContext()->isObjCContainer() &&
-      Tag->getDeclContext()->isFileContext())
-    Tag->setTopLevelDeclInObjCContainer();
 
   // Notify the consumer that we've defined a tag.
   if (!Tag->isInvalidDecl())

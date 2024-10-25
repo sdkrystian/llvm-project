@@ -623,17 +623,6 @@ public:
 
   void setReferenced(bool R = true) { Referenced = R; }
 
-  /// Whether this declaration is a top-level declaration (function,
-  /// global variable, etc.) that is lexically inside an objc container
-  /// definition.
-  bool isTopLevelDeclInObjCContainer() const {
-    return false; // return TopLevelDeclInObjCContainer;
-  }
-
-  void setTopLevelDeclInObjCContainer(bool V = true) {
-    // TopLevelDeclInObjCContainer = V;
-  }
-
   /// Looks on this and related declarations for an applicable
   /// external source symbol attribute.
   ExternalSourceSymbolAttr *getExternalSourceSymbolAttr() const;

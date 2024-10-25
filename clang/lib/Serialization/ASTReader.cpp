@@ -8136,6 +8136,7 @@ void ASTReader::FindFileRegionDecls(FileID File,
   if (BeginIt != DInfo.Decls.begin())
     --BeginIt;
 
+  #if 0
   // If we are pointing at a top-level decl inside an objc container, we need
   // to backtrack until we find it otherwise we will fail to report that the
   // region overlaps with an objc container.
@@ -8144,6 +8145,7 @@ void ASTReader::FindFileRegionDecls(FileID File,
                                  LocalDeclID::get(*this, *DInfo.Mod, *BeginIt)))
              ->isTopLevelDeclInObjCContainer())
     --BeginIt;
+  #endif
 
   ArrayRef<unaligned_decl_id_t>::iterator EndIt =
       llvm::upper_bound(DInfo.Decls, EndLoc, DIDComp);
