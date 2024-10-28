@@ -43,6 +43,9 @@ bool FoldingSetNodeIDRef::operator<(FoldingSetNodeIDRef RHS) const {
 /// Add* - Add various data types to Bit data.
 ///
 void FoldingSetNodeID::AddString(StringRef String) {
+  Bits.push_back(String.size());
+  Bits.append(String.bytes_begin(), String.bytes_end());
+  #if 0
   unsigned Size =  String.size();
 
   unsigned NumInserts = 1 + divideCeil(Size, 4);
@@ -96,6 +99,8 @@ void FoldingSetNodeID::AddString(StringRef String) {
   }
 
   Bits.push_back(V);
+  #endif
+
 }
 
 // AddNodeID - Adds the Bit data of another ID to *this.
@@ -130,7 +135,7 @@ bool FoldingSetNodeID::operator<(FoldingSetNodeIDRef RHS) const {
 /// interned data.
 FoldingSetNodeIDRef
 FoldingSetNodeID::Intern(BumpPtrAllocator &Allocator) const {
-  unsigned *New = Allocator.Allocate<unsigned>(Bits.size());
+  unsigned char *New = Allocator.Allocate<unsigned char>(Bits.size());
   std::uninitialized_copy(Bits.begin(), Bits.end(), New);
   return FoldingSetNodeIDRef(New, Bits.size());
 }

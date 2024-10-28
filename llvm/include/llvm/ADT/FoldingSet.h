@@ -288,12 +288,12 @@ template<typename T, typename Ctx> struct ContextualFoldingSetTrait
 /// is often much larger than necessary, and the possibility of heap
 /// allocation means it requires a non-trivial destructor call.
 class FoldingSetNodeIDRef {
-  const unsigned *Data = nullptr;
+  const unsigned char *Data = nullptr;
   size_t Size = 0;
 
 public:
   FoldingSetNodeIDRef() = default;
-  FoldingSetNodeIDRef(const unsigned *D, size_t S) : Data(D), Size(S) {}
+  FoldingSetNodeIDRef(const unsigned char *D, size_t S) : Data(D), Size(S) {}
 
   // Compute a strong hash value used to lookup the node in the FoldingSetBase.
   // The hash value is not guaranteed to be deterministic across processes.
@@ -305,7 +305,7 @@ public:
   // on-disk serialization.
   unsigned computeStableHash() const {
     return static_cast<unsigned>(xxh3_64bits(ArrayRef(
-        reinterpret_cast<const uint8_t *>(Data), sizeof(unsigned) * Size)));
+        reinterpret_cast<const uint8_t *>(Data), Size)));
   }
 
   bool operator==(FoldingSetNodeIDRef) const;
@@ -316,7 +316,7 @@ public:
   /// profiled bits and their ordering defined by memcmp().
   bool operator<(FoldingSetNodeIDRef) const;
 
-  const unsigned *getData() const { return Data; }
+  const unsigned char *getData() const { return Data; }
   size_t getSize() const { return Size; }
 };
 
@@ -327,13 +327,25 @@ public:
 class FoldingSetNodeID {
   /// Bits - Vector of all the data bits that make the node unique.
   /// Use a SmallVector to avoid a heap allocation in the common case.
-  SmallVector<unsigned, 32> Bits;
+  SmallVector<unsigned char, 128> Bits;
 
 public:
   FoldingSetNodeID() = default;
 
   FoldingSetNodeID(FoldingSetNodeIDRef Ref)
     : Bits(Ref.getData(), Ref.getData() + Ref.getSize()) {}
+
+  template <typename T, std::enable_if_t<std::is_enum_v<T>>* = nullptr>
+  void AddInteger(T t) {
+    AddInteger(static_cast<std::underlying_type_t<T>>(t));
+  }
+
+  template <typename T, std::enable_if_t<std::is_integral_v<T>>* = nullptr>
+  void AddInteger(T t) {
+    alignas(T) unsigned char bytes[sizeof(T)];
+    std::memcpy(&bytes, &t, sizeof(T));
+    Bits.append(std::begin(bytes), std::end(bytes));
+  }
 
   /// Add* - Add various data types to Bit data.
   void AddPointer(const void *Ptr) {
@@ -345,25 +357,8 @@ public:
                   "unexpected pointer size");
     AddInteger(reinterpret_cast<uintptr_t>(Ptr));
   }
-  void AddInteger(signed I) { Bits.push_back(I); }
-  void AddInteger(unsigned I) { Bits.push_back(I); }
-  void AddInteger(long I) { AddInteger((unsigned long)I); }
-  void AddInteger(unsigned long I) {
-    if (sizeof(long) == sizeof(int))
-      AddInteger(unsigned(I));
-    else if (sizeof(long) == sizeof(long long)) {
-      AddInteger((unsigned long long)I);
-    } else {
-      llvm_unreachable("unexpected sizeof(long)");
-    }
-  }
-  void AddInteger(long long I) { AddInteger((unsigned long long)I); }
-  void AddInteger(unsigned long long I) {
-    AddInteger(unsigned(I));
-    AddInteger(unsigned(I >> 32));
-  }
 
-  void AddBoolean(bool B) { AddInteger(B ? 1U : 0U); }
+  void AddBoolean(bool B) { Bits.push_back(B); }
   void AddString(StringRef String);
   void AddNodeID(const FoldingSetNodeID &ID);
 
