@@ -319,16 +319,16 @@ bool TemplateDecl::isTypeAlias() const {
 void RedeclarableTemplateDecl::anchor() {}
 
 RedeclarableTemplateDecl::CommonBase *RedeclarableTemplateDecl::getCommonPtr() const {
-  if (Common)
-    return Common;
+  if (CommonBase *C = getCommonPtrInternal())
+    return C;
 
   // Walk the previous-declaration chain until we either find a declaration
   // with a common pointer or we run out of previous declarations.
   SmallVector<const RedeclarableTemplateDecl *, 2> PrevDecls;
   for (const RedeclarableTemplateDecl *Prev = getPreviousDecl(); Prev;
        Prev = Prev->getPreviousDecl()) {
-    if (Prev->Common) {
-      Common = Prev->Common;
+    if (CommonBase *C = Prev->getCommonPtrInternal()) {
+      setCommonPtr(C);
       break;
     }
 
@@ -336,18 +336,18 @@ RedeclarableTemplateDecl::CommonBase *RedeclarableTemplateDecl::getCommonPtr() c
   }
 
   // If we never found a common pointer, allocate one now.
-  if (!Common) {
+  if (!getCommonPtrInternal()) {
     // FIXME: If any of the declarations is from an AST file, we probably
     // need an update record to add the common data.
 
-    Common = newCommon(getASTContext());
+    setCommonPtr(newCommon(getASTContext()));
   }
 
   // Update any previous declarations we saw with the common pointer.
   for (const RedeclarableTemplateDecl *Prev : PrevDecls)
-    Prev->Common = Common;
+    Prev->setCommonPtr(getCommonPtrInternal());
 
-  return Common;
+  return getCommonPtrInternal();
 }
 
 void RedeclarableTemplateDecl::loadLazySpecializationsImpl(
@@ -494,19 +494,17 @@ void FunctionTemplateDecl::addSpecialization(
 }
 
 void FunctionTemplateDecl::mergePrevDecl(FunctionTemplateDecl *Prev) {
-  using Base = RedeclarableTemplateDecl;
-
   // If we haven't created a common pointer yet, then it can just be created
   // with the usual method.
-  if (!Base::Common)
+  if (!getCommonPtrInternal())
     return;
 
-  Common *ThisCommon = static_cast<Common *>(Base::Common);
+  Common *ThisCommon = static_cast<Common *>(getCommonPtrInternal());
   Common *PrevCommon = nullptr;
   SmallVector<FunctionTemplateDecl *, 8> PreviousDecls;
   for (; Prev; Prev = Prev->getPreviousDecl()) {
-    if (Prev->Base::Common) {
-      PrevCommon = static_cast<Common *>(Prev->Base::Common);
+    if (CommonBase *C = Prev->getCommonPtrInternal()) {
+      PrevCommon = static_cast<Common *>(C);
       break;
     }
     PreviousDecls.push_back(Prev);
@@ -516,7 +514,7 @@ void FunctionTemplateDecl::mergePrevDecl(FunctionTemplateDecl *Prev) {
   // use this common pointer.
   if (!PrevCommon) {
     for (auto *D : PreviousDecls)
-      D->Base::Common = ThisCommon;
+      D->setCommonPtr(ThisCommon);
     return;
   }
 
@@ -524,7 +522,7 @@ void FunctionTemplateDecl::mergePrevDecl(FunctionTemplateDecl *Prev) {
   assert(ThisCommon->Specializations.size() == 0 &&
          "Can't merge incompatible declarations!");
 
-  Base::Common = PrevCommon;
+  setCommonPtr(PrevCommon);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1038,6 +1036,16 @@ ClassTemplateSpecializationDecl::getSpecializedTemplate() const {
   return cast<ClassTemplateDecl *>(SpecializedTemplate);
 }
 
+llvm::PointerUnion<ClassTemplateDecl *,
+                   ClassTemplatePartialSpecializationDecl *>
+ClassTemplateSpecializationDecl::getSpecializedTemplateOrPartial() const {
+  if (const auto *PartialSpec =
+          SpecializedTemplate.dyn_cast<SpecializedPartialSpecialization *>())
+    return PartialSpec->PartialSpecialization;
+
+  return cast<ClassTemplateDecl *>(SpecializedTemplate);
+}
+
 SourceRange
 ClassTemplateSpecializationDecl::getSourceRange() const {
   switch (getSpecializationKind()) {
@@ -1326,6 +1334,39 @@ VarTemplateDecl::newCommon(ASTContext &C) const {
   return CommonPtr;
 }
 
+void VarTemplateDecl::mergePrevDecl(VarTemplateDecl *Prev) {
+  // If we haven't created a common pointer yet, then it can just be created
+  // with the usual method.
+  if (!getCommonPtrInternal())
+    return;
+
+  Common *ThisCommon = static_cast<Common *>(getCommonPtrInternal());
+  Common *PrevCommon = nullptr;
+  SmallVector<VarTemplateDecl *, 8> PreviousDecls;
+  for (; Prev; Prev = Prev->getPreviousDecl()) {
+    if (CommonBase *C = Prev->getCommonPtrInternal()) {
+      PrevCommon = static_cast<Common *>(C);
+      break;
+    }
+    PreviousDecls.push_back(Prev);
+  }
+
+  // If the previous redecl chain hasn't created a common pointer yet, then just
+  // use this common pointer.
+  if (!PrevCommon) {
+    for (auto *D : PreviousDecls)
+      D->setCommonPtr(ThisCommon);
+    return;
+  }
+
+  // Ensure we don't leak any important state.
+  assert(ThisCommon->Specializations.empty() &&
+         ThisCommon->PartialSpecializations.empty() &&
+         "Can't merge incompatible declarations!");
+
+  setCommonPtr(PrevCommon);
+}
+
 VarTemplateSpecializationDecl *
 VarTemplateDecl::findSpecialization(ArrayRef<TemplateArgument> Args,
                                     void *&InsertPos) {
@@ -1451,6 +1492,15 @@ VarTemplateDecl *VarTemplateSpecializationDecl::getSpecializedTemplate() const {
           SpecializedTemplate.dyn_cast<SpecializedPartialSpecialization *>())
     return PartialSpec->PartialSpecialization->getSpecializedTemplate();
   return cast<VarTemplateDecl *>(SpecializedTemplate);
+}
+
+llvm::PointerUnion<VarTemplateDecl *, VarTemplatePartialSpecializationDecl *>
+VarTemplateSpecializationDecl::getSpecializedTemplateOrPartial() const {
+  if (const auto *PartialSpec =
+          SpecializedTemplate.dyn_cast<SpecializedPartialSpecialization *>())
+    return PartialSpec->PartialSpecialization;
+
+  return SpecializedTemplate.get<VarTemplateDecl *>();
 }
 
 SourceRange VarTemplateSpecializationDecl::getSourceRange() const {
