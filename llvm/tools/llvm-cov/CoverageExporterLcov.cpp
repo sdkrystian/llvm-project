@@ -41,6 +41,9 @@
 
 #include "CoverageExporterLcov.h"
 #include "CoverageReport.h"
+#include "llvm/Support/ThreadPool.h"
+#include "llvm/Support/Threading.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 using namespace coverage;
@@ -275,11 +278,29 @@ void renderFile(raw_ostream &OS, const coverage::CoverageMapping &Coverage,
 void renderFiles(raw_ostream &OS, const coverage::CoverageMapping &Coverage,
                  ArrayRef<std::string> SourceFiles,
                  ArrayRef<FileCoverageSummary> FileReports,
-                 bool ExportSummaryOnly, bool SkipFunctions, bool SkipBranches,
-                 bool UnifyInstances) {
-  for (unsigned I = 0, E = SourceFiles.size(); I < E; ++I)
-    renderFile(OS, Coverage, SourceFiles[I], FileReports[I], ExportSummaryOnly,
-               SkipFunctions, SkipBranches, UnifyInstances);
+                 const CoverageViewOptions &Options, bool ExportSummaryOnly,
+                 bool SkipFunctions, bool SkipBranches, bool UnifyInstances) {
+  ThreadPoolStrategy S = hardware_concurrency(Options.NumThreads);
+  if (Options.NumThreads == 0) {
+    S = heavyweight_hardware_concurrency(SourceFiles.size());
+    S.Limit = true;
+  }
+
+  DefaultThreadPool Pool(S);
+  std::vector<std::string> FileOutputs(SourceFiles.size());
+
+  for (unsigned I = 0, E = SourceFiles.size(); I < E; ++I) {
+    Pool.async([&, I] {
+      raw_string_ostream FileOS(FileOutputs[I]);
+      renderFile(FileOS, Coverage, SourceFiles[I], FileReports[I],
+                 ExportSummaryOnly, SkipFunctions, SkipBranches, UnifyInstances);
+    });
+  }
+  Pool.wait();
+
+  // Write outputs in order to preserve LCOV format
+  for (const auto &Output : FileOutputs)
+    OS << Output;
 }
 
 } // end anonymous namespace
@@ -297,7 +318,7 @@ void CoverageExporterLcov::renderRoot(ArrayRef<std::string> SourceFiles) {
   FileCoverageSummary Totals = FileCoverageSummary("Totals");
   auto FileReports = CoverageReport::prepareFileReports(Coverage, Totals,
                                                         SourceFiles, Options);
-  renderFiles(OS, Coverage, SourceFiles, FileReports, Options.ExportSummaryOnly,
-              Options.SkipFunctions, Options.SkipBranches,
-              Options.UnifyFunctionInstantiations);
+  renderFiles(OS, Coverage, SourceFiles, FileReports, Options,
+              Options.ExportSummaryOnly, Options.SkipFunctions,
+              Options.SkipBranches, Options.UnifyFunctionInstantiations);
 }

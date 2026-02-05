@@ -1022,6 +1022,10 @@ class CoverageMapping {
       const std::optional<std::reference_wrapper<IndexedInstrProfReader>>
           &ProfileReader);
 
+  /// Merge coverage data from another CoverageMapping instance.
+  /// Used for parallel loading of multiple object files.
+  void merge(CoverageMapping &&Other);
+
   /// Look up the indices for function records which are at least partially
   /// defined in the specified file. This is guaranteed to return a superset of
   /// such records: extra records not in the file may be included if there is

@@ -27,9 +27,13 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/ThreadPool.h"
+#include "llvm/Support/Threading.h"
 #include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
+#include <atomic>
+#include <mutex>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -982,6 +986,41 @@ Error CoverageMapping::loadFunctionRecord(
   return Error::success();
 }
 
+void CoverageMapping::merge(CoverageMapping &&Other) {
+  // Merge SingleByteCoverage setting
+  if (!SingleByteCoverage)
+    SingleByteCoverage = Other.SingleByteCoverage;
+
+  // Reserve space for efficiency
+  Functions.reserve(Functions.size() + Other.Functions.size());
+
+  // Merge functions and update filename hash indices
+  for (auto &F : Other.Functions) {
+    Functions.push_back(std::move(F));
+    unsigned RecordIndex = Functions.size() - 1;
+    for (StringRef Filename : Functions.back().Filenames) {
+      auto &RecordIndices = FilenameHash2RecordIndices[hash_value(Filename)];
+      if (RecordIndices.empty() || RecordIndices.back() != RecordIndex)
+        RecordIndices.push_back(RecordIndex);
+    }
+  }
+
+  // Merge hash mismatches
+  FuncHashMismatches.reserve(FuncHashMismatches.size() +
+                             Other.FuncHashMismatches.size());
+  for (auto &Mismatch : Other.FuncHashMismatches)
+    FuncHashMismatches.push_back(std::move(Mismatch));
+
+  // Merge record provenance (updating indices for moved functions)
+  // Note: RecordProvenance tracks which (filename hash, function name hash)
+  // pairs have been seen. We need to merge these sets.
+  for (auto &KV : Other.RecordProvenance) {
+    auto &TargetSet = RecordProvenance[KV.first];
+    for (auto Val : KV.second)
+      TargetSet.insert(Val);
+  }
+}
+
 // This function is for memory optimization by shortening the lifetimes
 // of CoverageMappingReader instances.
 Error CoverageMapping::loadFromReaders(
@@ -1024,6 +1063,8 @@ static Error handleMaybeNoDataFoundError(Error E) {
     return make_error<CoverageMapError>(CME.get(), CME.getMessage());
   });
 }
+
+
 
 Error CoverageMapping::loadFromFile(
     StringRef Filename, StringRef Arch, StringRef CompilationDir,
@@ -1095,11 +1136,96 @@ Expected<std::unique_ptr<CoverageMapping>> CoverageMapping::load(
   };
 
   SmallVector<object::BuildID> FoundBinaryIDs;
-  for (const auto &File : llvm::enumerate(ObjectFilenames)) {
-    if (Error E = loadFromFile(File.value(), GetArch(File.index()),
-                               CompilationDir, ProfileReaderRef, *Coverage,
-                               DataFound, &FoundBinaryIDs))
+
+  // Parallelize binary parsing. Profile data lookups are done sequentially
+  // afterwards since IndexedInstrProfReader is not designed for concurrent
+  // access.
+  ThreadPoolStrategy S = heavyweight_hardware_concurrency(ObjectFilenames.size());
+  S.Limit = true;
+  DefaultThreadPool Pool(S);
+
+  // Structure to hold results of parallel binary parsing.
+  // Must keep memory buffers alive as long as readers exist.
+  // Uses std::optional<Error> to avoid issues with LLVM Error's checked state
+  // requirements during default construction and destruction.
+  struct ParsedFile {
+    std::unique_ptr<MemoryBuffer> MainBuffer;
+    SmallVector<std::unique_ptr<MemoryBuffer>, 4> Buffers;
+    SmallVector<std::unique_ptr<CoverageMappingReader>, 4> Readers;
+    SmallVector<object::BuildID, 4> BinaryIDs;
+    std::optional<Error> ParseError;
+    bool HasData = false;
+  };
+  std::vector<ParsedFile> ParsedFiles(ObjectFilenames.size());
+
+  // Phase 1: Parallel binary parsing
+  for (size_t I = 0; I < ObjectFilenames.size(); ++I) {
+    Pool.async([&, I] {
+      auto CovMappingBufOrErr = MemoryBuffer::getFileOrSTDIN(
+          ObjectFilenames[I], /*IsText=*/false,
+          /*RequiresNullTerminator=*/false);
+      if (std::error_code EC = CovMappingBufOrErr.getError()) {
+        ParsedFiles[I].ParseError =
+            createFileError(ObjectFilenames[I], errorCodeToError(EC));
+        return;
+      }
+
+      ParsedFiles[I].MainBuffer = std::move(CovMappingBufOrErr.get());
+      MemoryBufferRef CovMappingBufRef =
+          ParsedFiles[I].MainBuffer->getMemBufferRef();
+      SmallVector<object::BuildIDRef> BinaryIDRefs;
+
+      auto CoverageReadersOrErr = BinaryCoverageReader::create(
+          CovMappingBufRef, GetArch(I), ParsedFiles[I].Buffers, CompilationDir,
+          &BinaryIDRefs);
+
+      if (Error E = CoverageReadersOrErr.takeError()) {
+        E = handleMaybeNoDataFoundError(std::move(E));
+        if (E) {
+          ParsedFiles[I].ParseError =
+              createFileError(ObjectFilenames[I], std::move(E));
+        }
+        return;
+      }
+
+      for (auto &Reader : CoverageReadersOrErr.get())
+        ParsedFiles[I].Readers.push_back(std::move(Reader));
+
+      for (auto BIDRef : BinaryIDRefs)
+        ParsedFiles[I].BinaryIDs.push_back(object::BuildID(BIDRef));
+
+      ParsedFiles[I].HasData = !ParsedFiles[I].Readers.empty();
+    });
+  }
+  Pool.wait();
+
+  // Phase 2: Sequential profile data loading (not thread-safe)
+  // Helper to consume all remaining errors when returning early.
+  auto ConsumeRemainingErrors = [&ParsedFiles](size_t StartIdx) {
+    for (size_t J = StartIdx; J < ParsedFiles.size(); ++J)
+      if (ParsedFiles[J].ParseError)
+        consumeError(std::move(*ParsedFiles[J].ParseError));
+  };
+
+  for (size_t I = 0; I < ObjectFilenames.size(); ++I) {
+    if (ParsedFiles[I].ParseError) {
+      Error E = std::move(*ParsedFiles[I].ParseError);
+      ConsumeRemainingErrors(I + 1);
       return std::move(E);
+    }
+
+    DataFound |= ParsedFiles[I].HasData;
+
+    for (auto &BID : ParsedFiles[I].BinaryIDs)
+      FoundBinaryIDs.push_back(std::move(BID));
+
+    if (!ParsedFiles[I].Readers.empty()) {
+      if (Error E = loadFromReaders(ParsedFiles[I].Readers, ProfileReaderRef,
+                                    *Coverage)) {
+        ConsumeRemainingErrors(I + 1);
+        return createFileError(ObjectFilenames[I], std::move(E));
+      }
+    }
   }
 
   if (BIDFetcher) {
