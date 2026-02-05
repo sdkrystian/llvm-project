@@ -41,6 +41,7 @@
 
 #include "CoverageExporterLcov.h"
 #include "CoverageReport.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ThreadPool.h"
 #include "llvm/Support/Threading.h"
 #include "llvm/Support/raw_ostream.h"
@@ -289,10 +290,10 @@ void renderFiles(raw_ostream &OS, const coverage::CoverageMapping &Coverage,
   DefaultThreadPool Pool(S);
   std::vector<std::string> FileOutputs(SourceFiles.size());
 
-  for (unsigned I = 0, E = SourceFiles.size(); I < E; ++I) {
-    Pool.async([&, I] {
+  for (const auto &[I, SourceFile] : llvm::enumerate(SourceFiles)) {
+    Pool.async([&, I, SourceFile] {
       raw_string_ostream FileOS(FileOutputs[I]);
-      renderFile(FileOS, Coverage, SourceFiles[I], FileReports[I],
+      renderFile(FileOS, Coverage, SourceFile, FileReports[I],
                  ExportSummaryOnly, SkipFunctions, SkipBranches, UnifyInstances);
     });
   }

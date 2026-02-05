@@ -1064,8 +1064,6 @@ static Error handleMaybeNoDataFoundError(Error E) {
   });
 }
 
-
-
 Error CoverageMapping::loadFromFile(
     StringRef Filename, StringRef Arch, StringRef CompilationDir,
     std::optional<std::reference_wrapper<IndexedInstrProfReader>>
@@ -1159,42 +1157,38 @@ Expected<std::unique_ptr<CoverageMapping>> CoverageMapping::load(
   std::vector<ParsedFile> ParsedFiles(ObjectFilenames.size());
 
   // Phase 1: Parallel binary parsing
-  for (size_t I = 0; I < ObjectFilenames.size(); ++I) {
-    Pool.async([&, I] {
+  for (const auto &[I, Filename] : llvm::enumerate(ObjectFilenames)) {
+    Pool.async([&, I, Filename] {
+      ParsedFile &PF = ParsedFiles[I];
       auto CovMappingBufOrErr = MemoryBuffer::getFileOrSTDIN(
-          ObjectFilenames[I], /*IsText=*/false,
-          /*RequiresNullTerminator=*/false);
+          Filename, /*IsText=*/false, /*RequiresNullTerminator=*/false);
       if (std::error_code EC = CovMappingBufOrErr.getError()) {
-        ParsedFiles[I].ParseError =
-            createFileError(ObjectFilenames[I], errorCodeToError(EC));
+        PF.ParseError = createFileError(Filename, errorCodeToError(EC));
         return;
       }
 
-      ParsedFiles[I].MainBuffer = std::move(CovMappingBufOrErr.get());
-      MemoryBufferRef CovMappingBufRef =
-          ParsedFiles[I].MainBuffer->getMemBufferRef();
+      PF.MainBuffer = std::move(CovMappingBufOrErr.get());
+      MemoryBufferRef CovMappingBufRef = PF.MainBuffer->getMemBufferRef();
       SmallVector<object::BuildIDRef> BinaryIDRefs;
 
       auto CoverageReadersOrErr = BinaryCoverageReader::create(
-          CovMappingBufRef, GetArch(I), ParsedFiles[I].Buffers, CompilationDir,
+          CovMappingBufRef, GetArch(I), PF.Buffers, CompilationDir,
           &BinaryIDRefs);
 
       if (Error E = CoverageReadersOrErr.takeError()) {
         E = handleMaybeNoDataFoundError(std::move(E));
-        if (E) {
-          ParsedFiles[I].ParseError =
-              createFileError(ObjectFilenames[I], std::move(E));
-        }
+        if (E)
+          PF.ParseError = createFileError(Filename, std::move(E));
         return;
       }
 
       for (auto &Reader : CoverageReadersOrErr.get())
-        ParsedFiles[I].Readers.push_back(std::move(Reader));
+        PF.Readers.push_back(std::move(Reader));
 
       for (auto BIDRef : BinaryIDRefs)
-        ParsedFiles[I].BinaryIDs.push_back(object::BuildID(BIDRef));
+        PF.BinaryIDs.push_back(object::BuildID(BIDRef));
 
-      ParsedFiles[I].HasData = !ParsedFiles[I].Readers.empty();
+      PF.HasData = !PF.Readers.empty();
     });
   }
   Pool.wait();
@@ -1207,23 +1201,23 @@ Expected<std::unique_ptr<CoverageMapping>> CoverageMapping::load(
         consumeError(std::move(*ParsedFiles[J].ParseError));
   };
 
-  for (size_t I = 0; I < ObjectFilenames.size(); ++I) {
-    if (ParsedFiles[I].ParseError) {
-      Error E = std::move(*ParsedFiles[I].ParseError);
+  for (const auto &[I, Filename] : llvm::enumerate(ObjectFilenames)) {
+    ParsedFile &PF = ParsedFiles[I];
+    if (PF.ParseError) {
+      Error E = std::move(*PF.ParseError);
       ConsumeRemainingErrors(I + 1);
       return std::move(E);
     }
 
-    DataFound |= ParsedFiles[I].HasData;
+    DataFound |= PF.HasData;
 
-    for (auto &BID : ParsedFiles[I].BinaryIDs)
+    for (auto &BID : PF.BinaryIDs)
       FoundBinaryIDs.push_back(std::move(BID));
 
-    if (!ParsedFiles[I].Readers.empty()) {
-      if (Error E = loadFromReaders(ParsedFiles[I].Readers, ProfileReaderRef,
-                                    *Coverage)) {
+    if (!PF.Readers.empty()) {
+      if (Error E = loadFromReaders(PF.Readers, ProfileReaderRef, *Coverage)) {
         ConsumeRemainingErrors(I + 1);
-        return createFileError(ObjectFilenames[I], std::move(E));
+        return createFileError(Filename, std::move(E));
       }
     }
   }
