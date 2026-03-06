@@ -2119,6 +2119,14 @@ def fsafety_profile_apply_arithmetic : Flag<["-"], "fsafety-profile-apply=arithm
   HelpText<"Apply the std::arithmetic safety profile">,
   Visibility<[ClangOption, CC1Option]>,
   MarshallingInfoFlag<LangOpts<"ProfileApplyArithmetic">>;
+def fsafety_profile_enforce_lifetime : Flag<["-"], "fsafety-profile-enforce=lifetime">, Group<f_Group>,
+  HelpText<"Enforce the std::lifetime safety profile">,
+  Visibility<[ClangOption, CC1Option]>,
+  MarshallingInfoFlag<LangOpts<"ProfileEnforceLifetime">>;
+def fsafety_profile_apply_lifetime : Flag<["-"], "fsafety-profile-apply=lifetime">, Group<f_Group>,
+  HelpText<"Apply the std::lifetime safety profile">,
+  Visibility<[ClangOption, CC1Option]>,
+  MarshallingInfoFlag<LangOpts<"ProfileApplyLifetime">>;
 def fconstexpr_backtrace_limit_EQ : Joined<["-"], "fconstexpr-backtrace-limit=">, Group<f_Group>,
   Visibility<[ClangOption, CC1Option]>,
   HelpText<"Set the maximum number of entries to print in a constexpr evaluation backtrace (0 = no limit)">,

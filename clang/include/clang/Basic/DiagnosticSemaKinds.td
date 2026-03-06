@@ -14139,4 +14139,20 @@ def warn_profile_rejected_overflow : Warning<
   "arithmetic overflow is discouraged by profile std::arithmetic">,
   InGroup<SafetyProfileArithmetic>, DefaultIgnore;
 
+def err_profile_rejected_delete : Error<
+  "'delete' is not allowed when profile std::lifetime is enforced">;
+def warn_profile_rejected_delete : Warning<
+  "'delete' is discouraged by profile std::lifetime">,
+  InGroup<SafetyProfileLifetime>, DefaultIgnore;
+def err_profile_rejected_free : Error<
+  "calling 'free' is not allowed when profile std::lifetime is enforced">;
+def warn_profile_rejected_free : Warning<
+  "calling 'free' is discouraged by profile std::lifetime">,
+  InGroup<SafetyProfileLifetime>, DefaultIgnore;
+def err_profile_rejected_deref_unchecked : Error<
+  "dereferencing a pointer without a null check is not allowed when profile std::lifetime is enforced">;
+def warn_profile_rejected_deref_unchecked : Warning<
+  "dereferencing a pointer without a null check is discouraged by profile std::lifetime">,
+  InGroup<SafetyProfileLifetime>, DefaultIgnore;
+
 } // end of sema component.

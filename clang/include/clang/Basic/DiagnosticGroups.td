@@ -1924,3 +1924,4 @@ def TrivialAutoVarInit : DiagGroup<"trivial-auto-var-init">;
 def ExperimentalOption : DiagGroup<"experimental-option">;
 
 def SafetyProfileArithmetic : DiagGroup<"safety-profile-arithmetic">;
+def SafetyProfileLifetime : DiagGroup<"safety-profile-lifetime">;

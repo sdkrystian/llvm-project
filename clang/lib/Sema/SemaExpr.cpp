@@ -36,6 +36,7 @@
 #include "clang/Basic/Builtins.h"
 #include "clang/Basic/DiagnosticSema.h"
 #include "clang/Basic/PartialDiagnostic.h"
+#include "clang/Basic/ProfileState.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/Specifiers.h"
 #include "clang/Basic/TargetInfo.h"
@@ -16163,6 +16164,15 @@ ExprResult Sema::CreateBuiltinUnaryOp(SourceLocation OpLoc,
         return ExprError();
       resultType =
           CheckIndirectionOperand(*this, Input.get(), VK, OpLoc, IsAfterAmp);
+      // P3081R2 [expr.unary.op]: pointer dereference is profile-checked
+      // by std::lifetime
+      if (!resultType.isNull() &&
+          Input.get()->getType()->isPointerType()) {
+        if (isProfileEnforced(ProfileKind::Lifetime))
+          Diag(OpLoc, diag::err_profile_rejected_deref_unchecked);
+        else if (isProfileApplied(ProfileKind::Lifetime))
+          Diag(OpLoc, diag::warn_profile_rejected_deref_unchecked);
+      }
       break;
     }
     case UO_Plus:

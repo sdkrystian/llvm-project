@@ -4470,6 +4470,11 @@ bool Sema::CheckFunctionCall(FunctionDecl *FDecl, CallExpr *TheCall,
     CheckStrncatArguments(TheCall, FnInfo);
     break;
   case Builtin::BIfree:
+    // P3081R2 [c.malloc]: free is profile-rejected by std::lifetime
+    if (isProfileEnforced(ProfileKind::Lifetime))
+      Diag(TheCall->getBeginLoc(), diag::err_profile_rejected_free);
+    else if (isProfileApplied(ProfileKind::Lifetime))
+      Diag(TheCall->getBeginLoc(), diag::warn_profile_rejected_free);
     CheckFreeArguments(TheCall);
     break;
   default:

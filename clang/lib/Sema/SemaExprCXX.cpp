@@ -28,6 +28,7 @@
 #include "clang/Basic/AlignedAllocation.h"
 #include "clang/Basic/DiagnosticSema.h"
 #include "clang/Basic/PartialDiagnostic.h"
+#include "clang/Basic/ProfileState.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Basic/TokenKinds.h"
 #include "clang/Lex/Preprocessor.h"
@@ -3982,6 +3983,12 @@ void Sema::AnalyzeDeleteExprMismatch(FieldDecl *Field, SourceLocation DeleteLoc,
 ExprResult
 Sema::ActOnCXXDelete(SourceLocation StartLoc, bool UseGlobal,
                      bool ArrayForm, Expr *ExE) {
+  // P3081R2 [expr.delete]: profile-rejected by std::lifetime
+  if (isProfileEnforced(ProfileKind::Lifetime))
+    Diag(StartLoc, diag::err_profile_rejected_delete);
+  else if (isProfileApplied(ProfileKind::Lifetime))
+    Diag(StartLoc, diag::warn_profile_rejected_delete);
+
   // C++ [expr.delete]p1:
   //   The operand shall have a pointer type, or a class type having a single
   //   non-explicit conversion function to a pointer type. The result has type
