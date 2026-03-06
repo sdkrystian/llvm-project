@@ -527,6 +527,9 @@ LANGOPT(EnableLifetimeSafetyTUAnalysis, 1, 0, NotCompatible, "Lifetime safety at
 LANGOPT(PreserveVec3Type, 1, 0, NotCompatible, "Preserve 3-component vector type")
 LANGOPT(Reflection      , 1, 0, NotCompatible, "C++26 Reflection")
 
+LANGOPT(ProfileEnforceArithmetic, 1, 0, NotCompatible, "Enforce std::arithmetic safety profile")
+LANGOPT(ProfileApplyArithmetic, 1, 0, NotCompatible, "Apply std::arithmetic safety profile")
+
 #undef LANGOPT
 #undef ENUM_LANGOPT
 #undef VALUE_LANGOPT

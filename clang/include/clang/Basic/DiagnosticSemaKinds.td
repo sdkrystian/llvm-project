@@ -14115,4 +14115,28 @@ def err_cuda_device_kernel_launch_not_supported
 def err_cuda_device_kernel_launch_require_rdc
     : Error<"kernel launch from __device__ or __global__ function requires "
             "relocatable device code (i.e. requires -fgpu-rdc)">;
+
+// Safety profiles
+def err_profile_unknown : Error<
+  "unknown safety profile %0">;
+def err_profile_enforce_not_first_decl : Error<
+  "profile attribute must appear on the lexically first declaration in the translation unit">;
+def err_profile_enforce_apply_conflict : Error<
+  "cannot both enforce and apply profile %0">;
+def err_profile_rejected_narrowing : Error<
+  "narrowing conversion from %0 to %1 is not allowed when profile std::arithmetic is enforced">;
+def warn_profile_rejected_narrowing : Warning<
+  "narrowing conversion from %0 to %1 is discouraged by profile std::arithmetic">,
+  InGroup<SafetyProfileArithmetic>, DefaultIgnore;
+def err_profile_rejected_signedness : Error<
+  "implicit conversion changes signedness from %0 to %1 when profile std::arithmetic is enforced">;
+def warn_profile_rejected_signedness : Warning<
+  "implicit conversion changes signedness from %0 to %1; discouraged by profile std::arithmetic">,
+  InGroup<SafetyProfileArithmetic>, DefaultIgnore;
+def err_profile_rejected_overflow : Error<
+  "arithmetic overflow is not allowed when profile std::arithmetic is enforced">;
+def warn_profile_rejected_overflow : Warning<
+  "arithmetic overflow is discouraged by profile std::arithmetic">,
+  InGroup<SafetyProfileArithmetic>, DefaultIgnore;
+
 } // end of sema component.

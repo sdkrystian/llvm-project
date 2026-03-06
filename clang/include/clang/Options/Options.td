@@ -2111,6 +2111,14 @@ def fexperimental_new_constant_interpreter : Flag<["-"], "fexperimental-new-cons
   HelpText<"Enable the experimental new constant interpreter">,
   Visibility<[ClangOption, CC1Option]>,
   MarshallingInfoFlag<LangOpts<"EnableNewConstInterp">>;
+def fsafety_profile_enforce_arithmetic : Flag<["-"], "fsafety-profile-enforce=arithmetic">, Group<f_Group>,
+  HelpText<"Enforce the std::arithmetic safety profile">,
+  Visibility<[ClangOption, CC1Option]>,
+  MarshallingInfoFlag<LangOpts<"ProfileEnforceArithmetic">>;
+def fsafety_profile_apply_arithmetic : Flag<["-"], "fsafety-profile-apply=arithmetic">, Group<f_Group>,
+  HelpText<"Apply the std::arithmetic safety profile">,
+  Visibility<[ClangOption, CC1Option]>,
+  MarshallingInfoFlag<LangOpts<"ProfileApplyArithmetic">>;
 def fconstexpr_backtrace_limit_EQ : Joined<["-"], "fconstexpr-backtrace-limit=">, Group<f_Group>,
   Visibility<[ClangOption, CC1Option]>,
   HelpText<"Set the maximum number of entries to print in a constexpr evaluation backtrace (0 = no limit)">,

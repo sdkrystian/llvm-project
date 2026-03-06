@@ -327,6 +327,11 @@ Sema::Sema(Preprocessor &pp, ASTContext &ctxt, ASTConsumer &consumer,
   assert(pp.TUKind == TUKind);
   TUScope = nullptr;
 
+  if (LangOpts.ProfileEnforceArithmetic)
+    CurProfileState.setMode(ProfileKind::Arithmetic, ProfileMode::Enforced);
+  else if (LangOpts.ProfileApplyArithmetic)
+    CurProfileState.setMode(ProfileKind::Arithmetic, ProfileMode::Applied);
+
   LoadedExternalKnownNamespaces = false;
   for (unsigned I = 0; I != NSAPI::NumNSNumberLiteralMethods; ++I)
     ObjC().NSNumberLiteralMethods[I] = nullptr;
@@ -2496,13 +2501,14 @@ operator()(sema::FunctionScopeInfo *Scope) const {
 
 void Sema::PushCompoundScope(bool IsStmtExpr) {
   getCurFunction()->CompoundScopes.push_back(
-      CompoundScopeInfo(IsStmtExpr, getCurFPFeatures()));
+      CompoundScopeInfo(IsStmtExpr, getCurFPFeatures(), CurProfileState));
 }
 
 void Sema::PopCompoundScope() {
   FunctionScopeInfo *CurFunction = getCurFunction();
   assert(!CurFunction->CompoundScopes.empty() && "mismatched push/pop");
 
+  CurProfileState = CurFunction->CompoundScopes.back().InitialProfileState;
   CurFunction->CompoundScopes.pop_back();
 }
 

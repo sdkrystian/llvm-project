@@ -49,6 +49,7 @@
 #include "clang/Basic/OperatorKinds.h"
 #include "clang/Basic/PartialDiagnostic.h"
 #include "clang/Basic/PragmaKinds.h"
+#include "clang/Basic/ProfileState.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/Specifiers.h"
 #include "clang/Basic/StackExhaustionHandler.h"
@@ -933,6 +934,18 @@ public:
   OpenCLOptions &getOpenCLOptions() { return OpenCLFeatures; }
   FPOptions &getCurFPFeatures() { return CurFPFeatures; }
 
+  ProfileState &getCurProfileState() { return CurProfileState; }
+  const ProfileState &getCurProfileState() const { return CurProfileState; }
+  bool isProfileEnforced(ProfileKind P) const {
+    return CurProfileState.isEnforced(P);
+  }
+  bool isProfileApplied(ProfileKind P) const {
+    return CurProfileState.isApplied(P);
+  }
+  bool isProfileEnabled(ProfileKind P) const {
+    return CurProfileState.isEnabled(P);
+  }
+
   DiagnosticsEngine &getDiagnostics() const { return Diags; }
   SourceManager &getSourceManager() const { return SourceMgr; }
   Preprocessor &getPreprocessor() const { return PP; }
@@ -1294,6 +1307,7 @@ public:
 
   OpenCLOptions OpenCLFeatures;
   FPOptions CurFPFeatures;
+  ProfileState CurProfileState;
 
   const LangOptions &LangOpts;
   Preprocessor &PP;

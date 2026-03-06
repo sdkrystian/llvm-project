@@ -28,6 +28,7 @@
 #include "clang/Basic/Cuda.h"
 #include "clang/Basic/DarwinSDKInfo.h"
 #include "clang/Basic/IdentifierTable.h"
+#include "clang/Basic/ProfileState.h"
 #include "clang/Basic/LangOptions.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/SourceManager.h"
@@ -5451,6 +5452,47 @@ static void handleSuppressAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
                               DiagnosticIdentifiers.size()));
 }
 
+static std::optional<ProfileKind> resolveProfileKind(IdentifierInfo *II) {
+  if (!II)
+    return std::nullopt;
+  return llvm::StringSwitch<std::optional<ProfileKind>>(II->getName())
+      .Case("type", ProfileKind::Type)
+      .Case("bounds", ProfileKind::Bounds)
+      .Case("lifetime", ProfileKind::Lifetime)
+      .Case("arithmetic", ProfileKind::Arithmetic)
+      .Default(std::nullopt);
+}
+
+static void handleProfilesEnforceAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  IdentifierInfo *II = AL.getArgAsIdent(0)->getIdentifierInfo();
+  auto PK = resolveProfileKind(II);
+  if (!PK) {
+    S.Diag(AL.getLoc(), diag::err_profile_unknown) << II;
+    return;
+  }
+  if (S.getCurProfileState().getMode(*PK) == ProfileMode::Applied) {
+    S.Diag(AL.getLoc(), diag::err_profile_enforce_apply_conflict) << II;
+    return;
+  }
+  S.getCurProfileState().setMode(*PK, ProfileMode::Enforced);
+  D->addAttr(::new (S.Context) ProfilesEnforceAttr(S.Context, AL, II));
+}
+
+static void handleProfilesApplyAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  IdentifierInfo *II = AL.getArgAsIdent(0)->getIdentifierInfo();
+  auto PK = resolveProfileKind(II);
+  if (!PK) {
+    S.Diag(AL.getLoc(), diag::err_profile_unknown) << II;
+    return;
+  }
+  if (S.getCurProfileState().getMode(*PK) == ProfileMode::Enforced) {
+    S.Diag(AL.getLoc(), diag::err_profile_enforce_apply_conflict) << II;
+    return;
+  }
+  S.getCurProfileState().setMode(*PK, ProfileMode::Applied);
+  D->addAttr(::new (S.Context) ProfilesApplyAttr(S.Context, AL, II));
+}
+
 static void handleLifetimeCategoryAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   TypeSourceInfo *DerefTypeLoc = nullptr;
   QualType ParmType;
@@ -7880,6 +7922,15 @@ ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D, const ParsedAttr &AL,
     break;
   case ParsedAttr::AT_Suppress:
     handleSuppressAttr(S, D, AL);
+    break;
+  case ParsedAttr::AT_ProfilesEnforce:
+    handleProfilesEnforceAttr(S, D, AL);
+    break;
+  case ParsedAttr::AT_ProfilesApply:
+    handleProfilesApplyAttr(S, D, AL);
+    break;
+  case ParsedAttr::AT_ProfilesSuppress:
+    // profiles::suppress on a decl is a no-op (it only matters on statements)
     break;
   case ParsedAttr::AT_Owner:
   case ParsedAttr::AT_Pointer:

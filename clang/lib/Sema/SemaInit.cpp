@@ -19,6 +19,7 @@
 #include "clang/AST/IgnoreExpr.h"
 #include "clang/AST/TypeBase.h"
 #include "clang/AST/TypeLoc.h"
+#include "clang/Basic/ProfileState.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/Specifiers.h"
 #include "clang/Basic/TargetInfo.h"
@@ -9934,6 +9935,19 @@ static void DiagnoseNarrowingInInitList(Sema &S,
         << EntityType.getNonReferenceType().getLocalUnqualifiedType();
     break;
   }
+  }
+
+  // P3081R2 [dcl.init.list] p7: profile-rejected by std::arithmetic
+  QualType T = EntityType.getNonReferenceType();
+  if (!T->isVoidType() && !T->isBooleanType()) {
+    if (S.isProfileEnforced(ProfileKind::Arithmetic))
+      S.Diag(PostInit->getBeginLoc(), diag::err_profile_rejected_narrowing)
+          << PreNarrowingType.getLocalUnqualifiedType()
+          << T.getLocalUnqualifiedType();
+    else if (S.isProfileApplied(ProfileKind::Arithmetic))
+      S.Diag(PostInit->getBeginLoc(), diag::warn_profile_rejected_narrowing)
+          << PreNarrowingType.getLocalUnqualifiedType()
+          << T.getLocalUnqualifiedType();
   }
 
   SmallString<128> StaticCast;

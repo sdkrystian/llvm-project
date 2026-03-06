@@ -20,6 +20,7 @@
 #include "clang/Basic/CapturedStmt.h"
 #include "clang/Basic/LLVM.h"
 #include "clang/Basic/PartialDiagnostic.h"
+#include "clang/Basic/ProfileState.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Sema/CleanupInfo.h"
 #include "clang/Sema/DeclSpec.h"
@@ -78,8 +79,13 @@ public:
   /// any pragma.
   FPOptions InitialFPFeatures;
 
-  CompoundScopeInfo(bool IsStmtExpr, FPOptions FPO)
-      : IsStmtExpr(IsStmtExpr), InitialFPFeatures(FPO) {}
+  /// Profile state at the beginning of the compound statement, prior to
+  /// any profile attribute.
+  ProfileState InitialProfileState;
+
+  CompoundScopeInfo(bool IsStmtExpr, FPOptions FPO, ProfileState PS)
+      : IsStmtExpr(IsStmtExpr), InitialFPFeatures(FPO),
+        InitialProfileState(PS) {}
 
   void setHasEmptyLoopBodies() {
     HasEmptyLoopBodies = true;

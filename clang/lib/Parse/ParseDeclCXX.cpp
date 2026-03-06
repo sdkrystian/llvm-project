@@ -4493,6 +4493,49 @@ bool Parser::ParseCXX11AttributeArgs(
     return true;
   }
 
+  // [[profiles::enforce/apply/suppress(std::arithmetic)]]
+  if (ScopeName && ScopeName->isStr("profiles") &&
+      (AttrName->isStr("enforce") || AttrName->isStr("apply") ||
+       AttrName->isStr("suppress"))) {
+    BalancedDelimiterTracker T(*this, tok::l_paren);
+    T.consumeOpen();
+
+    // Parse profile-name: optionally 'std' '::' followed by identifier.
+    // We only store the final identifier (e.g. "arithmetic").
+    IdentifierInfo *ProfileNameII = nullptr;
+    SourceLocation ProfileNameLoc;
+    if (Tok.is(tok::identifier)) {
+      IdentifierInfo *First = Tok.getIdentifierInfo();
+      ProfileNameLoc = ConsumeToken();
+      if (TryConsumeToken(tok::coloncolon)) {
+        if (Tok.is(tok::identifier)) {
+          ProfileNameII = Tok.getIdentifierInfo();
+          ProfileNameLoc = ConsumeToken();
+        } else {
+          ProfileNameII = First;
+        }
+      } else {
+        ProfileNameII = First;
+      }
+    }
+
+    T.consumeClose();
+    if (EndLoc)
+      *EndLoc = T.getCloseLocation();
+
+    if (ProfileNameII) {
+      IdentifierLoc *ILoc = ::new (Actions.getASTContext())
+          IdentifierLoc(ProfileNameLoc, ProfileNameII);
+      ArgsVector Args = {ILoc};
+      Attrs.addNew(AttrName,
+                   SourceRange(ScopeLoc.isValid() ? ScopeLoc : AttrNameLoc,
+                               T.getCloseLocation()),
+                   AttributeScopeInfo(ScopeName, ScopeLoc, SourceLocation{}),
+                   Args.data(), Args.size(), Form);
+    }
+    return true;
+  }
+
   unsigned NumArgs;
   // Some Clang-scoped attributes have some special parsing behavior.
   if (ScopeName && (ScopeName->isStr("clang") || ScopeName->isStr("_Clang")))

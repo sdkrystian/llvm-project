@@ -49,6 +49,7 @@
 #include "clang/Basic/OpenCLOptions.h"
 #include "clang/Basic/OperatorKinds.h"
 #include "clang/Basic/PartialDiagnostic.h"
+#include "clang/Basic/ProfileState.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/Specifiers.h"
@@ -13315,6 +13316,17 @@ void Sema::CheckImplicitConversion(Expr *E, QualType T, SourceLocation CC,
   if (!Source->isIntegerType() || !Target->isIntegerType())
     return;
 
+  // P3081R2 [conv.integral] p4: signedness conversion is profile-rejected
+  if (Source->isSignedIntegerType() != Target->isSignedIntegerType() &&
+      !Target->isBooleanType()) {
+    if (isProfileEnforced(ProfileKind::Arithmetic))
+      Diag(CC, diag::err_profile_rejected_signedness)
+          << E->getType() << T;
+    else if (isProfileApplied(ProfileKind::Arithmetic))
+      Diag(CC, diag::warn_profile_rejected_signedness)
+          << E->getType() << T;
+  }
+
   // TODO: remove this early return once the false positives for constant->bool
   // in templates, macros, etc, are reduced or removed.
   if (Target->isSpecificBuiltinType(BuiltinType::Bool))
@@ -14093,6 +14105,51 @@ void Sema::CheckBoolLikeConversion(Expr *E, SourceLocation CC) {
   ::CheckBoolLikeConversion(*this, E, CC);
 }
 
+static bool CheckBinOpForIntOverflow(Sema &S, const BinaryOperator *BO) {
+  if (!BO->getType()->isIntegerType())
+    return false;
+  BinaryOperatorKind Op = BO->getOpcode();
+  if (Op != BO_Add && Op != BO_Sub && Op != BO_Mul &&
+      Op != BO_Div && Op != BO_Rem)
+    return false;
+  Expr::EvalResult LHSResult, RHSResult;
+  if (!BO->getLHS()->EvaluateAsInt(LHSResult, S.Context) ||
+      !BO->getRHS()->EvaluateAsInt(RHSResult, S.Context))
+    return false;
+  llvm::APSInt LHS = LHSResult.Val.getInt();
+  llvm::APSInt RHS = RHSResult.Val.getInt();
+  if ((Op == BO_Div || Op == BO_Rem) && RHS == 0)
+    return true;
+  bool Overflow = false;
+  switch (Op) {
+  case BO_Add: LHS.isSigned() ? LHS.sadd_ov(RHS, Overflow) : LHS.uadd_ov(RHS, Overflow); break;
+  case BO_Sub: LHS.isSigned() ? LHS.ssub_ov(RHS, Overflow) : LHS.usub_ov(RHS, Overflow); break;
+  case BO_Mul: LHS.isSigned() ? LHS.smul_ov(RHS, Overflow) : LHS.umul_ov(RHS, Overflow); break;
+  case BO_Div:
+    if (LHS.isSigned() && LHS.isMinSignedValue() && RHS.isAllOnes())
+      Overflow = true;
+    break;
+  case BO_Rem:
+    if (LHS.isSigned() && LHS.isMinSignedValue() && RHS.isAllOnes())
+      Overflow = true;
+    break;
+  default: break;
+  }
+  return Overflow;
+}
+
+static bool CheckUnaryOpForIntOverflow(Sema &S, const UnaryOperator *UO) {
+  if (UO->getOpcode() != UO_Minus || !UO->getType()->isIntegerType())
+    return false;
+  Expr::EvalResult Result;
+  if (!UO->getSubExpr()->EvaluateAsInt(Result, S.Context))
+    return false;
+  llvm::APSInt Val = Result.Val.getInt();
+  if (Val.isSigned() && Val.isMinSignedValue())
+    return true;
+  return false;
+}
+
 void Sema::CheckForIntOverflow (const Expr *E) {
   // Use a work list to deal with nested struct initializers.
   SmallVector<const Expr *, 2> Exprs(1, E);
@@ -14103,6 +14160,21 @@ void Sema::CheckForIntOverflow (const Expr *E) {
 
     if (isa<BinaryOperator, UnaryOperator>(E)) {
       E->EvaluateForOverflow(Context);
+
+      // P3081R2 [expr.pre]: overflow is profile-rejected by std::arithmetic
+      if (isProfileEnabled(ProfileKind::Arithmetic)) {
+        bool Overflowed = false;
+        if (const auto *BO = dyn_cast<BinaryOperator>(E))
+          Overflowed = CheckBinOpForIntOverflow(*this, BO);
+        else if (const auto *UO = dyn_cast<UnaryOperator>(E))
+          Overflowed = CheckUnaryOpForIntOverflow(*this, UO);
+        if (Overflowed) {
+          if (isProfileEnforced(ProfileKind::Arithmetic))
+            Diag(E->getExprLoc(), diag::err_profile_rejected_overflow);
+          else
+            Diag(E->getExprLoc(), diag::warn_profile_rejected_overflow);
+        }
+      }
       continue;
     }
 

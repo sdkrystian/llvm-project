@@ -3454,6 +3454,24 @@ def Suppress : DeclOrStmtAttr {
   let Documentation = [SuppressDocs];
 }
 
+def ProfilesEnforce : Attr {
+  let Spellings = [CXX11<"profiles", "enforce">];
+  let Args = [IdentifierArgument<"ProfileName">];
+  let Documentation = [Undocumented];
+}
+
+def ProfilesApply : Attr {
+  let Spellings = [CXX11<"profiles", "apply">];
+  let Args = [IdentifierArgument<"ProfileName">];
+  let Documentation = [Undocumented];
+}
+
+def ProfilesSuppress : DeclOrStmtAttr {
+  let Spellings = [CXX11<"profiles", "suppress">];
+  let Args = [IdentifierArgument<"ProfileName">];
+  let Documentation = [Undocumented];
+}
+
 def SysVABI : DeclOrTypeAttr {
   let Spellings = [GCC<"sysv_abi">];
 //  let Subjects = [Function, ObjCMethod];

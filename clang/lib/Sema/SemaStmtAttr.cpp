@@ -12,6 +12,7 @@
 
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/EvaluatedExprVisitor.h"
+#include "clang/Basic/ProfileState.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Sema/DelayedDiagnostic.h"
 #include "clang/Sema/ParsedAttr.h"
@@ -20,6 +21,17 @@
 
 using namespace clang;
 using namespace sema;
+
+static std::optional<ProfileKind> resolveProfileKind(IdentifierInfo *II) {
+  if (!II)
+    return std::nullopt;
+  return llvm::StringSwitch<std::optional<ProfileKind>>(II->getName())
+      .Case("type", ProfileKind::Type)
+      .Case("bounds", ProfileKind::Bounds)
+      .Case("lifetime", ProfileKind::Lifetime)
+      .Case("arithmetic", ProfileKind::Arithmetic)
+      .Default(std::nullopt);
+}
 
 static Attr *handleFallThroughAttr(Sema &S, Stmt *St, const ParsedAttr &A,
                                    SourceRange Range) {
@@ -704,6 +716,17 @@ static Attr *ProcessStmtAttribute(Sema &S, Stmt *St, const ParsedAttr &A,
     return handleOpenCLUnrollHint(S, St, A, Range);
   case ParsedAttr::AT_Suppress:
     return handleSuppressAttr(S, St, A, Range);
+  case ParsedAttr::AT_ProfilesSuppress: {
+    IdentifierInfo *II = A.getArgAsIdent(0)->getIdentifierInfo();
+    auto PK = resolveProfileKind(II);
+    if (!PK) {
+      S.Diag(A.getLoc(), diag::err_profile_unknown) << II;
+      return nullptr;
+    }
+    S.getCurProfileState().setSuppressed(*PK);
+    return ::new (S.Context)
+        ProfilesSuppressAttr(S.Context, A, II);
+  }
   case ParsedAttr::AT_NoMerge:
     return handleNoMergeAttr(S, St, A, Range);
   case ParsedAttr::AT_NoInline:
