@@ -671,6 +671,18 @@ static Attr *handleAtomicAttr(Sema &S, Stmt *St, const ParsedAttr &AL,
       AtomicAttr(S.Context, AL, Options.data(), Options.size());
 }
 
+static Attr *handleProfileSuppressAttr(Sema &S, Stmt *St, const ParsedAttr &A,
+                                       SourceRange Range) {
+  IdentifierInfo *II = A.getArgAsIdent(0)->getIdentifierInfo();
+  auto PK = resolveProfileKind(II);
+  if (!PK) {
+    S.Diag(A.getLoc(), diag::err_profile_unknown) << II;
+    return nullptr;
+  }
+  S.getCurProfileState().setSuppressed(*PK);
+  return ::new (S.Context) ProfilesSuppressAttr(S.Context, A, II);
+}
+
 static Attr *ProcessStmtAttribute(Sema &S, Stmt *St, const ParsedAttr &A,
                                   SourceRange Range) {
   if (A.isInvalid() || A.getKind() == ParsedAttr::IgnoredAttribute)
@@ -716,17 +728,8 @@ static Attr *ProcessStmtAttribute(Sema &S, Stmt *St, const ParsedAttr &A,
     return handleOpenCLUnrollHint(S, St, A, Range);
   case ParsedAttr::AT_Suppress:
     return handleSuppressAttr(S, St, A, Range);
-  case ParsedAttr::AT_ProfilesSuppress: {
-    IdentifierInfo *II = A.getArgAsIdent(0)->getIdentifierInfo();
-    auto PK = resolveProfileKind(II);
-    if (!PK) {
-      S.Diag(A.getLoc(), diag::err_profile_unknown) << II;
-      return nullptr;
-    }
-    S.getCurProfileState().setSuppressed(*PK);
-    return ::new (S.Context)
-        ProfilesSuppressAttr(S.Context, A, II);
-  }
+  case ParsedAttr::AT_ProfilesSuppress:
+    return handleProfileSuppressAttr(S, St, A, Range);
   case ParsedAttr::AT_NoMerge:
     return handleNoMergeAttr(S, St, A, Range);
   case ParsedAttr::AT_NoInline:
