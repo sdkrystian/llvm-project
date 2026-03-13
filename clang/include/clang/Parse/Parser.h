@@ -2981,6 +2981,14 @@ private:
   void ParseOpenMPAttributeArgs(const IdentifierInfo *AttrName,
                                 CachedTokens &OpenMPTokens);
 
+  void ParseProfileAttributeArgs(IdentifierInfo *AttrName,
+                                 SourceLocation AttrNameLoc,
+                                 ParsedAttributes &Attrs,
+                                 SourceLocation *EndLoc,
+                                 IdentifierInfo *ScopeName,
+                                 SourceLocation ScopeLoc,
+                                 ParsedAttr::Form Form);
+
   /// Parse a C++11 or C23 attribute-specifier.
   ///
   /// \verbatim

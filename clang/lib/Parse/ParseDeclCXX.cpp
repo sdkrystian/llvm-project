@@ -4421,6 +4421,43 @@ bool Parser::ParseCXXAssumeAttributeArg(
   return false;
 }
 
+void Parser::ParseProfileAttributeArgs(
+    IdentifierInfo *AttrName, SourceLocation AttrNameLoc,
+    ParsedAttributes &Attrs, SourceLocation *EndLoc, IdentifierInfo *ScopeName,
+    SourceLocation ScopeLoc, ParsedAttr::Form Form) {
+  BalancedDelimiterTracker T(*this, tok::l_paren);
+
+  if (T.consumeOpen()) {
+    Diag(Tok, diag::err_expected) << tok::l_paren;
+    return;
+  }
+  // Parse profile-name: optionally 'std' '::' followed by identifier.
+  // We only store the final identifier (e.g. "arithmetic").
+  SourceLocation NameLoc;
+  IdentifierInfo *ProfileName = TryParseCXX11AttributeIdentifier(NameLoc);
+  if (ProfileName && ProfileName->isStr("std") && !ExpectAndConsume(tok::coloncolon))
+    ProfileName = TryParseCXX11AttributeIdentifier(NameLoc);
+
+  if (!ProfileName) {
+    Diag(Tok.getLocation(), diag::err_expected_identifier);
+    SkipUntil(tok::r_paren);
+    return;
+  }
+
+  if (T.consumeClose()) {
+    Diag(Tok.getLocation(), diag::err_expected_lparen_after) << NameLoc;
+    return;
+  }
+
+  IdentifierLoc *ProfileNameLoc = ::new (Actions.getASTContext())
+      IdentifierLoc(NameLoc, ProfileName);
+  ArgsVector Args = {ProfileNameLoc};
+  Attrs.addNew(AttrName,
+               SourceRange(ScopeLoc, T.getCloseLocation()),
+               AttributeScopeInfo(ScopeName, ScopeLoc, SourceLocation{}),
+               Args.data(), Args.size(), Form);
+}
+
 bool Parser::ParseCXX11AttributeArgs(
     IdentifierInfo *AttrName, SourceLocation AttrNameLoc,
     ParsedAttributes &Attrs, SourceLocation *EndLoc, IdentifierInfo *ScopeName,
@@ -4497,42 +4534,8 @@ bool Parser::ParseCXX11AttributeArgs(
   if (ScopeName && ScopeName->isStr("profiles") &&
       (AttrName->isStr("enforce") || AttrName->isStr("apply") ||
        AttrName->isStr("suppress"))) {
-    BalancedDelimiterTracker T(*this, tok::l_paren);
-    T.consumeOpen();
-
-    // Parse profile-name: optionally 'std' '::' followed by identifier.
-    // We only store the final identifier (e.g. "arithmetic").
-    IdentifierInfo *ProfileNameII = nullptr;
-    SourceLocation ProfileNameLoc;
-    if (Tok.is(tok::identifier)) {
-      IdentifierInfo *First = Tok.getIdentifierInfo();
-      ProfileNameLoc = ConsumeToken();
-      if (TryConsumeToken(tok::coloncolon)) {
-        if (Tok.is(tok::identifier)) {
-          ProfileNameII = Tok.getIdentifierInfo();
-          ProfileNameLoc = ConsumeToken();
-        } else {
-          ProfileNameII = First;
-        }
-      } else {
-        ProfileNameII = First;
-      }
-    }
-
-    T.consumeClose();
-    if (EndLoc)
-      *EndLoc = T.getCloseLocation();
-
-    if (ProfileNameII) {
-      IdentifierLoc *ILoc = ::new (Actions.getASTContext())
-          IdentifierLoc(ProfileNameLoc, ProfileNameII);
-      ArgsVector Args = {ILoc};
-      Attrs.addNew(AttrName,
-                   SourceRange(ScopeLoc.isValid() ? ScopeLoc : AttrNameLoc,
-                               T.getCloseLocation()),
-                   AttributeScopeInfo(ScopeName, ScopeLoc, SourceLocation{}),
-                   Args.data(), Args.size(), Form);
-    }
+    ParseProfileAttributeArgs(AttrName, AttrNameLoc, Attrs, EndLoc, ScopeName,
+                              ScopeLoc, Form);
     return true;
   }
 
