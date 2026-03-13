@@ -175,5 +175,5 @@ namespace PR51872_part1 {
 
 namespace GH177545 {
   template<decltype(auto)()() volatile throw() -> char> // expected-error {{'decltype(auto)' can only be used as a return type in a function declaration}}
-  struct T2;                                            // expected-error@-1 {{function cannot return function type 'auto () volatile throw() -> decltype(auto)'}}
+  struct T2;                                            // expected-error@* {{function cannot return function type 'auto () volatile throw() -> decltype(auto)'}}
 }
