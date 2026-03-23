@@ -5463,33 +5463,81 @@ static std::optional<ProfileKind> resolveProfileKind(IdentifierInfo *II) {
       .Default(std::nullopt);
 }
 
+// P3081R2: std::strict expands to type+bounds+lifetime.
+static bool
+resolveProfileKinds(IdentifierInfo *II,
+                    SmallVectorImpl<ProfileKind> &Profiles) {
+  if (!II)
+    return false;
+  if (II->isStr("strict")) {
+    Profiles.push_back(ProfileKind::Type);
+    Profiles.push_back(ProfileKind::Bounds);
+    Profiles.push_back(ProfileKind::Lifetime);
+    return true;
+  }
+  auto PK = resolveProfileKind(II);
+  if (!PK)
+    return false;
+  Profiles.push_back(*PK);
+  return true;
+}
+
+// P3081R2: enforce/apply must appear on the lexically first declaration
+// in the translation unit.
+static bool checkProfileAttrIsFirstInTU(Sema &S, const ParsedAttr &AL) {
+  if (!S.CurContext->isTranslationUnit()) {
+    S.Diag(AL.getLoc(), diag::err_profile_enforce_not_first_decl);
+    return false;
+  }
+  for (const Decl *Prev : S.CurContext->decls()) {
+    if (Prev->isImplicit())
+      continue;
+    if (isa<EmptyDecl>(Prev) && (Prev->hasAttr<ProfilesEnforceAttr>() ||
+                                 Prev->hasAttr<ProfilesApplyAttr>()))
+      continue;
+    S.Diag(AL.getLoc(), diag::err_profile_enforce_not_first_decl);
+    return false;
+  }
+  return true;
+}
+
 static void handleProfilesEnforceAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   IdentifierInfo *II = AL.getArgAsIdent(0)->getIdentifierInfo();
-  auto PK = resolveProfileKind(II);
-  if (!PK) {
+  SmallVector<ProfileKind, 4> Profiles;
+  if (!resolveProfileKinds(II, Profiles)) {
     S.Diag(AL.getLoc(), diag::err_profile_unknown) << II;
     return;
   }
-  if (S.getCurProfileState().getMode(*PK) == ProfileMode::Applied) {
-    S.Diag(AL.getLoc(), diag::err_profile_enforce_apply_conflict) << II;
+  if (!checkProfileAttrIsFirstInTU(S, AL))
     return;
+  for (ProfileKind PK : Profiles) {
+    if (S.getCurProfileState().getMode(PK) == ProfileMode::Applied) {
+      S.Diag(AL.getLoc(), diag::err_profile_enforce_apply_conflict) << II;
+      return;
+    }
   }
-  S.getCurProfileState().setMode(*PK, ProfileMode::Enforced);
+  for (ProfileKind PK : Profiles)
+    S.getCurProfileState().setMode(PK, ProfileMode::Enforced);
   D->addAttr(::new (S.Context) ProfilesEnforceAttr(S.Context, AL, II));
 }
 
 static void handleProfilesApplyAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   IdentifierInfo *II = AL.getArgAsIdent(0)->getIdentifierInfo();
-  auto PK = resolveProfileKind(II);
-  if (!PK) {
+  SmallVector<ProfileKind, 4> Profiles;
+  if (!resolveProfileKinds(II, Profiles)) {
     S.Diag(AL.getLoc(), diag::err_profile_unknown) << II;
     return;
   }
-  if (S.getCurProfileState().getMode(*PK) == ProfileMode::Enforced) {
-    S.Diag(AL.getLoc(), diag::err_profile_enforce_apply_conflict) << II;
+  if (!checkProfileAttrIsFirstInTU(S, AL))
     return;
+  for (ProfileKind PK : Profiles) {
+    if (S.getCurProfileState().getMode(PK) == ProfileMode::Enforced) {
+      S.Diag(AL.getLoc(), diag::err_profile_enforce_apply_conflict) << II;
+      return;
+    }
   }
-  S.getCurProfileState().setMode(*PK, ProfileMode::Applied);
+  for (ProfileKind PK : Profiles)
+    S.getCurProfileState().setMode(PK, ProfileMode::Applied);
   D->addAttr(::new (S.Context) ProfilesApplyAttr(S.Context, AL, II));
 }
 

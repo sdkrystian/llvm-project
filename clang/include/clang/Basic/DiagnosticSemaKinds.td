@@ -14149,12 +14149,6 @@ def err_profile_rejected_free : Error<
 def warn_profile_rejected_free : Warning<
   "calling 'free' is discouraged by profile std::lifetime">,
   InGroup<SafetyProfileLifetime>, DefaultIgnore;
-def err_profile_rejected_deref_unchecked : Error<
-  "dereferencing a pointer without a null check is not allowed when profile std::lifetime is enforced">;
-def warn_profile_rejected_deref_unchecked : Warning<
-  "dereferencing a pointer without a null check is discouraged by profile std::lifetime">,
-  InGroup<SafetyProfileLifetime>, DefaultIgnore;
-
 def err_profile_rejected_reinterpret_cast : Error<
   "'reinterpret_cast' is not allowed when profile std::type is enforced">;
 def warn_profile_rejected_reinterpret_cast : Warning<

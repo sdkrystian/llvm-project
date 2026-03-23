@@ -937,6 +937,10 @@ public:
   ProfileState &getCurProfileState() { return CurProfileState; }
   const ProfileState &getCurProfileState() const { return CurProfileState; }
 
+  /// Set profile-suppressed for the profile identified by \p ProfileName.
+  /// Silently does nothing if \p ProfileName is not a recognized profile.
+  void setProfileSuppressedByName(IdentifierInfo *ProfileName);
+
   // P3081R2 [dcl.attr.profile]: profile-rejection only applies when
   // potentially evaluated, outside requires-expressions, outside discarded
   // statements, and outside SFINAE contexts.

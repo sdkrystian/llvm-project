@@ -2514,6 +2514,27 @@ operator()(sema::FunctionScopeInfo *Scope) const {
     delete Scope;
 }
 
+void Sema::setProfileSuppressedByName(IdentifierInfo *ProfileName) {
+  if (!ProfileName)
+    return;
+  llvm::StringRef Name = ProfileName->getName();
+  if (Name == "strict") {
+    CurProfileState.setSuppressed(ProfileKind::Type);
+    CurProfileState.setSuppressed(ProfileKind::Bounds);
+    CurProfileState.setSuppressed(ProfileKind::Lifetime);
+    return;
+  }
+  auto PK =
+      llvm::StringSwitch<std::optional<ProfileKind>>(Name)
+          .Case("type", ProfileKind::Type)
+          .Case("bounds", ProfileKind::Bounds)
+          .Case("lifetime", ProfileKind::Lifetime)
+          .Case("arithmetic", ProfileKind::Arithmetic)
+          .Default(std::nullopt);
+  if (PK)
+    CurProfileState.setSuppressed(*PK);
+}
+
 void Sema::PushCompoundScope(bool IsStmtExpr) {
   getCurFunction()->CompoundScopes.push_back(
       CompoundScopeInfo(IsStmtExpr, getCurFPFeatures(), CurProfileState));

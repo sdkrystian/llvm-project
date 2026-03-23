@@ -674,12 +674,17 @@ static Attr *handleAtomicAttr(Sema &S, Stmt *St, const ParsedAttr &AL,
 static Attr *handleProfileSuppressAttr(Sema &S, Stmt *St, const ParsedAttr &A,
                                        SourceRange Range) {
   IdentifierInfo *II = A.getArgAsIdent(0)->getIdentifierInfo();
-  auto PK = resolveProfileKind(II);
-  if (!PK) {
-    S.Diag(A.getLoc(), diag::err_profile_unknown) << II;
-    return nullptr;
+  if (!II->isStr("strict")) {
+    auto PK = resolveProfileKind(II);
+    if (!PK) {
+      S.Diag(A.getLoc(), diag::err_profile_unknown) << II;
+      return nullptr;
+    }
   }
-  S.getCurProfileState().setSuppressed(*PK);
+  // Suppression timing is handled by the parser (save/set before
+  // statement body, restore after for non-NullStmt). For NullStmt,
+  // the parser intentionally does not restore, so suppression
+  // persists for the rest of the enclosing compound scope.
   return ::new (S.Context) ProfilesSuppressAttr(S.Context, A, II);
 }
 

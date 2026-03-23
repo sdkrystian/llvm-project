@@ -14,6 +14,7 @@
 #include "clang/AST/PrettyDeclStackTrace.h"
 #include "clang/Basic/Attributes.h"
 #include "clang/Basic/PrettyStackTrace.h"
+#include "clang/Basic/ProfileState.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Basic/TokenKinds.h"
 #include "clang/Parse/LoopHint.h"
@@ -75,10 +76,28 @@ StmtResult Parser::ParseStatementOrDeclaration(StmtVector &Stmts,
   if (getLangOpts().HLSL)
     MaybeParseMicrosoftAttributes(GNUOrMSAttrs);
 
+  // P3081R2: Pre-set profiles::suppress before parsing the statement body so
+  // that diagnostics are suppressed during analysis of the attributed statement.
+  std::optional<ProfileState> SavedProfileState;
+  for (const auto &Attr : CXX11Attrs) {
+    if (Attr.getParsedKind() == ParsedAttr::AT_ProfilesSuppress &&
+        Attr.getNumArgs() > 0 && Attr.isArgIdent(0)) {
+      if (!SavedProfileState)
+        SavedProfileState = Actions.getCurProfileState();
+      Actions.setProfileSuppressedByName(
+          Attr.getArgAsIdent(0)->getIdentifierInfo());
+    }
+  }
+
   StmtResult Res = ParseStatementOrDeclarationAfterAttributes(
       Stmts, StmtCtx, TrailingElseLoc, CXX11Attrs, GNUOrMSAttrs,
       PrecedingLabel);
   MaybeDestroyTemplateIds();
+
+  // Restore profile state for non-NullStmt. For NullStmt, keep the
+  // suppression so it persists for the rest of the enclosing compound scope.
+  if (SavedProfileState && !isa_and_present<NullStmt>(Res.get()))
+    Actions.getCurProfileState() = *SavedProfileState;
 
   takeAndConcatenateAttrs(CXX11Attrs, std::move(GNUOrMSAttrs));
 
