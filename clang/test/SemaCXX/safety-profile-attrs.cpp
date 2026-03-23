@@ -28,7 +28,7 @@
 [[profiles::apply(std::type)]]; // expected-error {{cannot both enforce and apply profile 'type'}}
 
 // No conflict for different profiles:
-[[profiles::apply(std::lifetime)]];
+[[profiles::enforce(std::lifetime)]];
 
 // ==========================================================================
 // Enforce via attribute fires diagnostics
@@ -44,6 +44,15 @@ void test_enforce_type() {
 void test_enforce_arithmetic() {
   int s = 42;
   unsigned u = s; // expected-error {{implicit conversion changes signedness from 'int' to 'unsigned int' when profile std::arithmetic is enforced}}
+}
+
+void test_enforce_lifetime() {
+  int *p = new int(42);
+  delete p; // expected-error {{'delete' is not allowed when profile std::lifetime is enforced}}
+
+  int x = 0;
+  int *q = &x;
+  int v = *q; // expected-error {{dereferencing a pointer without a null check is not allowed when profile std::lifetime is enforced}}
 }
 
 // ==========================================================================
@@ -73,8 +82,22 @@ void test_suppress_type_scoping() {
   int z; // expected-error {{uninitialized variable declaration is not allowed when profile std::type is enforced}}
 }
 
+void test_suppress_lifetime_scoping() {
+  int x = 0;
+  int *p = &x;
+  int v = *p; // expected-error {{dereferencing a pointer without a null check is not allowed when profile std::lifetime is enforced}}
+
+  {
+    [[profiles::suppress(std::lifetime)]];
+    int w = *p;
+    delete p; // no error -- suppressed
+  }
+
+  int u = *p; // expected-error {{dereferencing a pointer without a null check is not allowed when profile std::lifetime is enforced}}
+}
+
 // ==========================================================================
-// Suppress only one profile, other remains active
+// Suppress only one profile, others remain active
 // ==========================================================================
 
 void test_suppress_one_profile() {
@@ -84,6 +107,9 @@ void test_suppress_one_profile() {
     unsigned u = s;
 
     int x; // expected-error {{uninitialized variable declaration is not allowed when profile std::type is enforced}}
+
+    int *p = new int(1);
+    delete p; // expected-error {{'delete' is not allowed when profile std::lifetime is enforced}}
   }
 
   {
@@ -92,6 +118,20 @@ void test_suppress_one_profile() {
 
     int s = 42;
     unsigned u = s; // expected-error {{implicit conversion changes signedness from 'int' to 'unsigned int' when profile std::arithmetic is enforced}}
+
+    int *p = new int(1);
+    delete p; // expected-error {{'delete' is not allowed when profile std::lifetime is enforced}}
+  }
+
+  {
+    [[profiles::suppress(std::lifetime)]];
+    int *p = new int(1);
+    delete p;
+
+    int s = 42;
+    unsigned u = s; // expected-error {{implicit conversion changes signedness from 'int' to 'unsigned int' when profile std::arithmetic is enforced}}
+
+    int x; // expected-error {{uninitialized variable declaration is not allowed when profile std::type is enforced}}
   }
 }
 
