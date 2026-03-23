@@ -14196,4 +14196,15 @@ def warn_profile_rejected_uninit : Warning<
   "uninitialized variable declaration is discouraged by profile std::type">,
   InGroup<SafetyProfileType>, DefaultIgnore;
 
+def err_profile_rejected_pointer_arithmetic : Error<
+  "pointer arithmetic is not allowed when profile std::bounds is enforced">;
+def warn_profile_rejected_pointer_arithmetic : Warning<
+  "pointer arithmetic is discouraged by profile std::bounds">,
+  InGroup<SafetyProfileBounds>, DefaultIgnore;
+def err_profile_rejected_array_decay : Error<
+  "array-to-pointer decay is not allowed when profile std::bounds is enforced">;
+def warn_profile_rejected_array_decay : Warning<
+  "array-to-pointer decay is discouraged by profile std::bounds">,
+  InGroup<SafetyProfileBounds>, DefaultIgnore;
+
 } // end of sema component.

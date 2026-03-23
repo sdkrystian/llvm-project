@@ -4842,6 +4842,12 @@ Sema::PerformImplicitConversion(Expr *From, QualType ToType,
   }
 
   case ICK_Array_To_Pointer:
+    if (!isa<StringLiteral>(From->IgnoreParens())) {
+      if (isProfileEnforced(ProfileKind::Bounds))
+        Diag(From->getExprLoc(), diag::err_profile_rejected_array_decay);
+      else if (isProfileApplied(ProfileKind::Bounds))
+        Diag(From->getExprLoc(), diag::warn_profile_rejected_array_decay);
+    }
     FromType = Context.getArrayDecayedType(FromType);
     From = ImpCastExprToType(From, FromType, CK_ArrayToPointerDecay, VK_PRValue,
                              /*BasePath=*/nullptr, CCK)

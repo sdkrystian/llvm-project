@@ -29,6 +29,7 @@
 
 // No conflict for different profiles:
 [[profiles::enforce(std::lifetime)]];
+[[profiles::enforce(std::bounds)]];
 
 // ==========================================================================
 // Enforce via attribute fires diagnostics
@@ -53,6 +54,15 @@ void test_enforce_lifetime() {
   int x = 0;
   int *q = &x;
   int v = *q; // expected-error {{dereferencing a pointer without a null check is not allowed when profile std::lifetime is enforced}}
+}
+
+void test_enforce_bounds() {
+  int x = 0;
+  int *p = &x;
+  p++; // expected-error {{pointer arithmetic is not allowed when profile std::bounds is enforced}}
+
+  int arr[4] = {};
+  int *q = arr; // expected-error {{array-to-pointer decay is not allowed when profile std::bounds is enforced}}
 }
 
 // ==========================================================================
@@ -90,10 +100,23 @@ void test_suppress_lifetime_scoping() {
   {
     [[profiles::suppress(std::lifetime)]];
     int w = *p;
-    delete p; // no error -- suppressed
+    delete p;
   }
 
   int u = *p; // expected-error {{dereferencing a pointer without a null check is not allowed when profile std::lifetime is enforced}}
+}
+
+void test_suppress_bounds_scoping() {
+  int x = 0;
+  int *p = &x;
+  p++; // expected-error {{pointer arithmetic is not allowed when profile std::bounds is enforced}}
+
+  {
+    [[profiles::suppress(std::bounds)]];
+    p++;
+  }
+
+  p++; // expected-error {{pointer arithmetic is not allowed when profile std::bounds is enforced}}
 }
 
 // ==========================================================================
@@ -110,28 +133,23 @@ void test_suppress_one_profile() {
 
     int *p = new int(1);
     delete p; // expected-error {{'delete' is not allowed when profile std::lifetime is enforced}}
+
+    int *q = &s;
+    q++; // expected-error {{pointer arithmetic is not allowed when profile std::bounds is enforced}}
   }
 
   {
-    [[profiles::suppress(std::type)]];
-    int x;
+    [[profiles::suppress(std::bounds)]];
+    int x = 0;
+    int *p = &x;
+    p++;
 
     int s = 42;
     unsigned u = s; // expected-error {{implicit conversion changes signedness from 'int' to 'unsigned int' when profile std::arithmetic is enforced}}
 
-    int *p = new int(1);
+    int y; // expected-error {{uninitialized variable declaration is not allowed when profile std::type is enforced}}
+
     delete p; // expected-error {{'delete' is not allowed when profile std::lifetime is enforced}}
-  }
-
-  {
-    [[profiles::suppress(std::lifetime)]];
-    int *p = new int(1);
-    delete p;
-
-    int s = 42;
-    unsigned u = s; // expected-error {{implicit conversion changes signedness from 'int' to 'unsigned int' when profile std::arithmetic is enforced}}
-
-    int x; // expected-error {{uninitialized variable declaration is not allowed when profile std::type is enforced}}
   }
 }
 

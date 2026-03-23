@@ -549,6 +549,12 @@ ExprResult Sema::DefaultFunctionArrayConversion(Expr *E, bool Diagnose) {
     // T" can be converted to an rvalue of type "pointer to T".
     //
     if (getLangOpts().C99 || getLangOpts().CPlusPlus || E->isLValue()) {
+      if (!isa<StringLiteral>(E->IgnoreParens())) {
+        if (isProfileEnforced(ProfileKind::Bounds))
+          Diag(E->getExprLoc(), diag::err_profile_rejected_array_decay);
+        else if (isProfileApplied(ProfileKind::Bounds))
+          Diag(E->getExprLoc(), diag::warn_profile_rejected_array_decay);
+      }
       ExprResult Res = ImpCastExprToType(E, Context.getArrayDecayedType(Ty),
                                          CK_ArrayToPointerDecay);
       if (Res.isInvalid())
@@ -11614,6 +11620,11 @@ QualType Sema::CheckAdditionOperands(ExprResult &LHS, ExprResult &RHS,
   }
   assert(PExp->getType()->isAnyPointerType());
 
+  if (isProfileEnforced(ProfileKind::Bounds))
+    Diag(Loc, diag::err_profile_rejected_pointer_arithmetic);
+  else if (isProfileApplied(ProfileKind::Bounds))
+    Diag(Loc, diag::warn_profile_rejected_pointer_arithmetic);
+
   if (!IExp->getType()->isIntegerType())
     return InvalidOperands(Loc, LHS, RHS);
 
@@ -11716,6 +11727,11 @@ QualType Sema::CheckSubtractionOperands(ExprResult &LHS, ExprResult &RHS,
 
   // Either ptr - int   or   ptr - ptr.
   if (LHS.get()->getType()->isAnyPointerType()) {
+    if (isProfileEnforced(ProfileKind::Bounds))
+      Diag(Loc, diag::err_profile_rejected_pointer_arithmetic);
+    else if (isProfileApplied(ProfileKind::Bounds))
+      Diag(Loc, diag::warn_profile_rejected_pointer_arithmetic);
+
     QualType lpointee = LHS.get()->getType()->getPointeeType();
 
     // Diagnose bad cases where we step over interface counts.
@@ -16151,6 +16167,12 @@ ExprResult Sema::CreateBuiltinUnaryOp(SourceLocation OpLoc,
           CheckIncrementDecrementOperand(*this, Input.get(), VK, OK, OpLoc,
                                          Opc == UO_PreInc || Opc == UO_PostInc,
                                          Opc == UO_PreInc || Opc == UO_PreDec);
+      if (!resultType.isNull() && Input.get()->getType()->isPointerType()) {
+        if (isProfileEnforced(ProfileKind::Bounds))
+          Diag(OpLoc, diag::err_profile_rejected_pointer_arithmetic);
+        else if (isProfileApplied(ProfileKind::Bounds))
+          Diag(OpLoc, diag::warn_profile_rejected_pointer_arithmetic);
+      }
       CanOverflow = isOverflowingIntegerType(Context, resultType);
       break;
     case UO_AddrOf:
