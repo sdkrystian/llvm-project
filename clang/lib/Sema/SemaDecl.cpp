@@ -14630,6 +14630,7 @@ void Sema::ActOnUninitializedDecl(Decl *RealDecl) {
 
     if (isProfileEnabled(ProfileKind::Type) && Var->isLocalVarDecl() &&
         !Var->isExternC() &&
+        Var->getStorageDuration() == SD_Automatic &&
         (Type->isScalarType() || Type.isPODType(Context))) {
       if (isProfileEnforced(ProfileKind::Type))
         Diag(Var->getLocation(), diag::err_profile_rejected_uninit);

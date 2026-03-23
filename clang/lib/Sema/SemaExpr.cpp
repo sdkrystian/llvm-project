@@ -549,12 +549,10 @@ ExprResult Sema::DefaultFunctionArrayConversion(Expr *E, bool Diagnose) {
     // T" can be converted to an rvalue of type "pointer to T".
     //
     if (getLangOpts().C99 || getLangOpts().CPlusPlus || E->isLValue()) {
-      if (!isa<StringLiteral>(E->IgnoreParens())) {
-        if (isProfileEnforced(ProfileKind::Bounds))
-          Diag(E->getExprLoc(), diag::err_profile_rejected_array_decay);
-        else if (isProfileApplied(ProfileKind::Bounds))
-          Diag(E->getExprLoc(), diag::warn_profile_rejected_array_decay);
-      }
+      if (isProfileEnforced(ProfileKind::Bounds))
+        Diag(E->getExprLoc(), diag::err_profile_rejected_array_decay);
+      else if (isProfileApplied(ProfileKind::Bounds))
+        Diag(E->getExprLoc(), diag::warn_profile_rejected_array_decay);
       ExprResult Res = ImpCastExprToType(E, Context.getArrayDecayedType(Ty),
                                          CK_ArrayToPointerDecay);
       if (Res.isInvalid())
@@ -16191,6 +16189,25 @@ ExprResult Sema::CreateBuiltinUnaryOp(SourceLocation OpLoc,
           Diag(OpLoc, diag::err_profile_rejected_pointer_arithmetic);
         else if (isProfileApplied(ProfileKind::Bounds))
           Diag(OpLoc, diag::warn_profile_rejected_pointer_arithmetic);
+      }
+      // P3081R2 [class.union.general] p5: increment/decrement of a union
+      // member reads the member and is not the left operand of an assignment.
+      if (!resultType.isNull() && isProfileEnabled(ProfileKind::Type)) {
+        if (auto *ME = dyn_cast<MemberExpr>(
+                Input.get()->IgnoreParenImpCasts())) {
+          if (auto *FD = dyn_cast<FieldDecl>(ME->getMemberDecl())) {
+            if (FD->getParent()->isUnion()) {
+              if (isProfileEnforced(ProfileKind::Type))
+                Diag(ME->getMemberLoc(),
+                     diag::err_profile_rejected_union_access)
+                    << FD;
+              else if (isProfileApplied(ProfileKind::Type))
+                Diag(ME->getMemberLoc(),
+                     diag::warn_profile_rejected_union_access)
+                    << FD;
+            }
+          }
+        }
       }
       CanOverflow = isOverflowingIntegerType(Context, resultType);
       break;

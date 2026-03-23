@@ -81,8 +81,10 @@ void test_array_decay() {
   // enforced-error@-1 {{array-to-pointer decay is not allowed when profile std::bounds is enforced}}
   // applied-warning@-2 {{array-to-pointer decay is discouraged by profile std::bounds}}
 
-  // String literals are excluded
+  // String literals also undergo array-to-pointer decay
   const char *s = "hello";
+  // enforced-error@-1 {{array-to-pointer decay is not allowed when profile std::bounds is enforced}}
+  // applied-warning@-2 {{array-to-pointer decay is discouraged by profile std::bounds}}
 }
 
 // --- Suppression ---

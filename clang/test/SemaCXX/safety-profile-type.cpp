@@ -100,6 +100,18 @@ void test_static_cast_unrelated() {
   int *ip = static_cast<int*>(vp);
   // enforced-error@-1 {{'static_cast' between unrelated types 'void *' and 'int *' is not allowed when profile std::type is enforced}}
   // applied-warning@-2 {{'static_cast' between unrelated types 'void *' and 'int *' is discouraged by profile std::type}}
+
+  int *p = &x;
+  void *vp2 = static_cast<void*>(p);
+  // enforced-error@-1 {{'static_cast' between unrelated types 'int *' and 'void *' is not allowed when profile std::type is enforced}}
+  // applied-warning@-2 {{'static_cast' between unrelated types 'int *' and 'void *' is discouraged by profile std::type}}
+
+  void *vp3 = (void*)p;
+  // enforced-error@-1 {{'static_cast' between unrelated types 'int *' and 'void *' is not allowed when profile std::type is enforced}}
+  // applied-warning@-2 {{'static_cast' between unrelated types 'int *' and 'void *' is discouraged by profile std::type}}
+
+  // void* to void* is fine (identity)
+  void *vp4 = static_cast<void*>(vp);
 }
 
 // --- Rule 4.7: uninitialized variables ---
@@ -121,6 +133,10 @@ void test_uninit() {
   int y = 0;
   double e = 0.0;
   int *q = nullptr;
+
+  // Static/thread_local storage duration: zero-initialized, not vacuous
+  static int si;
+  thread_local int ti;
 }
 
 // --- Rule 4.8: va_arg ---
@@ -153,12 +169,24 @@ void test_union() {
   // Writes to union members are allowed (LHS of assignment)
   u.i = 42;
 
+  // Compound assignment is allowed (LHS of assignment operator)
+  u.i += 1;
+
   // Reads are rejected
   float val = u.f;
   // enforced-error@-1 {{reading union member 'f' is not allowed when profile std::type is enforced}}
   // applied-warning@-2 {{reading union member 'f' is discouraged by profile std::type}}
 
   int ival = u.i;
+  // enforced-error@-1 {{reading union member 'i' is not allowed when profile std::type is enforced}}
+  // applied-warning@-2 {{reading union member 'i' is discouraged by profile std::type}}
+
+  // Increment/decrement reads the member and is not an assignment
+  u.i++;
+  // enforced-error@-1 {{reading union member 'i' is not allowed when profile std::type is enforced}}
+  // applied-warning@-2 {{reading union member 'i' is discouraged by profile std::type}}
+
+  ++u.i;
   // enforced-error@-1 {{reading union member 'i' is not allowed when profile std::type is enforced}}
   // applied-warning@-2 {{reading union member 'i' is discouraged by profile std::type}}
 }

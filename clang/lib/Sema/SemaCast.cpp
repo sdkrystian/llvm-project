@@ -423,15 +423,20 @@ static void CheckProfileStaticCast(Sema &S, SourceLocation OpLoc,
   }
 
   // P3081R2 [expr.static.cast] p1: unrelated pointer types.
-  if (Kind == CK_BitCast && SrcType->isPointerType() &&
-      SrcType->getPointeeType()->isVoidType() && DestType->isPointerType()) {
-    if (S.isProfileEnforced(ProfileKind::Type))
-      S.Diag(OpLoc, diag::err_profile_rejected_static_cast_unrelated)
-          << SrcType << DestType;
-    else if (S.isProfileApplied(ProfileKind::Type))
-      S.Diag(OpLoc, diag::warn_profile_rejected_static_cast_unrelated)
-          << SrcType << DestType;
-    return;
+  // Covers both void* -> T* (CK_BitCast) and T* -> void* (CK_NoOp, since
+  // it's an implicit conversion wrapped by the explicit cast).
+  if (SrcType->isPointerType() && DestType->isPointerType()) {
+    QualType SrcPointee = SrcType->getPointeeType();
+    QualType DestPointee = DestType->getPointeeType();
+    if (SrcPointee->isVoidType() != DestPointee->isVoidType()) {
+      if (S.isProfileEnforced(ProfileKind::Type))
+        S.Diag(OpLoc, diag::err_profile_rejected_static_cast_unrelated)
+            << SrcType << DestType;
+      else if (S.isProfileApplied(ProfileKind::Type))
+        S.Diag(OpLoc, diag::warn_profile_rejected_static_cast_unrelated)
+            << SrcType << DestType;
+      return;
+    }
   }
 
   // P3081R2 [expr.static.cast] p1: narrowing conversion (not to bool).
@@ -489,8 +494,9 @@ static void CheckProfileCStyleCastViolations(Sema &S, SourceLocation OpLoc,
   switch (Kind) {
   case CK_BitCast:
   case CK_LValueBitCast:
-    if (SrcType->isPointerType() && SrcType->getPointeeType()->isVoidType() &&
-        DestType->isPointerType())
+    if (SrcType->isPointerType() && DestType->isPointerType() &&
+        (SrcType->getPointeeType()->isVoidType() ||
+         DestType->getPointeeType()->isVoidType()))
       CheckProfileStaticCast(S, OpLoc, SrcType, DestType, Kind);
     else
       CheckProfileReinterpretCast(S, OpLoc, SrcType, DestType);
