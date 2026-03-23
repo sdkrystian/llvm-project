@@ -17135,6 +17135,11 @@ ExprResult Sema::ActOnVAArg(SourceLocation BuiltinLoc, Expr *E, ParsedType Ty,
 ExprResult Sema::BuildVAArgExpr(SourceLocation BuiltinLoc,
                                 Expr *E, TypeSourceInfo *TInfo,
                                 SourceLocation RPLoc) {
+  if (isProfileEnforced(ProfileKind::Type))
+    Diag(BuiltinLoc, diag::err_profile_rejected_va_arg);
+  else if (isProfileApplied(ProfileKind::Type))
+    Diag(BuiltinLoc, diag::warn_profile_rejected_va_arg);
+
   Expr *OrigExpr = E;
   bool IsMS = false;
 

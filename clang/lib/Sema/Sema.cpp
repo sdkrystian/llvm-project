@@ -337,6 +337,11 @@ Sema::Sema(Preprocessor &pp, ASTContext &ctxt, ASTConsumer &consumer,
   else if (LangOpts.ProfileApplyLifetime)
     CurProfileState.setMode(ProfileKind::Lifetime, ProfileMode::Applied);
 
+  if (LangOpts.ProfileEnforceType)
+    CurProfileState.setMode(ProfileKind::Type, ProfileMode::Enforced);
+  else if (LangOpts.ProfileApplyType)
+    CurProfileState.setMode(ProfileKind::Type, ProfileMode::Applied);
+
   LoadedExternalKnownNamespaces = false;
   for (unsigned I = 0; I != NSAPI::NumNSNumberLiteralMethods; ++I)
     ObjC().NSNumberLiteralMethods[I] = nullptr;

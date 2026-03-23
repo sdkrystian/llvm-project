@@ -32,6 +32,7 @@
 #include "clang/Basic/DiagnosticComment.h"
 #include "clang/Basic/HLSLRuntime.h"
 #include "clang/Basic/PartialDiagnostic.h"
+#include "clang/Basic/ProfileState.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Lex/HeaderSearch.h" // TODO: Sema shouldn't depend on Lex
@@ -14625,6 +14626,15 @@ void Sema::ActOnUninitializedDecl(Decl *RealDecl) {
                                AbstractVariableType)) {
       Var->setInvalidDecl();
       return;
+    }
+
+    if (isProfileEnabled(ProfileKind::Type) && Var->isLocalVarDecl() &&
+        !Var->isExternC() &&
+        (Type->isScalarType() || Type.isPODType(Context))) {
+      if (isProfileEnforced(ProfileKind::Type))
+        Diag(Var->getLocation(), diag::err_profile_rejected_uninit);
+      else if (isProfileApplied(ProfileKind::Type))
+        Diag(Var->getLocation(), diag::warn_profile_rejected_uninit);
     }
 
     // In C, if the definition is const-qualified and has no initializer, it

@@ -14155,4 +14155,45 @@ def warn_profile_rejected_deref_unchecked : Warning<
   "dereferencing a pointer without a null check is discouraged by profile std::lifetime">,
   InGroup<SafetyProfileLifetime>, DefaultIgnore;
 
+def err_profile_rejected_reinterpret_cast : Error<
+  "'reinterpret_cast' is not allowed when profile std::type is enforced">;
+def warn_profile_rejected_reinterpret_cast : Warning<
+  "'reinterpret_cast' is discouraged by profile std::type">,
+  InGroup<SafetyProfileType>, DefaultIgnore;
+def err_profile_rejected_const_cast : Error<
+  "'const_cast' that casts away constness is not allowed when profile std::type is enforced">;
+def warn_profile_rejected_const_cast : Warning<
+  "'const_cast' that casts away constness is discouraged by profile std::type">,
+  InGroup<SafetyProfileType>, DefaultIgnore;
+def err_profile_rejected_static_cast_narrowing : Error<
+  "narrowing 'static_cast' from %0 to %1 is not allowed when profile std::type is enforced">;
+def warn_profile_rejected_static_cast_narrowing : Warning<
+  "narrowing 'static_cast' from %0 to %1 is discouraged by profile std::type">,
+  InGroup<SafetyProfileType>, DefaultIgnore;
+def err_profile_rejected_static_cast_downcast : Error<
+  "downcasting 'static_cast' from %0 to %1 is not allowed when profile std::type is enforced">;
+def warn_profile_rejected_static_cast_downcast : Warning<
+  "downcasting 'static_cast' from %0 to %1 is discouraged by profile std::type">,
+  InGroup<SafetyProfileType>, DefaultIgnore;
+def err_profile_rejected_static_cast_unrelated : Error<
+  "'static_cast' between unrelated types %0 and %1 is not allowed when profile std::type is enforced">;
+def warn_profile_rejected_static_cast_unrelated : Warning<
+  "'static_cast' between unrelated types %0 and %1 is discouraged by profile std::type">,
+  InGroup<SafetyProfileType>, DefaultIgnore;
+def err_profile_rejected_va_arg : Error<
+  "'va_arg' is not allowed when profile std::type is enforced">;
+def warn_profile_rejected_va_arg : Warning<
+  "'va_arg' is discouraged by profile std::type">,
+  InGroup<SafetyProfileType>, DefaultIgnore;
+def err_profile_rejected_union_access : Error<
+  "reading union member %0 is not allowed when profile std::type is enforced">;
+def warn_profile_rejected_union_access : Warning<
+  "reading union member %0 is discouraged by profile std::type">,
+  InGroup<SafetyProfileType>, DefaultIgnore;
+def err_profile_rejected_uninit : Error<
+  "uninitialized variable declaration is not allowed when profile std::type is enforced">;
+def warn_profile_rejected_uninit : Warning<
+  "uninitialized variable declaration is discouraged by profile std::type">,
+  InGroup<SafetyProfileType>, DefaultIgnore;
+
 } // end of sema component.

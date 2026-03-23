@@ -531,6 +531,8 @@ LANGOPT(ProfileEnforceArithmetic, 1, 0, NotCompatible, "Enforce std::arithmetic 
 LANGOPT(ProfileApplyArithmetic, 1, 0, NotCompatible, "Apply std::arithmetic safety profile")
 LANGOPT(ProfileEnforceLifetime, 1, 0, NotCompatible, "Enforce std::lifetime safety profile")
 LANGOPT(ProfileApplyLifetime, 1, 0, NotCompatible, "Apply std::lifetime safety profile")
+LANGOPT(ProfileEnforceType, 1, 0, NotCompatible, "Enforce std::type safety profile")
+LANGOPT(ProfileApplyType, 1, 0, NotCompatible, "Apply std::type safety profile")
 
 #undef LANGOPT
 #undef ENUM_LANGOPT
