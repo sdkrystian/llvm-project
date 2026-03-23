@@ -1053,15 +1053,6 @@ Sema::BuildMemberReferenceExpr(Expr *BaseExpr, QualType BaseExprType,
     if (ConvertBaseExprToGLValue())
       return ExprError();
 
-    if (isProfileEnabled(ProfileKind::Type) && FD->getParent()->isUnion()) {
-      if (isProfileEnforced(ProfileKind::Type))
-        Diag(MemberLoc, diag::err_profile_rejected_union_access)
-            << FD;
-      else if (isProfileApplied(ProfileKind::Type))
-        Diag(MemberLoc, diag::warn_profile_rejected_union_access)
-            << FD;
-    }
-
     return BuildFieldReferenceExpr(BaseExpr, IsArrow, OpLoc, SS, FD, FoundDecl,
                                    MemberNameInfo);
   }

@@ -358,6 +358,154 @@ CastsAwayConstness(Sema &Self, QualType SrcType, QualType DestType,
                    QualType *TheOffendingDestType = nullptr,
                    Qualifiers *CastAwayQualifiers = nullptr);
 
+static void CheckProfileReinterpretCast(Sema &S, SourceLocation OpLoc,
+                                        QualType SrcType, QualType DestType) {
+  if (!S.isProfileEnabled(ProfileKind::Type))
+    return;
+
+  bool Allowed = false;
+  if (DestType->isPointerType() &&
+      DestType->getPointeeType().getUnqualifiedType()->isStdByteType())
+    Allowed = true;
+  else if (DestType->isReferenceType() &&
+           DestType.getNonReferenceType()
+               .getUnqualifiedType()
+               ->isStdByteType())
+    Allowed = true;
+  else if (SrcType->isPointerType() &&
+           S.Context.hasSameUnqualifiedType(DestType, S.Context.getUIntPtrType()))
+    Allowed = true;
+
+  if (!Allowed) {
+    if (S.isProfileEnforced(ProfileKind::Type))
+      S.Diag(OpLoc, diag::err_profile_rejected_reinterpret_cast);
+    else if (S.isProfileApplied(ProfileKind::Type))
+      S.Diag(OpLoc, diag::warn_profile_rejected_reinterpret_cast);
+  }
+}
+
+static void CheckProfileConstCast(Sema &S, SourceLocation OpLoc,
+                                   QualType SrcType, QualType DestType) {
+  if (!S.isProfileEnabled(ProfileKind::Type))
+    return;
+
+  if (!DestType->isReferenceType() &&
+      (!SrcType->isAnyPointerType() && !SrcType->isMemberPointerType() &&
+       !SrcType->isBlockPointerType()))
+    return;
+
+  if (CastsAwayConstness(S, SrcType, DestType, /*CheckCVR=*/true,
+                         /*CheckObjCLifetime=*/false) !=
+      CastAwayConstnessKind::CACK_None) {
+    if (S.isProfileEnforced(ProfileKind::Type))
+      S.Diag(OpLoc, diag::err_profile_rejected_const_cast);
+    else if (S.isProfileApplied(ProfileKind::Type))
+      S.Diag(OpLoc, diag::warn_profile_rejected_const_cast);
+  }
+}
+
+static void CheckProfileStaticCast(Sema &S, SourceLocation OpLoc,
+                                    QualType SrcType, QualType DestType,
+                                    CastKind Kind) {
+  if (!S.isProfileEnabled(ProfileKind::Type))
+    return;
+
+  // P3081R2 [expr.static.cast] p1: downcast is profile-rejected,
+  // except during constant evaluation.
+  if (Kind == CK_BaseToDerived && !S.isConstantEvaluatedContext()) {
+    if (S.isProfileEnforced(ProfileKind::Type))
+      S.Diag(OpLoc, diag::err_profile_rejected_static_cast_downcast)
+          << SrcType << DestType;
+    else if (S.isProfileApplied(ProfileKind::Type))
+      S.Diag(OpLoc, diag::warn_profile_rejected_static_cast_downcast)
+          << SrcType << DestType;
+    return;
+  }
+
+  // P3081R2 [expr.static.cast] p1: unrelated pointer types.
+  if (Kind == CK_BitCast && SrcType->isPointerType() &&
+      SrcType->getPointeeType()->isVoidType() && DestType->isPointerType()) {
+    if (S.isProfileEnforced(ProfileKind::Type))
+      S.Diag(OpLoc, diag::err_profile_rejected_static_cast_unrelated)
+          << SrcType << DestType;
+    else if (S.isProfileApplied(ProfileKind::Type))
+      S.Diag(OpLoc, diag::warn_profile_rejected_static_cast_unrelated)
+          << SrcType << DestType;
+    return;
+  }
+
+  // P3081R2 [expr.static.cast] p1: narrowing conversion (not to bool).
+  if (DestType->isBooleanType() || !SrcType->isArithmeticType() ||
+      !DestType->isArithmeticType())
+    return;
+
+  bool IsNarrowing = false;
+  if (SrcType->isRealFloatingType() &&
+      DestType->isIntegralOrEnumerationType())
+    IsNarrowing = true;
+  else if (SrcType->isIntegralOrEnumerationType() &&
+           DestType->isRealFloatingType())
+    IsNarrowing = true;
+  else if (SrcType->isIntegralOrEnumerationType() &&
+           DestType->isIntegralOrEnumerationType()) {
+    unsigned SrcWidth = S.Context.getIntWidth(SrcType);
+    unsigned DestWidth = S.Context.getIntWidth(DestType);
+    bool SrcSigned = SrcType->isSignedIntegerType();
+    bool DestSigned = DestType->isSignedIntegerType();
+    if (SrcSigned == DestSigned)
+      IsNarrowing = DestWidth < SrcWidth;
+    else if (SrcSigned && !DestSigned)
+      // signed → unsigned: can't represent negative values
+      IsNarrowing = true;
+    else
+      // unsigned → signed: narrowing unless signed type is strictly wider
+      IsNarrowing = DestWidth <= SrcWidth;
+  } else if (SrcType->isRealFloatingType() &&
+             DestType->isRealFloatingType())
+    IsNarrowing =
+        S.Context.getTypeSize(DestType) < S.Context.getTypeSize(SrcType);
+
+  if (IsNarrowing) {
+    if (S.isProfileEnforced(ProfileKind::Type))
+      S.Diag(OpLoc, diag::err_profile_rejected_static_cast_narrowing)
+          << SrcType << DestType;
+    else if (S.isProfileApplied(ProfileKind::Type))
+      S.Diag(OpLoc, diag::warn_profile_rejected_static_cast_narrowing)
+          << SrcType << DestType;
+  }
+}
+
+// P3081R2 §4.5/4.6: C-style and functional casts follow the same
+// restrictions as the named casts they resolve to.
+static void CheckProfileCStyleCastViolations(Sema &S, SourceLocation OpLoc,
+                                             QualType SrcType,
+                                             QualType DestType,
+                                             CastKind Kind) {
+  if (!S.isProfileEnabled(ProfileKind::Type))
+    return;
+
+  CheckProfileConstCast(S, OpLoc, SrcType, DestType);
+
+  switch (Kind) {
+  case CK_BitCast:
+  case CK_LValueBitCast:
+    if (SrcType->isPointerType() && SrcType->getPointeeType()->isVoidType() &&
+        DestType->isPointerType())
+      CheckProfileStaticCast(S, OpLoc, SrcType, DestType, Kind);
+    else
+      CheckProfileReinterpretCast(S, OpLoc, SrcType, DestType);
+    break;
+  case CK_IntegralToPointer:
+  case CK_PointerToIntegral:
+  case CK_ReinterpretMemberPointer:
+    CheckProfileReinterpretCast(S, OpLoc, SrcType, DestType);
+    break;
+  default:
+    CheckProfileStaticCast(S, OpLoc, SrcType, DestType, Kind);
+    break;
+  }
+}
+
 ExprResult
 Sema::BuildCXXNamedCast(SourceLocation OpLoc, tok::TokenKind Kind,
                         TypeSourceInfo *DestTInfo, Expr *E,
@@ -395,18 +543,8 @@ Sema::BuildCXXNamedCast(SourceLocation OpLoc, tok::TokenKind Kind,
       if (Op.SrcExpr.isInvalid())
         return ExprError();
       DiscardMisalignedMemberAddress(DestType.getTypePtr(), E);
-
-      if (isProfileEnabled(ProfileKind::Type)) {
-        QualType SrcType = Op.SrcExpr.get()->getType();
-        if (CastsAwayConstness(*this, SrcType, DestType, /*CheckCVR=*/true,
-                               /*CheckObjCLifetime=*/false) !=
-            CastAwayConstnessKind::CACK_None) {
-          if (isProfileEnforced(ProfileKind::Type))
-            Diag(OpLoc, diag::err_profile_rejected_const_cast);
-          else if (isProfileApplied(ProfileKind::Type))
-            Diag(OpLoc, diag::warn_profile_rejected_const_cast);
-        }
-      }
+      CheckProfileConstCast(*this, OpLoc, Op.SrcExpr.get()->getType(),
+                            DestType);
     }
     return Op.complete(CXXConstCastExpr::Create(Context, Op.ResultType,
                                   Op.ValueKind, Op.SrcExpr.get(), DestTInfo,
@@ -437,32 +575,8 @@ Sema::BuildCXXNamedCast(SourceLocation OpLoc, tok::TokenKind Kind,
       if (Op.SrcExpr.isInvalid())
         return ExprError();
       DiscardMisalignedMemberAddress(DestType.getTypePtr(), E);
-
-      if (isProfileEnabled(ProfileKind::Type)) {
-        QualType SrcType = Op.SrcExpr.get()->getType();
-        bool Allowed = false;
-        // Allow cast to std::byte* or std::byte&
-        if (DestType->isPointerType() &&
-            DestType->getPointeeType().getUnqualifiedType()->isStdByteType())
-          Allowed = true;
-        else if (DestType->isReferenceType() &&
-                 DestType.getNonReferenceType()
-                     .getUnqualifiedType()
-                     ->isStdByteType())
-          Allowed = true;
-        // Allow pointer-to-uintptr_t
-        else if (SrcType->isPointerType() &&
-                 Context.hasSameUnqualifiedType(DestType,
-                                                Context.getUIntPtrType()))
-          Allowed = true;
-
-        if (!Allowed) {
-          if (isProfileEnforced(ProfileKind::Type))
-            Diag(OpLoc, diag::err_profile_rejected_reinterpret_cast);
-          else if (isProfileApplied(ProfileKind::Type))
-            Diag(OpLoc, diag::warn_profile_rejected_reinterpret_cast);
-        }
-      }
+      CheckProfileReinterpretCast(*this, OpLoc,
+                                  Op.SrcExpr.get()->getType(), DestType);
     }
     return Op.complete(CXXReinterpretCastExpr::Create(Context, Op.ResultType,
                                     Op.ValueKind, Op.Kind, Op.SrcExpr.get(),
@@ -476,55 +590,7 @@ Sema::BuildCXXNamedCast(SourceLocation OpLoc, tok::TokenKind Kind,
       if (Op.SrcExpr.isInvalid())
         return ExprError();
       DiscardMisalignedMemberAddress(DestType.getTypePtr(), E);
-
-      if (isProfileEnabled(ProfileKind::Type)) {
-        QualType SrcType = E->getType();
-        if (Op.Kind == CK_BaseToDerived) {
-          if (isProfileEnforced(ProfileKind::Type))
-            Diag(OpLoc, diag::err_profile_rejected_static_cast_downcast)
-                << SrcType << DestType;
-          else if (isProfileApplied(ProfileKind::Type))
-            Diag(OpLoc, diag::warn_profile_rejected_static_cast_downcast)
-                << SrcType << DestType;
-        } else if (Op.Kind == CK_BitCast &&
-                   SrcType->isPointerType() &&
-                   SrcType->getPointeeType()->isVoidType() &&
-                   DestType->isPointerType()) {
-          if (isProfileEnforced(ProfileKind::Type))
-            Diag(OpLoc, diag::err_profile_rejected_static_cast_unrelated)
-                << SrcType << DestType;
-          else if (isProfileApplied(ProfileKind::Type))
-            Diag(OpLoc, diag::warn_profile_rejected_static_cast_unrelated)
-                << SrcType << DestType;
-        } else if (!DestType->isBooleanType() &&
-                   SrcType->isArithmeticType() &&
-                   DestType->isArithmeticType()) {
-          bool IsNarrowing = false;
-          if (SrcType->isRealFloatingType() &&
-              DestType->isIntegralOrEnumerationType())
-            IsNarrowing = true;
-          else if (SrcType->isIntegralOrEnumerationType() &&
-                   DestType->isRealFloatingType())
-            IsNarrowing = true;
-          else if (SrcType->isIntegralOrEnumerationType() &&
-                   DestType->isIntegralOrEnumerationType())
-            IsNarrowing =
-                Context.getIntWidth(DestType) < Context.getIntWidth(SrcType);
-          else if (SrcType->isRealFloatingType() &&
-                   DestType->isRealFloatingType())
-            IsNarrowing = Context.getTypeSize(DestType) <
-                          Context.getTypeSize(SrcType);
-
-          if (IsNarrowing) {
-            if (isProfileEnforced(ProfileKind::Type))
-              Diag(OpLoc, diag::err_profile_rejected_static_cast_narrowing)
-                  << SrcType << DestType;
-            else if (isProfileApplied(ProfileKind::Type))
-              Diag(OpLoc, diag::warn_profile_rejected_static_cast_narrowing)
-                  << SrcType << DestType;
-          }
-        }
-      }
+      CheckProfileStaticCast(*this, OpLoc, E->getType(), DestType, Op.Kind);
     }
 
     return Op.complete(CXXStaticCastExpr::Create(
@@ -3555,6 +3621,9 @@ ExprResult Sema::BuildCStyleCastExpr(SourceLocation LPLoc,
   if (Op.SrcExpr.isInvalid())
     return ExprError();
 
+  CheckProfileCStyleCastViolations(*this, LPLoc, CastExpr->getType(),
+                                   CastTypeInfo->getType(), Op.Kind);
+
   // -Wcast-qual
   DiagnoseCastQual(Op.Self, Op.SrcExpr, Op.DestType);
 
@@ -3579,6 +3648,9 @@ ExprResult Sema::BuildCXXFunctionalCastExpr(TypeSourceInfo *CastTypeInfo,
   Op.CheckCXXCStyleCast(/*FunctionalCast=*/true, /*ListInit=*/false);
   if (Op.SrcExpr.isInvalid())
     return ExprError();
+
+  CheckProfileCStyleCastViolations(*this, LPLoc, CastExpr->getType(), Type,
+                                   Op.Kind);
 
   Op.checkQualifiedDestType();
 

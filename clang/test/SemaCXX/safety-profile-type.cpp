@@ -150,13 +150,61 @@ union U {
 void test_union() {
   U u = {0};
 
+  // Writes to union members are allowed (LHS of assignment)
   u.i = 42;
-  // enforced-error@-1 {{reading union member 'i' is not allowed when profile std::type is enforced}}
-  // applied-warning@-2 {{reading union member 'i' is discouraged by profile std::type}}
 
+  // Reads are rejected
   float val = u.f;
   // enforced-error@-1 {{reading union member 'f' is not allowed when profile std::type is enforced}}
   // applied-warning@-2 {{reading union member 'f' is discouraged by profile std::type}}
+
+  int ival = u.i;
+  // enforced-error@-1 {{reading union member 'i' is not allowed when profile std::type is enforced}}
+  // applied-warning@-2 {{reading union member 'i' is discouraged by profile std::type}}
+}
+
+// --- Rule 4.5/4.6: C-style and functional casts ---
+
+void test_cstyle_casts() {
+  int x = 0;
+  int *p = &x;
+
+  // C-style reinterpret_cast equivalent
+  long *q = (long*)p;
+  // enforced-error@-1 {{'reinterpret_cast' is not allowed when profile std::type is enforced}}
+  // applied-warning@-2 {{'reinterpret_cast' is discouraged by profile std::type}}
+
+  // C-style const_cast equivalent
+  const int *cp = &x;
+  int *mp = (int*)cp;
+  // enforced-error@-1 {{'const_cast' that casts away constness is not allowed when profile std::type is enforced}}
+  // applied-warning@-2 {{'const_cast' that casts away constness is discouraged by profile std::type}}
+
+  // C-style static_cast narrowing
+  double d = 3.14;
+  int i = (int)d;
+  // enforced-error@-1 {{narrowing 'static_cast' from 'double' to 'int' is not allowed when profile std::type is enforced}}
+  // applied-warning@-2 {{narrowing 'static_cast' from 'double' to 'int' is discouraged by profile std::type}}
+
+  // Functional cast narrowing
+  long long ll = 100;
+  int j = int(ll);
+  // enforced-error@-1 {{narrowing 'static_cast' from 'long long' to 'int' is not allowed when profile std::type is enforced}}
+  // applied-warning@-2 {{narrowing 'static_cast' from 'long long' to 'int' is discouraged by profile std::type}}
+}
+
+// --- static_cast narrowing: signed/unsigned same-width ---
+
+void test_signedness_narrowing() {
+  int s = 42;
+  unsigned u = static_cast<unsigned>(s);
+  // enforced-error@-1 {{narrowing 'static_cast' from 'int' to 'unsigned int' is not allowed when profile std::type is enforced}}
+  // applied-warning@-2 {{narrowing 'static_cast' from 'int' to 'unsigned int' is discouraged by profile std::type}}
+
+  unsigned u2 = 42u;
+  int s2 = static_cast<int>(u2);
+  // enforced-error@-1 {{narrowing 'static_cast' from 'unsigned int' to 'int' is not allowed when profile std::type is enforced}}
+  // applied-warning@-2 {{narrowing 'static_cast' from 'unsigned int' to 'int' is discouraged by profile std::type}}
 }
 
 // --- Suppression in unevaluated contexts ---

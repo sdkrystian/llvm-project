@@ -694,6 +694,25 @@ ExprResult Sema::DefaultLvalueConversion(Expr *E) {
     return ExprError();
   }
 
+  // P3081R2 [class.union.general] p5: reading a union member that is not
+  // the LHS of an assignment and not in the common initial sequence is
+  // profile-rejected by std::type. Checking at lvalue-to-rvalue conversion
+  // correctly excludes writes (simple and compound assignment LHS).
+  if (isProfileEnabled(ProfileKind::Type)) {
+    if (auto *ME = dyn_cast<MemberExpr>(E->IgnoreParenImpCasts())) {
+      if (auto *FD = dyn_cast<FieldDecl>(ME->getMemberDecl())) {
+        if (FD->getParent()->isUnion()) {
+          if (isProfileEnforced(ProfileKind::Type))
+            Diag(ME->getMemberLoc(), diag::err_profile_rejected_union_access)
+                << FD;
+          else if (isProfileApplied(ProfileKind::Type))
+            Diag(ME->getMemberLoc(), diag::warn_profile_rejected_union_access)
+                << FD;
+        }
+      }
+    }
+  }
+
   CheckForNullPointerDereference(*this, E);
   if (const ObjCIsaExpr *OISA = dyn_cast<ObjCIsaExpr>(E->IgnoreParenCasts())) {
     NamedDecl *ObjectGetClass = LookupSingleName(TUScope,
