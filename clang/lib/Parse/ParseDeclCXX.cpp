@@ -4439,7 +4439,7 @@ void Parser::ParseProfileAttributeArgs(
     ProfileName = TryParseCXX11AttributeIdentifier(NameLoc);
 
   if (!ProfileName) {
-    Diag(Tok.getLocation(), diag::err_expected_identifier);
+    Diag(Tok.getLocation(), diag::err_expected) << tok::identifier;
     SkipUntil(tok::r_paren);
     return;
   }

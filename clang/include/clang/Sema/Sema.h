@@ -936,14 +936,28 @@ public:
 
   ProfileState &getCurProfileState() { return CurProfileState; }
   const ProfileState &getCurProfileState() const { return CurProfileState; }
+
+  // P3081R2 [dcl.attr.profile]: profile-rejection only applies when
+  // potentially evaluated, outside requires-expressions, outside discarded
+  // statements, and outside SFINAE contexts.
+  bool isProfileDiagnosticSuppressed() const {
+    if (isUnevaluatedContext())
+      return true;
+    if (isSFINAEContext())
+      return true;
+    if (currentEvaluationContext().isDiscardedStatementContext())
+      return true;
+    return false;
+  }
+
   bool isProfileEnforced(ProfileKind P) const {
-    return CurProfileState.isEnforced(P);
+    return CurProfileState.isEnforced(P) && !isProfileDiagnosticSuppressed();
   }
   bool isProfileApplied(ProfileKind P) const {
-    return CurProfileState.isApplied(P);
+    return CurProfileState.isApplied(P) && !isProfileDiagnosticSuppressed();
   }
   bool isProfileEnabled(ProfileKind P) const {
-    return CurProfileState.isEnabled(P);
+    return CurProfileState.isEnabled(P) && !isProfileDiagnosticSuppressed();
   }
 
   DiagnosticsEngine &getDiagnostics() const { return Diags; }
