@@ -3457,12 +3457,14 @@ def Suppress : DeclOrStmtAttr {
 def ProfilesEnforce : Attr {
   let Spellings = [CXX11<"profiles", "enforce">];
   let Args = [IdentifierArgument<"ProfileName">];
+  let Subjects = SubjectList<[Empty], ErrorDiag, "empty declarations">;
   let Documentation = [Undocumented];
 }
 
 def ProfilesApply : Attr {
   let Spellings = [CXX11<"profiles", "apply">];
   let Args = [IdentifierArgument<"ProfileName">];
+  let Subjects = SubjectList<[Empty], ErrorDiag, "empty declarations">;
   let Documentation = [Undocumented];
 }
 
