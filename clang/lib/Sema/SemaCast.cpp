@@ -389,9 +389,12 @@ static void CheckProfileConstCast(Sema &S, SourceLocation OpLoc,
   if (!S.isProfileEnabled(ProfileKind::Type))
     return;
 
+  auto IsPointerLike = [](QualType T) {
+    return T->isAnyPointerType() || T->isMemberPointerType() ||
+           T->isBlockPointerType();
+  };
   if (!DestType->isReferenceType() &&
-      (!SrcType->isAnyPointerType() && !SrcType->isMemberPointerType() &&
-       !SrcType->isBlockPointerType()))
+      (!IsPointerLike(SrcType) || !IsPointerLike(DestType)))
     return;
 
   if (CastsAwayConstness(S, SrcType, DestType, /*CheckCVR=*/true,
