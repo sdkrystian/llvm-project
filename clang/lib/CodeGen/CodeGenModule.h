@@ -27,6 +27,7 @@
 #include "clang/Basic/LangOptions.h"
 #include "clang/Basic/NoSanitizeList.h"
 #include "clang/Basic/ProfileList.h"
+#include "clang/Basic/ProfileState.h"
 #include "clang/Basic/StackExhaustionHandler.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Basic/XRayLists.h"
@@ -383,6 +384,7 @@ private:
   InstrProfStats PGOStats;
   std::unique_ptr<llvm::SanitizerStatReport> SanStats;
   StackExhaustionHandler StackHandler;
+  ProfileState CurProfileState;
 
   // A set of references that have only been seen via a weakref so far. This is
   // used to remove the weak of the reference if we ever see a direct reference
@@ -857,6 +859,7 @@ public:
   const PreprocessorOptions &getPreprocessorOpts()
     const { return PreprocessorOpts; }
   const CodeGenOptions &getCodeGenOpts() const { return CodeGenOpts; }
+  const ProfileState &getProfileState() const { return CurProfileState; }
   llvm::Module &getModule() const { return TheModule; }
   DiagnosticsEngine &getDiags() const { return Diags; }
   const llvm::DataLayout &getDataLayout() const {

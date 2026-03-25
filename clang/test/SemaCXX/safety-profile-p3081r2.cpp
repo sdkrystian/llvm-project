@@ -388,8 +388,10 @@ void test_c_style_and_functional_casts() {
 // =====================================================================
 
 struct POD {
-  int x;
-  float y;
+  int x; // enforced-error {{uninitialized variable declaration is not allowed when profile std::type is enforced}}
+         // applied-warning@-1 {{uninitialized variable declaration is discouraged by profile std::type}}
+  float y; // enforced-error {{uninitialized variable declaration is not allowed when profile std::type is enforced}}
+           // applied-warning@-1 {{uninitialized variable declaration is discouraged by profile std::type}}
 };
 
 void test_uninit_variables() {
@@ -404,10 +406,13 @@ void test_uninit_variables() {
   // enforced-error@-1 {{uninitialized variable declaration is not allowed when profile std::type is enforced}}
   // applied-warning@-2 {{uninitialized variable declaration is discouraged by profile std::type}}
 
-  // POD class with trivial default constructor
+  // POD class with trivial default constructor: both the local variable
+  // and its uninitialized members are diagnosed.
   POD pod;
   // enforced-error@-1 {{uninitialized variable declaration is not allowed when profile std::type is enforced}}
   // applied-warning@-2 {{uninitialized variable declaration is discouraged by profile std::type}}
+  // enforced-note@-3 {{in implicit default constructor for 'POD' first required here}}
+  // applied-note@-4 {{in implicit default constructor for 'POD' first required here}}
 
   // Initialized: fine
   int d = 0;

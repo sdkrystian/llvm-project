@@ -2522,10 +2522,13 @@ bool Sema::isProfileDiagnosticSuppressed() const {
   if (currentEvaluationContext().isDiscardedStatementContext())
     return true;
   // P3081R2 [dcl.attr.profile]: "If C appears in the body of a function that
-  // is defined in this document" — suppress for system header functions.
+  // is defined in this document" — suppress for system header functions
+  // and compiler-synthesized functions for builtin types.
   if (const auto *FD = dyn_cast_if_present<FunctionDecl>(CurContext)) {
     if (FD->getLocation().isValid() &&
         getSourceManager().isInSystemHeader(FD->getLocation()))
+      return true;
+    if (FD->isImplicit() && FD->getLocation().isInvalid())
       return true;
   }
   return false;

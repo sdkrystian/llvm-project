@@ -446,6 +446,23 @@ CodeGenModule::CodeGenModule(ASTContext &C,
       LLVMContext, C.getTargetAddressSpace(GetGlobalConstantAddressSpace()));
   ASTAllocaAddressSpace = getTargetCodeGenInfo().getASTAllocaAddressSpace();
 
+  if (LangOpts.ProfileEnforceType)
+    CurProfileState.setMode(ProfileKind::Type, ProfileMode::Enforced);
+  else if (LangOpts.ProfileApplyType)
+    CurProfileState.setMode(ProfileKind::Type, ProfileMode::Applied);
+  if (LangOpts.ProfileEnforceBounds)
+    CurProfileState.setMode(ProfileKind::Bounds, ProfileMode::Enforced);
+  else if (LangOpts.ProfileApplyBounds)
+    CurProfileState.setMode(ProfileKind::Bounds, ProfileMode::Applied);
+  if (LangOpts.ProfileEnforceLifetime)
+    CurProfileState.setMode(ProfileKind::Lifetime, ProfileMode::Enforced);
+  else if (LangOpts.ProfileApplyLifetime)
+    CurProfileState.setMode(ProfileKind::Lifetime, ProfileMode::Applied);
+  if (LangOpts.ProfileEnforceArithmetic)
+    CurProfileState.setMode(ProfileKind::Arithmetic, ProfileMode::Enforced);
+  else if (LangOpts.ProfileApplyArithmetic)
+    CurProfileState.setMode(ProfileKind::Arithmetic, ProfileMode::Applied);
+
   // Build C++20 Module initializers.
   // TODO: Add Microsoft here once we know the mangling required for the
   // initializers.
@@ -7675,8 +7692,32 @@ void CodeGenModule::EmitTopLevelDecl(Decl *D) {
   case Decl::FunctionTemplate:
   case Decl::TypeAliasTemplate:
   case Decl::Block:
-  case Decl::Empty:
   case Decl::Binding:
+    break;
+  case Decl::Empty:
+    for (const auto *A : D->attrs()) {
+      auto SetModes = [&](const IdentifierInfo *II, ProfileMode Mode) {
+        llvm::StringRef Name = II->getName();
+        if (Name == "strict") {
+          CurProfileState.setMode(ProfileKind::Type, Mode);
+          CurProfileState.setMode(ProfileKind::Bounds, Mode);
+          CurProfileState.setMode(ProfileKind::Lifetime, Mode);
+        } else {
+          auto PK = llvm::StringSwitch<std::optional<ProfileKind>>(Name)
+                        .Case("type", ProfileKind::Type)
+                        .Case("bounds", ProfileKind::Bounds)
+                        .Case("lifetime", ProfileKind::Lifetime)
+                        .Case("arithmetic", ProfileKind::Arithmetic)
+                        .Default(std::nullopt);
+          if (PK)
+            CurProfileState.setMode(*PK, Mode);
+        }
+      };
+      if (const auto *EA = dyn_cast<ProfilesEnforceAttr>(A))
+        SetModes(EA->getProfileName(), ProfileMode::Enforced);
+      else if (const auto *AA = dyn_cast<ProfilesApplyAttr>(A))
+        SetModes(AA->getProfileName(), ProfileMode::Applied);
+    }
     break;
   case Decl::Using:          // using X; [C++]
     if (CGDebugInfo *DI = getModuleDebugInfo())
