@@ -1,128 +1,188 @@
 // Comprehensive CodeGen tests for P3081R2 §5.3 subscript bounds profile checks.
 //
-// P3081R2 [dcl.attr.profile]: "At a program point Q, a profile P is suppressed
-//   if any enclosing scope of Q has the profile attribute
-//   profiles::suppress(P)."
+// P3081R2 §5.3: "the condition index_in_range(a,b) is profile-checked by
+//   profile std::bounds"
 //
-// The bounds profile rejects array-to-pointer decay at Sema level when enforced.
-// Use 'apply' mode (warnings are DefaultIgnore) so the code compiles to IR
-// while still emitting runtime bounds checks.
+// P3081R2 §3.2: "If P is enabled at Q, C is evaluated ... if it does not
+//   evaluate to true, then std::profile_violation(PP) is invoked where PP is
+//   the detection_mode value corresponding to P."
+//   detection_mode::bounds == 1.
+//
+// The bounds profile also rejects array-to-pointer decay at Sema level when
+// enforced, so we use 'apply' mode (DefaultIgnore warnings) to let the code
+// compile to IR while still emitting runtime bounds checks.
 //
 // RUN: %clang_cc1 -emit-llvm -std=c++20 -fsafety-profile-apply=bounds -o - %s | FileCheck %s --check-prefixes=CHECK,ENABLED
 // RUN: %clang_cc1 -emit-llvm -std=c++20 -o - %s | FileCheck %s --check-prefixes=CHECK,DISABLED
 
 // =====================================================================
-// Signed index on a constant-size array
+// Signed index: checks 0 <= idx && idx < N.
 // =====================================================================
 
-// CHECK-LABEL: define {{.*}}test_signed_index
-// ENABLED: %[[IDX:.*]] = load i32,
-// ENABLED: icmp slt i32 %[[IDX]], 10
-// ENABLED: icmp sge i32 %[[IDX]], 0
-// ENABLED: and i1
-// ENABLED: br i1 %{{.*}}, label %profile.cont, label %profile.trap
-// ENABLED: profile.trap:
-// ENABLED-NEXT: call void @_ZSt17profile_violationSt14detection_mode(i32 1)
-// ENABLED-NEXT: unreachable
-// ENABLED: profile.cont:
+// CHECK-LABEL: define {{.*}}test_signed
+// ENABLED:       %[[IDX:.*]] = load i32,
+// ENABLED-DAG:   icmp slt i32 %[[IDX]], 10
+// ENABLED-DAG:   icmp sge i32 %[[IDX]], 0
+// ENABLED:       and i1
+// ENABLED:       br i1 %{{.*}}, label %profile.cont, label %profile.trap
+// ENABLED:      profile.trap:
+// ENABLED-NEXT:  call void @_ZSt17profile_violationSt14detection_mode(i32 1)
+// ENABLED-NEXT:  unreachable
+// ENABLED:      profile.cont:
 // DISABLED-NOT: profile.trap
-int test_signed_index(int i) {
+int test_signed(int i) {
   int arr[10] = {};
   return arr[i];
 }
 
 // =====================================================================
-// Unsigned index on a constant-size array — no signed check needed
+// Unsigned index: only checks idx < N (no negative check needed).
 // =====================================================================
 
-// CHECK-LABEL: define {{.*}}test_unsigned_index
-// ENABLED: %[[IDX:.*]] = load i32,
-// ENABLED: icmp ult i32 %[[IDX]], 4
-// ENABLED: br i1 %{{.*}}, label %profile.cont, label %profile.trap
-// ENABLED: profile.trap:
-// ENABLED-NEXT: call void @_ZSt17profile_violationSt14detection_mode(i32 1)
-// ENABLED-NEXT: unreachable
-// ENABLED: profile.cont:
+// CHECK-LABEL: define {{.*}}test_unsigned
+// ENABLED:       %[[IDX:.*]] = load i32,
+// ENABLED:       icmp ult i32 %[[IDX]], 4
+// ENABLED-NOT:   icmp sge
+// ENABLED:       br i1 %{{.*}}, label %profile.cont, label %profile.trap
+// ENABLED:      profile.trap:
+// ENABLED-NEXT:  call void @_ZSt17profile_violationSt14detection_mode(i32 1)
+// ENABLED-NEXT:  unreachable
+// ENABLED:      profile.cont:
 // DISABLED-NOT: profile.trap
-int test_unsigned_index(unsigned i) {
+int test_unsigned(unsigned i) {
   int arr[4] = {};
   return arr[i];
 }
 
 // =====================================================================
-// Write to array element: arr[i] = val
+// Write: arr[i] = val — check on the store side too.
 // =====================================================================
 
-// CHECK-LABEL: define {{.*}}test_array_write
-// ENABLED: icmp ult i32
-// ENABLED: profile.trap:
-// ENABLED: call void @_ZSt17profile_violationSt14detection_mode(i32 1)
+// CHECK-LABEL: define {{.*}}test_write
+// ENABLED:      icmp ult i32
+// ENABLED:      profile.trap:
+// ENABLED-NEXT: call void @_ZSt17profile_violationSt14detection_mode(i32 1)
 // DISABLED-NOT: profile.trap
-void test_array_write(int val, unsigned i) {
+void test_write(int val, unsigned i) {
   int arr[8] = {};
   arr[i] = val;
 }
 
 // =====================================================================
-// Different array element types
+// Different element types: double, char, struct.
 // =====================================================================
 
-// CHECK-LABEL: define {{.*}}test_double_array
-// ENABLED: profile.trap:
-// ENABLED: call void @_ZSt17profile_violationSt14detection_mode(i32 1)
+// CHECK-LABEL: define {{.*}}test_double
+// ENABLED:      profile.trap:
+// ENABLED:      @_ZSt17profile_violationSt14detection_mode(i32 1)
 // DISABLED-NOT: profile.trap
-double test_double_array(int i) {
+double test_double(int i) {
   double arr[5] = {};
   return arr[i];
 }
 
-// CHECK-LABEL: define {{.*}}test_char_array
-// ENABLED: profile.trap:
-// ENABLED: call void @_ZSt17profile_violationSt14detection_mode(i32 1)
+// CHECK-LABEL: define {{.*}}test_char
+// ENABLED:      profile.trap:
+// ENABLED:      @_ZSt17profile_violationSt14detection_mode(i32 1)
 // DISABLED-NOT: profile.trap
-char test_char_array(int i) {
+char test_char(int i) {
   char arr[16] = {};
   return arr[i];
 }
 
-// =====================================================================
-// Array of structs
-// =====================================================================
-
 struct S { int x; int y; };
 
-// CHECK-LABEL: define {{.*}}test_struct_array
-// ENABLED: profile.trap:
-// ENABLED: call void @_ZSt17profile_violationSt14detection_mode(i32 1)
+// CHECK-LABEL: define {{.*}}test_struct
+// ENABLED:      profile.trap:
+// ENABLED:      @_ZSt17profile_violationSt14detection_mode(i32 1)
 // DISABLED-NOT: profile.trap
-int test_struct_array(int i) {
+int test_struct(int i) {
   S arr[3] = {};
   return arr[i].x;
 }
 
 // =====================================================================
-// Suppress on a single statement
+// Size-1 array — only index 0 is valid.
 // =====================================================================
 
-// CHECK-LABEL: define {{.*}}test_suppress_single
+// CHECK-LABEL: define {{.*}}test_size_one
+// ENABLED:      icmp slt i32 %{{.*}}, 1
+// ENABLED:      profile.trap:
+// DISABLED-NOT: profile.trap
+int test_size_one(int i) {
+  int arr[1] = {};
+  return arr[i];
+}
+
+// =====================================================================
+// Two arrays, two accesses — each gets its own check.
+// =====================================================================
+
+// CHECK-LABEL: define {{.*}}test_multi
+// ENABLED:      profile.trap:
+// ENABLED:      profile.cont:
+// ENABLED:      profile.trap{{[0-9]+}}:
+// ENABLED:      profile.cont{{[0-9]+}}:
+// DISABLED-NOT: profile.trap
+int test_multi(int i, int j) {
+  int a[5] = {};
+  int b[3] = {};
+  return a[i] + b[j];
+}
+
+// =====================================================================
+// Array access in a loop.
+// =====================================================================
+
+// CHECK-LABEL: define {{.*}}test_loop
+// ENABLED:      profile.trap:
+// ENABLED:      @_ZSt17profile_violationSt14detection_mode(i32 1)
+// DISABLED-NOT: profile.trap
+int test_loop(int n) {
+  int arr[100] = {};
+  int sum = 0;
+  for (int i = 0; i < n; ++i)
+    sum += arr[i];
+  return sum;
+}
+
+// =====================================================================
+// Pointer subscript: p[i] — no ConstantArrayType, no check.
+// =====================================================================
+
+// CHECK-LABEL: define {{.*}}test_pointer
+// CHECK-NOT:   profile.trap
+// CHECK:       ret i32
+int test_pointer(int *p, int i) {
+  return p[i];
+}
+
+// =====================================================================
+// Suppression §2.1: suppress on a single statement.
+// =====================================================================
+
+// CHECK-LABEL: define {{.*}}test_suppress_stmt
 // ENABLED-NOT: profile.trap
-// ENABLED: }
-int test_suppress_single(int i) {
+// ENABLED:     ret i32
+int test_suppress_stmt(int i) {
   int arr[10] = {};
   [[profiles::suppress(std::bounds)]]
   return arr[i];
 }
 
 // =====================================================================
-// Suppress on a compound statement: only the block is suppressed,
-// code outside gets checked.
+// Suppression §2.1: suppress on a compound statement.
+// The first access (arr[i]) is outside → checked.
+// The second access (arr[j]) is inside the block → not checked.
 // =====================================================================
 
-// CHECK-LABEL: define {{.*}}test_suppress_compound
-// ENABLED: profile.trap:
-// ENABLED: call void @_ZSt17profile_violationSt14detection_mode(i32 1)
-// ENABLED: profile.cont:
-int test_suppress_compound(int i, int j) {
+// CHECK-LABEL: define {{.*}}test_suppress_block
+// ENABLED:      profile.trap:
+// ENABLED:      @_ZSt17profile_violationSt14detection_mode(i32 1)
+// ENABLED:      profile.cont:
+// ENABLED-NOT:  profile.trap
+// ENABLED:      ret i32
+int test_suppress_block(int i, int j) {
   int arr[10] = {};
   int x = arr[i];
   [[profiles::suppress(std::bounds)]] {
@@ -132,74 +192,31 @@ int test_suppress_compound(int i, int j) {
 }
 
 // =====================================================================
-// Suppress does NOT persist outside its statement scope.
-// The second access is NOT suppressed.
+// Suppression does NOT persist past the attributed statement.
+// Only the first access is suppressed; the second is checked.
 // =====================================================================
 
-// CHECK-LABEL: define {{.*}}test_suppress_no_persist
-// ENABLED: profile.trap:
-// ENABLED: profile.cont:
-// ENABLED: profile.trap{{[0-9]*}}:
-int test_suppress_no_persist(int i, int j) {
+// CHECK-LABEL: define {{.*}}test_suppress_scope
+// ENABLED-NOT:  profile.trap
+// ENABLED:      icmp
+// ENABLED:      profile.trap
+// ENABLED:      @_ZSt17profile_violationSt14detection_mode(i32 1)
+int test_suppress_scope(int i, int j) {
   int arr[10] = {};
-  [[profiles::suppress(std::bounds)]]
-  int x = arr[i];
-  return x + arr[j];
+  [[profiles::suppress(std::bounds)]] {
+    (void)arr[i];
+  }
+  return arr[j];
 }
 
 // =====================================================================
-// Pointer subscript: p[i] does NOT get a profile bounds check
-// (no ConstantArrayType, no size info available)
+// No profile enabled → no checks anywhere.
 // =====================================================================
 
-// CHECK-LABEL: define {{.*}}test_pointer
-// CHECK-NOT: profile.trap
-// CHECK: }
-int test_pointer(int *p, int i) {
-  return p[i];
-}
-
-// =====================================================================
-// Multiple subscripts in one function — each gets its own check
-// =====================================================================
-
-// CHECK-LABEL: define {{.*}}test_multi_access
-// ENABLED: profile.trap:
-// ENABLED: profile.cont:
-// ENABLED: profile.trap{{[0-9]*}}:
-// ENABLED: profile.cont{{[0-9]*}}:
+// CHECK-LABEL: define {{.*}}test_no_profile
 // DISABLED-NOT: profile.trap
-int test_multi_access(int i, int j) {
-  int a[5] = {};
-  int b[3] = {};
-  return a[i] + b[j];
-}
-
-// =====================================================================
-// Array access in a loop — check emitted each iteration
-// =====================================================================
-
-// CHECK-LABEL: define {{.*}}test_loop
-// ENABLED: profile.trap:
-// ENABLED: call void @_ZSt17profile_violationSt14detection_mode(i32 1)
-// DISABLED-NOT: profile.trap
-int test_loop(int *out, int n) {
-  int arr[100] = {};
-  int sum = 0;
-  for (int i = 0; i < n; ++i)
-    sum += arr[i];
-  return sum;
-}
-
-// =====================================================================
-// Size-1 array — valid index is only 0
-// =====================================================================
-
-// CHECK-LABEL: define {{.*}}test_size_one
-// ENABLED: icmp slt i32 %{{.*}}, 1
-// ENABLED: profile.trap:
-// DISABLED-NOT: profile.trap
-int test_size_one(int i) {
-  int arr[1] = {};
+// DISABLED:     ret i32
+int test_no_profile(int i) {
+  int arr[10] = {};
   return arr[i];
 }
