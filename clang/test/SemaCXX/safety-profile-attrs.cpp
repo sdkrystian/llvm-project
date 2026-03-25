@@ -17,8 +17,8 @@
 [[profiles::enforce(std::nonexistent)]]; // expected-error {{unknown safety profile 'nonexistent'}}
 [[profiles::apply(std::nonexistent)]]; // expected-error {{unknown safety profile 'nonexistent'}}
 
-// Enforce + apply conflict on the same profile
-// (comes after non-profile decls above, so also gets first-decl error)
+// First-decl check fires (and preempts the conflict check) because
+// the non-empty declarations above are non-profile declarations.
 [[profiles::apply(std::type)]]; // expected-error {{profile attribute must appear on the lexically first declaration in the translation unit}}
 
 void test_enforce_type() {
