@@ -28,6 +28,7 @@
 #include "clang/Basic/TargetInfo.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/StringSwitch.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/IR/Assumptions.h"
@@ -823,7 +824,30 @@ void CodeGenFunction::EmitAttributedStmt(const AttributedStmt &S) {
   SaveAndRestore save_noconvergent(InNoConvergentAttributedStmt, noconvergent);
   SaveAndRestore save_musttail(MustTailCall, musttail);
   SaveAndRestore save_flattenOrBranch(HLSLControlFlowAttr, flattenOrBranch);
+  SaveAndRestore save_profilestate(CurProfileState);
   CGAtomicOptionsRAII AORAII(CGM, AA);
+
+  for (const auto *A : S.getAttrs()) {
+    if (A->getKind() != attr::ProfilesSuppress)
+      continue;
+    llvm::StringRef Name =
+        cast<ProfilesSuppressAttr>(A)->getProfileName()->getName();
+    if (Name == "strict") {
+      CurProfileState.setSuppressed(ProfileKind::Type);
+      CurProfileState.setSuppressed(ProfileKind::Bounds);
+      CurProfileState.setSuppressed(ProfileKind::Lifetime);
+    } else {
+      auto PK = llvm::StringSwitch<std::optional<ProfileKind>>(Name)
+                    .Case("type", ProfileKind::Type)
+                    .Case("bounds", ProfileKind::Bounds)
+                    .Case("lifetime", ProfileKind::Lifetime)
+                    .Case("arithmetic", ProfileKind::Arithmetic)
+                    .Default(std::nullopt);
+      if (PK)
+        CurProfileState.setSuppressed(*PK);
+    }
+  }
+
   EmitStmt(S.getSubStmt(), S.getAttrs());
 }
 

@@ -36,6 +36,7 @@ set(LIBCXX_SOURCES
   new_helpers.cpp
   optional.cpp
   print.cpp
+  profile_violation.cpp
   random_shuffle.cpp
   ryu/d2fixed.cpp
   ryu/d2s.cpp

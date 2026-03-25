@@ -3787,6 +3787,13 @@ LValue CodeGenFunction::EmitUnaryOpLValue(const UnaryOperator *E) {
     TBAAAccessInfo TBAAInfo;
     Address Addr = EmitPointerWithAlignment(E->getSubExpr(), &BaseInfo,
                                             &TBAAInfo);
+
+    if (isProfileEnabled(ProfileKind::Lifetime) &&
+        !SanOpts.has(SanitizerKind::Null)) {
+      llvm::Value *IsNotNull = Builder.CreateIsNotNull(Addr.getBasePointer());
+      EmitProfileCheck(IsNotNull, ProfileKind::Lifetime, E->getExprLoc());
+    }
+
     LValue LV = MakeAddrLValue(Addr, T, BaseInfo, TBAAInfo);
     LV.getQuals().setAddressSpace(ExprTy.getAddressSpace());
 
@@ -4485,6 +4492,51 @@ void CodeGenFunction::EmitUnreachable(SourceLocation Loc) {
   Builder.CreateUnreachable();
 }
 
+void CodeGenFunction::EmitProfileCheck(llvm::Value *Cond, ProfileKind Kind,
+                                       SourceLocation Loc) {
+  llvm::BasicBlock *ContBB = createBasicBlock("profile.cont");
+  llvm::BasicBlock *TrapBB = createBasicBlock("profile.trap");
+
+  llvm::MDBuilder MDHelper(getLLVMContext());
+  llvm::MDNode *Weights = MDHelper.createLikelyBranchWeights();
+  Builder.CreateCondBr(Cond, ContBB, TrapBB)->setMetadata(
+      llvm::LLVMContext::MD_prof, Weights);
+
+  EmitBlock(TrapBB);
+
+  llvm::FunctionType *FnTy =
+      llvm::FunctionType::get(CGM.VoidTy, {CGM.Int32Ty}, false);
+  llvm::AttrBuilder B(getLLVMContext());
+  B.addAttribute(llvm::Attribute::NoReturn);
+  B.addAttribute(llvm::Attribute::NoUnwind);
+  llvm::FunctionCallee Fn = CGM.CreateRuntimeFunction(
+      FnTy, "_ZSt17profile_violationSt14detection_mode",
+      llvm::AttributeList::get(getLLVMContext(),
+                               llvm::AttributeList::FunctionIndex, B));
+
+  unsigned ModeVal;
+  switch (Kind) {
+  case ProfileKind::Type:
+    ModeVal = 0;
+    break;
+  case ProfileKind::Bounds:
+    ModeVal = 1;
+    break;
+  case ProfileKind::Lifetime:
+    ModeVal = 2;
+    break;
+  default:
+    llvm_unreachable("unexpected ProfileKind for runtime check");
+  }
+
+  llvm::CallInst *Call = EmitNounwindRuntimeCall(
+      Fn, llvm::ConstantInt::get(CGM.Int32Ty, ModeVal));
+  Call->setDoesNotReturn();
+  Builder.CreateUnreachable();
+
+  EmitBlock(ContBB);
+}
+
 void CodeGenFunction::EmitTrapCheck(llvm::Value *Checked,
                                     SanitizerHandler CheckHandlerID,
                                     bool NoMerge, const TrapReason *TR) {
@@ -4956,6 +5008,25 @@ LValue CodeGenFunction::EmitArraySubscriptExpr(const ArraySubscriptExpr *E,
 
     if (SanOpts.has(SanitizerKind::ArrayBounds))
       EmitBoundsCheck(E, E->getBase(), Idx, IdxTy, Accessed);
+    else if (isProfileEnabled(ProfileKind::Bounds)) {
+      const Expr *Base = E->getBase()->IgnoreParenImpCasts();
+      QualType BaseTy = Base->getType();
+      if (const auto *CAT = getContext().getAsConstantArrayType(BaseTy)) {
+        uint64_t Size = CAT->getZExtSize();
+        llvm::Value *Bound =
+            llvm::ConstantInt::get(Idx->getType(), Size);
+        llvm::Value *InBounds;
+        if (IdxSigned) {
+          llvm::Value *Zero =
+              llvm::ConstantInt::get(Idx->getType(), 0);
+          InBounds = Builder.CreateAnd(Builder.CreateICmpSGE(Idx, Zero),
+                                       Builder.CreateICmpSLT(Idx, Bound));
+        } else {
+          InBounds = Builder.CreateICmpULT(Idx, Bound);
+        }
+        EmitProfileCheck(InBounds, ProfileKind::Bounds, E->getExprLoc());
+      }
+    }
 
     // Extend or truncate the index type to 32 or 64-bits.
     if (Promote && Idx->getType() != IntPtrTy)
@@ -5535,6 +5606,12 @@ LValue CodeGenFunction::EmitMemberExpr(const MemberExpr *E) {
       SkippedChecks.set(SanitizerKind::Null, true);
     EmitTypeCheck(TCK_MemberAccess, E->getExprLoc(), Addr, PtrTy,
                   /*Alignment=*/CharUnits::Zero(), SkippedChecks);
+    if (isProfileEnabled(ProfileKind::Lifetime) &&
+        !SanOpts.has(SanitizerKind::Null) && !IsBaseCXXThis &&
+        !isa<DeclRefExpr>(BaseExpr)) {
+      llvm::Value *IsNotNull = Builder.CreateIsNotNull(Addr.getBasePointer());
+      EmitProfileCheck(IsNotNull, ProfileKind::Lifetime, E->getExprLoc());
+    }
     BaseLV = MakeAddrLValue(Addr, PtrTy, BaseInfo, TBAAInfo);
   } else
     BaseLV = EmitCheckedLValue(BaseExpr, TCK_MemberAccess);

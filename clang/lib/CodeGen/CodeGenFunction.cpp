@@ -87,6 +87,24 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
   EHStack.setCGF(this);
 
   SetFastMathFlags(CurFPFeatures);
+
+  const auto &LO = CGM.getLangOpts();
+  if (LO.ProfileEnforceType)
+    CurProfileState.setMode(ProfileKind::Type, ProfileMode::Enforced);
+  else if (LO.ProfileApplyType)
+    CurProfileState.setMode(ProfileKind::Type, ProfileMode::Applied);
+  if (LO.ProfileEnforceBounds)
+    CurProfileState.setMode(ProfileKind::Bounds, ProfileMode::Enforced);
+  else if (LO.ProfileApplyBounds)
+    CurProfileState.setMode(ProfileKind::Bounds, ProfileMode::Applied);
+  if (LO.ProfileEnforceLifetime)
+    CurProfileState.setMode(ProfileKind::Lifetime, ProfileMode::Enforced);
+  else if (LO.ProfileApplyLifetime)
+    CurProfileState.setMode(ProfileKind::Lifetime, ProfileMode::Applied);
+  if (LO.ProfileEnforceArithmetic)
+    CurProfileState.setMode(ProfileKind::Arithmetic, ProfileMode::Enforced);
+  else if (LO.ProfileApplyArithmetic)
+    CurProfileState.setMode(ProfileKind::Arithmetic, ProfileMode::Applied);
 }
 
 CodeGenFunction::~CodeGenFunction() {

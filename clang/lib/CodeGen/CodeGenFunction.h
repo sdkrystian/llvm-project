@@ -32,6 +32,7 @@
 #include "clang/Basic/ABI.h"
 #include "clang/Basic/CapturedStmt.h"
 #include "clang/Basic/CodeGenOptions.h"
+#include "clang/Basic/ProfileState.h"
 #include "clang/Basic/OpenMPKinds.h"
 #include "clang/Basic/TargetInfo.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -576,6 +577,16 @@ public:
 
   /// Sanitizers enabled for this function.
   SanitizerSet SanOpts;
+
+  /// Safety profile state for this function.
+  ProfileState CurProfileState;
+
+  bool isProfileEnabled(ProfileKind P) const {
+    return CurProfileState.isEnabled(P);
+  }
+
+  void EmitProfileCheck(llvm::Value *Cond, ProfileKind Kind,
+                        SourceLocation Loc);
 
   /// True if CodeGen currently emits code implementing sanitizer checks.
   bool IsSanitizerScope = false;

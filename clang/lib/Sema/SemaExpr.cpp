@@ -16222,9 +16222,6 @@ ExprResult Sema::CreateBuiltinUnaryOp(SourceLocation OpLoc,
         return ExprError();
       resultType =
           CheckIndirectionOperand(*this, Input.get(), VK, OpLoc, IsAfterAmp);
-      // P3081R2 [expr.unary.op]: pointer dereference is profile-checked
-      // (not profile-rejected) by std::lifetime. Runtime null-check
-      // insertion is a codegen feature not yet implemented.
       break;
     }
     case UO_Plus:
