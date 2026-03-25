@@ -824,8 +824,9 @@ void CodeGenFunction::EmitAttributedStmt(const AttributedStmt &S) {
   SaveAndRestore save_noconvergent(InNoConvergentAttributedStmt, noconvergent);
   SaveAndRestore save_musttail(MustTailCall, musttail);
   SaveAndRestore save_flattenOrBranch(HLSLControlFlowAttr, flattenOrBranch);
-  SaveAndRestore save_profilestate(CurProfileState);
   CGAtomicOptionsRAII AORAII(CGM, AA);
+
+  SaveAndRestore save_profilestate(CurProfileState);
 
   for (const auto *A : S.getAttrs()) {
     if (A->getKind() != attr::ProfilesSuppress)
