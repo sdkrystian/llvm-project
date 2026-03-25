@@ -52,13 +52,12 @@ void test_enforce_bounds() {
   int *q = arr; // expected-error {{array-to-pointer decay is not allowed when profile std::bounds is enforced}}
 }
 
-// Suppress scoping: null-statement form persists for rest of block
+// Suppress scoping: compound-statement form
 void test_suppress_scoping() {
   int s = 42;
   unsigned u = s; // expected-error {{implicit conversion changes signedness from 'int' to 'unsigned int' when profile std::arithmetic is enforced}}
 
-  {
-    [[profiles::suppress(std::arithmetic)]];
+  [[profiles::suppress(std::arithmetic)]] {
     unsigned v = s;
   }
 
@@ -68,8 +67,7 @@ void test_suppress_scoping() {
 void test_suppress_type_scoping() {
   int x; // expected-error {{uninitialized variable declaration is not allowed when profile std::type is enforced}}
 
-  {
-    [[profiles::suppress(std::type)]];
+  [[profiles::suppress(std::type)]] {
     int y;
   }
 
@@ -80,8 +78,7 @@ void test_suppress_lifetime_scoping() {
   int *p = new int(42);
   delete p; // expected-error {{'delete' is not allowed when profile std::lifetime is enforced}}
 
-  {
-    [[profiles::suppress(std::lifetime)]];
+  [[profiles::suppress(std::lifetime)]] {
     int *q = new int(1);
     delete q;
   }
@@ -94,8 +91,7 @@ void test_suppress_bounds_scoping() {
   int *p = &x;
   p++; // expected-error {{pointer arithmetic is not allowed when profile std::bounds is enforced}}
 
-  {
-    [[profiles::suppress(std::bounds)]];
+  [[profiles::suppress(std::bounds)]] {
     p++;
   }
 
@@ -127,8 +123,7 @@ void test_suppress_compound_statement() {
 
 // Suppress only one profile, others remain active
 void test_suppress_one_profile() {
-  {
-    [[profiles::suppress(std::arithmetic)]];
+  [[profiles::suppress(std::arithmetic)]] {
     int s = 42;
     unsigned u = s;
 
@@ -141,8 +136,7 @@ void test_suppress_one_profile() {
     q++; // expected-error {{pointer arithmetic is not allowed when profile std::bounds is enforced}}
   }
 
-  {
-    [[profiles::suppress(std::bounds)]];
+  [[profiles::suppress(std::bounds)]] {
     int x = 0;
     int *p = &x;
     p++;

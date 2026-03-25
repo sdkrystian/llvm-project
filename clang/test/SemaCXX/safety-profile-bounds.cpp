@@ -97,8 +97,7 @@ void test_suppress() {
   // enforced-error@-1 {{pointer arithmetic is not allowed when profile std::bounds is enforced}}
   // applied-warning@-2 {{pointer arithmetic is discouraged by profile std::bounds}}
 
-  {
-    [[profiles::suppress(std::bounds)]];
+  [[profiles::suppress(std::bounds)]] {
     p++;
     int arr[10] = {};
     int *q = arr;

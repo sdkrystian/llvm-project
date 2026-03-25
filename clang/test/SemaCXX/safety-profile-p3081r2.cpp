@@ -162,20 +162,33 @@ void test_suppress_compound_statement() {
   // applied-warning@-2 {{implicit conversion changes signedness}}
 }
 
-// --- NullStmt form: suppression persists for rest of block scope ---
-void test_suppress_null_stmt_persists() {
+// --- NullStmt form: suppression does NOT persist past the NullStmt ---
+void test_suppress_null_stmt_does_not_persist() {
+  // At function body scope
   int s = 42;
+  [[profiles::suppress(std::arithmetic)]];
   unsigned u1 = s;
   // enforced-error@-1 {{implicit conversion changes signedness}}
   // applied-warning@-2 {{implicit conversion changes signedness}}
+
+  // Inside a nested block
   {
-    [[profiles::suppress(std::arithmetic)]];
-    unsigned u2 = s;
-    unsigned u3 = s;
+    [[profiles::suppress(std::type)]];
+    int x;
+    // enforced-error@-1 {{uninitialized variable declaration is not allowed}}
+    // applied-warning@-2 {{uninitialized variable declaration is discouraged}}
   }
-  unsigned u4 = s;
-  // enforced-error@-1 {{implicit conversion changes signedness}}
-  // applied-warning@-2 {{implicit conversion changes signedness}}
+
+  // Multiple NullStmt suppresses in sequence
+  [[profiles::suppress(std::type)]];
+  [[profiles::suppress(std::bounds)]];
+  int y;
+  // enforced-error@-1 {{uninitialized variable declaration is not allowed}}
+  // applied-warning@-2 {{uninitialized variable declaration is discouraged}}
+  int arr[4] = {};
+  int *p = arr;
+  // enforced-error@-1 {{array-to-pointer decay is not allowed}}
+  // applied-warning@-2 {{array-to-pointer decay is discouraged}}
 }
 
 // --- Suppress one profile, others remain active ---
@@ -195,6 +208,54 @@ void test_suppress_granularity() {
     // enforced-error@-1 {{uninitialized variable declaration is not allowed}}
     // applied-warning@-2 {{uninitialized variable declaration is discouraged}}
   }
+}
+
+// --- Suppress on a declaration-statement (uninit) ---
+void test_suppress_declaration_statement() {
+  [[profiles::suppress(std::type)]]
+  int x;
+
+  int y;
+  // enforced-error@-1 {{uninitialized variable declaration is not allowed}}
+  // applied-warning@-2 {{uninitialized variable declaration is discouraged}}
+}
+
+// --- Suppress on an expression statement ---
+void test_suppress_expression_statement() {
+  int x = 0;
+  int *p = &x;
+
+  [[profiles::suppress(std::bounds)]]
+  p++;
+
+  p++;
+  // enforced-error@-1 {{pointer arithmetic is not allowed when profile std::bounds is enforced}}
+  // applied-warning@-2 {{pointer arithmetic is discouraged by profile std::bounds}}
+}
+
+// --- Suppress on a for statement ---
+void test_suppress_for_statement() {
+  int arr[4] = {};
+
+  [[profiles::suppress(std::bounds)]]
+  for (int *p = arr, *end = arr + 4; p != end; ++p) {}
+
+  int *q = arr;
+  // enforced-error@-1 {{array-to-pointer decay is not allowed when profile std::bounds is enforced}}
+  // applied-warning@-2 {{array-to-pointer decay is discouraged by profile std::bounds}}
+}
+
+// --- Suppress on an if statement ---
+void test_suppress_if_statement() {
+  int *p = new int(42);
+
+  [[profiles::suppress(std::lifetime)]]
+  if (p) { delete p; }
+
+  int *q = new int(1);
+  delete q;
+  // enforced-error@-1 {{'delete' is not allowed when profile std::lifetime is enforced}}
+  // applied-warning@-2 {{'delete' is discouraged by profile std::lifetime}}
 }
 
 // --- Multiple suppresses on one statement ---

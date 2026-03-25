@@ -94,9 +94,7 @@ StmtResult Parser::ParseStatementOrDeclaration(StmtVector &Stmts,
       PrecedingLabel);
   MaybeDestroyTemplateIds();
 
-  // Restore profile state for non-NullStmt. For NullStmt, keep the
-  // suppression so it persists for the rest of the enclosing compound scope.
-  if (SavedProfileState && !isa_and_present<NullStmt>(Res.get()))
+  if (SavedProfileState)
     Actions.getCurProfileState() = *SavedProfileState;
 
   takeAndConcatenateAttrs(CXX11Attrs, std::move(GNUOrMSAttrs));

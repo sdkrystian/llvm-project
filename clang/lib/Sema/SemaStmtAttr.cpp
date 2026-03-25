@@ -682,9 +682,7 @@ static Attr *handleProfileSuppressAttr(Sema &S, Stmt *St, const ParsedAttr &A,
     }
   }
   // Suppression timing is handled by the parser (save/set before
-  // statement body, restore after for non-NullStmt). For NullStmt,
-  // the parser intentionally does not restore, so suppression
-  // persists for the rest of the enclosing compound scope.
+  // statement body, restore after).
   return ::new (S.Context) ProfilesSuppressAttr(S.Context, A, II);
 }
 
