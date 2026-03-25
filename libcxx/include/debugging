@@ -12,6 +12,9 @@
 
 // P3081R2 profile support
 #include <__profiles/detection_mode.h>
+#include <__profiles/index_in_range.h>
+#include <__profiles/indirection_not_null.h>
+#include <__profiles/narrow.h>
 #include <__profiles/profile_violation.h>
 
 #endif // _LIBCPP_DEBUGGING

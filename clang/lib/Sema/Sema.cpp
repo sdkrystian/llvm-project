@@ -2514,6 +2514,23 @@ operator()(sema::FunctionScopeInfo *Scope) const {
     delete Scope;
 }
 
+bool Sema::isProfileDiagnosticSuppressed() const {
+  if (isUnevaluatedContext())
+    return true;
+  if (isSFINAEContext())
+    return true;
+  if (currentEvaluationContext().isDiscardedStatementContext())
+    return true;
+  // P3081R2 [dcl.attr.profile]: "If C appears in the body of a function that
+  // is defined in this document" — suppress for system header functions.
+  if (const auto *FD = dyn_cast_if_present<FunctionDecl>(CurContext)) {
+    if (FD->getLocation().isValid() &&
+        getSourceManager().isInSystemHeader(FD->getLocation()))
+      return true;
+  }
+  return false;
+}
+
 void Sema::setProfileSuppressedByName(IdentifierInfo *ProfileName) {
   if (!ProfileName)
     return;

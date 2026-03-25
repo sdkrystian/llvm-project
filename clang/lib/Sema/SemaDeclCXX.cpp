@@ -5139,6 +5139,15 @@ BuildImplicitMemberInitializer(Sema &SemaRef, CXXConstructorDecl *Constructor,
     return false;
   }
 
+  // P3081R2 [class.base.init] p9.3: if default-initialization performs no
+  // initialization, the expression is profile-rejected by std::type.
+  if (!Constructor->isImplicit()) {
+    if (SemaRef.isProfileEnforced(ProfileKind::Type))
+      SemaRef.Diag(Field->getLocation(), diag::err_profile_rejected_uninit);
+    else if (SemaRef.isProfileApplied(ProfileKind::Type))
+      SemaRef.Diag(Field->getLocation(), diag::warn_profile_rejected_uninit);
+  }
+
   // Nothing to initialize.
   CXXMemberInit = nullptr;
   return false;

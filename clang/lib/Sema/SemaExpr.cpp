@@ -563,6 +563,25 @@ ExprResult Sema::DefaultFunctionArrayConversion(Expr *E, bool Diagnose) {
   return E;
 }
 
+// P3081R2 [class.union.general] p5: a union field is part of the common
+// initial sequence if all union alternatives are layout-compatible.
+static bool isUnionFieldInCommonInitialSequence(ASTContext &Ctx,
+                                                const FieldDecl *FD) {
+  const auto *Union = FD->getParent();
+  assert(Union->isUnion());
+  const FieldDecl *First = *Union->field_begin();
+  QualType FirstTy = First->getType().getUnqualifiedType();
+  for (const auto *F : Union->fields()) {
+    if (F == First)
+      continue;
+    if (!Ctx.hasSameUnqualifiedType(FirstTy,
+                                    F->getType().getUnqualifiedType()) &&
+        !Ctx.typesAreCompatible(FirstTy, F->getType().getUnqualifiedType()))
+      return false;
+  }
+  return true;
+}
+
 static void CheckForNullPointerDereference(Sema &S, Expr *E) {
   // Check to see if we are dereferencing a null pointer.  If so,
   // and if not volatile-qualified, this is undefined behavior that the
@@ -699,7 +718,8 @@ ExprResult Sema::DefaultLvalueConversion(Expr *E) {
   if (isProfileEnabled(ProfileKind::Type)) {
     if (auto *ME = dyn_cast<MemberExpr>(E->IgnoreParenImpCasts())) {
       if (auto *FD = dyn_cast<FieldDecl>(ME->getMemberDecl())) {
-        if (FD->getParent()->isUnion()) {
+        if (FD->getParent()->isUnion() &&
+            !isUnionFieldInCommonInitialSequence(Context, FD)) {
           if (isProfileEnforced(ProfileKind::Type))
             Diag(ME->getMemberLoc(), diag::err_profile_rejected_union_access)
                 << FD;
@@ -16190,13 +16210,12 @@ ExprResult Sema::CreateBuiltinUnaryOp(SourceLocation OpLoc,
         else if (isProfileApplied(ProfileKind::Bounds))
           Diag(OpLoc, diag::warn_profile_rejected_pointer_arithmetic);
       }
-      // P3081R2 [class.union.general] p5: increment/decrement of a union
-      // member reads the member and is not the left operand of an assignment.
       if (!resultType.isNull() && isProfileEnabled(ProfileKind::Type)) {
         if (auto *ME = dyn_cast<MemberExpr>(
                 Input.get()->IgnoreParenImpCasts())) {
           if (auto *FD = dyn_cast<FieldDecl>(ME->getMemberDecl())) {
-            if (FD->getParent()->isUnion()) {
+            if (FD->getParent()->isUnion() &&
+                !isUnionFieldInCommonInitialSequence(Context, FD)) {
               if (isProfileEnforced(ProfileKind::Type))
                 Diag(ME->getMemberLoc(),
                      diag::err_profile_rejected_union_access)

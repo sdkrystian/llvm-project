@@ -941,18 +941,7 @@ public:
   /// Silently does nothing if \p ProfileName is not a recognized profile.
   void setProfileSuppressedByName(IdentifierInfo *ProfileName);
 
-  // P3081R2 [dcl.attr.profile]: profile-rejection only applies when
-  // potentially evaluated, outside requires-expressions, outside discarded
-  // statements, and outside SFINAE contexts.
-  bool isProfileDiagnosticSuppressed() const {
-    if (isUnevaluatedContext())
-      return true;
-    if (isSFINAEContext())
-      return true;
-    if (currentEvaluationContext().isDiscardedStatementContext())
-      return true;
-    return false;
-  }
+  bool isProfileDiagnosticSuppressed() const;
 
   bool isProfileEnforced(ProfileKind P) const {
     return CurProfileState.isEnforced(P) && !isProfileDiagnosticSuppressed();
