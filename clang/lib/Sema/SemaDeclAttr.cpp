@@ -5487,8 +5487,8 @@ resolveProfileKinds(IdentifierInfo *II,
   return true;
 }
 
-// P3081R2: enforce/apply must appear on the lexically first declaration
-// in the translation unit.
+// P3589R2 [decl.attr.enforce] para 1: enforce must precede any
+// non-empty-declaration in the translation unit.
 static bool checkProfileAttrIsFirstInTU(Sema &S, const ParsedAttr &AL) {
   if (!S.CurContext->isTranslationUnit()) {
     S.Diag(AL.getLoc(), diag::err_profile_enforce_not_first_decl);
@@ -5497,8 +5497,7 @@ static bool checkProfileAttrIsFirstInTU(Sema &S, const ParsedAttr &AL) {
   for (const Decl *Prev : S.CurContext->decls()) {
     if (Prev->isImplicit())
       continue;
-    if (isa<EmptyDecl>(Prev) && (Prev->hasAttr<ProfilesEnforceAttr>() ||
-                                 Prev->hasAttr<ProfilesApplyAttr>()))
+    if (isa<EmptyDecl>(Prev))
       continue;
     S.Diag(AL.getLoc(), diag::err_profile_enforce_not_first_decl);
     return false;
@@ -5515,66 +5514,32 @@ static void handleProfilesEnforceAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   }
   if (!checkProfileAttrIsFirstInTU(S, AL))
     return;
-  for (ProfileKind PK : Profiles) {
-    if (S.getCurProfileState().getMode(PK) == ProfileMode::Applied) {
-      S.Diag(AL.getLoc(), diag::err_profile_enforce_apply_conflict) << II;
-      return;
-    }
-  }
   // P3589R2 [decl.attr.enforce] para 3: repeated enforce for the same
-  // profile is only permitted if the designators are identical.  Check
-  // only against other source-level enforce attrs (not CLI defaults).
+  // profile is only permitted if the designators are identical.
+  auto CheckConflict = [&](const ProfilesEnforceAttr *EA) {
+    llvm::StringRef PrevBase =
+        stripStdProfilePrefix(EA->getProfileName()->getName());
+    llvm::StringRef CurBase = stripStdProfilePrefix(II->getName());
+    if (PrevBase == CurBase &&
+        EA->getProfileName()->getName() != II->getName()) {
+      S.Diag(AL.getLoc(), diag::err_profile_enforce_duplicate_conflict) << II;
+      return true;
+    }
+    return false;
+  };
+  for (const auto *EA : D->specific_attrs<ProfilesEnforceAttr>())
+    if (CheckConflict(EA))
+      return;
   for (const Decl *Prev : S.CurContext->decls()) {
     if (Prev == D || !isa<EmptyDecl>(Prev))
       continue;
-    if (const auto *EA = Prev->getAttr<ProfilesEnforceAttr>()) {
-      llvm::StringRef PrevBase = stripStdProfilePrefix(EA->getProfileName()->getName());
-      llvm::StringRef CurBase = stripStdProfilePrefix(II->getName());
-      if (PrevBase == CurBase && EA->getProfileName()->getName() != II->getName()) {
-        S.Diag(AL.getLoc(), diag::err_profile_enforce_duplicate_conflict) << II;
+    if (const auto *EA = Prev->getAttr<ProfilesEnforceAttr>())
+      if (CheckConflict(EA))
         return;
-      }
-    }
   }
   for (ProfileKind PK : Profiles)
     S.getCurProfileState().setMode(PK, ProfileMode::Enforced);
   D->addAttr(::new (S.Context) ProfilesEnforceAttr(S.Context, AL, II));
-}
-
-static void handleProfilesApplyAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
-  IdentifierInfo *II = AL.getArgAsIdent(0)->getIdentifierInfo();
-  SmallVector<ProfileKind, 4> Profiles;
-  if (!resolveProfileKinds(II, Profiles)) {
-    S.Diag(AL.getLoc(), diag::err_profile_unknown) << II;
-    return;
-  }
-  if (!checkProfileAttrIsFirstInTU(S, AL))
-    return;
-  for (ProfileKind PK : Profiles) {
-    if (S.getCurProfileState().getMode(PK) == ProfileMode::Enforced) {
-      S.Diag(AL.getLoc(), diag::err_profile_enforce_apply_conflict) << II;
-      return;
-    }
-  }
-  // P3589R2 [decl.attr.enforce] para 3: same duplicate-designator rule
-  // applies to apply attributes.
-  for (const Decl *Prev : S.CurContext->decls()) {
-    if (Prev == D || !isa<EmptyDecl>(Prev))
-      continue;
-    if (const auto *AA = Prev->getAttr<ProfilesApplyAttr>()) {
-      llvm::StringRef PrevBase =
-          stripStdProfilePrefix(AA->getProfileName()->getName());
-      llvm::StringRef CurBase = stripStdProfilePrefix(II->getName());
-      if (PrevBase == CurBase &&
-          AA->getProfileName()->getName() != II->getName()) {
-        S.Diag(AL.getLoc(), diag::err_profile_enforce_duplicate_conflict) << II;
-        return;
-      }
-    }
-  }
-  for (ProfileKind PK : Profiles)
-    S.getCurProfileState().setMode(PK, ProfileMode::Applied);
-  D->addAttr(::new (S.Context) ProfilesApplyAttr(S.Context, AL, II));
 }
 
 static void handleLifetimeCategoryAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
@@ -8010,10 +7975,8 @@ ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D, const ParsedAttr &AL,
   case ParsedAttr::AT_ProfilesEnforce:
     handleProfilesEnforceAttr(S, D, AL);
     break;
-  case ParsedAttr::AT_ProfilesApply:
-    handleProfilesApplyAttr(S, D, AL);
-    break;
   case ParsedAttr::AT_ProfilesRequire:
+    S.Diag(AL.getLoc(), diag::err_profile_require_not_import);
     break;
   case ParsedAttr::AT_ProfilesSuppress: {
     IdentifierInfo *II = AL.getArgAsIdent(0)->getIdentifierInfo();

@@ -1923,7 +1923,3 @@ def TrivialAutoVarInit : DiagGroup<"trivial-auto-var-init">;
 // A warning for options that enable a feature that is not yet complete
 def ExperimentalOption : DiagGroup<"experimental-option">;
 
-def SafetyProfileArithmetic : DiagGroup<"safety-profile-arithmetic">;
-def SafetyProfileLifetime : DiagGroup<"safety-profile-lifetime">;
-def SafetyProfileType : DiagGroup<"safety-profile-type">;
-def SafetyProfileBounds : DiagGroup<"safety-profile-bounds">;

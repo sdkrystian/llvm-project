@@ -425,6 +425,14 @@ Sema::ActOnModuleDecl(SourceLocation StartLoc, SourceLocation ModuleLoc,
       Mod = Map.createModuleForInterfaceUnit(ModuleLoc, ModuleName);
     } else {
       Mod = Map.createModuleForImplementationUnit(ModuleLoc, ModuleName);
+      // P3589R2 [decl.attr.enforce] para 4: the dominion of enforced
+      // profiles extends from the interface to all implementation units.
+      for (unsigned I = 0;
+           I < static_cast<unsigned>(ProfileKind::NumProfiles); ++I) {
+        if (Interface->EnforcedProfiles & (1u << I))
+          CurProfileState.setMode(static_cast<ProfileKind>(I),
+                                  ProfileMode::Enforced);
+      }
     }
   } break;
 

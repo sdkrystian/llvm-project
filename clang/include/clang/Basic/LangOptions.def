@@ -528,13 +528,9 @@ LANGOPT(PreserveVec3Type, 1, 0, NotCompatible, "Preserve 3-component vector type
 LANGOPT(Reflection      , 1, 0, NotCompatible, "C++26 Reflection")
 
 LANGOPT(ProfileEnforceArithmetic, 1, 0, Benign, "Enforce std::arithmetic safety profile")
-LANGOPT(ProfileApplyArithmetic, 1, 0, Benign, "Apply std::arithmetic safety profile")
 LANGOPT(ProfileEnforceLifetime, 1, 0, Benign, "Enforce std::lifetime safety profile")
-LANGOPT(ProfileApplyLifetime, 1, 0, Benign, "Apply std::lifetime safety profile")
 LANGOPT(ProfileEnforceType, 1, 0, Benign, "Enforce std::type safety profile")
-LANGOPT(ProfileApplyType, 1, 0, Benign, "Apply std::type safety profile")
 LANGOPT(ProfileEnforceBounds, 1, 0, Benign, "Enforce std::bounds safety profile")
-LANGOPT(ProfileApplyBounds, 1, 0, Benign, "Apply std::bounds safety profile")
 
 #undef LANGOPT
 #undef ENUM_LANGOPT

@@ -14121,8 +14121,6 @@ def err_profile_unknown : Error<
   "unknown safety profile %0">;
 def err_profile_enforce_not_first_decl : Error<
   "profile attribute must appear on the lexically first declaration in the translation unit">;
-def err_profile_enforce_apply_conflict : Error<
-  "cannot both enforce and apply profile %0">;
 def err_profile_enforce_duplicate_conflict : Error<
   "conflicting profile enforcement attributes for %0">;
 def err_profile_require_not_enforced : Error<
@@ -14131,80 +14129,35 @@ def err_profile_require_not_import : Error<
   "'profiles::require' attribute only allowed on import declarations">;
 def err_profile_rejected_narrowing : Error<
   "narrowing conversion from %0 to %1 is not allowed when profile std::arithmetic is enforced">;
-def warn_profile_rejected_narrowing : Warning<
-  "narrowing conversion from %0 to %1 is discouraged by profile std::arithmetic">,
-  InGroup<SafetyProfileArithmetic>, DefaultIgnore;
 def err_profile_rejected_signedness : Error<
   "implicit conversion changes signedness from %0 to %1 when profile std::arithmetic is enforced">;
-def warn_profile_rejected_signedness : Warning<
-  "implicit conversion changes signedness from %0 to %1; discouraged by profile std::arithmetic">,
-  InGroup<SafetyProfileArithmetic>, DefaultIgnore;
 def err_profile_rejected_overflow : Error<
   "arithmetic overflow is not allowed when profile std::arithmetic is enforced">;
-def warn_profile_rejected_overflow : Warning<
-  "arithmetic overflow is discouraged by profile std::arithmetic">,
-  InGroup<SafetyProfileArithmetic>, DefaultIgnore;
 
 def err_profile_rejected_delete : Error<
   "'delete' is not allowed when profile std::lifetime is enforced">;
-def warn_profile_rejected_delete : Warning<
-  "'delete' is discouraged by profile std::lifetime">,
-  InGroup<SafetyProfileLifetime>, DefaultIgnore;
 def err_profile_rejected_free : Error<
   "calling 'free' is not allowed when profile std::lifetime is enforced">;
-def warn_profile_rejected_free : Warning<
-  "calling 'free' is discouraged by profile std::lifetime">,
-  InGroup<SafetyProfileLifetime>, DefaultIgnore;
 def err_profile_rejected_reinterpret_cast : Error<
   "'reinterpret_cast' is not allowed when profile std::type is enforced">;
-def warn_profile_rejected_reinterpret_cast : Warning<
-  "'reinterpret_cast' is discouraged by profile std::type">,
-  InGroup<SafetyProfileType>, DefaultIgnore;
 def err_profile_rejected_const_cast : Error<
   "'const_cast' that casts away constness is not allowed when profile std::type is enforced">;
-def warn_profile_rejected_const_cast : Warning<
-  "'const_cast' that casts away constness is discouraged by profile std::type">,
-  InGroup<SafetyProfileType>, DefaultIgnore;
 def err_profile_rejected_static_cast_narrowing : Error<
   "narrowing 'static_cast' from %0 to %1 is not allowed when profile std::type is enforced">;
-def warn_profile_rejected_static_cast_narrowing : Warning<
-  "narrowing 'static_cast' from %0 to %1 is discouraged by profile std::type">,
-  InGroup<SafetyProfileType>, DefaultIgnore;
 def err_profile_rejected_static_cast_downcast : Error<
   "downcasting 'static_cast' from %0 to %1 is not allowed when profile std::type is enforced">;
-def warn_profile_rejected_static_cast_downcast : Warning<
-  "downcasting 'static_cast' from %0 to %1 is discouraged by profile std::type">,
-  InGroup<SafetyProfileType>, DefaultIgnore;
 def err_profile_rejected_static_cast_unrelated : Error<
   "'static_cast' between unrelated types %0 and %1 is not allowed when profile std::type is enforced">;
-def warn_profile_rejected_static_cast_unrelated : Warning<
-  "'static_cast' between unrelated types %0 and %1 is discouraged by profile std::type">,
-  InGroup<SafetyProfileType>, DefaultIgnore;
 def err_profile_rejected_va_arg : Error<
   "'va_arg' is not allowed when profile std::type is enforced">;
-def warn_profile_rejected_va_arg : Warning<
-  "'va_arg' is discouraged by profile std::type">,
-  InGroup<SafetyProfileType>, DefaultIgnore;
 def err_profile_rejected_union_access : Error<
   "reading union member %0 is not allowed when profile std::type is enforced">;
-def warn_profile_rejected_union_access : Warning<
-  "reading union member %0 is discouraged by profile std::type">,
-  InGroup<SafetyProfileType>, DefaultIgnore;
 def err_profile_rejected_uninit : Error<
   "uninitialized variable declaration is not allowed when profile std::type is enforced">;
-def warn_profile_rejected_uninit : Warning<
-  "uninitialized variable declaration is discouraged by profile std::type">,
-  InGroup<SafetyProfileType>, DefaultIgnore;
 
 def err_profile_rejected_pointer_arithmetic : Error<
   "pointer arithmetic is not allowed when profile std::bounds is enforced">;
-def warn_profile_rejected_pointer_arithmetic : Warning<
-  "pointer arithmetic is discouraged by profile std::bounds">,
-  InGroup<SafetyProfileBounds>, DefaultIgnore;
 def err_profile_rejected_array_decay : Error<
   "array-to-pointer decay is not allowed when profile std::bounds is enforced">;
-def warn_profile_rejected_array_decay : Warning<
-  "array-to-pointer decay is discouraged by profile std::bounds">,
-  InGroup<SafetyProfileBounds>, DefaultIgnore;
 
 } // end of sema component.

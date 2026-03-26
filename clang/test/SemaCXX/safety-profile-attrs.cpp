@@ -6,20 +6,12 @@
 [[profiles::enforce(std::lifetime)]];
 [[profiles::enforce(std::bounds)]];
 
-// enforce/apply only allowed on empty declarations
+// enforce only allowed on empty declarations
 [[profiles::enforce(std::type)]] void f1(); // expected-error {{'profiles::enforce' attribute only applies to empty declarations}}
 [[profiles::enforce(std::type)]] int g1; // expected-error {{'profiles::enforce' attribute only applies to empty declarations}}
 
-[[profiles::apply(std::arithmetic)]] void f2(); // expected-error {{'profiles::apply' attribute only applies to empty declarations}}
-[[profiles::apply(std::arithmetic)]] int g2; // expected-error {{'profiles::apply' attribute only applies to empty declarations}}
-
 // Unknown profile name
 [[profiles::enforce(std::nonexistent)]]; // expected-error {{unknown safety profile 'std::nonexistent'}}
-[[profiles::apply(std::nonexistent)]]; // expected-error {{unknown safety profile 'std::nonexistent'}}
-
-// First-decl check fires (and preempts the conflict check) because
-// the non-empty declarations above are non-profile declarations.
-[[profiles::apply(std::type)]]; // expected-error {{profile attribute must appear on the lexically first declaration in the translation unit}}
 
 void test_enforce_type() {
   int x; // expected-error {{uninitialized variable declaration is not allowed when profile std::type is enforced}}

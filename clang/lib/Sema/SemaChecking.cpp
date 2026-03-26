@@ -4473,8 +4473,6 @@ bool Sema::CheckFunctionCall(FunctionDecl *FDecl, CallExpr *TheCall,
     // P3081R2 [c.malloc]: free is profile-rejected by std::lifetime
     if (isProfileEnforced(ProfileKind::Lifetime, "c.malloc"))
       Diag(TheCall->getBeginLoc(), diag::err_profile_rejected_free);
-    else if (isProfileApplied(ProfileKind::Lifetime, "c.malloc"))
-      Diag(TheCall->getBeginLoc(), diag::warn_profile_rejected_free);
     CheckFreeArguments(TheCall);
     break;
   default:
@@ -13327,9 +13325,6 @@ void Sema::CheckImplicitConversion(Expr *E, QualType T, SourceLocation CC,
     if (isProfileEnforced(ProfileKind::Arithmetic, "conv.integral"))
       Diag(CC, diag::err_profile_rejected_signedness)
           << E->getType() << T;
-    else if (isProfileApplied(ProfileKind::Arithmetic, "conv.integral"))
-      Diag(CC, diag::warn_profile_rejected_signedness)
-          << E->getType() << T;
   }
 
   // TODO: remove this early return once the false positives for constant->bool
@@ -14176,8 +14171,6 @@ void Sema::CheckForIntOverflow (const Expr *E) {
         if (Overflowed) {
           if (isProfileEnforced(ProfileKind::Arithmetic, "expr.pre"))
             Diag(E->getExprLoc(), diag::err_profile_rejected_overflow);
-          else
-            Diag(E->getExprLoc(), diag::warn_profile_rejected_overflow);
         }
       }
       continue;

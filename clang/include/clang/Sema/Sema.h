@@ -941,9 +941,9 @@ public:
   /// Silently does nothing if \p ProfileName is not a recognized profile.
   void setProfileSuppressedByName(IdentifierInfo *ProfileName);
 
-  /// P3589R2: Apply a profile enforce/apply attr from a module-declaration
+  /// P3589R2: Apply a profile enforce attr from a module-declaration
   /// to the current profile state.
-  void applyProfileAttrToState(IdentifierInfo *ProfileName, bool IsEnforce);
+  void applyProfileAttrToState(IdentifierInfo *ProfileName);
 
   /// P3589R2 [decl.attr.require]: Check that the imported module enforces
   /// the required profile.
@@ -961,11 +961,6 @@ public:
 
   bool isProfileEnforced(ProfileKind P, llvm::StringRef Rule = "") const {
     if (!CurProfileState.isEnforced(P) || isProfileDiagnosticSuppressed())
-      return false;
-    return Rule.empty() || !isRuleSuppressed(P, Rule);
-  }
-  bool isProfileApplied(ProfileKind P, llvm::StringRef Rule = "") const {
-    if (!CurProfileState.isApplied(P) || isProfileDiagnosticSuppressed())
       return false;
     return Rule.empty() || !isRuleSuppressed(P, Rule);
   }

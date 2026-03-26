@@ -5145,8 +5145,6 @@ BuildImplicitMemberInitializer(Sema &SemaRef, CXXConstructorDecl *Constructor,
   // handled earlier in this function (IIK_Copy/IIK_Move paths return at L5070).
   if (SemaRef.isProfileEnforced(ProfileKind::Type, "class.base.init"))
     SemaRef.Diag(Field->getLocation(), diag::err_profile_rejected_uninit);
-  else if (SemaRef.isProfileApplied(ProfileKind::Type, "class.base.init"))
-    SemaRef.Diag(Field->getLocation(), diag::warn_profile_rejected_uninit);
 
   // Nothing to initialize.
   CXXMemberInit = nullptr;

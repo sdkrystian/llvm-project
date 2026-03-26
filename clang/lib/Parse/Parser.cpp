@@ -2378,13 +2378,12 @@ Parser::ParseModuleDecl(Sema::ModuleImportState &ImportState) {
   if (!Tok.isOneOf(tok::semi, tok::l_square))
     SkipUntil(tok::semi, SkipUntilFlags::StopBeforeMatch);
 
-  // P3589R2: Allow profiles::enforce/apply on module declarations.
+  // P3589R2: Allow profiles::enforce on module declarations.
   // Prohibit all other attributes.
   ParsedAttributes Attrs(AttrFactory);
   MaybeParseCXX11Attributes(Attrs);
   for (const ParsedAttr &AL : Attrs) {
-    if (AL.getParsedKind() == ParsedAttr::AT_ProfilesEnforce ||
-        AL.getParsedKind() == ParsedAttr::AT_ProfilesApply)
+    if (AL.getParsedKind() == ParsedAttr::AT_ProfilesEnforce)
       continue;
     if (AL.isRegularKeywordAttribute()) {
       Diag(AL.getLoc(), diag::err_keyword_not_module_attr) << AL;
@@ -2398,17 +2397,15 @@ Parser::ParseModuleDecl(Sema::ModuleImportState &ImportState) {
     }
   }
 
-  // Apply profile enforce/apply attrs before creating the module so
+  // Apply profile enforce attrs before creating the module so
   // CurProfileState reflects them when ActOnModuleDecl records on Module.
   for (const ParsedAttr &AL : Attrs) {
     if (AL.isInvalid())
       continue;
-    if (AL.getParsedKind() == ParsedAttr::AT_ProfilesEnforce ||
-        AL.getParsedKind() == ParsedAttr::AT_ProfilesApply) {
+    if (AL.getParsedKind() == ParsedAttr::AT_ProfilesEnforce) {
       if (AL.getNumArgs() > 0 && AL.isArgIdent(0)) {
         IdentifierInfo *II = AL.getArgAsIdent(0)->getIdentifierInfo();
-        Actions.applyProfileAttrToState(
-            II, AL.getParsedKind() == ParsedAttr::AT_ProfilesEnforce);
+        Actions.applyProfileAttrToState(II);
       }
     }
   }

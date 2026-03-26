@@ -4461,10 +4461,9 @@ void Parser::ParseProfileAttributeArgs(
     ProfileName =
         &Actions.getPreprocessor().getIdentifierTable().get(FullName);
 
-  // P3589R2 [decl.attr.enforce]: For enforce/apply, the profile-designator
+  // P3589R2 [decl.attr.enforce]: For enforce, the profile-designator
   // may include a parenthesized profile-argument-list.
-  if ((AttrName->isStr("enforce") || AttrName->isStr("apply")) &&
-      Tok.is(tok::l_paren)) {
+  if (AttrName->isStr("enforce") && Tok.is(tok::l_paren)) {
     BalancedDelimiterTracker ArgTracker(*this, tok::l_paren);
     ArgTracker.consumeOpen();
     SkipUntil(tok::r_paren, StopBeforeMatch);
@@ -4486,15 +4485,19 @@ void Parser::ParseProfileAttributeArgs(
       IdentifierInfo *Key = TryParseCXX11AttributeIdentifier(KeyLoc);
       if (Key && Tok.is(tok::colon)) {
         ConsumeToken();
-        if ((Key->isStr("justification") || Key->isStr("rule")) &&
-            Tok.is(tok::string_literal)) {
-          ExprResult Val = ParseStringLiteralExpression();
-          if (Val.isUsable()) {
-            if (Key->isStr("justification"))
-              JustificationExpr = Val.get();
-            else
-              RuleExpr = Val.get();
+        if (Key->isStr("justification") || Key->isStr("rule")) {
+          if (Tok.is(tok::string_literal)) {
+            ExprResult Val = ParseStringLiteralExpression();
+            if (Val.isUsable()) {
+              if (Key->isStr("justification"))
+                JustificationExpr = Val.get();
+              else
+                RuleExpr = Val.get();
+            } else {
+              SkipUntil(tok::comma, tok::r_paren, StopBeforeMatch);
+            }
           } else {
+            Diag(Tok.getLocation(), diag::err_expected) << "string literal";
             SkipUntil(tok::comma, tok::r_paren, StopBeforeMatch);
           }
         } else {
@@ -4598,7 +4601,7 @@ bool Parser::ParseCXX11AttributeArgs(
 
   // [[profiles::enforce/apply/suppress/require(...)]]
   if (ScopeName && ScopeName->isStr("profiles") &&
-      (AttrName->isStr("enforce") || AttrName->isStr("apply") ||
+      (AttrName->isStr("enforce") ||
        AttrName->isStr("suppress") || AttrName->isStr("require"))) {
     ParseProfileAttributeArgs(AttrName, AttrNameLoc, Attrs, EndLoc, ScopeName,
                               ScopeLoc, Form);

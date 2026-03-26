@@ -9944,10 +9944,6 @@ static void DiagnoseNarrowingInInitList(Sema &S,
       S.Diag(PostInit->getBeginLoc(), diag::err_profile_rejected_narrowing)
           << PreNarrowingType.getLocalUnqualifiedType()
           << T.getLocalUnqualifiedType();
-    else if (S.isProfileApplied(ProfileKind::Arithmetic, "dcl.init.list"))
-      S.Diag(PostInit->getBeginLoc(), diag::warn_profile_rejected_narrowing)
-          << PreNarrowingType.getLocalUnqualifiedType()
-          << T.getLocalUnqualifiedType();
   }
 
   SmallString<128> StaticCast;

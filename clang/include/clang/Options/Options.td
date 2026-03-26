@@ -2115,34 +2115,18 @@ def fsafety_profile_enforce_arithmetic : Flag<["-"], "fsafety-profile-enforce=ar
   HelpText<"Enforce the std::arithmetic safety profile">,
   Visibility<[ClangOption, CC1Option]>,
   MarshallingInfoFlag<LangOpts<"ProfileEnforceArithmetic">>;
-def fsafety_profile_apply_arithmetic : Flag<["-"], "fsafety-profile-apply=arithmetic">, Group<f_Group>,
-  HelpText<"Apply the std::arithmetic safety profile">,
-  Visibility<[ClangOption, CC1Option]>,
-  MarshallingInfoFlag<LangOpts<"ProfileApplyArithmetic">>;
 def fsafety_profile_enforce_lifetime : Flag<["-"], "fsafety-profile-enforce=lifetime">, Group<f_Group>,
   HelpText<"Enforce the std::lifetime safety profile">,
   Visibility<[ClangOption, CC1Option]>,
   MarshallingInfoFlag<LangOpts<"ProfileEnforceLifetime">>;
-def fsafety_profile_apply_lifetime : Flag<["-"], "fsafety-profile-apply=lifetime">, Group<f_Group>,
-  HelpText<"Apply the std::lifetime safety profile">,
-  Visibility<[ClangOption, CC1Option]>,
-  MarshallingInfoFlag<LangOpts<"ProfileApplyLifetime">>;
 def fsafety_profile_enforce_type : Flag<["-"], "fsafety-profile-enforce=type">, Group<f_Group>,
   HelpText<"Enforce the std::type safety profile">,
   Visibility<[ClangOption, CC1Option]>,
   MarshallingInfoFlag<LangOpts<"ProfileEnforceType">>;
-def fsafety_profile_apply_type : Flag<["-"], "fsafety-profile-apply=type">, Group<f_Group>,
-  HelpText<"Apply the std::type safety profile">,
-  Visibility<[ClangOption, CC1Option]>,
-  MarshallingInfoFlag<LangOpts<"ProfileApplyType">>;
 def fsafety_profile_enforce_bounds : Flag<["-"], "fsafety-profile-enforce=bounds">, Group<f_Group>,
   HelpText<"Enforce the std::bounds safety profile">,
   Visibility<[ClangOption, CC1Option]>,
   MarshallingInfoFlag<LangOpts<"ProfileEnforceBounds">>;
-def fsafety_profile_apply_bounds : Flag<["-"], "fsafety-profile-apply=bounds">, Group<f_Group>,
-  HelpText<"Apply the std::bounds safety profile">,
-  Visibility<[ClangOption, CC1Option]>,
-  MarshallingInfoFlag<LangOpts<"ProfileApplyBounds">>;
 def fconstexpr_backtrace_limit_EQ : Joined<["-"], "fconstexpr-backtrace-limit=">, Group<f_Group>,
   Visibility<[ClangOption, CC1Option]>,
   HelpText<"Set the maximum number of entries to print in a constexpr evaluation backtrace (0 = no limit)">,

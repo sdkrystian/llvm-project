@@ -5,8 +5,8 @@
 // RUN: %clang_cc1 -emit-llvm -std=c++20 -o - %s -DNO_ATTRS | FileCheck %s --check-prefixes=CHECK,DISABLED
 
 #ifndef NO_ATTRS
-[[profiles::apply(std::bounds)]];
-[[profiles::apply(std::lifetime)]];
+[[profiles::enforce(std::bounds)]];
+[[profiles::enforce(std::lifetime)]];
 #endif
 
 struct S {
@@ -22,8 +22,10 @@ struct S {
 // ENABLED:      profile.cont:
 // DISABLED-NOT: profile.trap
 int test_bounds(unsigned i) {
+  [[profiles::suppress(std::bounds, rule: "conv.array")]] {
   int arr[4] = {};
   return arr[i];
+  }
 }
 
 // CHECK-LABEL: define {{.*}}test_null_deref

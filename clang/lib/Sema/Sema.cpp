@@ -329,23 +329,15 @@ Sema::Sema(Preprocessor &pp, ASTContext &ctxt, ASTConsumer &consumer,
 
   if (LangOpts.ProfileEnforceArithmetic)
     CurProfileState.setMode(ProfileKind::Arithmetic, ProfileMode::Enforced);
-  else if (LangOpts.ProfileApplyArithmetic)
-    CurProfileState.setMode(ProfileKind::Arithmetic, ProfileMode::Applied);
 
   if (LangOpts.ProfileEnforceLifetime)
     CurProfileState.setMode(ProfileKind::Lifetime, ProfileMode::Enforced);
-  else if (LangOpts.ProfileApplyLifetime)
-    CurProfileState.setMode(ProfileKind::Lifetime, ProfileMode::Applied);
 
   if (LangOpts.ProfileEnforceType)
     CurProfileState.setMode(ProfileKind::Type, ProfileMode::Enforced);
-  else if (LangOpts.ProfileApplyType)
-    CurProfileState.setMode(ProfileKind::Type, ProfileMode::Applied);
 
   if (LangOpts.ProfileEnforceBounds)
     CurProfileState.setMode(ProfileKind::Bounds, ProfileMode::Enforced);
-  else if (LangOpts.ProfileApplyBounds)
-    CurProfileState.setMode(ProfileKind::Bounds, ProfileMode::Applied);
 
   LoadedExternalKnownNamespaces = false;
   for (unsigned I = 0; I != NSAPI::NumNSNumberLiteralMethods; ++I)
@@ -2556,20 +2548,20 @@ void Sema::setProfileSuppressedByName(IdentifierInfo *ProfileName) {
     CurProfileState.setSuppressed(*PK);
 }
 
-void Sema::applyProfileAttrToState(IdentifierInfo *ProfileName,
-                                   bool IsEnforce) {
+void Sema::applyProfileAttrToState(IdentifierInfo *ProfileName) {
   if (!ProfileName)
     return;
   llvm::StringRef Name = ProfileName->getName();
   Name.consume_front("std::");
-  ProfileMode Mode = IsEnforce ? ProfileMode::Enforced : ProfileMode::Applied;
 
-  auto Apply = [&](ProfileKind PK) { CurProfileState.setMode(PK, Mode); };
+  auto SetEnforced = [&](ProfileKind PK) {
+    CurProfileState.setMode(PK, ProfileMode::Enforced);
+  };
 
   if (Name == "strict") {
-    Apply(ProfileKind::Type);
-    Apply(ProfileKind::Bounds);
-    Apply(ProfileKind::Lifetime);
+    SetEnforced(ProfileKind::Type);
+    SetEnforced(ProfileKind::Bounds);
+    SetEnforced(ProfileKind::Lifetime);
     return;
   }
   auto PK =
@@ -2580,7 +2572,7 @@ void Sema::applyProfileAttrToState(IdentifierInfo *ProfileName,
           .Case("arithmetic", ProfileKind::Arithmetic)
           .Default(std::nullopt);
   if (PK)
-    Apply(*PK);
+    SetEnforced(*PK);
 }
 
 void Sema::checkProfileRequireOnImport(const ParsedAttr &AL,

@@ -8,11 +8,11 @@
 //   the detection_mode value corresponding to P."
 //   detection_mode::bounds == 1.
 //
-// The bounds profile also rejects array-to-pointer decay at Sema level when
-// enforced, so we use 'apply' mode (DefaultIgnore warnings) to let the code
-// compile to IR while still emitting runtime bounds checks.
+// Array subscripts on C arrays involve array-to-pointer decay, which is
+// profile-rejected at the Sema level.  We suppress that specific rule via
+// rule: "conv.array" so that the runtime bounds checks can still be tested.
 //
-// RUN: %clang_cc1 -emit-llvm -std=c++20 -fsafety-profile-apply=bounds -o - %s | FileCheck %s --check-prefixes=CHECK,ENABLED
+// RUN: %clang_cc1 -emit-llvm -std=c++20 -fsafety-profile-enforce=bounds -o - %s | FileCheck %s --check-prefixes=CHECK,ENABLED
 // RUN: %clang_cc1 -emit-llvm -std=c++20 -o - %s | FileCheck %s --check-prefixes=CHECK,DISABLED
 
 // =====================================================================
@@ -31,8 +31,10 @@
 // ENABLED:      profile.cont:
 // DISABLED-NOT: profile.trap
 int test_signed(int i) {
+  [[profiles::suppress(std::bounds, rule: "conv.array")]] {
   int arr[10] = {};
   return arr[i];
+  }
 }
 
 // =====================================================================
@@ -50,8 +52,10 @@ int test_signed(int i) {
 // ENABLED:      profile.cont:
 // DISABLED-NOT: profile.trap
 int test_unsigned(unsigned i) {
+  [[profiles::suppress(std::bounds, rule: "conv.array")]] {
   int arr[4] = {};
   return arr[i];
+  }
 }
 
 // =====================================================================
@@ -64,8 +68,10 @@ int test_unsigned(unsigned i) {
 // ENABLED-NEXT: call void @_ZSt17profile_violationSt14detection_mode(i32 1)
 // DISABLED-NOT: profile.trap
 void test_write(int val, unsigned i) {
+  [[profiles::suppress(std::bounds, rule: "conv.array")]] {
   int arr[8] = {};
   arr[i] = val;
+  }
 }
 
 // =====================================================================
@@ -77,8 +83,10 @@ void test_write(int val, unsigned i) {
 // ENABLED:      @_ZSt17profile_violationSt14detection_mode(i32 1)
 // DISABLED-NOT: profile.trap
 double test_double(int i) {
+  [[profiles::suppress(std::bounds, rule: "conv.array")]] {
   double arr[5] = {};
   return arr[i];
+  }
 }
 
 // CHECK-LABEL: define {{.*}}test_char
@@ -86,8 +94,10 @@ double test_double(int i) {
 // ENABLED:      @_ZSt17profile_violationSt14detection_mode(i32 1)
 // DISABLED-NOT: profile.trap
 char test_char(int i) {
+  [[profiles::suppress(std::bounds, rule: "conv.array")]] {
   char arr[16] = {};
   return arr[i];
+  }
 }
 
 struct S { int x; int y; };
@@ -97,8 +107,10 @@ struct S { int x; int y; };
 // ENABLED:      @_ZSt17profile_violationSt14detection_mode(i32 1)
 // DISABLED-NOT: profile.trap
 int test_struct(int i) {
+  [[profiles::suppress(std::bounds, rule: "conv.array")]] {
   S arr[3] = {};
   return arr[i].x;
+  }
 }
 
 // =====================================================================
@@ -110,8 +122,10 @@ int test_struct(int i) {
 // ENABLED:      profile.trap:
 // DISABLED-NOT: profile.trap
 int test_size_one(int i) {
+  [[profiles::suppress(std::bounds, rule: "conv.array")]] {
   int arr[1] = {};
   return arr[i];
+  }
 }
 
 // =====================================================================
@@ -125,9 +139,11 @@ int test_size_one(int i) {
 // ENABLED:      profile.cont{{[0-9]+}}:
 // DISABLED-NOT: profile.trap
 int test_multi(int i, int j) {
+  [[profiles::suppress(std::bounds, rule: "conv.array")]] {
   int a[5] = {};
   int b[3] = {};
   return a[i] + b[j];
+  }
 }
 
 // =====================================================================
@@ -139,11 +155,13 @@ int test_multi(int i, int j) {
 // ENABLED:      @_ZSt17profile_violationSt14detection_mode(i32 1)
 // DISABLED-NOT: profile.trap
 int test_loop(int n) {
+  [[profiles::suppress(std::bounds, rule: "conv.array")]] {
   int arr[100] = {};
   int sum = 0;
   for (int i = 0; i < n; ++i)
     sum += arr[i];
   return sum;
+  }
 }
 
 // =====================================================================
@@ -165,9 +183,10 @@ int test_pointer(int *p, int i) {
 // ENABLED-NOT: profile.trap
 // ENABLED:     ret i32
 int test_suppress_stmt(int i) {
+  [[profiles::suppress(std::bounds)]] {
   int arr[10] = {};
-  [[profiles::suppress(std::bounds)]]
   return arr[i];
+  }
 }
 
 // =====================================================================
@@ -183,12 +202,14 @@ int test_suppress_stmt(int i) {
 // ENABLED-NOT:  profile.trap
 // ENABLED:      ret i32
 int test_suppress_block(int i, int j) {
+  [[profiles::suppress(std::bounds, rule: "conv.array")]] {
   int arr[10] = {};
   int x = arr[i];
   [[profiles::suppress(std::bounds)]] {
     x += arr[j];
   }
   return x;
+  }
 }
 
 // =====================================================================
@@ -202,11 +223,13 @@ int test_suppress_block(int i, int j) {
 // ENABLED:      profile.trap
 // ENABLED:      @_ZSt17profile_violationSt14detection_mode(i32 1)
 int test_suppress_scope(int i, int j) {
+  [[profiles::suppress(std::bounds, rule: "conv.array")]] {
   int arr[10] = {};
   [[profiles::suppress(std::bounds)]] {
     (void)arr[i];
   }
   return arr[j];
+  }
 }
 
 // =====================================================================
@@ -217,6 +240,8 @@ int test_suppress_scope(int i, int j) {
 // DISABLED-NOT: profile.trap
 // DISABLED:     ret i32
 int test_no_profile(int i) {
+  [[profiles::suppress(std::bounds, rule: "conv.array")]] {
   int arr[10] = {};
   return arr[i];
+  }
 }

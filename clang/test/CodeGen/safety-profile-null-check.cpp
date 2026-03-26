@@ -14,7 +14,6 @@
 //   profiles::suppress(P)."
 //
 // RUN: %clang_cc1 -emit-llvm -std=c++20 -fsafety-profile-enforce=lifetime -o - %s | FileCheck %s --check-prefixes=CHECK,ENABLED
-// RUN: %clang_cc1 -emit-llvm -std=c++20 -fsafety-profile-apply=lifetime -o - %s | FileCheck %s --check-prefixes=CHECK,ENABLED
 // RUN: %clang_cc1 -emit-llvm -std=c++20 -o - %s | FileCheck %s --check-prefixes=CHECK,DISABLED
 
 struct S {
@@ -24,7 +23,7 @@ struct S {
 };
 
 // =====================================================================
-// §6.2: *p is profile-checked — both enforce and apply emit the check.
+// §6.2: *p is profile-checked — enforce emits the check.
 // detection_mode::lifetime == 2.
 // =====================================================================
 

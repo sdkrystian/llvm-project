@@ -14634,8 +14634,6 @@ void Sema::ActOnUninitializedDecl(Decl *RealDecl) {
         (Type->isScalarType() || Type.isPODType(Context))) {
       if (isProfileEnforced(ProfileKind::Type, "basic.life"))
         Diag(Var->getLocation(), diag::err_profile_rejected_uninit);
-      else if (isProfileApplied(ProfileKind::Type, "basic.life"))
-        Diag(Var->getLocation(), diag::warn_profile_rejected_uninit);
     }
 
     // In C, if the definition is const-qualified and has no initializer, it

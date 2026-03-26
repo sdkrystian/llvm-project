@@ -448,20 +448,12 @@ CodeGenModule::CodeGenModule(ASTContext &C,
 
   if (LangOpts.ProfileEnforceType)
     CurProfileState.setMode(ProfileKind::Type, ProfileMode::Enforced);
-  else if (LangOpts.ProfileApplyType)
-    CurProfileState.setMode(ProfileKind::Type, ProfileMode::Applied);
   if (LangOpts.ProfileEnforceBounds)
     CurProfileState.setMode(ProfileKind::Bounds, ProfileMode::Enforced);
-  else if (LangOpts.ProfileApplyBounds)
-    CurProfileState.setMode(ProfileKind::Bounds, ProfileMode::Applied);
   if (LangOpts.ProfileEnforceLifetime)
     CurProfileState.setMode(ProfileKind::Lifetime, ProfileMode::Enforced);
-  else if (LangOpts.ProfileApplyLifetime)
-    CurProfileState.setMode(ProfileKind::Lifetime, ProfileMode::Applied);
   if (LangOpts.ProfileEnforceArithmetic)
     CurProfileState.setMode(ProfileKind::Arithmetic, ProfileMode::Enforced);
-  else if (LangOpts.ProfileApplyArithmetic)
-    CurProfileState.setMode(ProfileKind::Arithmetic, ProfileMode::Applied);
 
   // Build C++20 Module initializers.
   // TODO: Add Microsoft here once we know the mangling required for the
@@ -7716,8 +7708,6 @@ void CodeGenModule::EmitTopLevelDecl(Decl *D) {
       };
       if (const auto *EA = dyn_cast<ProfilesEnforceAttr>(A))
         SetModes(EA->getProfileName(), ProfileMode::Enforced);
-      else if (const auto *AA = dyn_cast<ProfilesApplyAttr>(A))
-        SetModes(AA->getProfileName(), ProfileMode::Applied);
     }
     break;
   case Decl::Using:          // using X; [C++]

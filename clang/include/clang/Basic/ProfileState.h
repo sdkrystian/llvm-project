@@ -23,15 +23,14 @@ enum class ProfileKind : uint8_t {
 
 enum class ProfileMode : uint8_t {
   None = 0,
-  Applied = 1,
-  Enforced = 2,
+  Enforced = 1,
 };
 
 class ProfileState {
   static constexpr unsigned NumProfiles =
       static_cast<unsigned>(ProfileKind::NumProfiles);
 
-  // 2 bits per profile for mode (None/Applied/Enforced).
+  // 1 bit per profile for mode (None/Enforced).
   uint8_t Modes = 0;
   // 1 bit per profile for scope-local suppression.
   uint8_t Suppressed = 0;
@@ -42,13 +41,14 @@ public:
   ProfileState() = default;
 
   ProfileMode getMode(ProfileKind P) const {
-    return static_cast<ProfileMode>((Modes >> (idx(P) * 2)) & 0x3);
+    return ((Modes >> idx(P)) & 1) ? ProfileMode::Enforced : ProfileMode::None;
   }
 
   void setMode(ProfileKind P, ProfileMode M) {
-    unsigned shift = idx(P) * 2;
-    Modes = (Modes & ~(0x3 << shift)) |
-            (static_cast<uint8_t>(M) << shift);
+    if (M == ProfileMode::Enforced)
+      Modes |= (1u << idx(P));
+    else
+      Modes &= ~(1u << idx(P));
   }
 
   bool isSuppressed(ProfileKind P) const {
@@ -63,15 +63,11 @@ public:
   }
 
   bool isEnforced(ProfileKind P) const {
-    return getMode(P) == ProfileMode::Enforced && !isSuppressed(P);
-  }
-
-  bool isApplied(ProfileKind P) const {
-    return getMode(P) == ProfileMode::Applied && !isSuppressed(P);
+    return ((Modes >> idx(P)) & 1) && !isSuppressed(P);
   }
 
   bool isEnabled(ProfileKind P) const {
-    return getMode(P) != ProfileMode::None && !isSuppressed(P);
+    return isEnforced(P);
   }
 };
 

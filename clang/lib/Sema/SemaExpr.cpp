@@ -551,8 +551,6 @@ ExprResult Sema::DefaultFunctionArrayConversion(Expr *E, bool Diagnose) {
     if (getLangOpts().C99 || getLangOpts().CPlusPlus || E->isLValue()) {
       if (isProfileEnforced(ProfileKind::Bounds, "conv.array"))
         Diag(E->getExprLoc(), diag::err_profile_rejected_array_decay);
-      else if (isProfileApplied(ProfileKind::Bounds, "conv.array"))
-        Diag(E->getExprLoc(), diag::warn_profile_rejected_array_decay);
       ExprResult Res = ImpCastExprToType(E, Context.getArrayDecayedType(Ty),
                                          CK_ArrayToPointerDecay);
       if (Res.isInvalid())
@@ -722,9 +720,6 @@ ExprResult Sema::DefaultLvalueConversion(Expr *E) {
             !isUnionFieldInCommonInitialSequence(Context, FD)) {
           if (isProfileEnforced(ProfileKind::Type, "class.union.general"))
             Diag(ME->getMemberLoc(), diag::err_profile_rejected_union_access)
-                << FD;
-          else if (isProfileApplied(ProfileKind::Type, "class.union.general"))
-            Diag(ME->getMemberLoc(), diag::warn_profile_rejected_union_access)
                 << FD;
         }
       }
@@ -11659,8 +11654,6 @@ QualType Sema::CheckAdditionOperands(ExprResult &LHS, ExprResult &RHS,
 
   if (isProfileEnforced(ProfileKind::Bounds, "expr.add"))
     Diag(Loc, diag::err_profile_rejected_pointer_arithmetic);
-  else if (isProfileApplied(ProfileKind::Bounds, "expr.add"))
-    Diag(Loc, diag::warn_profile_rejected_pointer_arithmetic);
 
   if (!IExp->getType()->isIntegerType())
     return InvalidOperands(Loc, LHS, RHS);
@@ -11766,8 +11759,6 @@ QualType Sema::CheckSubtractionOperands(ExprResult &LHS, ExprResult &RHS,
   if (LHS.get()->getType()->isAnyPointerType()) {
     if (isProfileEnforced(ProfileKind::Bounds, "expr.sub"))
       Diag(Loc, diag::err_profile_rejected_pointer_arithmetic);
-    else if (isProfileApplied(ProfileKind::Bounds, "expr.sub"))
-      Diag(Loc, diag::warn_profile_rejected_pointer_arithmetic);
 
     QualType lpointee = LHS.get()->getType()->getPointeeType();
 
@@ -16207,8 +16198,6 @@ ExprResult Sema::CreateBuiltinUnaryOp(SourceLocation OpLoc,
       if (!resultType.isNull() && Input.get()->getType()->isPointerType()) {
         if (isProfileEnforced(ProfileKind::Bounds, "expr.pre.incr"))
           Diag(OpLoc, diag::err_profile_rejected_pointer_arithmetic);
-        else if (isProfileApplied(ProfileKind::Bounds, "expr.pre.incr"))
-          Diag(OpLoc, diag::warn_profile_rejected_pointer_arithmetic);
       }
       if (!resultType.isNull() && isProfileEnabled(ProfileKind::Type, "class.union.general")) {
         if (auto *ME = dyn_cast<MemberExpr>(
@@ -16219,10 +16208,6 @@ ExprResult Sema::CreateBuiltinUnaryOp(SourceLocation OpLoc,
               if (isProfileEnforced(ProfileKind::Type, "class.union.general"))
                 Diag(ME->getMemberLoc(),
                      diag::err_profile_rejected_union_access)
-                    << FD;
-              else if (isProfileApplied(ProfileKind::Type, "class.union.general"))
-                Diag(ME->getMemberLoc(),
-                     diag::warn_profile_rejected_union_access)
                     << FD;
             }
           }
@@ -17205,8 +17190,6 @@ ExprResult Sema::BuildVAArgExpr(SourceLocation BuiltinLoc,
                                 SourceLocation RPLoc) {
   if (isProfileEnforced(ProfileKind::Type, "cstdarg.syn"))
     Diag(BuiltinLoc, diag::err_profile_rejected_va_arg);
-  else if (isProfileApplied(ProfileKind::Type, "cstdarg.syn"))
-    Diag(BuiltinLoc, diag::warn_profile_rejected_va_arg);
 
   Expr *OrigExpr = E;
   bool IsMS = false;
