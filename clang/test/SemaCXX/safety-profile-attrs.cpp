@@ -14,8 +14,8 @@
 [[profiles::apply(std::arithmetic)]] int g2; // expected-error {{'profiles::apply' attribute only applies to empty declarations}}
 
 // Unknown profile name
-[[profiles::enforce(std::nonexistent)]]; // expected-error {{unknown safety profile 'nonexistent'}}
-[[profiles::apply(std::nonexistent)]]; // expected-error {{unknown safety profile 'nonexistent'}}
+[[profiles::enforce(std::nonexistent)]]; // expected-error {{unknown safety profile 'std::nonexistent'}}
+[[profiles::apply(std::nonexistent)]]; // expected-error {{unknown safety profile 'std::nonexistent'}}
 
 // First-decl check fires (and preempts the conflict check) because
 // the non-empty declarations above are non-profile declarations.

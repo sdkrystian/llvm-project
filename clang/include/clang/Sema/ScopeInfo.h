@@ -82,10 +82,13 @@ public:
   /// Profile state at the beginning of the compound statement, prior to
   /// any profile attribute.
   ProfileState InitialProfileState;
+  llvm::SmallVector<std::pair<ProfileKind, std::string>, 2>
+      InitialSuppressedRules;
 
-  CompoundScopeInfo(bool IsStmtExpr, FPOptions FPO, ProfileState PS)
+  CompoundScopeInfo(bool IsStmtExpr, FPOptions FPO, ProfileState PS,
+                    llvm::SmallVector<std::pair<ProfileKind, std::string>, 2> SR)
       : IsStmtExpr(IsStmtExpr), InitialFPFeatures(FPO),
-        InitialProfileState(PS) {}
+        InitialProfileState(PS), InitialSuppressedRules(std::move(SR)) {}
 
   void setHasEmptyLoopBodies() {
     HasEmptyLoopBodies = true;

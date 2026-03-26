@@ -14123,6 +14123,8 @@ def err_profile_enforce_not_first_decl : Error<
   "profile attribute must appear on the lexically first declaration in the translation unit">;
 def err_profile_enforce_apply_conflict : Error<
   "cannot both enforce and apply profile %0">;
+def err_profile_enforce_duplicate_conflict : Error<
+  "conflicting profile enforcement attributes for %0">;
 def err_profile_rejected_narrowing : Error<
   "narrowing conversion from %0 to %1 is not allowed when profile std::arithmetic is enforced">;
 def warn_profile_rejected_narrowing : Warning<

@@ -4431,17 +4431,89 @@ void Parser::ParseProfileAttributeArgs(
     Diag(Tok, diag::err_expected) << tok::l_paren;
     return;
   }
-  // Parse profile-name: optionally 'std' '::' followed by identifier.
-  // We only store the final identifier (e.g. "arithmetic").
+
+  // P3589R2 [dcl.attr.grammar]: Parse profile-name as
+  //   identifier (:: identifier)*
   SourceLocation NameLoc;
   IdentifierInfo *ProfileName = TryParseCXX11AttributeIdentifier(NameLoc);
-  if (ProfileName && ProfileName->isStr("std") && !ExpectAndConsume(tok::coloncolon))
-    ProfileName = TryParseCXX11AttributeIdentifier(NameLoc);
-
   if (!ProfileName) {
     Diag(Tok.getLocation(), diag::err_expected) << tok::identifier;
     SkipUntil(tok::r_paren);
     return;
+  }
+
+  std::string FullName(ProfileName->getName());
+  while (Tok.is(tok::coloncolon)) {
+    ConsumeToken();
+    SourceLocation NextLoc;
+    IdentifierInfo *Next = TryParseCXX11AttributeIdentifier(NextLoc);
+    if (!Next) {
+      Diag(Tok.getLocation(), diag::err_expected) << tok::identifier;
+      SkipUntil(tok::r_paren);
+      return;
+    }
+    FullName += "::";
+    FullName += Next->getName();
+    NameLoc = NextLoc;
+  }
+
+  if (FullName != ProfileName->getName())
+    ProfileName =
+        &Actions.getPreprocessor().getIdentifierTable().get(FullName);
+
+  // P3589R2 [decl.attr.enforce]: For enforce/apply, the profile-designator
+  // may include a parenthesized profile-argument-list.
+  if ((AttrName->isStr("enforce") || AttrName->isStr("apply")) &&
+      Tok.is(tok::l_paren)) {
+    BalancedDelimiterTracker ArgTracker(*this, tok::l_paren);
+    ArgTracker.consumeOpen();
+    SkipUntil(tok::r_paren, StopBeforeMatch);
+    ArgTracker.consumeClose();
+  }
+
+  IdentifierLoc *ProfileNameLoc =
+      ::new (Actions.getASTContext()) IdentifierLoc(NameLoc, ProfileName);
+
+  // P3589R2 [decl.attr.suppress]: For suppress, parse optional
+  //   , profile-argument-list
+  // storing justification: and rule: as Args[1] and Args[2].
+  Expr *JustificationExpr = nullptr;
+  Expr *RuleExpr = nullptr;
+  if (AttrName->isStr("suppress")) {
+    while (Tok.is(tok::comma)) {
+      ConsumeToken();
+      SourceLocation KeyLoc;
+      IdentifierInfo *Key = TryParseCXX11AttributeIdentifier(KeyLoc);
+      if (Key && Tok.is(tok::colon)) {
+        ConsumeToken();
+        if ((Key->isStr("justification") || Key->isStr("rule")) &&
+            Tok.is(tok::string_literal)) {
+          ExprResult Val = ParseStringLiteralExpression();
+          if (Val.isUsable()) {
+            if (Key->isStr("justification"))
+              JustificationExpr = Val.get();
+            else
+              RuleExpr = Val.get();
+          } else {
+            SkipUntil(tok::comma, tok::r_paren, StopBeforeMatch);
+          }
+        } else {
+          SkipUntil(tok::comma, tok::r_paren, StopBeforeMatch);
+        }
+      } else {
+        SkipUntil(tok::comma, tok::r_paren, StopBeforeMatch);
+      }
+    }
+  }
+
+  ArgsVector Args;
+  Args.push_back(ProfileNameLoc);
+  if (JustificationExpr || RuleExpr) {
+    Args.push_back(JustificationExpr
+                       ? static_cast<ArgsUnion>(JustificationExpr)
+                       : static_cast<ArgsUnion>(static_cast<Expr *>(nullptr)));
+    if (RuleExpr)
+      Args.push_back(RuleExpr);
   }
 
   if (T.consumeClose()) {
@@ -4449,11 +4521,7 @@ void Parser::ParseProfileAttributeArgs(
     return;
   }
 
-  IdentifierLoc *ProfileNameLoc = ::new (Actions.getASTContext())
-      IdentifierLoc(NameLoc, ProfileName);
-  ArgsVector Args = {ProfileNameLoc};
-  Attrs.addNew(AttrName,
-               SourceRange(ScopeLoc, T.getCloseLocation()),
+  Attrs.addNew(AttrName, SourceRange(ScopeLoc, T.getCloseLocation()),
                AttributeScopeInfo(ScopeName, ScopeLoc, SourceLocation{}),
                Args.data(), Args.size(), Form);
 }

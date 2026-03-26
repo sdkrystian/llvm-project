@@ -941,16 +941,29 @@ public:
   /// Silently does nothing if \p ProfileName is not a recognized profile.
   void setProfileSuppressedByName(IdentifierInfo *ProfileName);
 
+  /// P3589R2 [decl.attr.suppress] para 4: suppress a single rule of a profile.
+  void addRuleSuppression(ProfileKind P, llvm::StringRef Rule);
+  bool isRuleSuppressed(ProfileKind P, llvm::StringRef Rule) const;
+
+  /// Per-rule profile suppressions active in the current scope.
+  llvm::SmallVector<std::pair<ProfileKind, std::string>, 2> CurSuppressedRules;
+
   bool isProfileDiagnosticSuppressed() const;
 
-  bool isProfileEnforced(ProfileKind P) const {
-    return CurProfileState.isEnforced(P) && !isProfileDiagnosticSuppressed();
+  bool isProfileEnforced(ProfileKind P, llvm::StringRef Rule = "") const {
+    if (!CurProfileState.isEnforced(P) || isProfileDiagnosticSuppressed())
+      return false;
+    return Rule.empty() || !isRuleSuppressed(P, Rule);
   }
-  bool isProfileApplied(ProfileKind P) const {
-    return CurProfileState.isApplied(P) && !isProfileDiagnosticSuppressed();
+  bool isProfileApplied(ProfileKind P, llvm::StringRef Rule = "") const {
+    if (!CurProfileState.isApplied(P) || isProfileDiagnosticSuppressed())
+      return false;
+    return Rule.empty() || !isRuleSuppressed(P, Rule);
   }
-  bool isProfileEnabled(ProfileKind P) const {
-    return CurProfileState.isEnabled(P) && !isProfileDiagnosticSuppressed();
+  bool isProfileEnabled(ProfileKind P, llvm::StringRef Rule = "") const {
+    if (!CurProfileState.isEnabled(P) || isProfileDiagnosticSuppressed())
+      return false;
+    return Rule.empty() || !isRuleSuppressed(P, Rule);
   }
 
   DiagnosticsEngine &getDiagnostics() const { return Diags; }

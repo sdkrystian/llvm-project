@@ -549,9 +549,9 @@ ExprResult Sema::DefaultFunctionArrayConversion(Expr *E, bool Diagnose) {
     // T" can be converted to an rvalue of type "pointer to T".
     //
     if (getLangOpts().C99 || getLangOpts().CPlusPlus || E->isLValue()) {
-      if (isProfileEnforced(ProfileKind::Bounds))
+      if (isProfileEnforced(ProfileKind::Bounds, "conv.array"))
         Diag(E->getExprLoc(), diag::err_profile_rejected_array_decay);
-      else if (isProfileApplied(ProfileKind::Bounds))
+      else if (isProfileApplied(ProfileKind::Bounds, "conv.array"))
         Diag(E->getExprLoc(), diag::warn_profile_rejected_array_decay);
       ExprResult Res = ImpCastExprToType(E, Context.getArrayDecayedType(Ty),
                                          CK_ArrayToPointerDecay);
@@ -715,15 +715,15 @@ ExprResult Sema::DefaultLvalueConversion(Expr *E) {
   // the LHS of an assignment and not in the common initial sequence is
   // profile-rejected by std::type. Checking at lvalue-to-rvalue conversion
   // correctly excludes writes (simple and compound assignment LHS).
-  if (isProfileEnabled(ProfileKind::Type)) {
+  if (isProfileEnabled(ProfileKind::Type, "class.union.general")) {
     if (auto *ME = dyn_cast<MemberExpr>(E->IgnoreParenImpCasts())) {
       if (auto *FD = dyn_cast<FieldDecl>(ME->getMemberDecl())) {
         if (FD->getParent()->isUnion() &&
             !isUnionFieldInCommonInitialSequence(Context, FD)) {
-          if (isProfileEnforced(ProfileKind::Type))
+          if (isProfileEnforced(ProfileKind::Type, "class.union.general"))
             Diag(ME->getMemberLoc(), diag::err_profile_rejected_union_access)
                 << FD;
-          else if (isProfileApplied(ProfileKind::Type))
+          else if (isProfileApplied(ProfileKind::Type, "class.union.general"))
             Diag(ME->getMemberLoc(), diag::warn_profile_rejected_union_access)
                 << FD;
         }
@@ -11657,9 +11657,9 @@ QualType Sema::CheckAdditionOperands(ExprResult &LHS, ExprResult &RHS,
   }
   assert(PExp->getType()->isAnyPointerType());
 
-  if (isProfileEnforced(ProfileKind::Bounds))
+  if (isProfileEnforced(ProfileKind::Bounds, "expr.add"))
     Diag(Loc, diag::err_profile_rejected_pointer_arithmetic);
-  else if (isProfileApplied(ProfileKind::Bounds))
+  else if (isProfileApplied(ProfileKind::Bounds, "expr.add"))
     Diag(Loc, diag::warn_profile_rejected_pointer_arithmetic);
 
   if (!IExp->getType()->isIntegerType())
@@ -11764,9 +11764,9 @@ QualType Sema::CheckSubtractionOperands(ExprResult &LHS, ExprResult &RHS,
 
   // Either ptr - int   or   ptr - ptr.
   if (LHS.get()->getType()->isAnyPointerType()) {
-    if (isProfileEnforced(ProfileKind::Bounds))
+    if (isProfileEnforced(ProfileKind::Bounds, "expr.sub"))
       Diag(Loc, diag::err_profile_rejected_pointer_arithmetic);
-    else if (isProfileApplied(ProfileKind::Bounds))
+    else if (isProfileApplied(ProfileKind::Bounds, "expr.sub"))
       Diag(Loc, diag::warn_profile_rejected_pointer_arithmetic);
 
     QualType lpointee = LHS.get()->getType()->getPointeeType();
@@ -16205,22 +16205,22 @@ ExprResult Sema::CreateBuiltinUnaryOp(SourceLocation OpLoc,
                                          Opc == UO_PreInc || Opc == UO_PostInc,
                                          Opc == UO_PreInc || Opc == UO_PreDec);
       if (!resultType.isNull() && Input.get()->getType()->isPointerType()) {
-        if (isProfileEnforced(ProfileKind::Bounds))
+        if (isProfileEnforced(ProfileKind::Bounds, "expr.pre.incr"))
           Diag(OpLoc, diag::err_profile_rejected_pointer_arithmetic);
-        else if (isProfileApplied(ProfileKind::Bounds))
+        else if (isProfileApplied(ProfileKind::Bounds, "expr.pre.incr"))
           Diag(OpLoc, diag::warn_profile_rejected_pointer_arithmetic);
       }
-      if (!resultType.isNull() && isProfileEnabled(ProfileKind::Type)) {
+      if (!resultType.isNull() && isProfileEnabled(ProfileKind::Type, "class.union.general")) {
         if (auto *ME = dyn_cast<MemberExpr>(
                 Input.get()->IgnoreParenImpCasts())) {
           if (auto *FD = dyn_cast<FieldDecl>(ME->getMemberDecl())) {
             if (FD->getParent()->isUnion() &&
                 !isUnionFieldInCommonInitialSequence(Context, FD)) {
-              if (isProfileEnforced(ProfileKind::Type))
+              if (isProfileEnforced(ProfileKind::Type, "class.union.general"))
                 Diag(ME->getMemberLoc(),
                      diag::err_profile_rejected_union_access)
                     << FD;
-              else if (isProfileApplied(ProfileKind::Type))
+              else if (isProfileApplied(ProfileKind::Type, "class.union.general"))
                 Diag(ME->getMemberLoc(),
                      diag::warn_profile_rejected_union_access)
                     << FD;
@@ -17203,9 +17203,9 @@ ExprResult Sema::ActOnVAArg(SourceLocation BuiltinLoc, Expr *E, ParsedType Ty,
 ExprResult Sema::BuildVAArgExpr(SourceLocation BuiltinLoc,
                                 Expr *E, TypeSourceInfo *TInfo,
                                 SourceLocation RPLoc) {
-  if (isProfileEnforced(ProfileKind::Type))
+  if (isProfileEnforced(ProfileKind::Type, "cstdarg.syn"))
     Diag(BuiltinLoc, diag::err_profile_rejected_va_arg);
-  else if (isProfileApplied(ProfileKind::Type))
+  else if (isProfileApplied(ProfileKind::Type, "cstdarg.syn"))
     Diag(BuiltinLoc, diag::warn_profile_rejected_va_arg);
 
   Expr *OrigExpr = E;

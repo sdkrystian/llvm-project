@@ -5452,10 +5452,16 @@ static void handleSuppressAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
                               DiagnosticIdentifiers.size()));
 }
 
+static llvm::StringRef stripStdProfilePrefix(llvm::StringRef Name) {
+  Name.consume_front("std::");
+  return Name;
+}
+
 static std::optional<ProfileKind> resolveProfileKind(IdentifierInfo *II) {
   if (!II)
     return std::nullopt;
-  return llvm::StringSwitch<std::optional<ProfileKind>>(II->getName())
+  return llvm::StringSwitch<std::optional<ProfileKind>>(
+             stripStdProfilePrefix(II->getName()))
       .Case("type", ProfileKind::Type)
       .Case("bounds", ProfileKind::Bounds)
       .Case("lifetime", ProfileKind::Lifetime)
@@ -5463,13 +5469,12 @@ static std::optional<ProfileKind> resolveProfileKind(IdentifierInfo *II) {
       .Default(std::nullopt);
 }
 
-// P3081R2: std::strict expands to type+bounds+lifetime.
 static bool
 resolveProfileKinds(IdentifierInfo *II,
                     SmallVectorImpl<ProfileKind> &Profiles) {
   if (!II)
     return false;
-  if (II->isStr("strict")) {
+  if (stripStdProfilePrefix(II->getName()) == "strict") {
     Profiles.push_back(ProfileKind::Type);
     Profiles.push_back(ProfileKind::Bounds);
     Profiles.push_back(ProfileKind::Lifetime);
@@ -5514,6 +5519,21 @@ static void handleProfilesEnforceAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
     if (S.getCurProfileState().getMode(PK) == ProfileMode::Applied) {
       S.Diag(AL.getLoc(), diag::err_profile_enforce_apply_conflict) << II;
       return;
+    }
+  }
+  // P3589R2 [decl.attr.enforce] para 3: repeated enforce for the same
+  // profile is only permitted if the designators are identical.  Check
+  // only against other source-level enforce attrs (not CLI defaults).
+  for (const Decl *Prev : S.CurContext->decls()) {
+    if (Prev == D || !isa<EmptyDecl>(Prev))
+      continue;
+    if (const auto *EA = Prev->getAttr<ProfilesEnforceAttr>()) {
+      llvm::StringRef PrevBase = stripStdProfilePrefix(EA->getProfileName()->getName());
+      llvm::StringRef CurBase = stripStdProfilePrefix(II->getName());
+      if (PrevBase == CurBase && EA->getProfileName()->getName() != II->getName()) {
+        S.Diag(AL.getLoc(), diag::err_profile_enforce_duplicate_conflict) << II;
+        return;
+      }
     }
   }
   for (ProfileKind PK : Profiles)
@@ -7977,9 +7997,13 @@ ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D, const ParsedAttr &AL,
   case ParsedAttr::AT_ProfilesApply:
     handleProfilesApplyAttr(S, D, AL);
     break;
-  case ParsedAttr::AT_ProfilesSuppress:
-    // profiles::suppress on a decl is a no-op (it only matters on statements)
+  case ParsedAttr::AT_ProfilesSuppress: {
+    IdentifierInfo *II = AL.getArgAsIdent(0)->getIdentifierInfo();
+    llvm::StringRef Base = stripStdProfilePrefix(II->getName());
+    if (Base != "strict" && !resolveProfileKind(II))
+      S.Diag(AL.getLoc(), diag::err_profile_unknown) << II;
     break;
+  }
   case ParsedAttr::AT_Owner:
   case ParsedAttr::AT_Pointer:
     handleLifetimeCategoryAttr(S, D, AL);

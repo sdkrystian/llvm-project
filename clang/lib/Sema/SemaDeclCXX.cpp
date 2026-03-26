@@ -5143,9 +5143,9 @@ BuildImplicitMemberInitializer(Sema &SemaRef, CXXConstructorDecl *Constructor,
   // initialization, the expression is profile-rejected by std::type.
   // Copy/move constructors are excluded by the paper's wording and are already
   // handled earlier in this function (IIK_Copy/IIK_Move paths return at L5070).
-  if (SemaRef.isProfileEnforced(ProfileKind::Type))
+  if (SemaRef.isProfileEnforced(ProfileKind::Type, "class.base.init"))
     SemaRef.Diag(Field->getLocation(), diag::err_profile_rejected_uninit);
-  else if (SemaRef.isProfileApplied(ProfileKind::Type))
+  else if (SemaRef.isProfileApplied(ProfileKind::Type, "class.base.init"))
     SemaRef.Diag(Field->getLocation(), diag::warn_profile_rejected_uninit);
 
   // Nothing to initialize.

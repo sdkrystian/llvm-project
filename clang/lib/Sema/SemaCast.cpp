@@ -360,7 +360,7 @@ CastsAwayConstness(Sema &Self, QualType SrcType, QualType DestType,
 
 static void CheckProfileReinterpretCast(Sema &S, SourceLocation OpLoc,
                                         QualType SrcType, QualType DestType) {
-  if (!S.isProfileEnabled(ProfileKind::Type))
+  if (!S.isProfileEnabled(ProfileKind::Type, "expr.reinterpret.cast"))
     return;
 
   bool Allowed = false;
@@ -377,16 +377,16 @@ static void CheckProfileReinterpretCast(Sema &S, SourceLocation OpLoc,
     Allowed = true;
 
   if (!Allowed) {
-    if (S.isProfileEnforced(ProfileKind::Type))
+    if (S.isProfileEnforced(ProfileKind::Type, "expr.reinterpret.cast"))
       S.Diag(OpLoc, diag::err_profile_rejected_reinterpret_cast);
-    else if (S.isProfileApplied(ProfileKind::Type))
+    else if (S.isProfileApplied(ProfileKind::Type, "expr.reinterpret.cast"))
       S.Diag(OpLoc, diag::warn_profile_rejected_reinterpret_cast);
   }
 }
 
 static void CheckProfileConstCast(Sema &S, SourceLocation OpLoc,
                                    QualType SrcType, QualType DestType) {
-  if (!S.isProfileEnabled(ProfileKind::Type))
+  if (!S.isProfileEnabled(ProfileKind::Type, "expr.const.cast"))
     return;
 
   auto IsPointerLike = [](QualType T) {
@@ -400,9 +400,9 @@ static void CheckProfileConstCast(Sema &S, SourceLocation OpLoc,
   if (CastsAwayConstness(S, SrcType, DestType, /*CheckCVR=*/true,
                          /*CheckObjCLifetime=*/false) !=
       CastAwayConstnessKind::CACK_None) {
-    if (S.isProfileEnforced(ProfileKind::Type))
+    if (S.isProfileEnforced(ProfileKind::Type, "expr.const.cast"))
       S.Diag(OpLoc, diag::err_profile_rejected_const_cast);
-    else if (S.isProfileApplied(ProfileKind::Type))
+    else if (S.isProfileApplied(ProfileKind::Type, "expr.const.cast"))
       S.Diag(OpLoc, diag::warn_profile_rejected_const_cast);
   }
 }
@@ -410,16 +410,16 @@ static void CheckProfileConstCast(Sema &S, SourceLocation OpLoc,
 static void CheckProfileStaticCast(Sema &S, SourceLocation OpLoc,
                                     QualType SrcType, QualType DestType,
                                     CastKind Kind) {
-  if (!S.isProfileEnabled(ProfileKind::Type))
+  if (!S.isProfileEnabled(ProfileKind::Type, "expr.static.cast"))
     return;
 
   // P3081R2 [expr.static.cast] p1: downcast is profile-rejected,
   // except during constant evaluation.
   if (Kind == CK_BaseToDerived && !S.isConstantEvaluatedContext()) {
-    if (S.isProfileEnforced(ProfileKind::Type))
+    if (S.isProfileEnforced(ProfileKind::Type, "expr.static.cast"))
       S.Diag(OpLoc, diag::err_profile_rejected_static_cast_downcast)
           << SrcType << DestType;
-    else if (S.isProfileApplied(ProfileKind::Type))
+    else if (S.isProfileApplied(ProfileKind::Type, "expr.static.cast"))
       S.Diag(OpLoc, diag::warn_profile_rejected_static_cast_downcast)
           << SrcType << DestType;
     return;
@@ -432,10 +432,10 @@ static void CheckProfileStaticCast(Sema &S, SourceLocation OpLoc,
     QualType SrcPointee = SrcType->getPointeeType();
     QualType DestPointee = DestType->getPointeeType();
     if (SrcPointee->isVoidType() != DestPointee->isVoidType()) {
-      if (S.isProfileEnforced(ProfileKind::Type))
+      if (S.isProfileEnforced(ProfileKind::Type, "expr.static.cast"))
         S.Diag(OpLoc, diag::err_profile_rejected_static_cast_unrelated)
             << SrcType << DestType;
-      else if (S.isProfileApplied(ProfileKind::Type))
+      else if (S.isProfileApplied(ProfileKind::Type, "expr.static.cast"))
         S.Diag(OpLoc, diag::warn_profile_rejected_static_cast_unrelated)
             << SrcType << DestType;
       return;
@@ -474,10 +474,10 @@ static void CheckProfileStaticCast(Sema &S, SourceLocation OpLoc,
         S.Context.getTypeSize(DestType) < S.Context.getTypeSize(SrcType);
 
   if (IsNarrowing) {
-    if (S.isProfileEnforced(ProfileKind::Type))
+    if (S.isProfileEnforced(ProfileKind::Type, "expr.static.cast"))
       S.Diag(OpLoc, diag::err_profile_rejected_static_cast_narrowing)
           << SrcType << DestType;
-    else if (S.isProfileApplied(ProfileKind::Type))
+    else if (S.isProfileApplied(ProfileKind::Type, "expr.static.cast"))
       S.Diag(OpLoc, diag::warn_profile_rejected_static_cast_narrowing)
           << SrcType << DestType;
   }

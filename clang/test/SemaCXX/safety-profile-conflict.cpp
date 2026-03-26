@@ -5,4 +5,4 @@
 [[profiles::apply(std::arithmetic)]];
 
 // Conflict: type is already enforced
-[[profiles::apply(std::type)]]; // expected-error {{cannot both enforce and apply profile 'type'}}
+[[profiles::apply(std::type)]]; // expected-error {{cannot both enforce and apply profile 'std::type'}}

@@ -831,8 +831,13 @@ void CodeGenFunction::EmitAttributedStmt(const AttributedStmt &S) {
   for (const auto *A : S.getAttrs()) {
     if (A->getKind() != attr::ProfilesSuppress)
       continue;
-    llvm::StringRef Name =
-        cast<ProfilesSuppressAttr>(A)->getProfileName()->getName();
+    const auto *SA = cast<ProfilesSuppressAttr>(A);
+    // P3589R2 [decl.attr.suppress] para 4: when rule: is specified, only
+    // that rule is suppressed — don't suppress the whole profile in codegen.
+    if (!SA->getRule().empty())
+      continue;
+    llvm::StringRef Name = SA->getProfileName()->getName();
+    Name.consume_front("std::");
     if (Name == "strict") {
       CurProfileState.setSuppressed(ProfileKind::Type);
       CurProfileState.setSuppressed(ProfileKind::Bounds);

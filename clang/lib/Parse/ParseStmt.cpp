@@ -76,14 +76,50 @@ StmtResult Parser::ParseStatementOrDeclaration(StmtVector &Stmts,
   if (getLangOpts().HLSL)
     MaybeParseMicrosoftAttributes(GNUOrMSAttrs);
 
-  // P3081R2: Pre-set profiles::suppress before parsing the statement body so
+  // P3589R2: Pre-set profiles::suppress before parsing the statement body so
   // that diagnostics are suppressed during analysis of the attributed statement.
   std::optional<ProfileState> SavedProfileState;
+  decltype(Actions.CurSuppressedRules) SavedSuppressedRules;
+  bool DidSaveRules = false;
   for (const auto &Attr : CXX11Attrs) {
-    if (Attr.getParsedKind() == ParsedAttr::AT_ProfilesSuppress &&
-        Attr.getNumArgs() > 0 && Attr.isArgIdent(0)) {
-      if (!SavedProfileState)
-        SavedProfileState = Actions.getCurProfileState();
+    if (Attr.getParsedKind() != ParsedAttr::AT_ProfilesSuppress ||
+        Attr.getNumArgs() == 0 || !Attr.isArgIdent(0))
+      continue;
+
+    if (!SavedProfileState) {
+      SavedProfileState = Actions.getCurProfileState();
+      SavedSuppressedRules = Actions.CurSuppressedRules;
+      DidSaveRules = true;
+    }
+
+    // P3589R2 [decl.attr.suppress] para 4: if rule: is present, suppress
+    // only that rule instead of the whole profile.
+    // Args layout: [0]=name, [1]=justification Expr, [2]=rule Expr
+    StringRef RuleName;
+    if (Attr.getNumArgs() > 2 && Attr.isArgExpr(2))
+      if (auto *SL = dyn_cast_if_present<StringLiteral>(Attr.getArgAsExpr(2)))
+        RuleName = SL->getString();
+
+    if (!RuleName.empty()) {
+      IdentifierInfo *II = Attr.getArgAsIdent(0)->getIdentifierInfo();
+      llvm::StringRef Name = II->getName();
+      Name.consume_front("std::");
+      if (Name == "strict") {
+        Actions.addRuleSuppression(ProfileKind::Type, RuleName);
+        Actions.addRuleSuppression(ProfileKind::Bounds, RuleName);
+        Actions.addRuleSuppression(ProfileKind::Lifetime, RuleName);
+      } else {
+        auto PK =
+            llvm::StringSwitch<std::optional<ProfileKind>>(Name)
+                .Case("type", ProfileKind::Type)
+                .Case("bounds", ProfileKind::Bounds)
+                .Case("lifetime", ProfileKind::Lifetime)
+                .Case("arithmetic", ProfileKind::Arithmetic)
+                .Default(std::nullopt);
+        if (PK)
+          Actions.addRuleSuppression(*PK, RuleName);
+      }
+    } else {
       Actions.setProfileSuppressedByName(
           Attr.getArgAsIdent(0)->getIdentifierInfo());
     }
@@ -96,6 +132,8 @@ StmtResult Parser::ParseStatementOrDeclaration(StmtVector &Stmts,
 
   if (SavedProfileState)
     Actions.getCurProfileState() = *SavedProfileState;
+  if (DidSaveRules)
+    Actions.CurSuppressedRules = std::move(SavedSuppressedRules);
 
   takeAndConcatenateAttrs(CXX11Attrs, std::move(GNUOrMSAttrs));
 

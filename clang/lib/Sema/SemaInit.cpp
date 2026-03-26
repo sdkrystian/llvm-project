@@ -9940,11 +9940,11 @@ static void DiagnoseNarrowingInInitList(Sema &S,
   // P3081R2 [dcl.init.list] p7: profile-rejected by std::arithmetic
   QualType T = EntityType.getNonReferenceType();
   if (!T->isVoidType() && !T->isBooleanType()) {
-    if (S.isProfileEnforced(ProfileKind::Arithmetic))
+    if (S.isProfileEnforced(ProfileKind::Arithmetic, "dcl.init.list"))
       S.Diag(PostInit->getBeginLoc(), diag::err_profile_rejected_narrowing)
           << PreNarrowingType.getLocalUnqualifiedType()
           << T.getLocalUnqualifiedType();
-    else if (S.isProfileApplied(ProfileKind::Arithmetic))
+    else if (S.isProfileApplied(ProfileKind::Arithmetic, "dcl.init.list"))
       S.Diag(PostInit->getBeginLoc(), diag::warn_profile_rejected_narrowing)
           << PreNarrowingType.getLocalUnqualifiedType()
           << T.getLocalUnqualifiedType();

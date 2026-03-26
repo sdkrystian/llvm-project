@@ -2538,6 +2538,7 @@ void Sema::setProfileSuppressedByName(IdentifierInfo *ProfileName) {
   if (!ProfileName)
     return;
   llvm::StringRef Name = ProfileName->getName();
+  Name.consume_front("std::");
   if (Name == "strict") {
     CurProfileState.setSuppressed(ProfileKind::Type);
     CurProfileState.setSuppressed(ProfileKind::Bounds);
@@ -2555,9 +2556,20 @@ void Sema::setProfileSuppressedByName(IdentifierInfo *ProfileName) {
     CurProfileState.setSuppressed(*PK);
 }
 
+void Sema::addRuleSuppression(ProfileKind P, llvm::StringRef Rule) {
+  CurSuppressedRules.emplace_back(P, Rule.str());
+}
+
+bool Sema::isRuleSuppressed(ProfileKind P, llvm::StringRef Rule) const {
+  for (const auto &[Kind, Name] : CurSuppressedRules)
+    if (Kind == P && Name == Rule)
+      return true;
+  return false;
+}
+
 void Sema::PushCompoundScope(bool IsStmtExpr) {
-  getCurFunction()->CompoundScopes.push_back(
-      CompoundScopeInfo(IsStmtExpr, getCurFPFeatures(), CurProfileState));
+  getCurFunction()->CompoundScopes.push_back(CompoundScopeInfo(
+      IsStmtExpr, getCurFPFeatures(), CurProfileState, CurSuppressedRules));
 }
 
 void Sema::PopCompoundScope() {
@@ -2565,6 +2577,8 @@ void Sema::PopCompoundScope() {
   assert(!CurFunction->CompoundScopes.empty() && "mismatched push/pop");
 
   CurProfileState = CurFunction->CompoundScopes.back().InitialProfileState;
+  CurSuppressedRules =
+      std::move(CurFunction->CompoundScopes.back().InitialSuppressedRules);
   CurFunction->CompoundScopes.pop_back();
 }
 

@@ -22,10 +22,16 @@
 using namespace clang;
 using namespace sema;
 
+static llvm::StringRef stripStdProfilePrefix(llvm::StringRef Name) {
+  Name.consume_front("std::");
+  return Name;
+}
+
 static std::optional<ProfileKind> resolveProfileKind(IdentifierInfo *II) {
   if (!II)
     return std::nullopt;
-  return llvm::StringSwitch<std::optional<ProfileKind>>(II->getName())
+  return llvm::StringSwitch<std::optional<ProfileKind>>(
+             stripStdProfilePrefix(II->getName()))
       .Case("type", ProfileKind::Type)
       .Case("bounds", ProfileKind::Bounds)
       .Case("lifetime", ProfileKind::Lifetime)
@@ -674,16 +680,26 @@ static Attr *handleAtomicAttr(Sema &S, Stmt *St, const ParsedAttr &AL,
 static Attr *handleProfileSuppressAttr(Sema &S, Stmt *St, const ParsedAttr &A,
                                        SourceRange Range) {
   IdentifierInfo *II = A.getArgAsIdent(0)->getIdentifierInfo();
-  if (!II->isStr("strict")) {
+  if (stripStdProfilePrefix(II->getName()) != "strict") {
     auto PK = resolveProfileKind(II);
     if (!PK) {
       S.Diag(A.getLoc(), diag::err_profile_unknown) << II;
       return nullptr;
     }
   }
-  // Suppression timing is handled by the parser (save/set before
-  // statement body, restore after).
-  return ::new (S.Context) ProfilesSuppressAttr(S.Context, A, II);
+
+  // P3589R2 [decl.attr.suppress]: Extract optional justification: and rule:.
+  // Args[1] = justification Expr* (may be null), Args[2] = rule Expr*.
+  StringRef Justification, Rule;
+  if (A.getNumArgs() > 1 && A.isArgExpr(1))
+    if (auto *SL = dyn_cast_if_present<StringLiteral>(A.getArgAsExpr(1)))
+      Justification = SL->getString();
+  if (A.getNumArgs() > 2 && A.isArgExpr(2))
+    if (auto *SL = dyn_cast_if_present<StringLiteral>(A.getArgAsExpr(2)))
+      Rule = SL->getString();
+
+  return ::new (S.Context)
+      ProfilesSuppressAttr(S.Context, A, II, Justification, Rule);
 }
 
 static Attr *ProcessStmtAttribute(Sema &S, Stmt *St, const ParsedAttr &A,

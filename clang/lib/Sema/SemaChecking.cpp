@@ -4471,9 +4471,9 @@ bool Sema::CheckFunctionCall(FunctionDecl *FDecl, CallExpr *TheCall,
     break;
   case Builtin::BIfree:
     // P3081R2 [c.malloc]: free is profile-rejected by std::lifetime
-    if (isProfileEnforced(ProfileKind::Lifetime))
+    if (isProfileEnforced(ProfileKind::Lifetime, "c.malloc"))
       Diag(TheCall->getBeginLoc(), diag::err_profile_rejected_free);
-    else if (isProfileApplied(ProfileKind::Lifetime))
+    else if (isProfileApplied(ProfileKind::Lifetime, "c.malloc"))
       Diag(TheCall->getBeginLoc(), diag::warn_profile_rejected_free);
     CheckFreeArguments(TheCall);
     break;
@@ -13324,10 +13324,10 @@ void Sema::CheckImplicitConversion(Expr *E, QualType T, SourceLocation CC,
   // P3081R2 [conv.integral] p4: signedness conversion is profile-rejected
   if (Source->isSignedIntegerType() != Target->isSignedIntegerType() &&
       !Target->isBooleanType()) {
-    if (isProfileEnforced(ProfileKind::Arithmetic))
+    if (isProfileEnforced(ProfileKind::Arithmetic, "conv.integral"))
       Diag(CC, diag::err_profile_rejected_signedness)
           << E->getType() << T;
-    else if (isProfileApplied(ProfileKind::Arithmetic))
+    else if (isProfileApplied(ProfileKind::Arithmetic, "conv.integral"))
       Diag(CC, diag::warn_profile_rejected_signedness)
           << E->getType() << T;
   }
@@ -14167,14 +14167,14 @@ void Sema::CheckForIntOverflow (const Expr *E) {
       E->EvaluateForOverflow(Context);
 
       // P3081R2 [expr.pre]: overflow is profile-rejected by std::arithmetic
-      if (isProfileEnabled(ProfileKind::Arithmetic)) {
+      if (isProfileEnabled(ProfileKind::Arithmetic, "expr.pre")) {
         bool Overflowed = false;
         if (const auto *BO = dyn_cast<BinaryOperator>(E))
           Overflowed = CheckBinOpForIntOverflow(*this, BO);
         else if (const auto *UO = dyn_cast<UnaryOperator>(E))
           Overflowed = CheckUnaryOpForIntOverflow(*this, UO);
         if (Overflowed) {
-          if (isProfileEnforced(ProfileKind::Arithmetic))
+          if (isProfileEnforced(ProfileKind::Arithmetic, "expr.pre"))
             Diag(E->getExprLoc(), diag::err_profile_rejected_overflow);
           else
             Diag(E->getExprLoc(), diag::warn_profile_rejected_overflow);

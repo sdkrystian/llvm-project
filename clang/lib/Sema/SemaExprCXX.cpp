@@ -3984,9 +3984,9 @@ ExprResult
 Sema::ActOnCXXDelete(SourceLocation StartLoc, bool UseGlobal,
                      bool ArrayForm, Expr *ExE) {
   // P3081R2 [expr.delete]: profile-rejected by std::lifetime
-  if (isProfileEnforced(ProfileKind::Lifetime))
+  if (isProfileEnforced(ProfileKind::Lifetime, "expr.delete"))
     Diag(StartLoc, diag::err_profile_rejected_delete);
-  else if (isProfileApplied(ProfileKind::Lifetime))
+  else if (isProfileApplied(ProfileKind::Lifetime, "expr.delete"))
     Diag(StartLoc, diag::warn_profile_rejected_delete);
 
   // C++ [expr.delete]p1:
@@ -4842,9 +4842,9 @@ Sema::PerformImplicitConversion(Expr *From, QualType ToType,
   }
 
   case ICK_Array_To_Pointer:
-    if (isProfileEnforced(ProfileKind::Bounds))
+    if (isProfileEnforced(ProfileKind::Bounds, "conv.array"))
       Diag(From->getExprLoc(), diag::err_profile_rejected_array_decay);
-    else if (isProfileApplied(ProfileKind::Bounds))
+    else if (isProfileApplied(ProfileKind::Bounds, "conv.array"))
       Diag(From->getExprLoc(), diag::warn_profile_rejected_array_decay);
     FromType = Context.getArrayDecayedType(FromType);
     From = ImpCastExprToType(From, FromType, CK_ArrayToPointerDecay, VK_PRValue,

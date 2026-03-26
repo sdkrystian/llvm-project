@@ -7698,6 +7698,7 @@ void CodeGenModule::EmitTopLevelDecl(Decl *D) {
     for (const auto *A : D->attrs()) {
       auto SetModes = [&](const IdentifierInfo *II, ProfileMode Mode) {
         llvm::StringRef Name = II->getName();
+        Name.consume_front("std::");
         if (Name == "strict") {
           CurProfileState.setMode(ProfileKind::Type, Mode);
           CurProfileState.setMode(ProfileKind::Bounds, Mode);

@@ -14628,13 +14628,13 @@ void Sema::ActOnUninitializedDecl(Decl *RealDecl) {
       return;
     }
 
-    if (isProfileEnabled(ProfileKind::Type) && Var->isLocalVarDecl() &&
+    if (isProfileEnabled(ProfileKind::Type, "basic.life") && Var->isLocalVarDecl() &&
         !Var->isExternC() &&
         Var->getStorageDuration() == SD_Automatic &&
         (Type->isScalarType() || Type.isPODType(Context))) {
-      if (isProfileEnforced(ProfileKind::Type))
+      if (isProfileEnforced(ProfileKind::Type, "basic.life"))
         Diag(Var->getLocation(), diag::err_profile_rejected_uninit);
-      else if (isProfileApplied(ProfileKind::Type))
+      else if (isProfileApplied(ProfileKind::Type, "basic.life"))
         Diag(Var->getLocation(), diag::warn_profile_rejected_uninit);
     }
 

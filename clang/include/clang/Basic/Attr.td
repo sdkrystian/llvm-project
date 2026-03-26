@@ -3470,7 +3470,9 @@ def ProfilesApply : Attr {
 
 def ProfilesSuppress : DeclOrStmtAttr {
   let Spellings = [CXX11<"profiles", "suppress">];
-  let Args = [IdentifierArgument<"ProfileName">];
+  let Args = [IdentifierArgument<"ProfileName">,
+              StringArgument<"Justification", 1>,
+              StringArgument<"Rule", 1>];
   let Documentation = [Undocumented];
 }
 
