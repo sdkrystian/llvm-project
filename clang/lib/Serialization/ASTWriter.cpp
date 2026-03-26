@@ -3013,6 +3013,7 @@ void ASTWriter::WriteSubmodules(Module *WritingModule, ASTContext *Context) {
   Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 1)); // ConfigMacrosExh...
   Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 1)); // ModuleMapIsPriv...
   Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 1)); // NamedModuleHasN...
+  Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 4)); // EnforcedProfiles
   Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Blob)); // Name
   unsigned DefinitionAbbrev = Stream.EmitAbbrev(std::move(Abbrev));
 
@@ -3130,7 +3131,8 @@ void ASTWriter::WriteSubmodules(Module *WritingModule, ASTContext *Context) {
                                          Mod->InferExportWildcard,
                                          Mod->ConfigMacrosExhaustive,
                                          Mod->ModuleMapIsPrivate,
-                                         Mod->NamedModuleHasInit};
+                                         Mod->NamedModuleHasInit,
+                                         Mod->EnforcedProfiles};
       Stream.EmitRecordWithBlob(DefinitionAbbrev, Record, Mod->Name);
     }
 

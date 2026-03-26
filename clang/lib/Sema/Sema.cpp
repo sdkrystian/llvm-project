@@ -2556,6 +2556,73 @@ void Sema::setProfileSuppressedByName(IdentifierInfo *ProfileName) {
     CurProfileState.setSuppressed(*PK);
 }
 
+void Sema::applyProfileAttrToState(IdentifierInfo *ProfileName,
+                                   bool IsEnforce) {
+  if (!ProfileName)
+    return;
+  llvm::StringRef Name = ProfileName->getName();
+  Name.consume_front("std::");
+  ProfileMode Mode = IsEnforce ? ProfileMode::Enforced : ProfileMode::Applied;
+
+  auto Apply = [&](ProfileKind PK) { CurProfileState.setMode(PK, Mode); };
+
+  if (Name == "strict") {
+    Apply(ProfileKind::Type);
+    Apply(ProfileKind::Bounds);
+    Apply(ProfileKind::Lifetime);
+    return;
+  }
+  auto PK =
+      llvm::StringSwitch<std::optional<ProfileKind>>(Name)
+          .Case("type", ProfileKind::Type)
+          .Case("bounds", ProfileKind::Bounds)
+          .Case("lifetime", ProfileKind::Lifetime)
+          .Case("arithmetic", ProfileKind::Arithmetic)
+          .Default(std::nullopt);
+  if (PK)
+    Apply(*PK);
+}
+
+void Sema::checkProfileRequireOnImport(const ParsedAttr &AL,
+                                       IdentifierInfo *ProfileName,
+                                       Decl *ImportD) {
+  if (!ProfileName)
+    return;
+  llvm::StringRef Name = ProfileName->getName();
+  Name.consume_front("std::");
+
+  SmallVector<ProfileKind, 4> Required;
+  if (Name == "strict") {
+    Required = {ProfileKind::Type, ProfileKind::Bounds, ProfileKind::Lifetime};
+  } else {
+    auto PK =
+        llvm::StringSwitch<std::optional<ProfileKind>>(Name)
+            .Case("type", ProfileKind::Type)
+            .Case("bounds", ProfileKind::Bounds)
+            .Case("lifetime", ProfileKind::Lifetime)
+            .Case("arithmetic", ProfileKind::Arithmetic)
+            .Default(std::nullopt);
+    if (!PK) {
+      Diag(AL.getLoc(), diag::err_profile_unknown) << ProfileName;
+      return;
+    }
+    Required.push_back(*PK);
+  }
+
+  auto *ID = dyn_cast_if_present<ImportDecl>(ImportD);
+  if (!ID || !ID->getImportedModule())
+    return;
+
+  Module *Mod = ID->getImportedModule();
+  for (ProfileKind PK : Required) {
+    unsigned Bit = 1u << static_cast<unsigned>(PK);
+    if (!(Mod->EnforcedProfiles & Bit)) {
+      Diag(AL.getLoc(), diag::err_profile_require_not_enforced) << ProfileName;
+      return;
+    }
+  }
+}
+
 void Sema::addRuleSuppression(ProfileKind P, llvm::StringRef Rule) {
   CurSuppressedRules.emplace_back(P, Rule.str());
 }

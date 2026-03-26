@@ -941,6 +941,15 @@ public:
   /// Silently does nothing if \p ProfileName is not a recognized profile.
   void setProfileSuppressedByName(IdentifierInfo *ProfileName);
 
+  /// P3589R2: Apply a profile enforce/apply attr from a module-declaration
+  /// to the current profile state.
+  void applyProfileAttrToState(IdentifierInfo *ProfileName, bool IsEnforce);
+
+  /// P3589R2 [decl.attr.require]: Check that the imported module enforces
+  /// the required profile.
+  void checkProfileRequireOnImport(const ParsedAttr &AL,
+                                   IdentifierInfo *ProfileName, Decl *ImportD);
+
   /// P3589R2 [decl.attr.suppress] para 4: suppress a single rule of a profile.
   void addRuleSuppression(ProfileKind P, llvm::StringRef Rule);
   bool isRuleSuppressed(ProfileKind P, llvm::StringRef Rule) const;

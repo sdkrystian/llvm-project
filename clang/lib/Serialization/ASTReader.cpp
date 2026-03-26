@@ -6322,6 +6322,7 @@ llvm::Error ASTReader::ReadSubmoduleBlock(ModuleFile &F,
       bool ConfigMacrosExhaustive = Record[Idx++];
       bool ModuleMapIsPrivate = Record[Idx++];
       bool NamedModuleHasInit = Record[Idx++];
+      unsigned EnforcedProfiles = Record[Idx++];
 
       Module *ParentModule = nullptr;
       if (Parent)
@@ -6383,6 +6384,7 @@ llvm::Error ASTReader::ReadSubmoduleBlock(ModuleFile &F,
       CurrentModule->ConfigMacrosExhaustive = ConfigMacrosExhaustive;
       CurrentModule->ModuleMapIsPrivate = ModuleMapIsPrivate;
       CurrentModule->NamedModuleHasInit = NamedModuleHasInit;
+      CurrentModule->EnforcedProfiles = EnforcedProfiles;
 
       if (!ParentModule && !F.BaseDirectory.empty()) {
         if (auto Dir = FileMgr.getOptionalDirectoryRef(F.BaseDirectory))

@@ -14125,6 +14125,10 @@ def err_profile_enforce_apply_conflict : Error<
   "cannot both enforce and apply profile %0">;
 def err_profile_enforce_duplicate_conflict : Error<
   "conflicting profile enforcement attributes for %0">;
+def err_profile_require_not_enforced : Error<
+  "imported module does not enforce required profile %0">;
+def err_profile_require_not_import : Error<
+  "'profiles::require' attribute only allowed on import declarations">;
 def err_profile_rejected_narrowing : Error<
   "narrowing conversion from %0 to %1 is not allowed when profile std::arithmetic is enforced">;
 def warn_profile_rejected_narrowing : Warning<

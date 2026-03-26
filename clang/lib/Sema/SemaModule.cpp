@@ -450,6 +450,17 @@ Sema::ActOnModuleDecl(SourceLocation StartLoc, SourceLocation ModuleLoc,
   ModuleScopes.back().Module = Mod;
   VisibleModules.setVisible(Mod, ModuleLoc);
 
+  // P3589R2 [decl.attr.enforce] para 4: Record which profiles are enforced
+  // in this module's interface unit.
+  if (Mod->isInterfaceOrPartition()) {
+    for (unsigned I = 0;
+         I < static_cast<unsigned>(ProfileKind::NumProfiles); ++I) {
+      auto PK = static_cast<ProfileKind>(I);
+      if (CurProfileState.getMode(PK) == ProfileMode::Enforced)
+        Mod->EnforcedProfiles |= (1u << I);
+    }
+  }
+
   // From now on, we have an owning module for all declarations we see.
   // In C++20 modules, those declaration would be reachable when imported
   // unless explicitily exported.

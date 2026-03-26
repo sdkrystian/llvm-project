@@ -4596,10 +4596,10 @@ bool Parser::ParseCXX11AttributeArgs(
     return true;
   }
 
-  // [[profiles::enforce/apply/suppress(std::arithmetic)]]
+  // [[profiles::enforce/apply/suppress/require(...)]]
   if (ScopeName && ScopeName->isStr("profiles") &&
       (AttrName->isStr("enforce") || AttrName->isStr("apply") ||
-       AttrName->isStr("suppress"))) {
+       AttrName->isStr("suppress") || AttrName->isStr("require"))) {
     ParseProfileAttributeArgs(AttrName, AttrNameLoc, Attrs, EndLoc, ScopeName,
                               ScopeLoc, Form);
     return true;

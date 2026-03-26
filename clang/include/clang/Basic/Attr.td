@@ -3468,6 +3468,12 @@ def ProfilesApply : Attr {
   let Documentation = [Undocumented];
 }
 
+def ProfilesRequire : Attr {
+  let Spellings = [CXX11<"profiles", "require">];
+  let Args = [IdentifierArgument<"ProfileName">];
+  let Documentation = [Undocumented];
+}
+
 def ProfilesSuppress : DeclOrStmtAttr {
   let Spellings = [CXX11<"profiles", "suppress">];
   let Args = [IdentifierArgument<"ProfileName">,

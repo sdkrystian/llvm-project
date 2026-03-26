@@ -2378,13 +2378,40 @@ Parser::ParseModuleDecl(Sema::ModuleImportState &ImportState) {
   if (!Tok.isOneOf(tok::semi, tok::l_square))
     SkipUntil(tok::semi, SkipUntilFlags::StopBeforeMatch);
 
-  // We don't support any module attributes yet; just parse them and diagnose.
+  // P3589R2: Allow profiles::enforce/apply on module declarations.
+  // Prohibit all other attributes.
   ParsedAttributes Attrs(AttrFactory);
   MaybeParseCXX11Attributes(Attrs);
-  ProhibitCXX11Attributes(Attrs, diag::err_attribute_not_module_attr,
-                          diag::err_keyword_not_module_attr,
-                          /*DiagnoseEmptyAttrs=*/false,
-                          /*WarnOnUnknownAttrs=*/true);
+  for (const ParsedAttr &AL : Attrs) {
+    if (AL.getParsedKind() == ParsedAttr::AT_ProfilesEnforce ||
+        AL.getParsedKind() == ParsedAttr::AT_ProfilesApply)
+      continue;
+    if (AL.isRegularKeywordAttribute()) {
+      Diag(AL.getLoc(), diag::err_keyword_not_module_attr) << AL;
+      AL.setInvalid();
+    } else if (AL.isStandardAttributeSyntax()) {
+      if (AL.getKind() == ParsedAttr::UnknownAttribute)
+        Actions.DiagnoseUnknownAttribute(AL);
+      else
+        Diag(AL.getLoc(), diag::err_attribute_not_module_attr) << AL;
+      AL.setInvalid();
+    }
+  }
+
+  // Apply profile enforce/apply attrs before creating the module so
+  // CurProfileState reflects them when ActOnModuleDecl records on Module.
+  for (const ParsedAttr &AL : Attrs) {
+    if (AL.isInvalid())
+      continue;
+    if (AL.getParsedKind() == ParsedAttr::AT_ProfilesEnforce ||
+        AL.getParsedKind() == ParsedAttr::AT_ProfilesApply) {
+      if (AL.getNumArgs() > 0 && AL.isArgIdent(0)) {
+        IdentifierInfo *II = AL.getArgAsIdent(0)->getIdentifierInfo();
+        Actions.applyProfileAttrToState(
+            II, AL.getParsedKind() == ParsedAttr::AT_ProfilesEnforce);
+      }
+    }
+  }
 
   if (ExpectAndConsumeSemi(diag::err_expected_semi_after_module_or_import,
                            tok::getKeywordSpelling(tok::kw_module)))
@@ -2436,13 +2463,24 @@ Decl *Parser::ParseModuleImport(SourceLocation AtLoc,
       return nullptr;
   }
 
+  // P3589R2: Allow profiles::require on import declarations.
+  // Prohibit all other attributes.
   ParsedAttributes Attrs(AttrFactory);
   MaybeParseCXX11Attributes(Attrs);
-  // We don't support any module import attributes yet.
-  ProhibitCXX11Attributes(Attrs, diag::err_attribute_not_import_attr,
-                          diag::err_keyword_not_import_attr,
-                          /*DiagnoseEmptyAttrs=*/false,
-                          /*WarnOnUnknownAttrs=*/true);
+  for (const ParsedAttr &AL : Attrs) {
+    if (AL.getParsedKind() == ParsedAttr::AT_ProfilesRequire)
+      continue;
+    if (AL.isRegularKeywordAttribute()) {
+      Diag(AL.getLoc(), diag::err_keyword_not_import_attr) << AL;
+      AL.setInvalid();
+    } else if (AL.isStandardAttributeSyntax()) {
+      if (AL.getKind() == ParsedAttr::UnknownAttribute)
+        Actions.DiagnoseUnknownAttribute(AL);
+      else
+        Diag(AL.getLoc(), diag::err_attribute_not_import_attr) << AL;
+      AL.setInvalid();
+    }
+  }
 
   if (PP.hadModuleLoaderFatalFailure()) {
     // With a fatal failure in the module loader, we abort parsing.
@@ -2516,6 +2554,17 @@ Decl *Parser::ParseModuleImport(SourceLocation AtLoc,
                                        IsPartition);
   if (Import.isInvalid())
     return nullptr;
+
+  // P3589R2 [decl.attr.require]: Check profiles::require attrs against
+  // the imported module's enforcement state.
+  for (const ParsedAttr &AL : Attrs) {
+    if (AL.isInvalid() ||
+        AL.getParsedKind() != ParsedAttr::AT_ProfilesRequire)
+      continue;
+    if (AL.getNumArgs() > 0 && AL.isArgIdent(0))
+      Actions.checkProfileRequireOnImport(
+          AL, AL.getArgAsIdent(0)->getIdentifierInfo(), Import.get());
+  }
 
   // Using '@import' in framework headers requires modules to be enabled so that
   // the header is parseable. Emit a warning to make the user aware.

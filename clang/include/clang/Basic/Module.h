@@ -438,6 +438,10 @@ public:
   LLVM_PREFERRED_TYPE(bool)
   unsigned NamedModuleHasInit : 1;
 
+  /// P3589R2: Bitmask of profiles enforced by this module's interface unit.
+  /// Bit 0 = type, bit 1 = bounds, bit 2 = lifetime, bit 3 = arithmetic.
+  unsigned EnforcedProfiles : 4;
+
   /// Describes the visibility of the various names within a
   /// particular module.
   enum NameVisibilityKind {

@@ -44,7 +44,7 @@ Module::Module(ModuleConstructorTag, StringRef Name,
       InferSubmodules(false), InferExplicitSubmodules(false),
       InferExportWildcard(false), ConfigMacrosExhaustive(false),
       NoUndeclaredIncludes(false), ModuleMapIsPrivate(false),
-      NamedModuleHasInit(true), NameVisibility(Hidden) {
+      NamedModuleHasInit(true), EnforcedProfiles(0), NameVisibility(Hidden) {
   if (Parent) {
     IsAvailable = Parent->isAvailable();
     IsUnimportable = Parent->isUnimportable();

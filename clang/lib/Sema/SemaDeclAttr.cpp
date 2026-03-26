@@ -8013,6 +8013,8 @@ ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D, const ParsedAttr &AL,
   case ParsedAttr::AT_ProfilesApply:
     handleProfilesApplyAttr(S, D, AL);
     break;
+  case ParsedAttr::AT_ProfilesRequire:
+    break;
   case ParsedAttr::AT_ProfilesSuppress: {
     IdentifierInfo *II = AL.getArgAsIdent(0)->getIdentifierInfo();
     llvm::StringRef Base = stripStdProfilePrefix(II->getName());
