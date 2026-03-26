@@ -115,3 +115,34 @@ void test_suppress_whole_profile() {
   }
   int y; // expected-error {{uninitialized variable declaration is not allowed when profile std::type is enforced}}
 }
+
+// =====================================================================
+// P3589R2: reversed argument order (rule: before justification:)
+// =====================================================================
+
+void test_suppress_reversed_args() {
+  int x = 0;
+  int *p = &x;
+
+  [[profiles::suppress(std::type,
+                       rule: "expr.reinterpret.cast",
+                       justification: "FFI boundary")]] {
+    long *q = reinterpret_cast<long *>(p);
+    int y; // expected-error {{uninitialized variable declaration is not allowed when profile std::type is enforced}}
+  }
+}
+
+// =====================================================================
+// P3589R2: suppress std::strict with rule: — applies to
+//   type+bounds+lifetime simultaneously.
+// =====================================================================
+
+void test_suppress_strict_rule() {
+  [[profiles::suppress(std::strict, rule: "expr.reinterpret.cast")]] {
+    int x = 0;
+    int *p = &x;
+    long *q = reinterpret_cast<long *>(p);
+    int arr[4] = {};
+    int *r = arr; // expected-error {{array-to-pointer decay is not allowed when profile std::bounds is enforced}}
+  }
+}

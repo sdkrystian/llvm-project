@@ -4516,10 +4516,8 @@ void Parser::ParseProfileAttributeArgs(
       Args.push_back(RuleExpr);
   }
 
-  if (T.consumeClose()) {
-    Diag(Tok.getLocation(), diag::err_expected_lparen_after) << NameLoc;
+  if (T.consumeClose())
     return;
-  }
 
   Attrs.addNew(AttrName, SourceRange(ScopeLoc, T.getCloseLocation()),
                AttributeScopeInfo(ScopeName, ScopeLoc, SourceLocation{}),

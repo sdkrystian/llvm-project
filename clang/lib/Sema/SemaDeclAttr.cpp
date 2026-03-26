@@ -5556,6 +5556,22 @@ static void handleProfilesApplyAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
       return;
     }
   }
+  // P3589R2 [decl.attr.enforce] para 3: same duplicate-designator rule
+  // applies to apply attributes.
+  for (const Decl *Prev : S.CurContext->decls()) {
+    if (Prev == D || !isa<EmptyDecl>(Prev))
+      continue;
+    if (const auto *AA = Prev->getAttr<ProfilesApplyAttr>()) {
+      llvm::StringRef PrevBase =
+          stripStdProfilePrefix(AA->getProfileName()->getName());
+      llvm::StringRef CurBase = stripStdProfilePrefix(II->getName());
+      if (PrevBase == CurBase &&
+          AA->getProfileName()->getName() != II->getName()) {
+        S.Diag(AL.getLoc(), diag::err_profile_enforce_duplicate_conflict) << II;
+        return;
+      }
+    }
+  }
   for (ProfileKind PK : Profiles)
     S.getCurProfileState().setMode(PK, ProfileMode::Applied);
   D->addAttr(::new (S.Context) ProfilesApplyAttr(S.Context, AL, II));
