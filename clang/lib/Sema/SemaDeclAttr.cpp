@@ -5537,6 +5537,11 @@ static void handleProfilesEnforceAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
       if (CheckConflict(EA))
         return;
   }
+  // TODO: P3589R2 [decl.attr.enforce] para 5: if a declaration D appears in
+  // the dominion of a profile P1, all other redeclarations of D shall appear
+  // in the dominion of a compatible profile P2. All standard profiles are
+  // compatible with each other, so this only matters for implementation-defined
+  // profiles.
   for (ProfileKind PK : Profiles)
     S.getCurProfileState().setMode(PK, ProfileMode::Enforced);
   D->addAttr(::new (S.Context) ProfilesEnforceAttr(S.Context, AL, II));
@@ -7981,8 +7986,19 @@ ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D, const ParsedAttr &AL,
   case ParsedAttr::AT_ProfilesSuppress: {
     IdentifierInfo *II = AL.getArgAsIdent(0)->getIdentifierInfo();
     llvm::StringRef Base = stripStdProfilePrefix(II->getName());
-    if (Base != "strict" && !resolveProfileKind(II))
+    if (Base != "strict" && !resolveProfileKind(II)) {
       S.Diag(AL.getLoc(), diag::err_profile_unknown) << II;
+      break;
+    }
+    StringRef Justification, Rule;
+    if (AL.getNumArgs() > 1 && AL.isArgExpr(1))
+      if (auto *SL = dyn_cast_if_present<StringLiteral>(AL.getArgAsExpr(1)))
+        Justification = SL->getString();
+    if (AL.getNumArgs() > 2 && AL.isArgExpr(2))
+      if (auto *SL = dyn_cast_if_present<StringLiteral>(AL.getArgAsExpr(2)))
+        Rule = SL->getString();
+    D->addAttr(::new (S.Context)
+                   ProfilesSuppressAttr(S.Context, AL, II, Justification, Rule));
     break;
   }
   case ParsedAttr::AT_Owner:

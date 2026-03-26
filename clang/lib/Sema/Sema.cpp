@@ -2506,6 +2506,31 @@ operator()(sema::FunctionScopeInfo *Scope) const {
     delete Scope;
 }
 
+bool Sema::isProfileSuppressedByDeclAttr(ProfileKind P) const {
+  for (const DeclContext *DC = CurContext; DC; DC = DC->getParent()) {
+    if (const auto *D = dyn_cast<Decl>(DC)) {
+      for (const auto *A : D->specific_attrs<ProfilesSuppressAttr>()) {
+        llvm::StringRef Name = A->getProfileName()->getName();
+        Name.consume_front("std::");
+        if (Name == "strict" &&
+            (P == ProfileKind::Type || P == ProfileKind::Bounds ||
+             P == ProfileKind::Lifetime))
+          return true;
+        auto PK =
+            llvm::StringSwitch<std::optional<ProfileKind>>(Name)
+                .Case("type", ProfileKind::Type)
+                .Case("bounds", ProfileKind::Bounds)
+                .Case("lifetime", ProfileKind::Lifetime)
+                .Case("arithmetic", ProfileKind::Arithmetic)
+                .Default(std::nullopt);
+        if (PK && *PK == P)
+          return true;
+      }
+    }
+  }
+  return false;
+}
+
 bool Sema::isProfileDiagnosticSuppressed() const {
   if (isUnevaluatedContext())
     return true;
@@ -2548,9 +2573,9 @@ void Sema::setProfileSuppressedByName(IdentifierInfo *ProfileName) {
     CurProfileState.setSuppressed(*PK);
 }
 
-void Sema::applyProfileAttrToState(IdentifierInfo *ProfileName) {
+bool Sema::applyProfileAttrToState(IdentifierInfo *ProfileName) {
   if (!ProfileName)
-    return;
+    return false;
   llvm::StringRef Name = ProfileName->getName();
   Name.consume_front("std::");
 
@@ -2562,7 +2587,7 @@ void Sema::applyProfileAttrToState(IdentifierInfo *ProfileName) {
     SetEnforced(ProfileKind::Type);
     SetEnforced(ProfileKind::Bounds);
     SetEnforced(ProfileKind::Lifetime);
-    return;
+    return true;
   }
   auto PK =
       llvm::StringSwitch<std::optional<ProfileKind>>(Name)
@@ -2571,10 +2596,56 @@ void Sema::applyProfileAttrToState(IdentifierInfo *ProfileName) {
           .Case("lifetime", ProfileKind::Lifetime)
           .Case("arithmetic", ProfileKind::Arithmetic)
           .Default(std::nullopt);
-  if (PK)
+  if (PK) {
     SetEnforced(*PK);
+    return true;
+  }
+  return false;
 }
 
+bool Sema::checkProfileEnforceConflict(
+    SourceLocation Loc, IdentifierInfo *ProfileName,
+    SmallVectorImpl<IdentifierInfo *> &PrevNames) {
+  if (!ProfileName)
+    return false;
+  llvm::StringRef CurBase = ProfileName->getName();
+  CurBase.consume_front("std::");
+
+  auto IsConflict = [&](const IdentifierInfo *PrevII) {
+    llvm::StringRef PrevBase = PrevII->getName();
+    PrevBase.consume_front("std::");
+    return PrevBase == CurBase && PrevII->getName() != ProfileName->getName();
+  };
+
+  for (IdentifierInfo *Prev : PrevNames) {
+    if (IsConflict(Prev)) {
+      Diag(Loc, diag::err_profile_enforce_duplicate_conflict) << ProfileName;
+      return true;
+    }
+  }
+
+  if (CurContext->isTranslationUnit()) {
+    for (const Decl *D : CurContext->decls()) {
+      if (!isa<EmptyDecl>(D))
+        continue;
+      if (const auto *EA = D->getAttr<ProfilesEnforceAttr>()) {
+        if (IsConflict(EA->getProfileName())) {
+          Diag(Loc, diag::err_profile_enforce_duplicate_conflict)
+              << ProfileName;
+          return true;
+        }
+      }
+    }
+  }
+
+  PrevNames.push_back(ProfileName);
+  return false;
+}
+
+// TODO: P3589R2 [decl.attr.require] para 2: if the module-import-declaration
+// specifies a header-name H, the profile-designator shall appear in a
+// profile-enforcement attribute of an empty-declaration in the header unit
+// corresponding to H.
 void Sema::checkProfileRequireOnImport(const ParsedAttr &AL,
                                        IdentifierInfo *ProfileName,
                                        Decl *ImportD) {

@@ -942,8 +942,17 @@ public:
   void setProfileSuppressedByName(IdentifierInfo *ProfileName);
 
   /// P3589R2: Apply a profile enforce attr from a module-declaration
-  /// to the current profile state.
-  void applyProfileAttrToState(IdentifierInfo *ProfileName);
+  /// to the current profile state. Returns false if the profile name
+  /// is unrecognized.
+  bool applyProfileAttrToState(IdentifierInfo *ProfileName);
+
+  /// P3589R2 [decl.attr.enforce] para 3: Check for conflicting enforce
+  /// attributes that designate the same profile with different token
+  /// sequences. \p PrevNames collects names already seen on this
+  /// module-declaration; also checks against prior empty-declarations.
+  bool checkProfileEnforceConflict(SourceLocation Loc,
+                                   IdentifierInfo *ProfileName,
+                                   SmallVectorImpl<IdentifierInfo *> &PrevNames);
 
   /// P3589R2 [decl.attr.require]: Check that the imported module enforces
   /// the required profile.
@@ -959,13 +968,22 @@ public:
 
   bool isProfileDiagnosticSuppressed() const;
 
+  /// P3589R2 [decl.attr.suppress] para 3: check if ProfileKind P is
+  /// suppressed by a ProfilesSuppressAttr on the enclosing function
+  /// declaration.
+  bool isProfileSuppressedByDeclAttr(ProfileKind P) const;
+
   bool isProfileEnforced(ProfileKind P, llvm::StringRef Rule = "") const {
     if (!CurProfileState.isEnforced(P) || isProfileDiagnosticSuppressed())
+      return false;
+    if (isProfileSuppressedByDeclAttr(P))
       return false;
     return Rule.empty() || !isRuleSuppressed(P, Rule);
   }
   bool isProfileEnabled(ProfileKind P, llvm::StringRef Rule = "") const {
     if (!CurProfileState.isEnabled(P) || isProfileDiagnosticSuppressed())
+      return false;
+    if (isProfileSuppressedByDeclAttr(P))
       return false;
     return Rule.empty() || !isRuleSuppressed(P, Rule);
   }

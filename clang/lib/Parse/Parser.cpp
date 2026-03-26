@@ -2399,13 +2399,18 @@ Parser::ParseModuleDecl(Sema::ModuleImportState &ImportState) {
 
   // Apply profile enforce attrs before creating the module so
   // CurProfileState reflects them when ActOnModuleDecl records on Module.
+  SmallVector<IdentifierInfo *, 4> SeenEnforceNames;
   for (const ParsedAttr &AL : Attrs) {
     if (AL.isInvalid())
       continue;
     if (AL.getParsedKind() == ParsedAttr::AT_ProfilesEnforce) {
       if (AL.getNumArgs() > 0 && AL.isArgIdent(0)) {
         IdentifierInfo *II = AL.getArgAsIdent(0)->getIdentifierInfo();
-        Actions.applyProfileAttrToState(II);
+        if (!Actions.applyProfileAttrToState(II))
+          Diag(AL.getLoc(), diag::err_profile_unknown) << II;
+        else
+          Actions.checkProfileEnforceConflict(AL.getLoc(), II,
+                                              SeenEnforceNames);
       }
     }
   }
