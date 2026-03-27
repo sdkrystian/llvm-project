@@ -9,7 +9,10 @@
 #ifndef LLVM_CLANG_BASIC_PROFILESTATE_H
 #define LLVM_CLANG_BASIC_PROFILESTATE_H
 
+#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringSwitch.h"
 #include <cstdint>
+#include <optional>
 
 namespace clang {
 
@@ -25,6 +28,24 @@ enum class ProfileMode : uint8_t {
   None = 0,
   Enforced = 1,
 };
+
+/// Strip the "std::" prefix and any "(profile-argument-list)" suffix from a
+/// profile designator, yielding the base profile name for resolution.
+inline llvm::StringRef getBaseProfileName(llvm::StringRef Name) {
+  Name.consume_front("std::");
+  Name = Name.split('(').first;
+  return Name;
+}
+
+/// Resolve a base profile name to a ProfileKind.
+inline std::optional<ProfileKind> resolveProfileKind(llvm::StringRef Name) {
+  return llvm::StringSwitch<std::optional<ProfileKind>>(Name)
+      .Case("type", ProfileKind::Type)
+      .Case("bounds", ProfileKind::Bounds)
+      .Case("lifetime", ProfileKind::Lifetime)
+      .Case("arithmetic", ProfileKind::Arithmetic)
+      .Default(std::nullopt);
+}
 
 class ProfileState {
   static constexpr unsigned NumProfiles =

@@ -5452,21 +5452,10 @@ static void handleSuppressAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
                               DiagnosticIdentifiers.size()));
 }
 
-static llvm::StringRef stripStdProfilePrefix(llvm::StringRef Name) {
-  Name.consume_front("std::");
-  return Name;
-}
-
 static std::optional<ProfileKind> resolveProfileKind(IdentifierInfo *II) {
   if (!II)
     return std::nullopt;
-  return llvm::StringSwitch<std::optional<ProfileKind>>(
-             stripStdProfilePrefix(II->getName()))
-      .Case("type", ProfileKind::Type)
-      .Case("bounds", ProfileKind::Bounds)
-      .Case("lifetime", ProfileKind::Lifetime)
-      .Case("arithmetic", ProfileKind::Arithmetic)
-      .Default(std::nullopt);
+  return clang::resolveProfileKind(getBaseProfileName(II->getName()));
 }
 
 static bool
@@ -5474,7 +5463,7 @@ resolveProfileKinds(IdentifierInfo *II,
                     SmallVectorImpl<ProfileKind> &Profiles) {
   if (!II)
     return false;
-  if (stripStdProfilePrefix(II->getName()) == "strict") {
+  if (getBaseProfileName(II->getName()) == "strict") {
     Profiles.push_back(ProfileKind::Type);
     Profiles.push_back(ProfileKind::Bounds);
     Profiles.push_back(ProfileKind::Lifetime);
@@ -5518,8 +5507,8 @@ static void handleProfilesEnforceAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   // profile is only permitted if the designators are identical.
   auto CheckConflict = [&](const ProfilesEnforceAttr *EA) {
     llvm::StringRef PrevBase =
-        stripStdProfilePrefix(EA->getProfileName()->getName());
-    llvm::StringRef CurBase = stripStdProfilePrefix(II->getName());
+        getBaseProfileName(EA->getProfileName()->getName());
+    llvm::StringRef CurBase = getBaseProfileName(II->getName());
     if (PrevBase == CurBase &&
         EA->getProfileName()->getName() != II->getName()) {
       S.Diag(AL.getLoc(), diag::err_profile_enforce_duplicate_conflict) << II;
@@ -5537,13 +5526,25 @@ static void handleProfilesEnforceAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
       if (CheckConflict(EA))
         return;
   }
-  // TODO: P3589R2 [decl.attr.enforce] para 5: if a declaration D appears in
-  // the dominion of a profile P1, all other redeclarations of D shall appear
-  // in the dominion of a compatible profile P2. All standard profiles are
-  // compatible with each other, so this only matters for implementation-defined
-  // profiles.
+  // P3589R2 [decl.attr.enforce] para 5: redeclarations must be in a compatible
+  // profile dominion. This is trivially satisfied for standard profiles because:
+  //  (a) All standard profiles are compatible with each other.
+  //  (b) Enforcement is monotonic within a TU (once set, never unset).
+  //  (c) Para 1 requires enforce to precede all non-empty declarations, so all
+  //      declarations in the TU are necessarily within the dominion.
+  // Cross-TU redeclaration checking requires linker or module-level support.
   for (ProfileKind PK : Profiles)
     S.getCurProfileState().setMode(PK, ProfileMode::Enforced);
+
+  // P3589R2 [decl.attr.require] para 2: for header units, record enforced
+  // profiles on the Module so that require checks on imports can verify them.
+  if (Module *Mod = S.getCurrentModule()) {
+    if (Mod->isHeaderUnit()) {
+      for (ProfileKind PK : Profiles)
+        Mod->EnforcedProfiles |= (1u << static_cast<unsigned>(PK));
+    }
+  }
+
   D->addAttr(::new (S.Context) ProfilesEnforceAttr(S.Context, AL, II));
 }
 
@@ -7985,7 +7986,7 @@ ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D, const ParsedAttr &AL,
     break;
   case ParsedAttr::AT_ProfilesSuppress: {
     IdentifierInfo *II = AL.getArgAsIdent(0)->getIdentifierInfo();
-    llvm::StringRef Base = stripStdProfilePrefix(II->getName());
+    llvm::StringRef Base = getBaseProfileName(II->getName());
     if (Base != "strict" && !resolveProfileKind(II)) {
       S.Diag(AL.getLoc(), diag::err_profile_unknown) << II;
       break;

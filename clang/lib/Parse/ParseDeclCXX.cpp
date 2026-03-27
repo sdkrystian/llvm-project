@@ -4454,21 +4454,35 @@ void Parser::ParseProfileAttributeArgs(
     }
     FullName += "::";
     FullName += Next->getName();
-    NameLoc = NextLoc;
+  }
+
+  // P3589R2 [dcl.attr.grammar]: For enforce and require, the
+  // profile-designator may include a parenthesized profile-argument-list.
+  if ((AttrName->isStr("enforce") || AttrName->isStr("require")) &&
+      Tok.is(tok::l_paren)) {
+    FullName += "(";
+    ConsumeParen();
+    unsigned Depth = 1;
+    bool FirstTok = true;
+    while (Depth > 0 && !Tok.is(tok::eof)) {
+      if (Tok.is(tok::l_paren))
+        Depth++;
+      else if (Tok.is(tok::r_paren) && --Depth == 0)
+        break;
+      if (!FirstTok)
+        FullName += " ";
+      FirstTok = false;
+      FullName += PP.getSpelling(Tok);
+      ConsumeAnyToken();
+    }
+    FullName += ")";
+    if (Tok.is(tok::r_paren))
+      ConsumeParen();
   }
 
   if (FullName != ProfileName->getName())
     ProfileName =
         &Actions.getPreprocessor().getIdentifierTable().get(FullName);
-
-  // P3589R2 [decl.attr.enforce]: For enforce, the profile-designator
-  // may include a parenthesized profile-argument-list.
-  if (AttrName->isStr("enforce") && Tok.is(tok::l_paren)) {
-    BalancedDelimiterTracker ArgTracker(*this, tok::l_paren);
-    ArgTracker.consumeOpen();
-    SkipUntil(tok::r_paren, StopBeforeMatch);
-    ArgTracker.consumeClose();
-  }
 
   IdentifierLoc *ProfileNameLoc =
       ::new (Actions.getASTContext()) IdentifierLoc(NameLoc, ProfileName);
@@ -4484,27 +4498,37 @@ void Parser::ParseProfileAttributeArgs(
       SourceLocation KeyLoc;
       IdentifierInfo *Key = TryParseCXX11AttributeIdentifier(KeyLoc);
       if (Key && Tok.is(tok::colon)) {
+        // P3589R2 [dcl.attr.grammar]: identifier : non-comma-balanced-token
         ConsumeToken();
-        if (Key->isStr("justification") || Key->isStr("rule")) {
+        if (Key->isStr("justification")) {
+          // P3589R2 [decl.attr.suppress] para 2: shall be a string-literal.
           if (Tok.is(tok::string_literal)) {
             ExprResult Val = ParseStringLiteralExpression();
-            if (Val.isUsable()) {
-              if (Key->isStr("justification"))
-                JustificationExpr = Val.get();
-              else
-                RuleExpr = Val.get();
-            } else {
+            if (Val.isUsable())
+              JustificationExpr = Val.get();
+            else
               SkipUntil(tok::comma, tok::r_paren, StopBeforeMatch);
-            }
           } else {
             Diag(Tok.getLocation(), diag::err_expected) << "string literal";
+            SkipUntil(tok::comma, tok::r_paren, StopBeforeMatch);
+          }
+        } else if (Key->isStr("rule")) {
+          if (Tok.is(tok::string_literal)) {
+            ExprResult Val = ParseStringLiteralExpression();
+            if (Val.isUsable())
+              RuleExpr = Val.get();
+            else
+              SkipUntil(tok::comma, tok::r_paren, StopBeforeMatch);
+          } else {
             SkipUntil(tok::comma, tok::r_paren, StopBeforeMatch);
           }
         } else {
           SkipUntil(tok::comma, tok::r_paren, StopBeforeMatch);
         }
-      } else {
-        SkipUntil(tok::comma, tok::r_paren, StopBeforeMatch);
+      } else if (!Key &&
+                 !Tok.isOneOf(tok::comma, tok::r_paren, tok::eof)) {
+        // P3589R2 [dcl.attr.grammar]: bare non-operator-non-punctuator-token
+        ConsumeAnyToken();
       }
     }
   }
@@ -4599,7 +4623,7 @@ bool Parser::ParseCXX11AttributeArgs(
     return true;
   }
 
-  // [[profiles::enforce/apply/suppress/require(...)]]
+  // [[profiles::enforce/suppress/require(...)]]
   if (ScopeName && ScopeName->isStr("profiles") &&
       (AttrName->isStr("enforce") ||
        AttrName->isStr("suppress") || AttrName->isStr("require"))) {

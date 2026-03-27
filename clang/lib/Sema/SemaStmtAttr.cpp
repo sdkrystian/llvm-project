@@ -22,21 +22,10 @@
 using namespace clang;
 using namespace sema;
 
-static llvm::StringRef stripStdProfilePrefix(llvm::StringRef Name) {
-  Name.consume_front("std::");
-  return Name;
-}
-
 static std::optional<ProfileKind> resolveProfileKind(IdentifierInfo *II) {
   if (!II)
     return std::nullopt;
-  return llvm::StringSwitch<std::optional<ProfileKind>>(
-             stripStdProfilePrefix(II->getName()))
-      .Case("type", ProfileKind::Type)
-      .Case("bounds", ProfileKind::Bounds)
-      .Case("lifetime", ProfileKind::Lifetime)
-      .Case("arithmetic", ProfileKind::Arithmetic)
-      .Default(std::nullopt);
+  return clang::resolveProfileKind(getBaseProfileName(II->getName()));
 }
 
 static Attr *handleFallThroughAttr(Sema &S, Stmt *St, const ParsedAttr &A,
@@ -680,7 +669,7 @@ static Attr *handleAtomicAttr(Sema &S, Stmt *St, const ParsedAttr &AL,
 static Attr *handleProfileSuppressAttr(Sema &S, Stmt *St, const ParsedAttr &A,
                                        SourceRange Range) {
   IdentifierInfo *II = A.getArgAsIdent(0)->getIdentifierInfo();
-  if (stripStdProfilePrefix(II->getName()) != "strict") {
+  if (getBaseProfileName(II->getName()) != "strict") {
     auto PK = resolveProfileKind(II);
     if (!PK) {
       S.Diag(A.getLoc(), diag::err_profile_unknown) << II;

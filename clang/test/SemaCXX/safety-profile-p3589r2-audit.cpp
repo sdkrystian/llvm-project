@@ -37,7 +37,10 @@ void test_bad_justification() {
 }
 
 void test_bad_rule() {
-  [[profiles::suppress(std::type, rule: 42)]] // expected-error {{expected string literal}}
+  // P3589R2 [dcl.attr.grammar]: rule: accepts any non-comma-balanced-token.
+  // A non-string value is accepted per the grammar but not stored; this
+  // makes the suppress act as a whole-profile suppress rather than per-rule.
+  [[profiles::suppress(std::type, rule: 42)]]
   int x;
 }
 

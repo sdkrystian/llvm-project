@@ -102,8 +102,7 @@ StmtResult Parser::ParseStatementOrDeclaration(StmtVector &Stmts,
 
     if (!RuleName.empty()) {
       IdentifierInfo *II = Attr.getArgAsIdent(0)->getIdentifierInfo();
-      llvm::StringRef Name = II->getName();
-      Name.consume_front("std::");
+      llvm::StringRef Name = getBaseProfileName(II->getName());
       if (Name == "strict") {
         Actions.addRuleSuppression(ProfileKind::Type, RuleName);
         Actions.addRuleSuppression(ProfileKind::Bounds, RuleName);

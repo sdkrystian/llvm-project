@@ -836,8 +836,7 @@ void CodeGenFunction::EmitAttributedStmt(const AttributedStmt &S) {
     // that rule is suppressed — don't suppress the whole profile in codegen.
     if (!SA->getRule().empty())
       continue;
-    llvm::StringRef Name = SA->getProfileName()->getName();
-    Name.consume_front("std::");
+    llvm::StringRef Name = getBaseProfileName(SA->getProfileName()->getName());
     if (Name == "strict") {
       CurProfileState.setSuppressed(ProfileKind::Type);
       CurProfileState.setSuppressed(ProfileKind::Bounds);

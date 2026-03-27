@@ -2510,8 +2510,8 @@ bool Sema::isProfileSuppressedByDeclAttr(ProfileKind P) const {
   for (const DeclContext *DC = CurContext; DC; DC = DC->getParent()) {
     if (const auto *D = dyn_cast<Decl>(DC)) {
       for (const auto *A : D->specific_attrs<ProfilesSuppressAttr>()) {
-        llvm::StringRef Name = A->getProfileName()->getName();
-        Name.consume_front("std::");
+        llvm::StringRef Name =
+            getBaseProfileName(A->getProfileName()->getName());
         if (Name == "strict" &&
             (P == ProfileKind::Type || P == ProfileKind::Bounds ||
              P == ProfileKind::Lifetime))
@@ -2554,8 +2554,7 @@ bool Sema::isProfileDiagnosticSuppressed() const {
 void Sema::setProfileSuppressedByName(IdentifierInfo *ProfileName) {
   if (!ProfileName)
     return;
-  llvm::StringRef Name = ProfileName->getName();
-  Name.consume_front("std::");
+  llvm::StringRef Name = getBaseProfileName(ProfileName->getName());
   if (Name == "strict") {
     CurProfileState.setSuppressed(ProfileKind::Type);
     CurProfileState.setSuppressed(ProfileKind::Bounds);
@@ -2576,8 +2575,7 @@ void Sema::setProfileSuppressedByName(IdentifierInfo *ProfileName) {
 bool Sema::applyProfileAttrToState(IdentifierInfo *ProfileName) {
   if (!ProfileName)
     return false;
-  llvm::StringRef Name = ProfileName->getName();
-  Name.consume_front("std::");
+  llvm::StringRef Name = getBaseProfileName(ProfileName->getName());
 
   auto SetEnforced = [&](ProfileKind PK) {
     CurProfileState.setMode(PK, ProfileMode::Enforced);
@@ -2608,12 +2606,10 @@ bool Sema::checkProfileEnforceConflict(
     SmallVectorImpl<IdentifierInfo *> &PrevNames) {
   if (!ProfileName)
     return false;
-  llvm::StringRef CurBase = ProfileName->getName();
-  CurBase.consume_front("std::");
+  llvm::StringRef CurBase = getBaseProfileName(ProfileName->getName());
 
   auto IsConflict = [&](const IdentifierInfo *PrevII) {
-    llvm::StringRef PrevBase = PrevII->getName();
-    PrevBase.consume_front("std::");
+    llvm::StringRef PrevBase = getBaseProfileName(PrevII->getName());
     return PrevBase == CurBase && PrevII->getName() != ProfileName->getName();
   };
 
@@ -2642,17 +2638,14 @@ bool Sema::checkProfileEnforceConflict(
   return false;
 }
 
-// TODO: P3589R2 [decl.attr.require] para 2: if the module-import-declaration
-// specifies a header-name H, the profile-designator shall appear in a
-// profile-enforcement attribute of an empty-declaration in the header unit
-// corresponding to H.
+// P3589R2 [decl.attr.require] para 2: For header units, EnforcedProfiles is
+// populated by handleProfilesEnforceAttr when the header unit is compiled.
 void Sema::checkProfileRequireOnImport(const ParsedAttr &AL,
                                        IdentifierInfo *ProfileName,
                                        Decl *ImportD) {
   if (!ProfileName)
     return;
-  llvm::StringRef Name = ProfileName->getName();
-  Name.consume_front("std::");
+  llvm::StringRef Name = getBaseProfileName(ProfileName->getName());
 
   SmallVector<ProfileKind, 4> Required;
   if (Name == "strict") {
