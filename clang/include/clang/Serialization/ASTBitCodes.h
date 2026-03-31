@@ -884,6 +884,9 @@ enum SubmoduleRecordTypes {
   /// Specifies a direct submodule by name and ID, enabling on-demand
   /// deserialization of children without loading the entire submodule block.
   SUBMODULE_CHILD = 19,
+
+  /// Specifies enforced profile designators (P3589R2).
+  SUBMODULE_ENFORCED_PROFILES = 20,
 };
 
 /// Record types used within a comments block.
