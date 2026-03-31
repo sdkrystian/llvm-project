@@ -1005,6 +1005,7 @@ void ASTWriter::WriteBlockInfoBlock() {
   RECORD(SUBMODULE_INITIALIZERS);
   RECORD(SUBMODULE_EXPORT_AS);
   RECORD(SUBMODULE_CHILD);
+  RECORD(SUBMODULE_ENFORCED_PROFILES);
 
   // Comments Block.
   BLOCK(COMMENTS_BLOCK);
@@ -3254,6 +3255,16 @@ void ASTWriter::WriteSubmodules(Module *WritingModule, ASTContext *Context) {
       RecordData::value_type Record[] = {SUBMODULE_CHILD,
                                          getSubmoduleID(Child)};
       Stream.EmitRecordWithBlob(ChildAbbrev, Record, Child->Name);
+    }
+
+    // Emit enforced profile designators (P3589R2).
+    if (!Mod->EnforcedProfileDesignators.empty()) {
+      RecordData Record;
+      for (const auto &Desig : Mod->EnforcedProfileDesignators) {
+        Record.push_back(Desig.size());
+        Record.append(Desig.begin(), Desig.end());
+      }
+      Stream.EmitRecord(SUBMODULE_ENFORCED_PROFILES, Record);
     }
 
     // Emit the sentinel signifying the end of this submodule.
