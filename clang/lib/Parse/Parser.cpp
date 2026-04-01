@@ -2389,6 +2389,17 @@ Parser::ParseModuleDecl(Sema::ModuleImportState &ImportState) {
   ParsedAttributes Attrs(AttrFactory);
   MaybeParseCXX11Attributes(Attrs);
 
+  // Reject non-profile attributes on the module-declaration. Profile
+  // attributes are handled by ActOnModuleDecl.
+  for (const ParsedAttr &AL : Attrs) {
+    if (AL.getKind() == ParsedAttr::AT_ProfilesEnforce)
+      continue;
+    if (AL.isRegularKeywordAttribute())
+      Diag(AL.getLoc(), diag::err_keyword_not_module_attr) << AL;
+    else if (AL.isStandardAttributeSyntax())
+      Diag(AL.getLoc(), diag::err_attribute_not_module_attr) << AL;
+  }
+
   if (ExpectAndConsumeSemi(diag::err_expected_semi_after_module_or_import,
                            tok::getKeywordSpelling(tok::kw_module)))
     SkipUntil(tok::semi);
@@ -2442,6 +2453,17 @@ Decl *Parser::ParseModuleImport(SourceLocation AtLoc,
 
   ParsedAttributes Attrs(AttrFactory);
   MaybeParseCXX11Attributes(Attrs);
+
+  // Reject non-profile attributes on the import-declaration. Profile
+  // attributes are handled by ActOnModuleImportAttrs.
+  for (const ParsedAttr &AL : Attrs) {
+    if (AL.getKind() == ParsedAttr::AT_ProfilesRequire)
+      continue;
+    if (AL.isRegularKeywordAttribute())
+      Diag(AL.getLoc(), diag::err_keyword_not_import_attr) << AL;
+    else if (AL.isStandardAttributeSyntax())
+      Diag(AL.getLoc(), diag::err_attribute_not_import_attr) << AL;
+  }
 
   // Clang modules can inject token streams while loading, so a fatal loader
   // failure must stop parsing. C++20 named module imports are ordinary
