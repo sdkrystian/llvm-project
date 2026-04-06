@@ -6654,19 +6654,11 @@ Module *ASTReader::getSubmodule(uint32_t GlobalID) {
     }
 
     case SUBMODULE_ENFORCED_PROFILES: {
-      unsigned Idx = 0;
-      while (Idx < Record.size()) {
-        unsigned NameLen = Record[Idx++];
-        std::string Name(Record.begin() + Idx,
-                         Record.begin() + Idx + NameLen);
-        Idx += NameLen;
-        unsigned DesigLen = Record[Idx++];
-        std::string Desig(Record.begin() + Idx,
-                          Record.begin() + Idx + DesigLen);
-        Idx += DesigLen;
-        CurrentModule->EnforcedProfileDesignators.push_back(
-            {std::move(Name), std::move(Desig)});
-      }
+      unsigned NameLen = Record[0];
+      std::string Name = Blob.substr(0, NameLen).str();
+      std::string Desig = Blob.substr(NameLen).str();
+      CurrentModule->EnforcedProfileDesignators.push_back(
+          {std::move(Name), std::move(Desig)});
       break;
     }
     }
