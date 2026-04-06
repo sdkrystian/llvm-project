@@ -157,6 +157,7 @@ enum class OverloadCandidateParamOrder : char;
 enum OverloadCandidateRewriteKind : unsigned;
 class OverloadCandidateSet;
 class Preprocessor;
+class ProfilesSuppressAttr;
 class SemaAMDGPU;
 class SemaARM;
 class SemaAVR;
@@ -1063,6 +1064,8 @@ public:
   const ProfileEnforcement *getProfileEnforcement(StringRef ProfileName) const;
   bool addProfileEnforcement(StringRef Name, StringRef Designator,
                              SourceLocation Loc);
+
+  ProfilesSuppressAttr *makeProfilesSuppressAttr(const ParsedAttr &AL);
 
   void pushProfileSuppression(StringRef ProfileName, StringRef RuleName);
   void popProfileSuppressions(unsigned Count);
