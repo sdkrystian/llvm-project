@@ -5057,6 +5057,8 @@ void Parser::ParseMicrosoftIfExistsClassDeclaration(
 // C++ Profiles framework (P3589R2)
 //===----------------------------------------------------------------------===//
 
+// Profile names may contain '::' (e.g. "std::type"), so IdentifierLoc is not
+// suitable. We synthesize StringLiteral nodes to pass them through ArgsUnion.
 static Expr *MakeProfileStringLiteral(Parser &P, StringRef Str,
                                       SourceLocation Loc) {
   ASTContext &Ctx = P.getActions().Context;
