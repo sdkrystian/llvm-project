@@ -6272,6 +6272,7 @@ void Sema::InstantiateVariableInitializer(
     Var->setImplicitlyInline();
 
   ContextRAII SwitchContext(*this, Var->getDeclContext());
+  ProfileSuppressScope ProfileSuppressGuard(*this, OldVar);
 
   EnterExpressionEvaluationContext Evaluated(
       *this, Sema::ExpressionEvaluationContext::PotentiallyEvaluated, Var,
