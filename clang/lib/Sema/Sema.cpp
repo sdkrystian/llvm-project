@@ -3164,7 +3164,7 @@ bool Sema::processProfilesEnforceAttr(
 
 ProfilesSuppressAttr *Sema::makeProfilesSuppressAttr(const ParsedAttr &AL) {
   const auto &Args = AL.getProfileSuppressArgs();
-  if (Args.ProfileName.empty())
+  if (Args.Name.empty())
     return nullptr;
 
   SmallVector<StringRef, 4> RawArgs;
@@ -3172,7 +3172,7 @@ ProfilesSuppressAttr *Sema::makeProfilesSuppressAttr(const ParsedAttr &AL) {
     RawArgs.push_back(Arg);
 
   return ::new (Context) ProfilesSuppressAttr(
-      Context, AL, Args.ProfileName, Args.Justification, Args.Rule,
+      Context, AL, Args.Name, Args.Justification, Args.Rule,
       RawArgs.data(), RawArgs.size());
 }
 
@@ -3227,9 +3227,8 @@ Sema::ProfileSuppressScope::ProfileSuppressScope(
     if (AL.getKind() != ParsedAttr::AT_ProfilesSuppress)
       continue;
     const auto &Args = AL.getProfileSuppressArgs();
-    if (!Args.ProfileName.empty()) {
-      S.ProfileSuppressStack.push_back(
-          {Args.ProfileName, Args.Rule});
+    if (!Args.Name.empty()) {
+      S.ProfileSuppressStack.push_back({Args.Name, Args.Rule});
       ++Count;
     }
   }
@@ -3241,7 +3240,7 @@ Sema::ProfileSuppressScope::ProfileSuppressScope(Sema &S, const Decl *D)
     return;
   for (const auto *A : D->specific_attrs<ProfilesSuppressAttr>()) {
     S.ProfileSuppressStack.push_back(
-        {A->getProfileName().str(), A->getRule().str()});
+        {A->getProfileName(), A->getRule()});
     ++Count;
   }
 }
@@ -3254,7 +3253,7 @@ Sema::ProfileSuppressScope::ProfileSuppressScope(Sema &S,
   for (const auto *A : Attrs) {
     if (const auto *PSA = dyn_cast<ProfilesSuppressAttr>(A)) {
       S.ProfileSuppressStack.push_back(
-          {PSA->getProfileName().str(), PSA->getRule().str()});
+          {PSA->getProfileName(), PSA->getRule()});
       ++Count;
     }
   }
