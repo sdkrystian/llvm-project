@@ -747,6 +747,9 @@ enum ASTRecordTypes {
   /// Record that encodes the number of submodules, their base ID in the AST
   /// file, and for each module the relative bit offset into the stream.
   SUBMODULE_METADATA = 80,
+
+  /// Record code for enforced profile designators (P3589R2).
+  ENFORCED_PROFILES = 81,
 };
 
 /// Record types used within a source manager block.
