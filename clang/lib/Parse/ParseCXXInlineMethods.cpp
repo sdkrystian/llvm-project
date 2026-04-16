@@ -378,8 +378,8 @@ void Parser::ParseLexedMethodDeclaration(LateParsedMethodDeclaration &LM) {
   // Start the delayed C++ method declaration
   Actions.ActOnStartDelayedCXXMethodDeclaration(getCurScope(), LM.Method);
 
-  Sema::ProfileSuppressScope ProfileSuppressGuard(Actions,
-                                                  LM.Method->getAsFunction());
+  Sema::ProfileSuppressScope ProfileSuppressGuard(
+      Actions, LM.Method->getAsFunction(), /*WalkLexicalParents=*/true);
 
   // Introduce the parameters into scope and parse their default
   // arguments.
@@ -614,8 +614,8 @@ void Parser::ParseLexedMethodDef(LexedMethod &LM) {
 
   Actions.ActOnStartOfFunctionDef(getCurScope(), LM.D);
 
-  Sema::ProfileSuppressScope ProfileSuppressGuard(Actions,
-                                                  LM.D->getAsFunction());
+  Sema::ProfileSuppressScope ProfileSuppressGuard(
+      Actions, LM.D->getAsFunction(), /*WalkLexicalParents=*/true);
 
   llvm::scope_exit _([&]() {
     while (Tok.isNot(tok::eof))
