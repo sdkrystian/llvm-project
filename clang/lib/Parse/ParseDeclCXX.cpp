@@ -5088,7 +5088,33 @@ bool Parser::ParseProfileName(std::string &Name) {
   return false;
 }
 
-bool Parser::ParseNonCommaBalancedToken(std::string &Spelling) {
+template <typename ProfileArgument>
+static std::string
+getCanonicalProfileArgumentSpelling(const ProfileArgument &Argument) {
+  if (!Argument.isNamed())
+    return Argument.Value;
+  return Argument.Key + " : " + Argument.Value;
+}
+
+template <typename ProfileArguments>
+static ArrayRef<profiles::ProfileArgument> copyProfileArguments(
+    AttributePool &Pool, const ProfileArguments &Parsed) {
+  if (Parsed.empty())
+    return {};
+
+  auto Args = Pool.allocateArray<profiles::ProfileArgument>(Parsed.size());
+  for (unsigned I = 0; I < Parsed.size(); ++I) {
+    Args[I].Key = Pool.copyString(Parsed[I].Key);
+    Args[I].Value = Pool.copyString(Parsed[I].Value);
+    Args[I].Kind = Parsed[I].Kind;
+    Args[I].Range = Parsed[I].Range;
+  }
+  return Args;
+}
+
+bool Parser::ParseNonCommaBalancedToken(std::string &Spelling,
+                                        SourceRange *Range) {
+  SourceLocation StartLoc = Tok.getLocation();
   if (Tok.isOneOf(tok::l_paren, tok::l_square, tok::l_brace)) {
     tok::TokenKind Close;
     Spelling = PP.getSpelling(Tok);
@@ -5109,6 +5135,8 @@ bool Parser::ParseNonCommaBalancedToken(std::string &Spelling) {
       Spelling += " ";
       Spelling += PP.getSpelling(T);
     }
+    if (Range)
+      *Range = SourceRange(StartLoc, Toks.back().getLocation());
     return false;
   }
 
@@ -5119,39 +5147,48 @@ bool Parser::ParseNonCommaBalancedToken(std::string &Spelling) {
   }
 
   Spelling = PP.getSpelling(Tok);
+  if (Range)
+    *Range = SourceRange(StartLoc, Tok.getLocation());
   ConsumeAnyToken();
   return false;
 }
 
-bool Parser::ParseNonOperatorNonPunctuatorToken(std::string &Spelling) {
+bool Parser::ParseNonOperatorNonPunctuatorToken(std::string &Spelling,
+                                                SourceRange *Range) {
   // P3589R2 [dcl.attr.profiles]: A bare profile-argument is a
   // non-operator-non-punctuator-token.
   if (tok::getPunctuatorSpelling(Tok.getKind()) || Tok.is(tok::eof)) {
     Diag(Tok, diag::err_profiles_invalid_argument_token);
     return true;
   }
+  SourceLocation Loc = Tok.getLocation();
   Spelling = PP.getSpelling(Tok);
+  if (Range)
+    *Range = SourceRange(Loc, Loc);
   ConsumeAnyToken();
   return false;
 }
 
-bool Parser::ParseProfileArgumentList(SmallVectorImpl<std::string> &Args) {
+bool Parser::ParseProfileArgumentList(
+    SmallVectorImpl<ParsedProfileDesignator::Argument> &Args) {
   while (true) {
+    ParsedProfileDesignator::Argument Arg;
     if (Tok.is(tok::identifier) && NextToken().is(tok::colon)) {
-      std::string Key = Tok.getIdentifierInfo()->getName().str();
+      SourceLocation KeyLoc = Tok.getLocation();
+      Arg.Key = Tok.getIdentifierInfo()->getName().str();
+      Arg.Kind = profiles::ProfileArgumentKind::Named;
       ConsumeToken();
       ConsumeToken();
 
-      std::string Value;
-      if (ParseNonCommaBalancedToken(Value))
+      SourceRange ValueRange;
+      if (ParseNonCommaBalancedToken(Arg.Value, &ValueRange))
         return true;
-      Args.push_back(Key + " : " + Value);
+      Arg.Range = SourceRange(KeyLoc, ValueRange.getEnd());
     } else {
-      std::string Spelling;
-      if (ParseNonOperatorNonPunctuatorToken(Spelling))
+      if (ParseNonOperatorNonPunctuatorToken(Arg.Value, &Arg.Range))
         return true;
-      Args.push_back(std::move(Spelling));
     }
+    Args.push_back(std::move(Arg));
 
     if (!TryConsumeToken(tok::comma))
       break;
@@ -5171,14 +5208,13 @@ bool Parser::ParseProfileDesignator(ParsedProfileDesignator &D) {
   D.Spelling += "(";
   ConsumeParen();
 
-  SmallVector<std::string, 4> Args;
-  if (ParseProfileArgumentList(Args))
+  if (ParseProfileArgumentList(D.Arguments))
     return true;
 
-  for (unsigned I = 0; I < Args.size(); ++I) {
+  for (unsigned I = 0; I < D.Arguments.size(); ++I) {
     if (I > 0)
       D.Spelling += ", ";
-    D.Spelling += Args[I];
+    D.Spelling += getCanonicalProfileArgumentSpelling(D.Arguments[I]);
   }
 
   if (!Tok.is(tok::r_paren)) {
@@ -5223,14 +5259,16 @@ bool Parser::ParseProfileSuppressBody(ParsedProfileSuppressArgs &Args) {
 
   while (TryConsumeToken(tok::comma)) {
     if (!Tok.is(tok::identifier) || !NextToken().is(tok::colon)) {
-      std::string Spelling;
-      if (ParseNonOperatorNonPunctuatorToken(Spelling))
+      ParsedProfileDesignator::Argument Arg;
+      if (ParseNonOperatorNonPunctuatorToken(Arg.Value, &Arg.Range))
         return true;
-      Args.RawArguments.push_back(std::move(Spelling));
+      Args.RawArguments.push_back(getCanonicalProfileArgumentSpelling(Arg));
+      Args.Arguments.push_back(std::move(Arg));
       continue;
     }
 
     IdentifierInfo *KeyII = Tok.getIdentifierInfo();
+    SourceLocation KeyLoc = Tok.getLocation();
     ConsumeToken();
     ConsumeToken();
 
@@ -5254,9 +5292,16 @@ bool Parser::ParseProfileSuppressBody(ParsedProfileSuppressArgs &Args) {
     }
 
     std::string Value;
-    if (ParseNonCommaBalancedToken(Value))
+    SourceRange ValueRange;
+    if (ParseNonCommaBalancedToken(Value, &ValueRange))
       return true;
-    Args.RawArguments.push_back(KeyII->getName().str() + " : " + Value);
+    ParsedProfileDesignator::Argument Arg;
+    Arg.Key = KeyII->getName().str();
+    Arg.Value = std::move(Value);
+    Arg.Kind = profiles::ProfileArgumentKind::Named;
+    Arg.Range = SourceRange(KeyLoc, ValueRange.getEnd());
+    Args.RawArguments.push_back(getCanonicalProfileArgumentSpelling(Arg));
+    Args.Arguments.push_back(std::move(Arg));
   }
 
   return false;
@@ -5300,6 +5345,7 @@ bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
     for (unsigned I = 0; I < Parsed.size(); ++I) {
       Desigs[I].Name = Pool.copyString(Parsed[I].Name);
       Desigs[I].Spelling = Pool.copyString(Parsed[I].Spelling);
+      Desigs[I].Arguments = copyProfileArguments(Pool, Parsed[I].Arguments);
     }
 
     auto *Args = Pool.make<detail::ProfileEnforceArgs>();
@@ -5320,6 +5366,7 @@ bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
         RawBuf[I] = Pool.copyString(Parsed.RawArguments[I]);
       Args->RawArguments = RawBuf;
     }
+    Args->Arguments = copyProfileArguments(Pool, Parsed.Arguments);
     CustomData = Args;
   } else {
     ParsedProfileDesignator Parsed;
@@ -5329,6 +5376,8 @@ bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
     auto *Args = Pool.make<detail::ProfileRequireArgs>();
     Args->Designator.Name = Pool.copyString(Parsed.Name);
     Args->Designator.Spelling = Pool.copyString(Parsed.Spelling);
+    Args->Designator.Arguments =
+        copyProfileArguments(Pool, Parsed.Arguments);
     CustomData = Args;
   }
 
