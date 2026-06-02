@@ -312,12 +312,53 @@ This pattern needs two pieces, both colocated with the dispatcher.
 The diagnostic itself is defined with ``ProfileRuleError`` as in patterns 1
 and 2.
 
-Unlike the post-parse CFG pass, class-finalization callbacks run while the
-``CXXRecordDecl`` is being finalized (immediately before
-``CheckCompletedCXXClass`` returns).  Out-of-line member definitions --
-including constructor bodies -- have not yet been parsed when the callback
-runs.  Rules that need ctor-body flow analysis must therefore live in a
-post-parse CFG pass (pattern 2), not here.
+Class-finalization is for **structural** rules -- those answerable from the
+class's declared members, their types, and their attributes.  The callbacks
+run while the ``CXXRecordDecl`` is being finalized (immediately before
+``CheckCompletedCXXClass`` returns), which is *before any constructor body or
+member-initializer list has been parsed* -- inline member bodies are
+late-parsed afterward, and out-of-line and template member constructors later
+still.  A class-finalization callback therefore must not inspect a
+constructor's ``inits()`` (they are empty here).  Rules that depend on what a
+constructor initializes belong on the constructor-finalization dispatch
+(pattern 4); rules that need whole-function flow analysis belong on a
+post-parse CFG pass (pattern 2).
+
+
+Pattern 4: Constructor-Finalization Profile
+-------------------------------------------
+
+Used when the rule applies to a single constructor and needs that
+constructor's complete member-initializer list -- for example, "every member
+must be initialized by this constructor."  ``test::ctor_final`` is the in-tree
+example.
+
+The dispatch point is ``Sema::checkProfileViolationsAtConstructorFinalization``,
+called right after ``DiagnoseUninitializedFields`` in
+``Sema::ActOnMemInitializers`` and ``Sema::ActOnDefaultCtorInitializers`` in
+``clang/lib/Sema/SemaDeclCXX.cpp``.  Those two functions are the funnel for
+every user-defined constructor -- written or implicit member-initializer
+list, inline or out-of-line -- and template instantiation reaches the first
+of them through ``Sema::InstantiateMemInitializers``, so the hook sees every
+constructor at the point its ``inits()`` (including synthesized entries) is
+complete.
+
+The dispatcher filters out constructors the rules are not meant to see:
+
+- Dependent constructors (``isDependentContext()``).  The hook re-fires on
+  each instantiation.
+- Invalid constructors (``isInvalidDecl()``).
+- Delegating constructors (``isDelegatingConstructor()``), which leave member
+  initialization to their target.
+
+The two pieces mirror pattern 3: a per-pass opt-in table
+``ConstructorFinalizationProfiles`` (profile name plus a
+``void (*)(Sema &, CXXConstructorDecl *)`` callback), and a callback that
+emits via ``Sema::shouldEmitProfileViolation``.  The dispatcher establishes a
+``ProfileSuppressScope(*this, Ctor, /*WalkLexicalParents=*/true)`` around each
+callback, so ``[[profiles::suppress]]`` on the constructor, the class, or an
+enclosing lexical ``Decl`` works.  A callback that should only apply to
+user-written constructors checks ``Ctor->isUserProvided()``.
 
 
 .. _profiles-token-dominion:
@@ -427,7 +468,7 @@ The following parts of P3589R2 are deliberately not implemented:
 Built-in Test Profiles
 ======================
 
-The tree ships three minimal, test-only profiles -- one per implementation
+The tree ships four minimal, test-only profiles -- one per implementation
 pattern -- so the framework's behavior can be exercised without depending on
 any user-facing profile.  All are gated on ``-fprofiles``:
 
@@ -436,12 +477,14 @@ any user-facing profile.  All are gated on ``-fprofiles``:
   CFG uninitialized-variables analysis.
 - ``test::class_final`` -- pattern-3 example riding the
   class-finalization dispatch.
+- ``test::ctor_final`` -- pattern-4 example riding the
+  constructor-finalization dispatch.
 
 By convention:
 
 - Real test profiles live under the ``test::`` namespace.  Today there are
-  three: ``test::type_cast``, ``test::uninit_read``, and
-  ``test::class_final``.
+  four: ``test::type_cast``, ``test::uninit_read``, ``test::class_final``,
+  and ``test::ctor_final``.
 - The names ``test::other``, ``test::bounds``, ``test::new_profile``, and
   ``test::not_enforced`` are deliberately *not* implemented and appear only
   in negative tests as stand-in "some other profile" names.  Adding a real
@@ -518,10 +561,29 @@ primary template.  Lambda closures are also skipped.
 enclosing lexical ``Decl`` silences the diagnostic via the
 ``ProfileSuppressScope(*this, RD, /*WalkLexicalParents=*/true)`` the
 dispatcher establishes around each callback.
+
+
+The ``test::ctor_final`` Profile
+--------------------------------
+
+A pattern-4 (constructor-finalization) profile.  Demonstrates the case where
+the rule applies once per user-defined constructor, after its
+member-initializer list is complete.
+
+- **Rules**: none (single implicit rule, empty rule string).
+- **Diagnostic**: ``err_profile_ctor_final_test`` ("test profile fired on
+  finalization of a constructor for class %1 under profile '%0'").
+- **Opt-in table**: ``ConstructorFinalizationProfiles`` in
+  ``clang/lib/Sema/SemaDeclCXX.cpp``.
+
+The diagnostic fires once per user-defined constructor -- written or implicit
+member-initializer list, inline or out-of-line -- and on constructor template
+*instantiations* rather than the dependent pattern.  Defaulted and implicit
+constructors (no body) and delegating constructors are skipped.
 In-Tree Tests
 =============
 
-These tests collectively exercise the framework and the two built-in
+These tests collectively exercise the framework and the built-in
 profiles.  When changing the framework, run them all with
 ``check-clang-sema``, ``check-clang-parser``, and ``check-clang-pch``.
 
@@ -556,5 +618,10 @@ profiles.  When changing the framework, run them all with
   template instantiation, lambda skipping, suppression on the class and on
   enclosing lexical parents, SFINAE exclusion, and the
   without-``-fprofiles`` ignored path.
+- ``clang/test/SemaCXX/safety-profile-ctor-final.cpp`` -- the
+  ``test::ctor_final`` profile: end-to-end exercise of the
+  constructor-finalization dispatch (pattern 4) including written /
+  no-list / out-of-line / instantiated constructors, the delegating and
+  defaulted skips, suppression, and the without-``-fprofiles`` path.
 - ``clang/test/PCH/cxx-profiles-enforce.cpp`` -- ``[[profiles::enforce]]``
   state survives PCH serialization round-trip.
