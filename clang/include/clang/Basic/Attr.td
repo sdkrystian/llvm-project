@@ -1767,7 +1767,6 @@ def CXX11Uninitialized : InheritableAttr {
   let Spellings = [CXX11<"", "uninitialized", 202602>];
   let Subjects = SubjectList<[Var, Field], ErrorDiag>;
   let Documentation = [CXX11UninitializedDocs];
-  let SimpleHandler = 1;
 }
 
 def NonBlocking : TypeAttr {
