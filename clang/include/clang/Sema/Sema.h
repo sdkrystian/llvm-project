@@ -1092,9 +1092,13 @@ public:
   bool isProfileSuppressed(StringRef ProfileName,
                            StringRef RuleName = "") const;
   bool isProfileSuppressed(StringRef ProfileName, StringRef RuleName,
+                           const Decl *D) const;
+  bool isProfileSuppressed(StringRef ProfileName, StringRef RuleName,
                            const Stmt *S, AnalysisDeclContext &AC) const;
   bool shouldEmitProfileViolation(StringRef ProfileName, StringRef RuleName,
                                   SourceLocation Loc);
+  bool shouldEmitProfileViolation(StringRef ProfileName, StringRef RuleName,
+                                  SourceLocation Loc, const Decl *D);
   bool shouldEmitProfileViolation(StringRef ProfileName, StringRef RuleName,
                                   const Stmt *UseStmt,
                                   AnalysisDeclContext &AC) const;
@@ -1110,7 +1114,8 @@ public:
   void checkInitProfileUninitWithInitializer(SourceLocation Loc,
                                              DeclarationName Name,
                                              QualType DeclType,
-                                             const Expr *Init, bool HasMarker);
+                                             const Expr *Init, bool HasMarker,
+                                             const Decl *D);
 
   /// True if default-initialization of \p T would leave at least one scalar
   /// subobject with an indeterminate value. Shared by the std::init rules
@@ -1136,7 +1141,8 @@ public:
   /// target must not. Shared by the variable, data-member, assignment,
   /// argument, and return check sites; gated by shouldEmitProfileViolation.
   void checkRefToUninitInit(SourceLocation Loc, bool TargetIsRefToUninit,
-                            bool IsReference, const Expr *Src);
+                            bool IsReference, const Expr *Src,
+                            const Decl *D = nullptr);
 
   class ProfileSuppressScope {
     Sema &S;
