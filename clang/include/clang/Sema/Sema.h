@@ -1092,9 +1092,13 @@ public:
   bool isProfileSuppressed(StringRef ProfileName,
                            StringRef RuleName = "") const;
   bool isProfileSuppressed(StringRef ProfileName, StringRef RuleName,
+                           const Decl *D) const;
+  bool isProfileSuppressed(StringRef ProfileName, StringRef RuleName,
                            const Stmt *S, AnalysisDeclContext &AC) const;
   bool shouldEmitProfileViolation(StringRef ProfileName, StringRef RuleName,
                                   SourceLocation Loc);
+  bool shouldEmitProfileViolation(StringRef ProfileName, StringRef RuleName,
+                                  SourceLocation Loc, const Decl *D);
   bool shouldEmitProfileViolation(StringRef ProfileName, StringRef RuleName,
                                   const Stmt *UseStmt,
                                   AnalysisDeclContext &AC) const;
