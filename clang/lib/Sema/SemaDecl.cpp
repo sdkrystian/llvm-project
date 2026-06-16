@@ -14865,7 +14865,8 @@ void Sema::ActOnUninitializedDecl(Decl *RealDecl) {
         // provides an initializer, so the !getInit() test alone misses it).
         (!Var->getInit() ||
          (Var->getType()->isRecordType() &&
-          defaultInitLeavesScalarIndeterminate(Var->getType())))) {
+          defaultInitLeavesScalarIndeterminate(
+              Var->getType(), /*HonorUninitMarkers=*/true)))) {
       Diag(Var->getLocation(), diag::err_init_uninit_decl)
           << Profile << Var->getDeclName();
     }
