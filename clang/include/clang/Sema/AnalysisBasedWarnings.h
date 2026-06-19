@@ -122,6 +122,12 @@ public:
   // normal IssueWarnings path.
   void IssueWarningsForImplicitFunction(const Decl *D);
 
+  /// True if a profile that rides the uninitialized-variables analysis (see the
+  /// CFGUninitProfiles table) is enforced. Lets the per-function dispatch keep
+  /// running that analysis after a TU error so these profiles still diagnose
+  /// every later function instead of silently stopping at the first error.
+  bool hasEnforcedCFGUninitProfile() const;
+
   void registerVarDeclWarning(VarDecl *VD, PossiblyUnreachableDiag PUD);
 
   void issueWarningsForRegisteredVarDecl(VarDecl *VD);
