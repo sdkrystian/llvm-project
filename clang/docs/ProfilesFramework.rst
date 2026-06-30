@@ -454,6 +454,12 @@ interface unit of ``M``.
 ``[[profiles::require(...)]]`` on an import-declaration validates that the
 imported module's ``EnforcedProfileDesignators`` contains a matching designator.
 
+``[[profiles::enforce(...)]]`` on a *non-interface* module-declaration (a
+``module M;`` implementation unit, or a ``module M:P;`` partition
+implementation unit) is accepted but recorded only translation-unit-locally;
+it is **not** added to ``Module::EnforcedProfileDesignators`` and so is not
+visible to an importer's ``[[profiles::require]]``.
+
 A module partition implementation unit ``module M:P;`` is also a module
 implementation unit of ``M``, so the primary interface's enforcements apply to
 it as well.  However, it does **not** implicitly import the primary interface,
@@ -466,7 +472,10 @@ force-loaded and its absence is never diagnosed.  When it is not available the
 partition implementation unit is simply not subject to the inherited profile --
 a missed diagnostic, never a change to the meaning of a well-formed program.
 For guaranteed enforcement, **repeat** ``[[profiles::enforce(...)]]`` in the
-partition implementation unit rather than relying on inheritance.
+partition implementation unit rather than relying on inheritance.  (Best-effort
+inheritance is silent when the interface BMI is absent; if the BMI *is* resident
+and enforces a profile whose designator conflicts with a locally repeated
+``enforce`` of the same name, that mismatch is still diagnosed.)
 
 Importing a module that enforces a profile does **not** enforce that profile in
 the importing translation unit.  Enforcement is always explicit and local.
@@ -540,7 +549,9 @@ a rule can be checked from a single Sema entry point.
 - **Diagnostic**: ``err_profile_type_cast_reinterpret``
   ("'reinterpret_cast' is unsafe under profile '%0'").
 - **Check site**: ``Sema::BuildCXXNamedCast`` in ``clang/lib/Sema/SemaCast.cpp``,
-  inside the ``reinterpret_cast`` arm.
+  inside the ``reinterpret_cast`` arm.  Only the ``reinterpret_cast<>`` keyword
+  form is checked; a C-style or functional cast with reinterpret semantics goes
+  through a different path and is not diagnosed.
 
 The entire profile implementation is the single call:
 
@@ -619,48 +630,3 @@ The diagnostic fires once per user-defined constructor -- written or implicit
 member-initializer list, inline or out-of-line -- and on constructor template
 *instantiations* rather than the dependent pattern.  Defaulted and implicit
 constructors (no body) and delegating constructors are skipped.
-In-Tree Tests
-=============
-
-These tests collectively exercise the framework and the built-in
-profiles.  When changing the framework, run them all with
-``check-clang-sema``, ``check-clang-parser``, and ``check-clang-pch``.
-
-- ``clang/test/Parser/cxx-profiles-framework.cpp`` -- attribute parser:
-  valid ``enforce``/``suppress``/``require`` forms, the ``[[using profiles:
-  ...]]`` syntax, profile-name and profile-argument grammar, and the
-  parse-error / missing-argument-clause paths.
-- ``clang/test/SemaCXX/safety-profile-framework.cpp`` -- attribute placement
-  and basic semantic checks (``enforce`` only on empty-declarations at TU
-  scope, ``require`` only on imports, ``suppress`` on declarations and
-  statements, ``justification:`` must be a string literal, etc.).
-- ``clang/test/SemaCXX/safety-profile-framework-modules.cppm`` -- module
-  integration: ``enforce`` on a module-declaration is exported via the BMI,
-  ``require`` validates against an imported module's exported set, GMF-only
-  ``enforce`` does not leak through the BMI, interface-to-implementation
-  propagation, partition interfaces, and the without-``-fprofiles`` ignored
-  paths.
-- ``clang/test/SemaCXX/safety-profile-type-cast.cpp`` -- the
-  ``test::type_cast`` profile: enforcement, suppression on every supported
-  declaration and statement form, template instantiation, SFINAE
-  exclusion, lambdas (including generic lambdas with suppression carried
-  through instantiation), and out-of-line members of suppressed classes
-  and namespaces.
-- ``clang/test/SemaCXX/safety-profile-uninit-read.cpp`` -- the
-  ``test::uninit_read`` profile.  Cases are gated on ``-DCASE=N`` so the
-  analysis-based-warnings early-exit-on-first-error does not hide later
-  cases; case 0 is the no-violation baseline used by both the
-  ``-fprofiles`` and the without-``-fprofiles`` runs.
-- ``clang/test/SemaCXX/safety-profile-class-final.cpp`` -- the
-  ``test::class_final`` profile: end-to-end exercise of the
-  class-finalization dispatch (pattern 3) including basic firing, class
-  template instantiation, lambda skipping, suppression on the class and on
-  enclosing lexical parents, SFINAE exclusion, and the
-  without-``-fprofiles`` ignored path.
-- ``clang/test/SemaCXX/safety-profile-ctor-final.cpp`` -- the
-  ``test::ctor_final`` profile: end-to-end exercise of the
-  constructor-finalization dispatch (pattern 4) including written /
-  no-list / out-of-line / instantiated constructors, the delegating and
-  defaulted skips, suppression, and the without-``-fprofiles`` path.
-- ``clang/test/PCH/cxx-profiles-enforce.cpp`` -- ``[[profiles::enforce]]``
-  state survives PCH serialization round-trip.
