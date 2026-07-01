@@ -303,11 +303,19 @@ This pattern needs two pieces, both colocated with the dispatcher.
    patterns 3 and 4) checks ``anyProfileEnforced(Table)``, sets up a
    ``ProfileSuppressScope(S, RD, /*WalkLexicalParents=*/true)``, iterates the
    table, skips entries whose profile is not enforced, and invokes the
-   callback.  Because the
-   suppress scope is established by the dispatcher, the callback can use
-   the location-based ``shouldEmitProfileViolation`` overload and have
-   ``[[profiles::suppress]]`` on the class or any enclosing lexical
-   ``Decl`` work correctly.
+   callback.  Each callback passes the finalized ``Decl`` (here the
+   ``CXXRecordDecl``) to the decl-aware ``shouldEmitProfileViolation``
+   overload, which walks the declaration and its lexical parents for a
+   matching ``[[profiles::suppress]]``, so suppression on the class or any
+   enclosing lexical ``Decl`` works without the dispatcher establishing a
+   suppress scope.  For the duration of the callbacks the dispatcher sets
+   ``Sema::InProfileFinalizationCheck``, which makes
+   ``shouldEmitProfileViolation`` ignore the transient parse-time
+   ``ProfileSuppressStack``: finalization can run as a side effect of an
+   *unrelated* template instantiation whose ``[[profiles::suppress]]`` scope is
+   still on that stack, and that scope does not lexically enclose the finalized
+   class (see :ref:`profiles-token-dominion`).  Suppression is therefore
+   resolved only from the declaration and its lexical parents.
 
 2. **Emit diagnostics from the callback via**
    ``Sema::shouldEmitProfileViolation``.  Each callback decides where on
@@ -372,11 +380,20 @@ table ``ConstructorFinalizationProfiles`` of the same
 ``FinalizationProfile<Node>`` row (here
 ``FinalizationProfile<CXXConstructorDecl>``), and a callback that emits via
 ``Sema::shouldEmitProfileViolation``.  The same shared
-``dispatchFinalizationProfiles`` dispatcher establishes a
-``ProfileSuppressScope(S, Ctor, /*WalkLexicalParents=*/true)`` around each
-callback, so ``[[profiles::suppress]]`` on the constructor, the class, or an
-enclosing lexical ``Decl`` works.  A callback that should only apply to
-user-written constructors checks ``Ctor->isUserProvided()``.
+``dispatchFinalizationProfiles`` dispatcher invokes each callback, which
+passes the ``CXXConstructorDecl`` to the decl-aware
+``shouldEmitProfileViolation`` overload; that overload walks the declaration
+and its lexical parents, so ``[[profiles::suppress]]`` on the constructor,
+the class, or an enclosing lexical ``Decl`` works.  As for pattern 3, the
+shared ``dispatchFinalizationProfiles`` dispatcher runs these callbacks under
+the ``Sema::InProfileFinalizationCheck`` guard, so they resolve suppression
+only from that decl-aware walk and ignore the transient parse-time
+``ProfileSuppressStack`` (see :ref:`profiles-token-dominion`).  A constructor
+body is normally instantiated lazily -- outside any unrelated suppress scope --
+so here the guard is defensive; the scenario it actually prevents arises in
+pattern 3, where a class completes synchronously inside an enclosing
+instantiation.  A callback that should only apply to user-written constructors
+checks ``Ctor->isUserProvided()``.
 
 
 .. _profiles-token-dominion:
@@ -398,6 +415,18 @@ marker.
 
 This applies identically to the parse-time suppression stack and the
 post-parse Stmt-tree walker described in pattern 2.
+
+Token-based dominion is also why the class- and constructor-finalization
+dispatch (patterns 3 and 4) deliberately ignores the parse-time
+``ProfileSuppressStack``.  A finalization callback can run while an
+*unrelated* entity is being instantiated -- for example, completing a class
+template used inside a ``[[profiles::suppress(P)]]``-annotated function
+template that is itself being instantiated.  That instantiation's suppress
+scope is on the stack, but its tokens do not enclose the finalized class, so
+honoring it would suppress a violation outside its dominion.  Finalization
+therefore resolves suppression only from the finalized declaration and its
+lexical parents (via the ``Sema::InProfileFinalizationCheck`` guard on
+``dispatchFinalizationProfiles``).
 
 
 .. _profiles-internals:
