@@ -5088,14 +5088,6 @@ bool Parser::ParseProfileName(std::string &Name) {
   return false;
 }
 
-template <typename ProfileArgument>
-static std::string
-getCanonicalProfileArgumentSpelling(const ProfileArgument &Argument) {
-  if (!Argument.isNamed())
-    return Argument.Value;
-  return Argument.Key + " : " + Argument.Value;
-}
-
 template <typename ProfileArguments>
 static ArrayRef<profiles::ProfileArgument> copyProfileArguments(
     AttributePool &Pool, const ProfileArguments &Parsed) {
@@ -5214,7 +5206,7 @@ bool Parser::ParseProfileDesignator(ParsedProfileDesignator &D) {
   for (unsigned I = 0; I < D.Arguments.size(); ++I) {
     if (I > 0)
       D.Spelling += ", ";
-    D.Spelling += getCanonicalProfileArgumentSpelling(D.Arguments[I]);
+    D.Spelling += profiles::getCanonicalProfileArgumentSpelling(D.Arguments[I]);
   }
 
   if (!Tok.is(tok::r_paren)) {
@@ -5262,7 +5254,8 @@ bool Parser::ParseProfileSuppressBody(ParsedProfileSuppressArgs &Args) {
       ParsedProfileDesignator::Argument Arg;
       if (ParseNonOperatorNonPunctuatorToken(Arg.Value, &Arg.Range))
         return true;
-      Args.RawArguments.push_back(getCanonicalProfileArgumentSpelling(Arg));
+      Args.RawArguments.push_back(
+          profiles::getCanonicalProfileArgumentSpelling(Arg));
       Args.Arguments.push_back(std::move(Arg));
       continue;
     }
@@ -5300,7 +5293,8 @@ bool Parser::ParseProfileSuppressBody(ParsedProfileSuppressArgs &Args) {
     Arg.Value = std::move(Value);
     Arg.Kind = profiles::ProfileArgumentKind::Named;
     Arg.Range = SourceRange(KeyLoc, ValueRange.getEnd());
-    Args.RawArguments.push_back(getCanonicalProfileArgumentSpelling(Arg));
+    Args.RawArguments.push_back(
+        profiles::getCanonicalProfileArgumentSpelling(Arg));
     Args.Arguments.push_back(std::move(Arg));
   }
 
