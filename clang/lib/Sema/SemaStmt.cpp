@@ -4173,8 +4173,8 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp,
   // must match the function's [[ref_to_uninit]] return marking.
   if (RetValExp && getLangOpts().Profiles)
     if (const FunctionDecl *FD = getCurFunctionDecl())
-      Profiles().checkRefToUninitBinding(RetValExp->getExprLoc(), FD, FnRetType,
-                              RetValExp);
+      Profiles().checkInitProfileRefToUninitBinding(RetValExp->getExprLoc(),
+                                                    FD, FnRetType, RetValExp);
 
   const VarDecl *NRVOCandidate = getCopyElisionCandidate(NRInfo, FnRetType);
 
