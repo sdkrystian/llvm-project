@@ -43,6 +43,7 @@
 #include "clang/Sema/Scope.h"
 #include "clang/Sema/ScopeInfo.h"
 #include "clang/Sema/Sema.h"
+#include "clang/Sema/SemaProfiles.h"
 #include "clang/Sema/SemaAMDGPU.h"
 #include "clang/Sema/SemaARM.h"
 #include "clang/Sema/SemaAVR.h"
@@ -5742,7 +5743,7 @@ static void handleProfilesEnforceAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   SmallVector<StringRef, 4> Names, Designators;
   SmallVector<unsigned, 4> ArgumentCounts, ArgumentKinds;
   SmallVector<StringRef, 4> ArgumentKeys, ArgumentValues;
-  if (!S.processProfilesEnforceAttr(AL, Mod, &Names, &Designators,
+  if (!S.Profiles().processProfilesEnforceAttr(AL, Mod, &Names, &Designators,
                                     &ArgumentCounts, &ArgumentKeys,
                                     &ArgumentValues, &ArgumentKinds))
     return;
@@ -5760,7 +5761,7 @@ static void handleProfilesEnforceAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
 
 static void handleProfilesSuppressDeclAttr(Sema &S, Decl *D,
                                            const ParsedAttr &AL) {
-  if (auto *A = S.makeProfilesSuppressAttr(AL))
+  if (auto *A = S.Profiles().makeProfilesSuppressAttr(AL))
     D->addAttr(A);
 }
 

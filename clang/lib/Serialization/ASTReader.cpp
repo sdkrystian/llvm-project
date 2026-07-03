@@ -79,6 +79,7 @@
 #include "clang/Sema/ObjCMethodList.h"
 #include "clang/Sema/Scope.h"
 #include "clang/Sema/Sema.h"
+#include "clang/Sema/SemaProfiles.h"
 #include "clang/Sema/SemaCUDA.h"
 #include "clang/Sema/SemaObjC.h"
 #include "clang/Sema/Weak.h"
@@ -9391,7 +9392,7 @@ void ASTReader::UpdateSema() {
 
   // Restore enforced profile designators (P3589R2).
   for (const auto &EP : SerializedEnforcedProfiles)
-    SemaObj->addProfileEnforcement(EP.ProfileName, EP.Designator,
+    SemaObj->Profiles().addProfileEnforcement(EP.ProfileName, EP.Designator,
                                    SourceLocation());
   SerializedEnforcedProfiles.clear();
 

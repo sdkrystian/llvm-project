@@ -17,6 +17,7 @@
 #include "clang/Sema/DeclSpec.h"
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
 #include "clang/Sema/Scope.h"
+#include "clang/Sema/SemaProfiles.h"
 #include "llvm/ADT/ScopeExit.h"
 
 using namespace clang;
@@ -377,7 +378,7 @@ void Parser::ParseLexedMethodDeclaration(LateParsedMethodDeclaration &LM) {
   // Start the delayed C++ method declaration
   Actions.ActOnStartDelayedCXXMethodDeclaration(getCurScope(), LM.Method);
 
-  Sema::ProfileSuppressScope ProfileSuppressGuard(
+  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(
       Actions, LM.Method->getAsFunction(), /*WalkLexicalParents=*/true);
 
   // Introduce the parameters into scope and parse their default
@@ -613,7 +614,7 @@ void Parser::ParseLexedMethodDef(LexedMethod &LM) {
 
   Actions.ActOnStartOfFunctionDef(getCurScope(), LM.D);
 
-  Sema::ProfileSuppressScope ProfileSuppressGuard(
+  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(
       Actions, LM.D->getAsFunction(), /*WalkLexicalParents=*/true);
 
   llvm::scope_exit _([&]() {

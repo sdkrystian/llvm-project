@@ -41,6 +41,7 @@
 #include "clang/Sema/SemaDiagnostic.h"
 #include "clang/Sema/SemaHLSL.h"
 #include "clang/Sema/SemaInternal.h"
+#include "clang/Sema/SemaProfiles.h"
 #include "clang/Sema/SemaObjC.h"
 #include "clang/Sema/SemaOpenACC.h"
 #include "clang/Sema/SemaOpenMP.h"
@@ -8334,7 +8335,8 @@ template <typename Derived>
 StmtResult
 TreeTransform<Derived>::TransformAttributedStmt(AttributedStmt *S,
                                                 StmtDiscardKind SDK) {
-  Sema::ProfileSuppressScope ProfileSuppressGuard(getSema(), S->getAttrs());
+  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(getSema(),
+                                                          S->getAttrs());
 
   StmtResult SubStmt = getDerived().TransformStmt(S->getSubStmt(), SDK);
 
@@ -8675,7 +8677,7 @@ TreeTransform<Derived>::TransformDeclStmt(DeclStmt *S) {
   SmallVector<Decl *, 4> Decls;
   LambdaScopeInfo *LSI = getSema().getCurLambda();
   for (auto *D : S->decls()) {
-    Sema::ProfileSuppressScope ProfileSuppressGuard(getSema(), D);
+    SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(getSema(), D);
 
     Decl *Transformed = getDerived().TransformDefinition(D->getLocation(), D);
 

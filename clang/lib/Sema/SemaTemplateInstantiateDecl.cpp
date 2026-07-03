@@ -25,6 +25,7 @@
 #include "clang/Sema/Initialization.h"
 #include "clang/Sema/Lookup.h"
 #include "clang/Sema/ScopeInfo.h"
+#include "clang/Sema/SemaProfiles.h"
 #include "clang/Sema/SemaAMDGPU.h"
 #include "clang/Sema/SemaCUDA.h"
 #include "clang/Sema/SemaHLSL.h"
@@ -5975,7 +5976,7 @@ void Sema::InstantiateFunctionDefinition(SourceLocation PointOfInstantiation,
     // PushDeclContext because we don't have a scope.
     Sema::ContextRAII savedContext(*this, Function);
 
-    ProfileSuppressScope ProfileSuppressGuard(
+    SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(
         *this, PatternDecl, /*WalkLexicalParents=*/true);
 
     FPFeaturesStateRAII SavedFPFeatures(*this);
@@ -6275,7 +6276,7 @@ void Sema::InstantiateVariableInitializer(
     Var->setImplicitlyInline();
 
   ContextRAII SwitchContext(*this, Var->getDeclContext());
-  ProfileSuppressScope ProfileSuppressGuard(
+  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(
       *this, OldVar, /*WalkLexicalParents=*/true);
 
   EnterExpressionEvaluationContext Evaluated(

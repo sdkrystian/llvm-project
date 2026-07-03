@@ -1,0 +1,434 @@
+//===----- SemaProfiles.cpp --- C++ profiles framework --------*- C++ -*-===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+/// \file
+/// This file implements semantic analysis for the C++ profiles framework
+/// (P3589R2): profile enforcement and suppression state, the shared violation
+/// gate, and the class- and constructor-finalization dispatch.
+///
+//===----------------------------------------------------------------------===//
+
+#include "clang/Sema/SemaProfiles.h"
+#include "clang/AST/Attr.h"
+#include "clang/AST/DeclCXX.h"
+#include "clang/AST/ExprCXX.h"
+#include "clang/AST/ParentMap.h"
+#include "clang/Analysis/AnalysisDeclContext.h"
+#include "clang/Basic/Module.h"
+#include "clang/Sema/Attr.h"
+#include "clang/Sema/ParsedAttr.h"
+#include "clang/Sema/Sema.h"
+#include "llvm/Support/SaveAndRestore.h"
+
+using namespace clang;
+
+SemaProfiles::SemaProfiles(Sema &S) : SemaBase(S) {}
+
+
+bool SemaProfiles::isProfileEnforced(StringRef ProfileName) const {
+  if (!getLangOpts().Profiles)
+    return false;
+  // The built-in test:: profiles only exercise the framework; keep them inert
+  // unless the test suite opts in via -fprofiles-test-profiles.
+  if (!getLangOpts().ProfilesTestProfiles && ProfileName.starts_with("test::"))
+    return false;
+  return getProfileEnforcement(ProfileName) != nullptr;
+}
+
+const SemaProfiles::ProfileEnforcement *
+SemaProfiles::getProfileEnforcement(StringRef ProfileName) const {
+  for (const auto &E : EnforcedProfiles)
+    if (E.ProfileName == ProfileName)
+      return &E;
+  return nullptr;
+}
+
+bool SemaProfiles::addProfileEnforcement(StringRef Name, StringRef Designator,
+                                 SourceLocation Loc) {
+  if (const auto *Existing = getProfileEnforcement(Name)) {
+    if (Existing->Designator != Designator) {
+      Diag(Loc, diag::err_profiles_enforce_mismatch) << Name;
+      Diag(Existing->EnforceLoc, diag::note_previous_attribute);
+      return false;
+    }
+    return true;
+  }
+  EnforcedProfiles.push_back({{Name.str(), Designator.str()}, Loc});
+  return true;
+}
+
+// Unzip profile arguments into the parallel key/value/kind arrays that the
+// semantic attributes store (Attr.td cannot hold structured arguments).
+static void unzipProfileArguments(ArrayRef<profiles::ProfileArgument> Arguments,
+                                  SmallVectorImpl<StringRef> &Keys,
+                                  SmallVectorImpl<StringRef> &Values,
+                                  SmallVectorImpl<unsigned> &Kinds) {
+  for (const auto &Arg : Arguments) {
+    Keys.push_back(Arg.Key);
+    Values.push_back(Arg.Value);
+    Kinds.push_back(static_cast<unsigned>(Arg.Kind));
+  }
+}
+
+static void appendProfileArgumentData(
+    ArrayRef<profiles::ProfileArgument> Arguments,
+    SmallVectorImpl<unsigned> *ArgumentCounts,
+    SmallVectorImpl<StringRef> *ArgumentKeys,
+    SmallVectorImpl<StringRef> *ArgumentValues,
+    SmallVectorImpl<unsigned> *ArgumentKinds) {
+  if (!ArgumentCounts)
+    return;
+
+  assert(ArgumentKeys && ArgumentValues && ArgumentKinds);
+  ArgumentCounts->push_back(Arguments.size());
+  unzipProfileArguments(Arguments, *ArgumentKeys, *ArgumentValues,
+                        *ArgumentKinds);
+}
+
+bool SemaProfiles::processProfilesEnforceAttr(
+    const ParsedAttr &AL, Module *Mod, SmallVectorImpl<StringRef> *NewNames,
+    SmallVectorImpl<StringRef> *NewDesignators,
+    SmallVectorImpl<unsigned> *NewArgumentCounts,
+    SmallVectorImpl<StringRef> *NewArgumentKeys,
+    SmallVectorImpl<StringRef> *NewArgumentValues,
+    SmallVectorImpl<unsigned> *NewArgumentKinds) {
+  const auto &Args = AL.getProfileEnforceArgs();
+  if (Args.Designators.empty()) {
+    Diag(AL.getLoc(), diag::err_attribute_too_few_arguments) << AL << 1;
+    return false;
+  }
+
+  for (const auto &D : Args.Designators) {
+    StringRef Name = D.Name;
+    StringRef Spelling = D.Spelling;
+
+    bool IsNew = !isProfileEnforced(Name);
+    if (!addProfileEnforcement(Name, Spelling, AL.getLoc()))
+      continue;
+
+    if (Mod && !llvm::any_of(Mod->EnforcedProfileDesignators,
+                             [&](const Module::EnforcedProfile &EP) {
+                               return EP.ProfileName == Name;
+                             }))
+      Mod->EnforcedProfileDesignators.push_back({Name.str(), Spelling.str()});
+
+    if (IsNew) {
+      if (NewNames)
+        NewNames->push_back(Name);
+      if (NewDesignators)
+        NewDesignators->push_back(Spelling);
+      appendProfileArgumentData(D.Arguments, NewArgumentCounts,
+                                NewArgumentKeys, NewArgumentValues,
+                                NewArgumentKinds);
+    }
+  }
+  return true;
+}
+
+ProfilesSuppressAttr *
+SemaProfiles::makeProfilesSuppressAttr(const ParsedAttr &AL) {
+  const auto &Args = AL.getProfileSuppressArgs();
+  if (Args.Name.empty())
+    return nullptr;
+
+  SmallVector<StringRef, 4> RawArgs;
+  for (const auto &Arg : Args.RawArguments)
+    RawArgs.push_back(Arg);
+  SmallVector<StringRef, 4> RawArgumentKeys;
+  SmallVector<StringRef, 4> RawArgumentValues;
+  SmallVector<unsigned, 4> RawArgumentKinds;
+  unzipProfileArguments(Args.Arguments, RawArgumentKeys, RawArgumentValues,
+                        RawArgumentKinds);
+
+  return ::new (getASTContext()) ProfilesSuppressAttr(
+      getASTContext(), AL, Args.Name, Args.Justification, Args.Rule,
+      RawArgs.data(), RawArgs.size(), RawArgumentKeys.data(),
+      RawArgumentKeys.size(), RawArgumentValues.data(),
+      RawArgumentValues.size(), RawArgumentKinds.data(),
+      RawArgumentKinds.size());
+}
+
+ProfilesSuppressAttr *
+SemaProfiles::makeImplicitProfilesSuppressAttr(StringRef ProfileName,
+                                       StringRef RuleName) {
+  return ProfilesSuppressAttr::CreateImplicit(
+      getASTContext(), ProfileName, /*Justification=*/"", RuleName,
+      /*RawArguments=*/nullptr, /*RawArgumentsSize=*/0,
+      /*RawArgumentKeys=*/nullptr, /*RawArgumentKeysSize=*/0,
+      /*RawArgumentValues=*/nullptr, /*RawArgumentValuesSize=*/0,
+      /*RawArgumentKinds=*/nullptr, /*RawArgumentKindsSize=*/0);
+}
+
+static bool profileSuppressMatches(StringRef EntryProfile, StringRef EntryRule,
+                                   StringRef Profile, StringRef Rule) {
+  return EntryProfile == Profile &&
+         (EntryRule.empty() || EntryRule == Rule);
+}
+
+bool SemaProfiles::isProfileSuppressed(StringRef ProfileName,
+                                StringRef RuleName) const {
+  for (const auto &E : ProfileSuppressStack)
+    if (profileSuppressMatches(E.ProfileName, E.RuleName, ProfileName,
+                               RuleName))
+      return true;
+  return false;
+}
+
+bool SemaProfiles::isProfileSuppressed(StringRef ProfileName,
+                                       StringRef RuleName,
+                                       const Decl *D) const {
+  for (; D;) {
+    for (const auto *PSA : D->specific_attrs<ProfilesSuppressAttr>())
+      if (profileSuppressMatches(PSA->getProfileName(), PSA->getRule(),
+                                 ProfileName, RuleName))
+        return true;
+    const DeclContext *DC = D->getLexicalDeclContext();
+    D = DC ? dyn_cast<Decl>(DC) : nullptr;
+  }
+  return false;
+}
+
+bool SemaProfiles::isProfileSuppressed(StringRef ProfileName,
+                                       StringRef RuleName, const Stmt *S,
+                                       AnalysisDeclContext &AC) const {
+  ParentMap &PM = AC.getParentMap();
+  for (const Stmt *Cur = S; Cur; Cur = PM.getParent(Cur)) {
+    if (const auto *AS = dyn_cast<AttributedStmt>(Cur))
+      for (const Attr *A : AS->getAttrs())
+        if (const auto *PSA = dyn_cast<ProfilesSuppressAttr>(A))
+          if (profileSuppressMatches(PSA->getProfileName(), PSA->getRule(),
+                                     ProfileName, RuleName))
+            return true;
+    // [[profiles::suppress]] on a local variable attaches to the VarDecl,
+    // not the enclosing DeclStmt. Walk the declared decls so the post-parse
+    // walker matches the parse-time ProfileSuppressForInit RAII behavior.
+    if (const auto *DS = dyn_cast<DeclStmt>(Cur))
+      for (const Decl *D : DS->decls())
+        for (const auto *PSA : D->specific_attrs<ProfilesSuppressAttr>())
+          if (profileSuppressMatches(PSA->getProfileName(), PSA->getRule(),
+                                     ProfileName, RuleName))
+            return true;
+  }
+  return isProfileSuppressed(ProfileName, RuleName, AC.getDecl());
+}
+
+bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
+                                              StringRef RuleName,
+                                              SourceLocation Loc) {
+  return shouldEmitProfileViolation(ProfileName, RuleName, Loc, /*D=*/nullptr);
+}
+
+bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
+                                              StringRef RuleName,
+                                              SourceLocation Loc,
+                                              const Decl *D) {
+  if (!isProfileEnforced(ProfileName))
+    return false;
+  // Honor [[profiles::suppress]] from the parse-time stack and, when a Decl is
+  // available, from the declaration and its lexical parents. The latter does
+  // not depend on a parse-time scope still being active, so finalization checks
+  // that run after the parse scope is torn down still respect suppression.
+  //
+  // Finalization callbacks skip the parse-time stack: they can fire while an
+  // unrelated entity's instantiation ProfileSuppressScope is still active, and
+  // that scope does not lexically enclose the finalized declaration (token-
+  // based dominion, P3589R2 s2.4p3). Their decl-aware walk already covers a
+  // suppression on the declaration or a lexical parent.
+  if ((!InProfileFinalizationCheck &&
+       isProfileSuppressed(ProfileName, RuleName)) ||
+      isProfileSuppressed(ProfileName, RuleName, D))
+    return false;
+  // P3589R2 Section 1.1: "its static semantic effects are as-if applied only
+  // after translation phase 7. It is not possible for a profile to change the
+  // outcome of overload resolution or template instantiation, nor is it
+  // possible to 'SFINAE out' failure of a program to satisfy a profile
+  // requirement."
+  //
+  // A templated entity is not yet a phase-7 entity, so a profile rule must fire
+  // only on its instantiation -- where D is the instantiated, non-templated
+  // declaration -- not on the template pattern. Checking the pattern too would
+  // diagnose never-instantiated templates and double-fire (once when the
+  // pattern is parsed and again at each instantiation).
+  //
+  // A Decl-less expression check site whose Build* routine is re-run at
+  // instantiation must instead defer in a dependent context from its own
+  // wrapper, since no Decl is available here. The reinterpret_cast check
+  // passes D == nullptr and is not re-checked at instantiation, so it keeps
+  // running once at parse time (a separate gap).
+  if (D && D->isTemplated())
+    return false;
+  if (SemaRef.isUnevaluatedContext())
+    return false;
+  if (SemaRef.currentEvaluationContext().isDiscardedStatementContext())
+    return false;
+  return true;
+}
+
+bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
+                                              StringRef RuleName,
+                                              const Stmt *UseStmt,
+                                              AnalysisDeclContext &AC) const {
+  if (!isProfileEnforced(ProfileName))
+    return false;
+  if (isProfileSuppressed(ProfileName, RuleName, UseStmt, AC))
+    return false;
+  return true;
+}
+
+bool SemaProfiles::checkProfileViolation(StringRef ProfileName,
+                                         StringRef RuleName, SourceLocation Loc,
+                                         unsigned DiagID) {
+  if (!shouldEmitProfileViolation(ProfileName, RuleName, Loc))
+    return false;
+  Diag(Loc, DiagID) << ProfileName;
+  return true;
+}
+
+void SemaProfiles::ProfileSuppressScope::push(StringRef ProfileName,
+                                      StringRef RuleName) {
+  S.Profiles().ProfileSuppressStack.push_back({ProfileName, RuleName});
+  ++Count;
+}
+
+SemaProfiles::ProfileSuppressScope::ProfileSuppressScope(
+    Sema &S, const ParsedAttributesView &Attrs)
+    : S(S) {
+  if (!S.getLangOpts().Profiles)
+    return;
+  for (const auto &AL : Attrs) {
+    if (AL.getKind() != ParsedAttr::AT_ProfilesSuppress)
+      continue;
+    const auto &Args = AL.getProfileSuppressArgs();
+    if (!Args.Name.empty())
+      push(Args.Name, Args.Rule);
+  }
+}
+
+void SemaProfiles::ProfileSuppressScope::addFromDecl(const Decl *D) {
+  for (const auto *A : D->specific_attrs<ProfilesSuppressAttr>())
+    push(A->getProfileName(), A->getRule());
+}
+
+SemaProfiles::ProfileSuppressScope::ProfileSuppressScope(Sema &S, const Decl *D,
+                                                  bool WalkLexicalParents)
+    : S(S) {
+  if (!S.getLangOpts().Profiles || !D)
+    return;
+  addFromDecl(D);
+  if (WalkLexicalParents) {
+    for (const DeclContext *DC = D->getLexicalDeclContext(); DC;
+         DC = DC->getLexicalParent())
+      if (const auto *Parent = dyn_cast<Decl>(DC))
+        addFromDecl(Parent);
+  }
+}
+
+SemaProfiles::ProfileSuppressScope::ProfileSuppressScope(Sema &S,
+                                                  ArrayRef<const Attr *> Attrs)
+    : S(S) {
+  if (!S.getLangOpts().Profiles)
+    return;
+  for (const auto *A : Attrs)
+    if (const auto *PSA = dyn_cast<ProfilesSuppressAttr>(A))
+      push(PSA->getProfileName(), PSA->getRule());
+}
+
+SemaProfiles::ProfileSuppressScope::~ProfileSuppressScope() {
+  assert(S.Profiles().ProfileSuppressStack.size() >= Count);
+  S.Profiles().ProfileSuppressStack.pop_back_n(Count);
+}
+
+namespace {
+// Row for the unified finalization dispatch shared by class-finalization
+// (pattern 3) and constructor-finalization (pattern 4): a profile name plus a
+// callback invoked once per finalized, non-dependent, non-invalid Node (a
+// CXXRecordDecl or a CXXConstructorDecl). Adding a new profile is a single row
+// in the matching table below plus a ProfileRuleError diagnostic in
+// DiagnosticSemaKinds.td and a callback that consults
+// SemaProfiles::shouldEmitProfileViolation before emitting.
+template <class Node> struct FinalizationProfile {
+  StringRef Name;
+  void (*Callback)(Sema &, Node *);
+};
+
+void runTestClassFinalCallback(Sema &S, CXXRecordDecl *RD) {
+  if (!S.Profiles().shouldEmitProfileViolation("test::class_final", /*Rule=*/"",
+                                               RD->getLocation(), RD))
+    return;
+  S.Diag(RD->getLocation(), diag::err_profile_class_final_test)
+      << "test::class_final" << RD;
+}
+
+void runTestCtorFinalCallback(Sema &S, CXXConstructorDecl *Ctor) {
+  if (!S.Profiles().shouldEmitProfileViolation("test::ctor_final", /*Rule=*/"",
+                                               Ctor->getLocation(), Ctor))
+    return;
+  S.Diag(Ctor->getLocation(), diag::err_profile_ctor_final_test)
+      << "test::ctor_final" << Ctor->getParent();
+}
+
+// Class-finalization opt-in table (pattern 3).
+constexpr FinalizationProfile<CXXRecordDecl> ClassFinalizationProfiles[] = {
+    {"test::class_final", &runTestClassFinalCallback},
+};
+
+// Constructor-finalization opt-in table (pattern 4).
+constexpr FinalizationProfile<CXXConstructorDecl>
+    ConstructorFinalizationProfiles[] = {
+        {"test::ctor_final", &runTestCtorFinalCallback},
+};
+
+// Run the enforced finalization-profile callbacks in Table for D. Merges the
+// former per-node dispatchers; the per-node filter (dependent, lambda,
+// delegating, ...) stays at each call site. Each callback passes D to the
+// Decl-aware SemaProfiles::shouldEmitProfileViolation, which honors
+// [[profiles::suppress]]
+// on D or a lexical parent, so the dispatcher needs no suppress scope of its
+// own. The table is taken by reference-to-array, not ArrayRef: deducing Node
+// from a C array against an ArrayRef<FinalizationProfile<Node>> parameter is
+// not
+// possible (no array-to-ArrayRef conversion happens during template argument
+// deduction).
+template <class Node, std::size_t N>
+void dispatchFinalizationProfiles(Sema &S, Node *D,
+                                  const FinalizationProfile<Node> (&Table)[N]) {
+  if (!S.Profiles().anyProfileEnforced(Table))
+    return;
+  // Finalization can run nested in an unrelated instantiation whose
+  // [[profiles::suppress]] scope is still on the parse-time stack; the
+  // callbacks
+  // must resolve suppression only from D and its lexical parents, not that
+  // transient stack (P3589R2 s2.4p3).
+  llvm::SaveAndRestore<bool> InFinalization(
+      S.Profiles().InProfileFinalizationCheck, true);
+  for (const auto &E : Table)
+    if (S.Profiles().isProfileEnforced(E.Name))
+      E.Callback(S, D);
+}
+} // namespace
+
+void SemaProfiles::checkProfileViolationsAtClassFinalization(
+    CXXRecordDecl *RD) {
+  if (!getLangOpts().Profiles || !RD)
+    return;
+  if (RD->isInvalidDecl() || RD->isDependentType() || RD->isLambda())
+    return;
+  dispatchFinalizationProfiles(SemaRef, RD, ClassFinalizationProfiles);
+}
+
+void SemaProfiles::checkProfileViolationsAtConstructorFinalization(
+    CXXConstructorDecl *Ctor) {
+  if (!getLangOpts().Profiles || !Ctor)
+    return;
+  // A dependent constructor pattern re-fires on instantiation; a delegating
+  // constructor leaves member initialization to its target.
+  if (Ctor->isInvalidDecl() || Ctor->isDependentContext() ||
+      Ctor->isDelegatingConstructor())
+    return;
+  dispatchFinalizationProfiles(SemaRef, Ctor, ConstructorFinalizationProfiles);
+}
+

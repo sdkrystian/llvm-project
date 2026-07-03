@@ -48,6 +48,7 @@
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Sema/ScopeInfo.h"
 #include "clang/Sema/SemaInternal.h"
+#include "clang/Sema/SemaProfiles.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseMap.h"
@@ -1773,7 +1774,8 @@ private:
     // and skip the default warning path entirely.
     for (const auto &U : *vec) {
       for (const CFGUninitProfileEntry &E : CFGUninitProfiles) {
-        if (!S.shouldEmitProfileViolation(E.Name, E.Rule, U.getUser(), AC))
+        if (!S.Profiles().shouldEmitProfileViolation(E.Name, E.Rule,
+                                                     U.getUser(), AC))
           continue;
         S.Diag(U.getUser()->getBeginLoc(), E.DiagID)
             << E.Name << vd->getDeclName();
@@ -2827,7 +2829,7 @@ void sema::AnalysisBasedWarnings::clearOverrides() {
 }
 
 bool sema::AnalysisBasedWarnings::hasEnforcedCFGUninitProfile() const {
-  return S.anyProfileEnforced(CFGUninitProfiles);
+  return S.Profiles().anyProfileEnforced(CFGUninitProfiles);
 }
 
 static void flushDiagnostics(Sema &S, const sema::FunctionScopeInfo *fscope) {
@@ -2926,17 +2928,6 @@ static void addNonLinearizedAlwaysAddClasses(AnalysisDeclContext &AC) {
       .setAlwaysAdd(Stmt::DeclRefExprClass)
       .setAlwaysAdd(Stmt::ImplicitCastExprClass)
       .setAlwaysAdd(Stmt::UnaryOperatorClass);
-}
-
-// std::init: diagnose a read of a [[uninit]] scalar member before it is
-// assigned in the constructor body. Shared by the normal per-function pass
-// and the post-error rerun so both paths stay in step.
-static void runCtorBodyInitCheckIfEnforced(Sema &S, const Decl *D,
-                                           AnalysisDeclContext &AC) {
-  if (!S.isProfileEnforced("std::init"))
-    return;
-  if (const auto *Ctor = dyn_cast<CXXConstructorDecl>(D))
-    checkInitProfileCtorBody(S, Ctor, AC);
 }
 
 // Pattern-2 profiles (the CFGUninitProfiles table) ride the uninitialized-
