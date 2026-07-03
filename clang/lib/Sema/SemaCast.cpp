@@ -26,6 +26,7 @@
 #include "clang/Sema/SemaAMDGPU.h"
 #include "clang/Sema/SemaHLSL.h"
 #include "clang/Sema/SemaObjC.h"
+#include "clang/Sema/SemaProfiles.h"
 #include "clang/Sema/SemaRISCV.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
@@ -402,7 +403,8 @@ Sema::BuildCXXNamedCast(SourceLocation OpLoc, tok::TokenKind Kind,
         return ExprError();
       DiscardMisalignedMemberAddress(DestType.getTypePtr(), E);
       // test::type_cast is a built-in test profile; see ProfilesFramework.rst.
-      checkProfileViolation("test::type_cast", "reinterpret_cast", OpLoc,
+      Profiles().checkProfileViolation("test::type_cast", "reinterpret_cast",
+                                       OpLoc,
                             diag::err_profile_type_cast_reinterpret);
     }
     return Op.complete(CXXReinterpretCastExpr::Create(Context, Op.ResultType,

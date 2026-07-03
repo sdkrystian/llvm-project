@@ -61,6 +61,7 @@
 #include "clang/Sema/SemaObjC.h"
 #include "clang/Sema/SemaOpenCL.h"
 #include "clang/Sema/SemaOpenMP.h"
+#include "clang/Sema/SemaProfiles.h"
 #include "clang/Sema/SemaPseudoObject.h"
 #include "clang/Sema/Template.h"
 #include "llvm/ADT/STLExtras.h"
@@ -747,7 +748,7 @@ ExprResult Sema::DefaultLvalueConversion(Expr *E) {
   // lvalue-to-rvalue chokepoint that by-value reads (copy-init, by-value
   // arguments, returns, operator operands) all funnel through.
   if (getLangOpts().Profiles)
-    checkRefToUninitRead(E->getExprLoc(), E, T);
+    Profiles().checkRefToUninitRead(E->getExprLoc(), E, T);
 
   // C++ [conv.lval]p3:
   //   If T is cv std::nullptr_t, the result is a null pointer constant.
@@ -6367,7 +6368,8 @@ bool Sema::GatherArgumentsForCall(SourceLocation CallLoc, FunctionDecl *FDecl,
       const Expr *Src = Arg;
       if (const auto *DAE = dyn_cast<CXXDefaultArgExpr>(Src))
         Src = DAE->getExpr();
-      checkRefToUninitBinding(Arg->getExprLoc(), Param, Param->getType(), Src);
+      Profiles().checkRefToUninitBinding(Arg->getExprLoc(), Param,
+                                         Param->getType(), Src);
     }
 
     // Check for array bounds violations for each argument to the call. This
@@ -15642,8 +15644,9 @@ ExprResult Sema::CreateBuiltinBinOp(SourceLocation OpLoc,
       // unmarked pointer (paper §4.3) and must not be bound to uninitialized
       // memory.
       if (getLangOpts().Profiles && LHS.get()->getType()->isPointerType()) {
-        const ValueDecl *VD = getDirectlyNamedDecl(LHS.get());
-        checkRefToUninitInit(OpLoc, VD && VD->hasAttr<RefToUninitAttr>(),
+        const ValueDecl *VD = SemaProfiles::getDirectlyNamedDecl(LHS.get());
+        Profiles().checkRefToUninitInit(
+            OpLoc, VD && VD->hasAttr<RefToUninitAttr>(),
                              /*IsReference=*/false, RHS.get());
       }
 
