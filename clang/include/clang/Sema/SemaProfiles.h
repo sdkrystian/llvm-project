@@ -8,7 +8,8 @@
 /// \file
 /// This file declares semantic analysis for the C++ profiles framework
 /// (P3589R2).
-/// See clang/docs/ProfilesFramework.rst for the design.
+/// See clang/docs/ProfilesFrameworkInternals.rst for the design and
+/// clang/docs/ProfilesFramework.rst for the user-facing documentation.
 ///
 //===----------------------------------------------------------------------===//
 
