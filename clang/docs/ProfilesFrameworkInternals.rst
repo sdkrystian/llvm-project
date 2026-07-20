@@ -170,6 +170,49 @@ above keeps it from suppressing checks inside a synchronously instantiated
 body, NSDMI, default argument, or marker re-check.
 
 
+Suppression During Code Generation
+==================================
+
+A profile check site that runs during IR emission needs suppression state
+long after the parse-time stack has unwound, and it may be emitting a body
+deserialized from an AST file that was never parsed in this compilation.
+``CodeGenFunction`` therefore mirrors the post-parse walker's two-part
+structure over the AST it is emitting:
+
+- A *statement-suppression stack* (``ProfileStmtSuppressions``), pushed and
+  popped by ``ProfileSuppressionScope`` RAII guards in every
+  statement-emission path that can carry ``[[profiles::suppress]]``:
+  ``EmitAttributedStmt``, ``EmitDeclStmt`` (a suppression on a local variable
+  covers its whole declaration statement), and the local-variable arm of
+  ``EmitDecl`` (an if/while/for/switch condition variable is emitted
+  directly, never through ``EmitDeclStmt``).
+- The lexical declaration chain, reached through the shared walk in
+  ``clang/AST/Profiles.h``.  Because Sema propagates active suppressions onto
+  lambda call operators as implicit attributes, the chain walk also recovers
+  statement-level suppression around a lambda body.
+
+``CodeGenFunction::isProfileSuppressionActive`` composes the two *lazily at
+each check site*: the stack above its floor, then the chain from the
+suppression anchor or, absent one, from ``CurCodeDecl`` -- whatever code
+is being emitted (functions, lambdas, global dynamic initializers, coroutine
+bodies, OpenMP captured regions), that is the declaration whose chain
+carries its suppressions.  A null ``CurCodeDecl`` (synthesized helpers such
+as block copy/dispose functions) carries none.  Lazy querying is a
+correctness requirement, not a convenience: an inlined inheriting
+constructor swaps ``CurCodeDecl`` mid-function without a ``StartFunction``,
+so per-function seeding would apply the wrong declaration's suppressions.
+
+Known over-check-only gaps (a missed suppression, never a missed check):
+member functions of a local class defined inside a suppressed *statement*,
+ObjC blocks (no lambda-style implicit-attribute propagation exists for
+``BlockDecl``), and C++26 structured-binding condition variables, whose
+holding-variable initializer is emitted deferred, outside the variable's
+suppression scope.  Sema's parse-time stack additionally has a pre-existing
+blind spot of its own on condition-variable declarators (the parser installs
+no suppress scope there); CodeGen mirrors the post-parse walker, which
+honors them.
+
+
 Modules and Serialization
 =========================
 

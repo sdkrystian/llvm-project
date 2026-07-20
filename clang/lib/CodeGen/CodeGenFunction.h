@@ -624,6 +624,56 @@ public:
   /// True if the current statement has noconvergent attribute.
   bool InNoConvergentAttributedStmt = false;
 
+  /// The [[profiles::suppress]] attributes of the statements enclosing the
+  /// code being emitted, innermost last -- pushed by the AttributedStmt,
+  /// DeclStmt, and local-variable emission hooks. Entries at indices below
+  /// ProfileSuppressionFloor belong to an enclosing construct whose tokens do
+  /// not cover the code being emitted (emitting an NSDMI, a default argument,
+  /// or an inlined inherited constructor raises the floor; P3589R2's
+  /// suppression dominion) and are not consulted.
+  SmallVector<const ProfilesSuppressAttr *, 4> ProfileStmtSuppressions;
+  unsigned ProfileSuppressionFloor = 0;
+
+  /// When non-null, the declaration whose lexical chain carries the
+  /// [[profiles::suppress]] entries for the code being emitted *instead of*
+  /// CurCodeDecl: the field whose NSDMI, or the parameter whose default
+  /// argument, is emitted inline in another function's body.
+  const Decl *ProfileSuppressionAnchor = nullptr;
+
+  /// True if an active [[profiles::suppress]] for \p Profile / \p Rule covers
+  /// the code being emitted: consults the statement-suppression stack above
+  /// the floor, then the lexical declaration chain of the suppression anchor
+  /// (or, absent one, of CurCodeDecl -- null in synthesized helpers such as
+  /// block copy/dispose functions, which carry no suppressions). Queried
+  /// lazily at each check site rather than seeded per-function because the
+  /// current declaration can change mid-function without a StartFunction
+  /// (inlined inheriting constructors).
+  bool isProfileSuppressionActive(StringRef Profile, StringRef Rule) const;
+
+  /// RAII bounding the lifetime of statement-carried [[profiles::suppress]]
+  /// entries on ProfileStmtSuppressions: entries added through it are popped
+  /// on scope exit. Instantiated by every statement-emission path that can
+  /// carry the attribute -- AttributedStmt, DeclStmt, and direct
+  /// local-variable emission (condition variables of if/while/for/switch
+  /// never pass through EmitDeclStmt).
+  class ProfileSuppressionScope {
+    CodeGenFunction &CGF;
+    size_t OldSize;
+
+  public:
+    ProfileSuppressionScope(CodeGenFunction &CGF)
+        : CGF(CGF), OldSize(CGF.ProfileStmtSuppressions.size()) {}
+    /// Push the entries the statement node \p S itself carries: an
+    /// AttributedStmt's attributes, or those of a DeclStmt's declarations.
+    void addFromStmt(const Stmt *S);
+    /// Push the entries declared directly on \p D (a local variable emitted
+    /// without an enclosing DeclStmt).
+    void addFromDecl(const Decl *D);
+    ~ProfileSuppressionScope() {
+      CGF.ProfileStmtSuppressions.truncate(OldSize);
+    }
+  };
+
   /// HLSL Branch attribute.
   HLSLControlFlowHintAttr::Spelling HLSLControlFlowAttr =
       HLSLControlFlowHintAttr::SpellingNotCalculated;
