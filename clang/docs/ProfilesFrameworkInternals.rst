@@ -26,6 +26,15 @@ instantiation, module propagation, and PCH/BMI serialization -- so a profile
 implementation consists only of its diagnostics plus calls to the framework
 at its semantic check sites.
 
+The enforced-profile list itself is stored on the ``ASTContext``
+(``ASTContext::EnforcedProfiles``, queried through ``isProfileEnforced`` /
+``getProfileEnforcement`` / ``isProfileExemptSystemHeaderLoc``) rather than
+on ``Sema``: the ASTReader restores a PCH's ``ENFORCED_PROFILES`` records
+directly into it, so a consumer that never sees a Sema -- e.g. code
+generation directly from an AST file -- observes the same enforcement state.
+``SemaProfiles`` records enforcements into that list (through its delegating
+wrappers) and owns the attribute's diagnostics.
+
 Profile-rule diagnostics are defined with the ``ProfileRuleError`` diagnostic
 class rather than ``Error``.  It marks them SFINAE-suppressed: they do not
 count as substitution failures and cannot change overload resolution, but

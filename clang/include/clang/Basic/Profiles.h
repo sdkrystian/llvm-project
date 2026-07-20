@@ -40,6 +40,14 @@ struct EnforcedProfile {
   std::string Designator;
 };
 
+/// An enforcement recorded on the translation unit: the enforced profile plus
+/// the location of the [[profiles::enforce]] that recorded it (invalid for an
+/// enforcement restored from an AST file). The element type of ASTContext's
+/// enforcement list.
+struct ProfileEnforcement : EnforcedProfile {
+  SourceLocation EnforceLoc;
+};
+
 /// True if a [[profiles::suppress]] entry naming \p EntryProfile /
 /// \p EntryRule suppresses a violation of \p Rule of \p Profile: the profile
 /// names must agree, and the entry either names the violated rule or names no

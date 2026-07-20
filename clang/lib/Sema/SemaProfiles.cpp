@@ -31,13 +31,7 @@ SemaProfiles::SemaProfiles(Sema &S) : SemaBase(S) {}
 
 
 bool SemaProfiles::isProfileEnforced(StringRef ProfileName) const {
-  if (!getLangOpts().Profiles)
-    return false;
-  // The built-in test:: profiles only exercise the framework; keep them inert
-  // unless the test suite opts in via -fprofiles-test-profiles.
-  if (!getLangOpts().ProfilesTestProfiles && ProfileName.starts_with("test::"))
-    return false;
-  return getProfileEnforcement(ProfileName) != nullptr;
+  return getASTContext().isProfileEnforced(ProfileName);
 }
 
 bool SemaProfiles::isProfileEnforcedAt(StringRef ProfileName,
@@ -56,7 +50,7 @@ bool SemaProfiles::isProfileEnforcedAt(StringRef ProfileName,
   // macro defined in the GMF but *invoked* in the purview stays enforced --
   // its invocation tokens are purview tokens -- while GMF pattern tokens are
   // skipped.
-  const ProfileEnforcement *E = getProfileEnforcement(ProfileName);
+  const profiles::ProfileEnforcement *E = getProfileEnforcement(ProfileName);
   const SourceManager &SM = getASTContext().getSourceManager();
   if (Loc.isValid() && E->EnforceLoc.isValid() &&
       SM.isBeforeInTranslationUnit(SM.getExpansionLoc(Loc),
@@ -65,12 +59,9 @@ bool SemaProfiles::isProfileEnforcedAt(StringRef ProfileName,
   return true;
 }
 
-const SemaProfiles::ProfileEnforcement *
+const profiles::ProfileEnforcement *
 SemaProfiles::getProfileEnforcement(StringRef ProfileName) const {
-  for (const auto &E : EnforcedProfiles)
-    if (E.ProfileName == ProfileName)
-      return &E;
-  return nullptr;
+  return getASTContext().getProfileEnforcement(ProfileName);
 }
 
 bool SemaProfiles::addProfileEnforcement(StringRef Name, StringRef Designator,
@@ -83,7 +74,8 @@ bool SemaProfiles::addProfileEnforcement(StringRef Name, StringRef Designator,
     }
     return true;
   }
-  EnforcedProfiles.push_back({{Name.str(), Designator.str()}, Loc});
+  getASTContext().EnforcedProfiles.push_back(
+      {{Name.str(), Designator.str()}, Loc});
   return true;
 }
 
@@ -216,10 +208,10 @@ void SemaProfiles::checkRedeclarationProfileCompatibility(
   // The rule is symmetric: every profile whose dominion covers one
   // declaration must have a compatible counterpart covering the other.
   // Report the first violation in each direction.
-  StringRef MissingHere =
-      FindUncovered(Top->EnforcedProfileDesignators, EnforcedProfiles);
-  StringRef MissingThere =
-      FindUncovered(EnforcedProfiles, Top->EnforcedProfileDesignators);
+  StringRef MissingHere = FindUncovered(Top->EnforcedProfileDesignators,
+                                        getASTContext().EnforcedProfiles);
+  StringRef MissingThere = FindUncovered(getASTContext().EnforcedProfiles,
+                                         Top->EnforcedProfileDesignators);
   if (MissingHere.empty() && MissingThere.empty())
     return;
   if (!MissingHere.empty())
@@ -304,23 +296,10 @@ bool SemaProfiles::isProfileSuppressed(StringRef ProfileName,
   return profiles::isSuppressedFor(AC.getDecl(), ProfileName, RuleName);
 }
 
-// Temporary stopgap for the not-yet-implemented [[profiles::exempt]] (P3589R2
-// s1.1.6): exempt code originating in a system header from profile enforcement,
-// so enforcing a profile on a translation unit does not diagnose violations
-// inside the standard library and the other system headers it transitively
-// includes. On by default; -fno-profiles-exempt-system-headers restores
-// spec-exact enforcement into system-header code. Remove once
-// [[profiles::exempt]] has wording and a real implementation.
-static bool isExemptSystemHeaderLoc(const ASTContext &Ctx,
-                                    const LangOptions &LangOpts,
-                                    SourceLocation Loc) {
-  return LangOpts.ProfilesExemptSystemHeaders && Loc.isValid() &&
-         Ctx.getSourceManager().isInSystemHeader(Loc);
+bool SemaProfiles::isProfileExemptSystemHeaderLoc(SourceLocation Loc) const {
+  return getASTContext().isProfileExemptSystemHeaderLoc(Loc);
 }
 
-bool SemaProfiles::isProfileExemptSystemHeaderLoc(SourceLocation Loc) const {
-  return isExemptSystemHeaderLoc(getASTContext(), getLangOpts(), Loc);
-}
 
 bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
                                               StringRef RuleName,
@@ -334,7 +313,7 @@ bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
                                               const Decl *D) {
   if (!isProfileEnforcedAt(ProfileName, Loc))
     return false;
-  if (isExemptSystemHeaderLoc(getASTContext(), getLangOpts(), Loc))
+  if (getASTContext().isProfileExemptSystemHeaderLoc(Loc))
     return false;
   // Honor [[profiles::suppress]] from the parse-time stack and, when a Decl is
   // available, from the declaration and its lexical parents. The latter does
@@ -384,7 +363,7 @@ bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
       UseStmt ? UseStmt->getBeginLoc() : AC.getDecl()->getLocation();
   if (!isProfileEnforcedAt(ProfileName, Loc))
     return false;
-  if (isExemptSystemHeaderLoc(getASTContext(), getLangOpts(), Loc))
+  if (getASTContext().isProfileExemptSystemHeaderLoc(Loc))
     return false;
   if (isProfileSuppressed(ProfileName, RuleName, UseStmt, AC))
     return false;
