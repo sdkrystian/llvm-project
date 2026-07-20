@@ -37,11 +37,6 @@ class SemaProfiles : public SemaBase {
 public:
   SemaProfiles(Sema &S);
 
-  struct ProfileEnforcement : profiles::EnforcedProfile {
-    SourceLocation EnforceLoc;
-  };
-  SmallVector<ProfileEnforcement, 4> EnforcedProfiles;
-
   /// True if an included AST file (PCH) contributed a non-empty top-level
   /// declaration to this TU. The [[profiles::enforce]] placement check
   /// (P3589R2 [decl.attr.enforce]p1) consults this instead of deserializing
@@ -68,6 +63,8 @@ public:
   };
   SmallVector<ProfileSuppressEntry, 4> ProfileSuppressStack;
 
+  /// Thin wrapper over ASTContext::isProfileEnforced (the enforcement state
+  /// lives on the ASTContext).
   bool isProfileEnforced(StringRef ProfileName) const;
 
   /// Like isProfileEnforced, but additionally false when \p Loc lies before
@@ -89,7 +86,12 @@ public:
         Entries, [&](const auto &E) { return isProfileEnforced(E.Name); });
   }
 
-  const ProfileEnforcement *getProfileEnforcement(StringRef ProfileName) const;
+  const profiles::ProfileEnforcement *
+  getProfileEnforcement(StringRef ProfileName) const;
+
+  /// Record an enforcement of \p Name into the ASTContext's list, diagnosing
+  /// a designator mismatch with an already-recorded enforcement of the same
+  /// profile (P3589R2 [decl.attr.enforce]p3).
   bool addProfileEnforcement(StringRef Name, StringRef Designator,
                              SourceLocation Loc);
   bool processProfilesEnforceAttr(const ParsedAttr &AL, Module *Mod,

@@ -5364,11 +5364,12 @@ void ASTWriter::WriteEnforcedProfiles(Sema &SemaRef) {
     Stream.EmitRecord(PROFILES_TU_HAS_NONEMPTY_DECL, Record);
   }
 
-  if (SemaRef.Profiles().EnforcedProfiles.empty())
+  const auto &EnforcedProfiles = SemaRef.getASTContext().EnforcedProfiles;
+  if (EnforcedProfiles.empty())
     return;
 
   unsigned AbbrevID = createEnforcedProfileAbbrev(Stream, ENFORCED_PROFILES);
-  for (const auto &EP : SemaRef.Profiles().EnforcedProfiles)
+  for (const auto &EP : EnforcedProfiles)
     emitEnforcedProfile(Stream, AbbrevID, ENFORCED_PROFILES, EP);
 }
 

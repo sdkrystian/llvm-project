@@ -875,6 +875,29 @@ bool ASTContext::isTypeIgnoredBySanitizer(const SanitizerMask &Mask,
   return NoSanitizeL->containsType(Mask, TyName);
 }
 
+const profiles::ProfileEnforcement *
+ASTContext::getProfileEnforcement(StringRef ProfileName) const {
+  for (const auto &E : EnforcedProfiles)
+    if (E.ProfileName == ProfileName)
+      return &E;
+  return nullptr;
+}
+
+bool ASTContext::isProfileEnforced(StringRef ProfileName) const {
+  if (!getLangOpts().Profiles)
+    return false;
+  // The built-in test:: profiles only exercise the framework; keep them inert
+  // unless the test suite opts in via -fprofiles-test-profiles.
+  if (!getLangOpts().ProfilesTestProfiles && ProfileName.starts_with("test::"))
+    return false;
+  return getProfileEnforcement(ProfileName) != nullptr;
+}
+
+bool ASTContext::isProfileExemptSystemHeaderLoc(SourceLocation Loc) const {
+  return getLangOpts().ProfilesExemptSystemHeaders && Loc.isValid() &&
+         getSourceManager().isInSystemHeader(Loc);
+}
+
 TargetCXXABI::Kind ASTContext::getCXXABIKind() const {
   auto Kind = getTargetInfo().getCXXABI().getKind();
   return getLangOpts().CXXABI.value_or(Kind);
