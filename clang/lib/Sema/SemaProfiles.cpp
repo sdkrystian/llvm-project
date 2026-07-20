@@ -19,6 +19,7 @@
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/ParentMap.h"
+#include "clang/AST/Profiles.h"
 #include "clang/Analysis/AnalysisDeclContext.h"
 #include "clang/Basic/Builtins.h"
 #include "clang/Basic/Module.h"
@@ -249,19 +250,13 @@ SemaProfiles::makeImplicitProfilesSuppressAttr(StringRef ProfileName,
       /*RawArgumentKinds=*/nullptr, /*RawArgumentKindsSize=*/0);
 }
 
-static bool profileSuppressMatches(StringRef EntryProfile, StringRef EntryRule,
-                                   StringRef Profile, StringRef Rule) {
-  return EntryProfile == Profile &&
-         (EntryRule.empty() || EntryRule == Rule);
-}
-
 bool SemaProfiles::isProfileSuppressed(StringRef ProfileName,
                                        StringRef RuleName,
                                        SourceLocation Loc) const {
   const SourceManager &SM = getASTContext().getSourceManager();
   for (const auto &E : ProfileSuppressStack) {
-    if (!profileSuppressMatches(E.ProfileName, E.RuleName, ProfileName,
-                                RuleName))
+    if (!profiles::suppressionMatches(E.ProfileName, E.RuleName, ProfileName,
+                                      RuleName))
       continue;
     // The entry's dominion is its construct's token range (P3589R2 s2.4p3):
     // a violation before the recorded begin -- e.g. in a template pattern
@@ -285,41 +280,13 @@ bool SemaProfiles::isProfileSuppressed(StringRef ProfileName,
 }
 
 bool SemaProfiles::isProfileSuppressed(StringRef ProfileName,
-                                       StringRef RuleName,
-                                       const Decl *D) const {
-  for (; D;) {
-    for (const auto *PSA : D->specific_attrs<ProfilesSuppressAttr>())
-      if (profileSuppressMatches(PSA->getProfileName(), PSA->getRule(),
-                                 ProfileName, RuleName))
-        return true;
-    const DeclContext *DC = D->getLexicalDeclContext();
-    D = DC ? dyn_cast<Decl>(DC) : nullptr;
-  }
-  return false;
-}
-
-bool SemaProfiles::isProfileSuppressed(StringRef ProfileName,
                                        StringRef RuleName, const Stmt *S,
                                        AnalysisDeclContext &AC) const {
   ParentMap &PM = AC.getParentMap();
-  for (const Stmt *Cur = S; Cur; Cur = PM.getParent(Cur)) {
-    if (const auto *AS = dyn_cast<AttributedStmt>(Cur))
-      for (const Attr *A : AS->getAttrs())
-        if (const auto *PSA = dyn_cast<ProfilesSuppressAttr>(A))
-          if (profileSuppressMatches(PSA->getProfileName(), PSA->getRule(),
-                                     ProfileName, RuleName))
-            return true;
-    // [[profiles::suppress]] on a local variable attaches to the VarDecl,
-    // not the enclosing DeclStmt. Walk the declared decls so the post-parse
-    // walker matches the parse-time ProfileSuppressForInit RAII behavior.
-    if (const auto *DS = dyn_cast<DeclStmt>(Cur))
-      for (const Decl *D : DS->decls())
-        for (const auto *PSA : D->specific_attrs<ProfilesSuppressAttr>())
-          if (profileSuppressMatches(PSA->getProfileName(), PSA->getRule(),
-                                     ProfileName, RuleName))
-            return true;
-  }
-  return isProfileSuppressed(ProfileName, RuleName, AC.getDecl());
+  for (const Stmt *Cur = S; Cur; Cur = PM.getParent(Cur))
+    if (profiles::isSuppressedFor(Cur, ProfileName, RuleName))
+      return true;
+  return profiles::isSuppressedFor(AC.getDecl(), ProfileName, RuleName);
 }
 
 // Temporary stopgap for the not-yet-implemented [[profiles::exempt]] (P3589R2
@@ -362,7 +329,7 @@ bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
   // (P3589R2 s2.4p3), so no explicit finalization or instantiation guard is
   // needed here.
   if (isProfileSuppressed(ProfileName, RuleName, Loc) ||
-      isProfileSuppressed(ProfileName, RuleName, D))
+      profiles::isSuppressedFor(D, ProfileName, RuleName))
     return false;
   // P3589R2 Section 1.1: "its static semantic effects are as-if applied only
   // after translation phase 7. It is not possible for a profile to change the
@@ -485,27 +452,23 @@ static SourceLocation getCompletedConstructEnd(const Decl *D) {
   return SourceLocation();
 }
 
-void SemaProfiles::ProfileSuppressScope::addFromDecl(const Decl *D) {
-  SourceLocation Begin = D->getBeginLoc();
-  if (Begin.isInvalid())
-    Begin = D->getLocation();
-  SourceLocation End = getCompletedConstructEnd(D);
-  for (const auto *A : D->specific_attrs<ProfilesSuppressAttr>())
-    push(A->getProfileName(), A->getRule(), Begin, End);
-}
-
 SemaProfiles::ProfileSuppressScope::ProfileSuppressScope(Sema &S, const Decl *D,
                                                   bool WalkLexicalParents)
     : S(S) {
   if (!S.getLangOpts().Profiles || !D)
     return;
-  addFromDecl(D);
-  if (WalkLexicalParents) {
-    for (const DeclContext *DC = D->getLexicalDeclContext(); DC;
-         DC = DC->getLexicalParent())
-      if (const auto *Parent = dyn_cast<Decl>(DC))
-        addFromDecl(Parent);
-  }
+  // Each entry's dominion is its own owner's construct range, so the range is
+  // computed per owning declaration as the shared walk surfaces it.
+  profiles::forEachSuppression(
+      D, WalkLexicalParents,
+      [&](const Decl &Owner, const ProfilesSuppressAttr &A) {
+        SourceLocation Begin = Owner.getBeginLoc();
+        if (Begin.isInvalid())
+          Begin = Owner.getLocation();
+        push(A.getProfileName(), A.getRule(), Begin,
+             getCompletedConstructEnd(&Owner));
+        return false;
+      });
 }
 
 SemaProfiles::ProfileSuppressScope::ProfileSuppressScope(Sema &S,

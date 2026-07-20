@@ -109,8 +109,10 @@ public:
   /// declared -- are not suppressed.
   bool isProfileSuppressed(StringRef ProfileName, StringRef RuleName,
                            SourceLocation Loc) const;
-  bool isProfileSuppressed(StringRef ProfileName, StringRef RuleName,
-                           const Decl *D) const;
+  /// The post-parse counterpart of the parse-time stack: walk the AST upward
+  /// from \p S -- enclosing statement nodes via the ParentMap, then the
+  /// analyzed declaration's lexical chain -- for a matching suppression,
+  /// via the shared walks in clang/AST/Profiles.h.
   bool isProfileSuppressed(StringRef ProfileName, StringRef RuleName,
                            const Stmt *S, AnalysisDeclContext &AC) const;
   bool shouldEmitProfileViolation(StringRef ProfileName, StringRef RuleName,
@@ -555,7 +557,6 @@ public:
 
     void push(StringRef ProfileName, StringRef RuleName, SourceLocation Begin,
               SourceLocation End);
-    void addFromDecl(const Decl *D);
 
   public:
     ProfileSuppressScope(Sema &S, const ParsedAttributesView &Attrs);
