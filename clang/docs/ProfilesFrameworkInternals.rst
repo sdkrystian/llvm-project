@@ -202,6 +202,21 @@ correctness requirement, not a convenience: an inlined inheriting
 constructor swaps ``CurCodeDecl`` mid-function without a ``StartFunction``,
 so per-function seeding would apply the wrong declaration's suppressions.
 
+The dominion rule -- a suppression covers only its construct's tokens -- is
+enforced structurally rather than positionally: emitting an NSDMI
+(``CXXDefaultInitExprScope``), a default argument
+(``CXXDefaultArgExprScope``), or an inlined inherited constructor
+(``InlinedInheritingConstructorScope``) raises ``ProfileSuppressionFloor``
+to the current stack size, hiding the statement suppressions of the function
+whose emission reached the construct, and the first two set
+``ProfileSuppressionAnchor`` to the field or parameter whose construct the
+emitted tokens belong to (the inherited-constructor scope needs no anchor;
+it already swaps ``CurCodeDecl``).  A suppression written on the field,
+parameter, or a lexical parent is honored through the anchored chain walk;
+one written around the use site is not -- the same answer Sema's positional
+dominion check gives.  Nesting composes automatically as the scopes save and
+restore both values.
+
 Known over-check-only gaps (a missed suppression, never a missed check):
 member functions of a local class defined inside a suppressed *statement*,
 ObjC blocks (no lambda-style implicit-attribute propagation exists for
