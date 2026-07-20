@@ -80,7 +80,7 @@ profile's name.  ``test::uninit_read`` is the in-tree example:
 
 .. code-block:: c++
 
-   constexpr CFGUninitProfileEntry CFGUninitProfiles[] = {
+   constexpr CFGProfileEntry CFGProfiles[] = {
        {"my::profile", /*Rule=*/"", diag::err_my_profile_rule},
    };
 

@@ -1693,19 +1693,19 @@ namespace {
 // uninitialized read is found and not suppressed at the use site. Adding a
 // new profile that wants to ride this analysis is a single row here plus a
 // ProfileRuleError diagnostic in DiagnosticSemaKinds.td.
-struct CFGUninitProfileEntry {
+struct CFGProfileEntry {
   StringRef Name;
   StringRef Rule;
   unsigned DiagID;
 };
-constexpr CFGUninitProfileEntry CFGUninitProfiles[] = {
+constexpr CFGProfileEntry CFGProfiles[] = {
     {"test::uninit_read", /*Rule=*/"", diag::err_profile_uninit_read},
 };
 
 class UninitValsDiagReporter : public UninitVariablesHandler {
   Sema &S;
   AnalysisDeclContext &AC;
-  // When set, only the CFGUninitProfiles diagnostics are emitted; the default
+  // When set, only the CFGProfiles diagnostics are emitted; the default
   // -Wuninitialized reports (self-init and the sorted const-ref/ptr/use paths)
   // are skipped. The post-error profile pass sets this so it cannot resurrect
   // ordinary warnings that the first TU error is meant to suppress.
@@ -1775,7 +1775,7 @@ private:
     // below.
     if (hasSelfInit && vd->getInit()) {
       const Expr *Init = vd->getInit()->IgnoreParenCasts();
-      for (const CFGUninitProfileEntry &E : CFGUninitProfiles) {
+      for (const CFGProfileEntry &E : CFGProfiles) {
         if (!S.Profiles().shouldEmitProfileViolation(E.Name, E.Rule, Init, AC))
           continue;
         S.Diag(Init->getBeginLoc(), E.DiagID) << E.Name << vd->getDeclName();
@@ -1793,7 +1793,7 @@ private:
       // pointer/reference-binding territory, checked at the binding site.
       if (U.isConstRefOrPtrUse())
         continue;
-      for (const CFGUninitProfileEntry &E : CFGUninitProfiles) {
+      for (const CFGProfileEntry &E : CFGProfiles) {
         if (!S.Profiles().shouldEmitProfileViolation(E.Name, E.Rule,
                                                      U.getUser(), AC))
           continue;
@@ -2848,8 +2848,8 @@ void sema::AnalysisBasedWarnings::clearOverrides() {
   PolicyOverrides.enableThreadSafetyAnalysis = false;
 }
 
-bool sema::AnalysisBasedWarnings::hasEnforcedCFGUninitProfile() const {
-  return S.Profiles().anyProfileEnforced(CFGUninitProfiles);
+bool sema::AnalysisBasedWarnings::hasEnforcedCFGProfile() const {
+  return S.Profiles().anyProfileEnforced(CFGProfiles);
 }
 
 static void flushDiagnostics(Sema &S, const sema::FunctionScopeInfo *fscope) {
@@ -2950,7 +2950,7 @@ static void addNonLinearizedAlwaysAddClasses(AnalysisDeclContext &AC) {
       .setAlwaysAdd(Stmt::UnaryOperatorClass);
 }
 
-// Pattern-2 profiles (the CFGUninitProfiles table) ride the uninitialized-
+// Pattern-2 profiles (the CFGProfiles table) ride the uninitialized-
 // variables analysis, which IssueWarnings otherwise skips once the TU has an
 // uncompilable error. Re-run just that analysis for a single function so an
 // early TU error does not silently disable the profile for every later
@@ -3203,7 +3203,7 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
     // disables them for all later functions. Run only that analysis, only for
     // an enforced profile, and only on a valid decl (so the CFG is buildable).
     // Other analyses keep the early-out.
-    if (hasEnforcedCFGUninitProfile() && !D->isInvalidDecl() &&
+    if (hasEnforcedCFGProfile() && !D->isInvalidDecl() &&
         !Diags.hasFatalErrorOccurred())
       runUninitProfileAnalysisAfterError(S, D);
     return;
@@ -3295,7 +3295,7 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
     Analyzer.run(AC);
   }
 
-  if (hasEnforcedCFGUninitProfile() ||
+  if (hasEnforcedCFGProfile() ||
       !Diags.isIgnored(diag::warn_uninit_var, D->getBeginLoc()) ||
       !Diags.isIgnored(diag::warn_sometimes_uninit_var, D->getBeginLoc()) ||
       !Diags.isIgnored(diag::warn_maybe_uninit_var, D->getBeginLoc()) ||

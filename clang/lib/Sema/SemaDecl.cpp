@@ -17168,7 +17168,7 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body, bool IsInstantiation,
       if (!isa<FunctionTemplateDecl>(dcl) &&
           (!hasUncompilableErrorOccurred() ||
            (!dcl->isInvalidDecl() &&
-            AnalysisWarnings.hasEnforcedCFGUninitProfile()))) {
+            AnalysisWarnings.hasEnforcedCFGProfile()))) {
         // Normally analysis-based warnings only run for a valid body in an
         // otherwise error-free TU. CFG-based profiles (e.g.
         // test::uninit_read) must keep diagnosing later functions even after an
