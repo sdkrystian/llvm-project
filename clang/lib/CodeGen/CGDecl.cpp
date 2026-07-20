@@ -176,6 +176,16 @@ void CodeGenFunction::EmitDecl(const Decl &D, bool EvaluateConditionDecl) {
     const VarDecl &VD = cast<VarDecl>(D);
     assert(VD.isLocalVarDecl() &&
            "Should not see file-scope variables inside a function!");
+    // Condition variables of if/while/for/switch are emitted directly through
+    // here, never via EmitDeclStmt, so the variable's [[profiles::suppress]]
+    // entries must be pushed here to cover its initializer's emission (under
+    // an enclosing EmitDeclStmt this pushes a cheap, harmless duplicate).
+    // Known gap: a C++26 structured-binding condition variable's holding-var
+    // initializer is deferred via MaybeEmitDeferredVarDeclInit from the
+    // *caller* with EvaluateConditionDecl unset and escapes this scope --
+    // rare, and in the over-check direction only.
+    ProfileSuppressionScope ProfileScope(*this);
+    ProfileScope.addFromDecl(&VD);
     EmitVarDecl(VD);
     if (EvaluateConditionDecl)
       MaybeEmitDeferredVarDeclInit(&VD);
