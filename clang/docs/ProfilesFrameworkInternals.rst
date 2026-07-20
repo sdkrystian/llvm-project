@@ -80,7 +80,7 @@ profile's name.  ``test::uninit_read`` is the in-tree example:
 
 .. code-block:: c++
 
-   constexpr CFGUninitProfileEntry CFGUninitProfiles[] = {
+   constexpr CFGProfileEntry CFGProfiles[] = {
        {"my::profile", /*Rule=*/"", diag::err_my_profile_rule},
    };
 
@@ -249,7 +249,7 @@ patterns.  Its rules map to mechanisms as follows:
      - Primary entry points
    * - ``uninit_read``
      - 2 and 1
-     - ``CFGUninitProfiles`` row for local variables;
+     - ``CFGProfiles`` row for local variables;
        ``checkInitProfileCtorBody`` and ``checkInitProfileLocalMembers``
        (definite-assignment dataflow over ``[[uninit]]`` members; the
        ctor-body pass's ``CallExpr`` arm turns a ``[[now_init]]`` call into a

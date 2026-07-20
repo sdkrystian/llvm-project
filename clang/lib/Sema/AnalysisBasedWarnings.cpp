@@ -1693,7 +1693,7 @@ namespace {
 // uninitialized read is found and not suppressed at the use site. Adding a
 // new profile that wants to ride this analysis is a single row here plus a
 // ProfileRuleError diagnostic in DiagnosticSemaKinds.td.
-struct CFGUninitProfileEntry {
+struct CFGProfileEntry {
   StringRef Name;
   StringRef Rule;
   unsigned DiagID;
@@ -1701,7 +1701,7 @@ struct CFGUninitProfileEntry {
   // profile exempts it, while the generic test profile does not.
   bool ExemptStdByte;
 };
-constexpr CFGUninitProfileEntry CFGUninitProfiles[] = {
+constexpr CFGProfileEntry CFGProfiles[] = {
     {"test::uninit_read", /*Rule=*/"", diag::err_profile_uninit_read,
      /*ExemptStdByte=*/false},
     {"std::init", "uninit_read", diag::err_init_uninit_read,
@@ -2623,7 +2623,7 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC) {
 class UninitValsDiagReporter : public UninitVariablesHandler {
   Sema &S;
   AnalysisDeclContext &AC;
-  // When set, only the CFGUninitProfiles diagnostics are emitted; the default
+  // When set, only the CFGProfiles diagnostics are emitted; the default
   // -Wuninitialized reports (self-init and the sorted const-ref/ptr/use paths)
   // are skipped. The post-error profile pass sets this so it cannot resurrect
   // ordinary warnings that the first TU error is meant to suppress.
@@ -2693,7 +2693,7 @@ private:
     // below.
     if (hasSelfInit && vd->getInit()) {
       const Expr *Init = vd->getInit()->IgnoreParenCasts();
-      for (const CFGUninitProfileEntry &E : CFGUninitProfiles) {
+      for (const CFGProfileEntry &E : CFGProfiles) {
         if (E.ExemptStdByte &&
             S.Context.getBaseElementType(vd->getType())->isStdByteType())
           continue;
@@ -2714,7 +2714,7 @@ private:
       // ref_to_uninit (R7) binding territory, checked at the binding site.
       if (U.isConstRefOrPtrUse())
         continue;
-      for (const CFGUninitProfileEntry &E : CFGUninitProfiles) {
+      for (const CFGProfileEntry &E : CFGProfiles) {
         // std::byte may be read while uninitialized (paper §4).
         if (E.ExemptStdByte &&
             S.Context.getBaseElementType(vd->getType())->isStdByteType())
@@ -3773,8 +3773,8 @@ void sema::AnalysisBasedWarnings::clearOverrides() {
   PolicyOverrides.enableThreadSafetyAnalysis = false;
 }
 
-bool sema::AnalysisBasedWarnings::hasEnforcedCFGUninitProfile() const {
-  return S.Profiles().anyProfileEnforced(CFGUninitProfiles);
+bool sema::AnalysisBasedWarnings::hasEnforcedCFGProfile() const {
+  return S.Profiles().anyProfileEnforced(CFGProfiles);
 }
 
 static void flushDiagnostics(Sema &S, const sema::FunctionScopeInfo *fscope) {
@@ -3893,7 +3893,7 @@ static void runInitProfileCFGChecksIfEnforced(Sema &S, const Decl *D,
   checkInitProfileLocalMembers(S, AC);
 }
 
-// Pattern-2 profiles (the CFGUninitProfiles table) ride the uninitialized-
+// Pattern-2 profiles (the CFGProfiles table) ride the uninitialized-
 // variables analysis, which IssueWarnings otherwise skips once the TU has an
 // uncompilable error. Re-run just that analysis for a single function so an
 // early TU error does not silently disable the profile for every later
@@ -4149,7 +4149,7 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
     // disables them for all later functions. Run only that analysis, only for
     // an enforced profile, and only on a valid decl (so the CFG is buildable).
     // Other analyses keep the early-out.
-    if (hasEnforcedCFGUninitProfile() && !D->isInvalidDecl() &&
+    if (hasEnforcedCFGProfile() && !D->isInvalidDecl() &&
         !Diags.hasFatalErrorOccurred())
       runUninitProfileAnalysisAfterError(S, D);
     return;
@@ -4241,7 +4241,7 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
     Analyzer.run(AC);
   }
 
-  if (hasEnforcedCFGUninitProfile() ||
+  if (hasEnforcedCFGProfile() ||
       !Diags.isIgnored(diag::warn_uninit_var, D->getBeginLoc()) ||
       !Diags.isIgnored(diag::warn_sometimes_uninit_var, D->getBeginLoc()) ||
       !Diags.isIgnored(diag::warn_maybe_uninit_var, D->getBeginLoc()) ||
