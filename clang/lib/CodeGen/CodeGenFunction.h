@@ -42,6 +42,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/ValueHandle.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/SaveAndRestore.h"
 #include "llvm/Transforms/Utils/SanitizerStats.h"
 #include <optional>
 
@@ -1878,7 +1879,14 @@ public:
     CXXDefaultInitExprScope(CodeGenFunction &CGF, const CXXDefaultInitExpr *E)
         : CGF(CGF), OldCXXThisValue(CGF.CXXThisValue),
           OldCXXThisAlignment(CGF.CXXThisAlignment),
-          SourceLocScope(E, CGF.CurSourceLocExprScope) {
+          SourceLocScope(E, CGF.CurSourceLocExprScope),
+          // The NSDMI's tokens belong to the field's construct, not to the
+          // constructor whose emission reached it: hide the constructor's
+          // statement suppressions and anchor the suppression chain walk at
+          // the field itself.
+          ProfileFloor(CGF.ProfileSuppressionFloor,
+                       CGF.ProfileStmtSuppressions.size()),
+          ProfileAnchor(CGF.ProfileSuppressionAnchor, E->getField()) {
       CGF.CXXThisValue = CGF.CXXDefaultInitExprThis.getBasePointer();
       CGF.CXXThisAlignment = CGF.CXXDefaultInitExprThis.getAlignment();
     }
@@ -1892,11 +1900,22 @@ public:
     llvm::Value *OldCXXThisValue;
     CharUnits OldCXXThisAlignment;
     SourceLocExprScopeGuard SourceLocScope;
+    SaveAndRestore<unsigned> ProfileFloor;
+    SaveAndRestore<const Decl *> ProfileAnchor;
   };
 
   struct CXXDefaultArgExprScope : SourceLocExprScopeGuard {
     CXXDefaultArgExprScope(CodeGenFunction &CGF, const CXXDefaultArgExpr *E)
-        : SourceLocExprScopeGuard(E, CGF.CurSourceLocExprScope) {}
+        : SourceLocExprScopeGuard(E, CGF.CurSourceLocExprScope),
+          // The default argument's tokens belong to the parameter's
+          // construct, not to the caller being emitted: hide the caller's
+          // statement suppressions and anchor the suppression chain walk at
+          // the parameter.
+          ProfileFloor(CGF.ProfileSuppressionFloor,
+                       CGF.ProfileStmtSuppressions.size()),
+          ProfileAnchor(CGF.ProfileSuppressionAnchor, E->getParam()) {}
+    SaveAndRestore<unsigned> ProfileFloor;
+    SaveAndRestore<const Decl *> ProfileAnchor;
   };
 
   /// The scope of an ArrayInitLoopExpr. Within this scope, the value of the
@@ -1926,7 +1945,13 @@ public:
           OldCXXThisAlignment(CGF.CXXThisAlignment),
           OldReturnValue(CGF.ReturnValue), OldFnRetTy(CGF.FnRetTy),
           OldCXXInheritedCtorInitExprArgs(
-              std::move(CGF.CXXInheritedCtorInitExprArgs)) {
+              std::move(CGF.CXXInheritedCtorInitExprArgs)),
+          // The inherited constructor's tokens belong to its own construct,
+          // not to the constructor whose emission inlines it: hide the
+          // latter's statement suppressions. No anchor is needed -- this
+          // scope already swaps CurCodeDecl to the inherited constructor.
+          ProfileFloor(CGF.ProfileSuppressionFloor,
+                       CGF.ProfileStmtSuppressions.size()) {
       CGF.CurGD = GD;
       CGF.CurFuncDecl = CGF.CurCodeDecl =
           cast<CXXConstructorDecl>(GD.getDecl());
@@ -1967,6 +1992,7 @@ public:
     Address OldReturnValue;
     QualType OldFnRetTy;
     CallArgList OldCXXInheritedCtorInitExprArgs;
+    SaveAndRestore<unsigned> ProfileFloor;
   };
 
   // Helper class for the OpenMP IR Builder. Allows reusability of code used for
