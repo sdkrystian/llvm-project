@@ -40,6 +40,18 @@ struct EnforcedProfile {
   std::string Designator;
 };
 
+/// True if a [[profiles::suppress]] entry naming \p EntryProfile /
+/// \p EntryRule suppresses a violation of \p Rule of \p Profile: the profile
+/// names must agree, and the entry either names the violated rule or names no
+/// rule at all (suppressing the whole profile). The one matching rule shared
+/// by every consumer of suppression state -- Sema's parse-time suppress stack
+/// and the post-parse AST walks (clang/AST/Profiles.h).
+inline bool suppressionMatches(llvm::StringRef EntryProfile,
+                               llvm::StringRef EntryRule,
+                               llvm::StringRef Profile, llvm::StringRef Rule) {
+  return EntryProfile == Profile && (EntryRule.empty() || EntryRule == Rule);
+}
+
 /// The canonical spelling of a profile argument: the value token for a
 /// positional argument, "key : value" for a named one. Enforcement identity
 /// (P3589R2 [decl.attr.enforce]p3) compares designators by this spelling.
