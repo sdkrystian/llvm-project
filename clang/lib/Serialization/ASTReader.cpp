@@ -5787,6 +5787,28 @@ void ASTReader::InitializeContext() {
 
   ReadPragmaDiagnosticMappings(Context.getDiagnostics());
 
+  // Restore enforced profile designators (P3589R2) into the ASTContext's
+  // list, so consumers that never see a Sema -- e.g. code generation directly
+  // from this AST file -- observe them too. Chained PCHs re-read every file
+  // in the chain's records, so duplicates are expected: dedup by name. A
+  // designator mismatch between files of one chain is impossible (each file's
+  // records were restored and validated while the next file was built), so
+  // assert instead of diagnosing; a mismatch between a PCH and the main TU's
+  // own [[profiles::enforce]] is diagnosed by Sema's addProfileEnforcement
+  // when the attribute is parsed.
+  for (const auto &EP : SerializedEnforcedProfiles) {
+    if (const profiles::ProfileEnforcement *Existing =
+            Context.getProfileEnforcement(EP.ProfileName)) {
+      assert(Existing->Designator == EP.Designator &&
+             "chained AST files disagree on an enforced profile's designator");
+      (void)Existing;
+      continue;
+    }
+    Context.EnforcedProfiles.push_back(
+        {{EP.ProfileName, EP.Designator}, SourceLocation()});
+  }
+  SerializedEnforcedProfiles.clear();
+
   // If there were any CUDA special declarations, deserialize them.
   if (!CUDASpecialDeclRefs.empty()) {
     assert(CUDASpecialDeclRefs.size() == 3 && "More decl refs than expected!");
@@ -9394,11 +9416,6 @@ void ASTReader::UpdateSema() {
     }
   }
 
-  // Restore enforced profile designators (P3589R2).
-  for (const auto &EP : SerializedEnforcedProfiles)
-    SemaObj->Profiles().addProfileEnforcement(EP.ProfileName, EP.Designator,
-                                   SourceLocation());
-  SerializedEnforcedProfiles.clear();
   if (SerializedTUHasNonEmptyDecl)
     SemaObj->Profiles().TUPrecededByNonEmptyDecl = true;
 

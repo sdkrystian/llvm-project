@@ -29,6 +29,7 @@
 #include "clang/AST/TypeOrdering.h"
 #include "clang/Basic/LLVM.h"
 #include "clang/Basic/PartialDiagnostic.h"
+#include "clang/Basic/Profiles.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Lex/MacroBase.h"
 #include "llvm/ADT/DenseMap.h"
@@ -984,6 +985,34 @@ public:
   }
 
   const ProfileList &getProfileList() const { return *ProfList; }
+
+  /// The profiles enforced on this translation unit by [[profiles::enforce]]
+  /// (P3589R2). Sema records entries (and owns the attribute's diagnostics);
+  /// the state lives here so consumers without a Sema -- e.g. code generation
+  /// from an AST file -- can query enforcement, and the ASTReader restores a
+  /// PCH's enforcements directly into it.
+  SmallVector<profiles::ProfileEnforcement, 4> EnforcedProfiles;
+
+  /// The recorded enforcement of \p ProfileName, or null. Ungated: reports a
+  /// recorded entry even when the profile is inert in this compilation
+  /// (recording dedup needs the factual answer); use isProfileEnforced to ask
+  /// whether the profile's rules fire.
+  const profiles::ProfileEnforcement *
+  getProfileEnforcement(StringRef ProfileName) const;
+
+  /// True if \p ProfileName is enforced and active in this compilation:
+  /// recorded, -fprofiles is enabled, and (for a test:: profile) the test
+  /// suite opted in via -fprofiles-test-profiles.
+  bool isProfileEnforced(StringRef ProfileName) const;
+
+  /// True if \p Loc is exempt from profile enforcement because it lies in a
+  /// system header. Temporary stopgap for the not-yet-implemented
+  /// [[profiles::exempt]] (P3589R2 s1.1.6), so enforcing a profile on a
+  /// translation unit does not diagnose violations inside the standard
+  /// library and the other system headers it transitively includes. On by
+  /// default; -fno-profiles-exempt-system-headers restores spec-exact
+  /// enforcement into system-header code.
+  bool isProfileExemptSystemHeaderLoc(SourceLocation Loc) const;
 
   DiagnosticsEngine &getDiagnostics() const;
 
