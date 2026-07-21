@@ -686,22 +686,20 @@ public:
     unsigned TrapDiagID;
   };
 
-  /// The first entry of \p Entries whose profile is enforced, with \p Loc not
-  /// exempt and the rule not suppressed for the code being emitted; null if
-  /// none -- the emission gate of a pattern-5 check site. Every row of one
-  /// table guards the identical runtime check, so one trap suffices and
-  /// table order is priority.
-  const ProfileRuntimeCheckEntry *
-  getActiveProfileRuntimeCheck(ArrayRef<ProfileRuntimeCheckEntry> Entries,
-                               SourceLocation Loc);
-
-  /// Emit \p Entry's runtime check: a conditional branch to a trap
-  /// (SanitizerHandler::ProfileViolation) taken when \p Passed is false, its
-  /// debug location pointing at \p Loc, and -- under the default Detailed
-  /// -fsanitize-debug-trap-reasons mode, when debug info is emitted -- the
-  /// entry's trap diagnostic naming the violated profile as the trap reason.
-  void EmitProfileRuntimeCheck(const ProfileRuntimeCheckEntry &Entry,
-                               llvm::Value *Passed, SourceLocation Loc);
+  /// Emit the runtime check of the first active entry of \p Entries -- its
+  /// profile enforced, \p Loc not in an exempt system header, its rule not
+  /// suppressed for the code being emitted -- as a conditional branch to a
+  /// trap (SanitizerHandler::ProfileViolation) taken when the value
+  /// \p BuildPassed returns is false. \p BuildPassed is invoked only when a
+  /// check is actually emitted, so an inactive site builds no IR. Every row
+  /// of one table guards the identical check, so one trap suffices and table
+  /// order is priority. The trap's debug location points at \p Loc and --
+  /// under the default Detailed -fsanitize-debug-trap-reasons mode, when
+  /// debug info is emitted -- carries the entry's trap diagnostic naming the
+  /// violated profile. No-op without -fprofiles.
+  void EmitProfileRuntimeCheck(ArrayRef<ProfileRuntimeCheckEntry> Entries,
+                               SourceLocation Loc,
+                               llvm::function_ref<llvm::Value *()> BuildPassed);
 
   /// HLSL Branch attribute.
   HLSLControlFlowHintAttr::Spelling HLSLControlFlowAttr =

@@ -155,16 +155,28 @@ per riding profile -- the profile name, the rule, and a trap diagnostic
        {"my::profile", "my_rule", diag::trap_my_profile_rule},
    };
 
-The site asks ``CodeGenFunction::getActiveProfileRuntimeCheck(Table, Loc)``
-whether some row is active: its profile enforced
+The site guards on its own applicability conditions and makes one call --
+the runtime counterpart of pattern 1's ``checkProfileViolation`` one-liner --
+passing its check's "no violation" predicate as a lazily-invoked builder.
+The integer div/rem site is the in-tree example:
+
+.. code-block:: c++
+
+   if (Ops.Ty->isIntegerType() && Ops.mayHaveIntegerDivisionByZero())
+     CGF.EmitProfileRuntimeCheck(RuntimeProfiles, Ops.E->getExprLoc(), [&] {
+       return Builder.CreateICmpNE(
+           Ops.RHS, llvm::Constant::getNullValue(Ops.RHS->getType()));
+     });
+
+``EmitProfileRuntimeCheck`` finds the first active row: its profile enforced
 (``ASTContext::EnforcedProfiles``, so a body deserialized from an AST file
 is decided by the same state the importer restored), the given location not
 in an exempt system header, and the rule not suppressed for the code being
-emitted (the CodeGen suppression state above).  The first active row wins --
-every row of one table guards the identical check, so one trap suffices and
-table order is priority.  The site then computes its check's "no violation"
-predicate and hands it to ``EmitProfileRuntimeCheck``, which emits a
-conditional branch to a trap block (``SanitizerHandler::ProfileViolation``).
+emitted (the CodeGen suppression state above) -- every row of one table
+guards the identical check, so one trap suffices and table order is
+priority.  Only when a row is active does it invoke the builder for the
+predicate, so an inactive site emits no IR, and then emits a conditional
+branch to a trap block (``SanitizerHandler::ProfileViolation``).
 Unevaluated operands and discarded statements are never emitted at all, so
 the Sema-side gates for those contexts need no CodeGen counterpart.
 
