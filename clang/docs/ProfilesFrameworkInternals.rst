@@ -46,8 +46,8 @@ passes the profile name as ``%0``:
    def err_profile_type_cast_reinterpret : ProfileRuleError<
      "'reinterpret_cast' is unsafe under profile '%0'">;
 
-There are four implementation patterns, keyed on when the rule can be
-checked.
+There are five implementation patterns, keyed on when -- and for pattern 5,
+how -- the rule is checked.
 
 
 Pattern 1: Parse-Time Check Sites
@@ -141,6 +141,51 @@ any constructor body or member-initializer list has been parsed*, so a
 pattern-3 callback must not inspect a constructor's ``inits()``.  Rules that
 depend on what a constructor initializes belong on pattern 4; rules that need
 flow analysis belong on pattern 2.
+
+
+Pattern 5: Runtime-Checked Rules
+================================
+
+For a rule whose enforcement means emitting a *runtime check* during code
+generation rather than a compile-time diagnostic -- P3589R2 sanctions
+dynamic semantics for profiles (a profile "may have an effect on the runtime
+behavior of a program", e.g. bound checking, §1.1/§2.2.2).  Each check site
+in CodeGen owns a small opt-in table mirroring pattern 2's shape, one row
+per riding profile -- the profile name, the rule, and a trap diagnostic
+(``Trap`` class, ``DiagnosticTrapKinds.td``, category "C++ Profiles"):
+
+.. code-block:: c++
+
+   constexpr ProfileRuntimeCheckEntry RuntimeProfiles[] = {
+       {"my::profile", "my_rule", diag::trap_my_profile_rule},
+   };
+
+The site asks ``CodeGenFunction::getActiveProfileRuntimeCheck(Table, Loc)``
+whether some row is active: its profile enforced
+(``ASTContext::EnforcedProfiles``, so a body deserialized from an AST file
+is decided by the same state the importer restored), the given location not
+in an exempt system header, and the rule not suppressed for the code being
+emitted (the CodeGen suppression state above).  The first active row wins --
+every row of one table guards the identical check, so one trap suffices and
+table order is priority.  The site then computes its check's "no violation"
+predicate and hands it to ``EmitProfileRuntimeCheck``, which emits a
+conditional branch to a trap block (``SanitizerHandler::ProfileViolation``).
+Unevaluated operands and discarded statements are never emitted at all, so
+the Sema-side gates for those contexts need no CodeGen counterpart.
+
+Failure semantics are trap-only: ``llvm.ubsantrap`` with the handler's own
+immediate, no handler call, no runtime library.  That is forced rather than
+merely chosen -- enforcement is declared *in source*, so the driver cannot
+see it and no runtime support library can be auto-linked.  Under the default
+``-fsanitize-debug-trap-reasons=detailed`` with debug info enabled, the
+trap's debug location carries the entry's trap diagnostic naming the
+violated profile; external decoders of ubsantrap immediates (e.g. LLDB's
+enum copy) will not know the new immediate, which that trap-reason string
+compensates for.  With trap reasons off or basic, the fallback message is
+categorized "Undefined Behavior Sanitizer" -- cosmetic, a possible
+follow-up.  At -O0 every check site gets its own trap instruction, keeping
+locations and reasons exact; optimized builds coalesce the traps of one
+handler kind and merge their locations, like UBSan's trap mode.
 
 
 Suppression Dominion Mechanics

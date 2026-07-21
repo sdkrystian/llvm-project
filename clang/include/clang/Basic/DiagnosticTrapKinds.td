@@ -27,4 +27,11 @@ def trap_ubsan_arith_overflow : Trap<
   "}1 overflow in %2">;
 
 }
+
+let CategoryName = "C++ Profiles" in {
+
+def trap_profile_zero_divide : Trap<
+  "integer division or remainder by zero under profile '%0'">;
+
+}
 }
