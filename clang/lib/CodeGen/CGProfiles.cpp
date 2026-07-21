@@ -12,6 +12,7 @@
 ///
 //===----------------------------------------------------------------------===//
 
+#include "CGDebugInfo.h"
 #include "CodeGenFunction.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/Profiles.h"
@@ -61,4 +62,49 @@ bool CodeGenFunction::isProfileSuppressionActive(StringRef Profile,
   return profiles::isSuppressedFor(
       ProfileSuppressionAnchor ? ProfileSuppressionAnchor : CurCodeDecl,
       Profile, Rule);
+}
+
+const CodeGenFunction::ProfileRuntimeCheckEntry *
+CodeGenFunction::getActiveProfileRuntimeCheck(
+    ArrayRef<ProfileRuntimeCheckEntry> Entries, SourceLocation Loc) {
+  // Enforcement first, so a TU that enforces none of the table's profiles
+  // never pays the suppression walk; the system-header exemption is per-site,
+  // not per-entry, so it is checked once, when the first enforced entry is
+  // seen. The first enforced, unsuppressed entry wins. This funnel is also
+  // the seam where a memoization of the gating could sit, should the scans
+  // ever matter.
+  bool AnyEnforced = false;
+  for (const ProfileRuntimeCheckEntry &E : Entries) {
+    if (!getContext().isProfileEnforced(E.Name))
+      continue;
+    if (!AnyEnforced) {
+      if (getContext().isProfileExemptSystemHeaderLoc(Loc))
+        return nullptr;
+      AnyEnforced = true;
+    }
+    if (!isProfileSuppressionActive(E.Name, E.Rule))
+      return &E;
+  }
+  return nullptr;
+}
+
+void CodeGenFunction::EmitProfileRuntimeCheck(
+    const ProfileRuntimeCheckEntry &Entry, llvm::Value *Passed,
+    SourceLocation Loc) {
+  // Only pay for building the trap reason when EmitTrapCheck will encode it:
+  // it reads the reason under the Detailed -fsanitize-debug-trap-reasons mode
+  // only, and encoding it requires debug info. With the reason empty or
+  // unavailable the trap falls back to the handler's generic message.
+  TrapReason TR;
+  if (CGM.getCodeGenOpts().getSanitizeDebugTrapReasons() ==
+          CodeGenOptions::SanitizeDebugTrapReasonKind::Detailed &&
+      getDebugInfo())
+    CGM.BuildTrapReason(Entry.TrapDiagID, TR) << Entry.Name;
+  // Point the trap at the checked operation. At -O0 EmitTrapCheck never
+  // merges trap blocks, keeping location and reason exact per check site;
+  // optimized builds coalesce the traps of one handler kind, merging their
+  // locations, like UBSan's trap mode.
+  ApplyDebugLocation ADL(*this, Loc);
+  EmitTrapCheck(Passed, SanitizerHandler::ProfileViolation, /*NoMerge=*/false,
+                &TR);
 }

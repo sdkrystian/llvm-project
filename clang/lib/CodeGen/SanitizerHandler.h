@@ -71,9 +71,12 @@
       VLABoundNotPositive, vla_bound_not_positive, 0,                          \
       "Variable length array bound evaluates to non-positive value")           \
   SANITIZER_CHECK(BoundsSafety, bounds_safety, 0,                              \
-                  "") // BoundsSafety Msg is empty because it is not considered
-                      // part of UBSan; therefore, no trap reason is emitted for
-                      // this case.
+                  /* BoundsSafety Msg is empty because it is not considered */ \
+                  /* part of UBSan; therefore, no trap reason is emitted for */\
+                  /* this case. */                                             \
+                  "")                                                          \
+  SANITIZER_CHECK(ProfileViolation, profile_violation, 0,                      \
+                  "C++ profile violation")
 
 enum SanitizerHandler {
 #define SANITIZER_CHECK(Enum, Name, Version, Msg) Enum,
