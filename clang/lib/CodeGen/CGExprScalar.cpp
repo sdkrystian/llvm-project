@@ -4289,17 +4289,6 @@ void ScalarExprEmitter::EmitUndefinedBehaviorIntegerDivAndRemCheck(
     EmitBinOpCheck(Checks, Ops);
 }
 
-// The runtime-checked profile rules (pattern 5): a profile, one of its
-// rules, and the trap diagnostic the rule's check reports at runtime.
-// The check is emitted independently of any sanitizer configuration: a
-// profile's guarantee must not be voidable through sanitizer knobs
-// (ignorelists, no_sanitize, hot cutoffs), so under
-// -fsanitize=integer-divide-by-zero the same predicate is simply
-// instrumented twice -- redundant, never wrong.
-constexpr CodeGenFunction::ProfileRuntimeCheckEntry RuntimeProfiles[] = {
-    {"test::arith", "zero_divide", diag::trap_profile_zero_divide},
-};
-
 Value *ScalarExprEmitter::EmitDiv(const BinOpInfo &Ops) {
   {
     SanitizerDebugLocation SanScope(&CGF,
@@ -4324,14 +4313,20 @@ Value *ScalarExprEmitter::EmitDiv(const BinOpInfo &Ops) {
   }
 
   // After the sanitizer block: a SanitizerDebugLocation may not nest inside a
-  // live scope, and the profile check is independent of sanitizer state.
-  // Integer-only, like the sanitizer's zero-divisor check, and no dead check
-  // for a constant nonzero divisor.
+  // live scope, and the profile check is emitted independently of sanitizer
+  // state -- a profile's guarantee must not be voidable through sanitizer
+  // knobs (ignorelists, no_sanitize, hot cutoffs), so under
+  // -fsanitize=integer-divide-by-zero the same predicate is simply
+  // instrumented twice, redundant but never wrong. Integer-only, like the
+  // sanitizer's zero-divisor check, and no dead check for a constant nonzero
+  // divisor.
   if (Ops.Ty->isIntegerType() && Ops.mayHaveIntegerDivisionByZero())
-    CGF.EmitProfileRuntimeCheck(RuntimeProfiles, Ops.E->getExprLoc(), [&] {
-      return Builder.CreateICmpNE(
-          Ops.RHS, llvm::Constant::getNullValue(Ops.RHS->getType()));
-    });
+    CGF.EmitProfileRuntimeCheck(
+        "test::arith", "zero_divide", diag::trap_profile_zero_divide,
+        Ops.E->getExprLoc(), [&] {
+          return Builder.CreateICmpNE(
+              Ops.RHS, llvm::Constant::getNullValue(Ops.RHS->getType()));
+        });
 
   if (Ops.Ty->isConstantMatrixType()) {
     llvm::MatrixBuilder MB(Builder);
@@ -4379,14 +4374,16 @@ Value *ScalarExprEmitter::EmitRem(const BinOpInfo &Ops) {
   }
 
   // After the sanitizer block: a SanitizerDebugLocation may not nest inside a
-  // live scope, and the profile check is independent of sanitizer state.
-  // Integer-only, like the sanitizer's zero-divisor check, and no dead check
-  // for a constant nonzero divisor.
+  // live scope, and the profile check is independent of sanitizer state (see
+  // EmitDiv). Integer-only, like the sanitizer's zero-divisor check, and no
+  // dead check for a constant nonzero divisor.
   if (Ops.Ty->isIntegerType() && Ops.mayHaveIntegerDivisionByZero())
-    CGF.EmitProfileRuntimeCheck(RuntimeProfiles, Ops.E->getExprLoc(), [&] {
-      return Builder.CreateICmpNE(
-          Ops.RHS, llvm::Constant::getNullValue(Ops.RHS->getType()));
-    });
+    CGF.EmitProfileRuntimeCheck(
+        "test::arith", "zero_divide", diag::trap_profile_zero_divide,
+        Ops.E->getExprLoc(), [&] {
+          return Builder.CreateICmpNE(
+              Ops.RHS, llvm::Constant::getNullValue(Ops.RHS->getType()));
+        });
 
   if (Ops.Ty->hasUnsignedIntegerRepresentation())
     return Builder.CreateURem(Ops.LHS, Ops.RHS, "rem");

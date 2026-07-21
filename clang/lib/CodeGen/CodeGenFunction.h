@@ -675,30 +675,18 @@ public:
     }
   };
 
-  /// A profile rule enforced by a runtime check (pattern 5): the profile, one
-  /// of its rules, and the trap diagnostic the rule's check reports when it
-  /// fails at runtime. The element type of the opt-in table each runtime
-  /// check site consults (the \c Name member follows the framework's
-  /// table-entry convention).
-  struct ProfileRuntimeCheckEntry {
-    StringRef Name;
-    StringRef Rule;
-    unsigned TrapDiagID;
-  };
-
-  /// Emit the runtime check of the first active entry of \p Entries -- its
-  /// profile enforced, \p Loc not in an exempt system header, its rule not
+  /// Emit the runtime check of a pattern-5 profile rule when it is active --
+  /// \p Profile enforced, \p Loc not in an exempt system header, \p Rule not
   /// suppressed for the code being emitted -- as a conditional branch to a
   /// trap (SanitizerHandler::ProfileViolation) taken when the value
   /// \p BuildPassed returns is false. \p BuildPassed is invoked only when a
-  /// check is actually emitted, so an inactive site builds no IR. Every row
-  /// of one table guards the identical check, so one trap suffices and table
-  /// order is priority. The trap's debug location points at \p Loc and --
-  /// under the default Detailed -fsanitize-debug-trap-reasons mode, when
-  /// debug info is emitted -- carries the entry's trap diagnostic naming the
+  /// check is actually emitted, so an inactive site builds no IR. The trap's
+  /// debug location points at \p Loc and -- under the default Detailed
+  /// -fsanitize-debug-trap-reasons mode, when debug info is emitted --
+  /// carries \p TrapDiagID (a DiagnosticTrapKinds.td diagnostic) naming the
   /// violated profile. No-op without -fprofiles.
-  void EmitProfileRuntimeCheck(ArrayRef<ProfileRuntimeCheckEntry> Entries,
-                               SourceLocation Loc,
+  void EmitProfileRuntimeCheck(StringRef Profile, StringRef Rule,
+                               unsigned TrapDiagID, SourceLocation Loc,
                                llvm::function_ref<llvm::Value *()> BuildPassed);
 
   /// HLSL Branch attribute.
