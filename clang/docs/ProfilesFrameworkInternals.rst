@@ -158,48 +158,45 @@ Pattern 5: Runtime-Checked Rules
 For a rule whose enforcement means emitting a *runtime check* during code
 generation rather than a compile-time diagnostic -- P3589R2 sanctions
 dynamic semantics for profiles (a profile "may have an effect on the runtime
-behavior of a program", e.g. bound checking, §1.1/§2.2.2).  Each check site
-in CodeGen owns a small opt-in table mirroring pattern 2's shape, one row
-per riding profile -- the profile name, the rule, and a trap diagnostic
-(``Trap`` class, ``DiagnosticTrapKinds.td``, category "C++ Profiles"):
-
-.. code-block:: c++
-
-   constexpr ProfileRuntimeCheckEntry RuntimeProfiles[] = {
-       {"my::profile", "my_rule", diag::trap_my_profile_rule},
-   };
-
-The site guards on its own applicability conditions and makes one call --
-the runtime counterpart of pattern 1's ``checkProfileViolation`` one-liner --
-passing its check's "no violation" predicate as a lazily-invoked builder.
-The integer div/rem site is the in-tree example:
+behavior of a program", e.g. bound checking, §1.1/§2.2.2).  The entire
+profile implementation is one call at the check site -- the runtime
+counterpart of pattern 1's ``checkProfileViolation`` one-liner -- naming the
+profile, the rule, and a trap diagnostic (``Trap`` class,
+``DiagnosticTrapKinds.td``, category "C++ Profiles"), and passing the
+check's "no violation" predicate as a lazily-invoked builder.  The site
+guards on its own applicability conditions; the integer div/rem site is the
+in-tree example:
 
 .. code-block:: c++
 
    if (Ops.Ty->isIntegerType() && Ops.mayHaveIntegerDivisionByZero())
-     CGF.EmitProfileRuntimeCheck(RuntimeProfiles, Ops.E->getExprLoc(), [&] {
-       return Builder.CreateICmpNE(
-           Ops.RHS, llvm::Constant::getNullValue(Ops.RHS->getType()));
-     });
+     CGF.EmitProfileRuntimeCheck(
+         "test::arith", "zero_divide", diag::trap_profile_zero_divide,
+         Ops.E->getExprLoc(), [&] {
+           return Builder.CreateICmpNE(
+               Ops.RHS, llvm::Constant::getNullValue(Ops.RHS->getType()));
+         });
 
-``EmitProfileRuntimeCheck`` finds the first active row: its profile enforced
+``EmitProfileRuntimeCheck`` checks that the profile is enforced
 (``ASTContext::EnforcedProfiles``, so a body deserialized from an AST file
-is decided by the same state the importer restored), the given location not
-in an exempt system header, and the rule not suppressed for the code being
-emitted (the CodeGen suppression state above) -- every row of one table
-guards the identical check, so one trap suffices and table order is
-priority.  Only when a row is active does it invoke the builder for the
-predicate, so an inactive site emits no IR, and then emits a conditional
-branch to a trap block (``SanitizerHandler::ProfileViolation``).
-Unevaluated operands and discarded statements are never emitted at all, so
-the Sema-side gates for those contexts need no CodeGen counterpart.
+is decided by the same state the importer restored), that the given location
+is not in an exempt system header, and that the rule is not suppressed for
+the code being emitted (the CodeGen suppression state above).  Only when the
+check is active does it invoke the builder for the predicate, so an inactive
+site emits no IR, and then emits a conditional branch to a trap block
+(``SanitizerHandler::ProfileViolation``).  Should several profiles ever ride
+one check, per-profile calls would duplicate the trap (redundant, never
+wrong); a grouped form emitting one trap with priority attribution is
+deferred until such a rider exists.  Unevaluated operands and discarded
+statements are never emitted at all, so the Sema-side gates for those
+contexts need no CodeGen counterpart.
 
 Failure semantics are trap-only: ``llvm.ubsantrap`` with the handler's own
 immediate, no handler call, no runtime library.  That is forced rather than
 merely chosen -- enforcement is declared *in source*, so the driver cannot
 see it and no runtime support library can be auto-linked.  Under the default
 ``-fsanitize-debug-trap-reasons=detailed`` with debug info enabled, the
-trap's debug location carries the entry's trap diagnostic naming the
+trap's debug location carries the rule's trap diagnostic naming the
 violated profile; external decoders of ubsantrap immediates (e.g. LLDB's
 enum copy) will not know the new immediate, which that trap-reason string
 compensates for.  With trap reasons off or basic, the fallback message is

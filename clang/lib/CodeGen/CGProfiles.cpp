@@ -65,31 +65,16 @@ bool CodeGenFunction::isProfileSuppressionActive(StringRef Profile,
 }
 
 void CodeGenFunction::EmitProfileRuntimeCheck(
-    ArrayRef<ProfileRuntimeCheckEntry> Entries, SourceLocation Loc,
+    StringRef Profile, StringRef Rule, unsigned TrapDiagID, SourceLocation Loc,
     llvm::function_ref<llvm::Value *()> BuildPassed) {
   if (!getLangOpts().Profiles)
     return;
-  // Enforcement first, so a TU that enforces none of the table's profiles
-  // never pays the suppression walk; the system-header exemption is per-site,
-  // not per-entry, so it is checked once, when the first enforced entry is
-  // seen. The first enforced, unsuppressed entry wins. This gate is also the
-  // seam where a memoization of the scans could sit, should they ever matter.
-  const ProfileRuntimeCheckEntry *Entry = nullptr;
-  bool AnyEnforced = false;
-  for (const ProfileRuntimeCheckEntry &E : Entries) {
-    if (!getContext().isProfileEnforced(E.Name))
-      continue;
-    if (!AnyEnforced) {
-      if (getContext().isProfileExemptSystemHeaderLoc(Loc))
-        return;
-      AnyEnforced = true;
-    }
-    if (!isProfileSuppressionActive(E.Name, E.Rule)) {
-      Entry = &E;
-      break;
-    }
-  }
-  if (!Entry)
+  // Enforcement first, so a TU that does not enforce the profile never pays
+  // the suppression walk. This gate is also the seam where a memoization of
+  // the scans could sit, should they ever matter.
+  if (!getContext().isProfileEnforced(Profile) ||
+      getContext().isProfileExemptSystemHeaderLoc(Loc) ||
+      isProfileSuppressionActive(Profile, Rule))
     return;
   // The check fires: only now build the site's "no violation" predicate, so
   // an inactive site emits no IR at all.
@@ -102,7 +87,7 @@ void CodeGenFunction::EmitProfileRuntimeCheck(
   if (CGM.getCodeGenOpts().getSanitizeDebugTrapReasons() ==
           CodeGenOptions::SanitizeDebugTrapReasonKind::Detailed &&
       getDebugInfo())
-    CGM.BuildTrapReason(Entry->TrapDiagID, TR) << Entry->Name;
+    CGM.BuildTrapReason(TrapDiagID, TR) << Profile;
   // Point the trap at the checked operation. At -O0 EmitTrapCheck never
   // merges trap blocks, keeping location and reason exact per check site;
   // optimized builds coalesce the traps of one handler kind, merging their
