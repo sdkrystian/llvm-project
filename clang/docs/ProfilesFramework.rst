@@ -695,13 +695,74 @@ false positive.
   time and may be repeated at instantiation.
 
 
+Runtime-Checked Rules
+=====================
+
+P3589R2 anticipates profiles with *dynamic semantics*: a profile "may have
+an effect on the runtime behavior of a program", such as enabling runtime
+instrumentation like bound checking (§1.1, §2.2.2).  The framework supports
+such rules: enforcing the profile makes the compiler emit a runtime check
+into the generated code, and a failed check *traps* -- deterministically
+stopping the program (typically ``SIGILL``) before the guarded operation
+executes.  No real profile with runtime-checked rules ships yet; the
+in-tree pilot rule (``test::arith`` / ``zero_divide``, which traps on
+integer division or remainder by a runtime zero) exists to exercise the
+machinery and is inert outside the test suite.
+
+Behavior of a runtime check:
+
+- **Trap-only.**  Enforcement is declared in source, so the driver cannot
+  know at link time that a support runtime would be needed: there is no
+  handler library, no runtime error message, and no way to continue past a
+  failed check.  When debug info is enabled (and under the default
+  ``-fsanitize-debug-trap-reasons=detailed``), the trap's debug location
+  carries a message naming the violated profile, which debuggers display.
+  At ``-O0`` every check site gets its own trap instruction with an exact
+  source location; optimized builds merge a function's profile trap blocks,
+  like UBSan's trap mode.
+- **Suppression applies identically.**  ``[[profiles::suppress]]`` on the
+  statement, the declaration, or an enclosing declaration removes the
+  runtime check, with the same token-dominion rule as compile-time
+  diagnostics: a suppression around a use site does not silence checks in a
+  default member initializer or default argument emitted there -- those
+  belong to the member's or parameter's construct, so suppress on the
+  member or parameter instead.  Two known over-checking gaps (a check that
+  suppression fails to remove, never a missing check): suppression from an
+  enclosing *statement* does not reach the member functions of a local
+  class defined inside it, nor the body of an Objective-C block (a lambda
+  body is covered).
+- **System-header exemption.**  As for compile-time rules, code originating
+  in a system header gets no checks by default;
+  ``-fno-profiles-exempt-system-headers`` restores them.
+- **Sanitizer independence.**  The checks are emitted regardless of
+  sanitizer configuration.  Enabling a sanitizer that guards the same
+  operation (e.g. ``-fsanitize=integer-divide-by-zero`` alongside the pilot
+  rule) instruments the operation twice -- redundant, never wrong -- and no
+  sanitizer facility (ignorelists, ``__attribute__((no_sanitize))``,
+  ``-fsanitize-skip-hot-cutoff``) can disable a profile's check, which is a
+  language guarantee rather than opt-in instrumentation.
+- **Per-TU enforcement.**  A check is emitted exactly when the translation
+  unit *emitting the code* enforces the profile.  An inline function
+  defined in a textual header is therefore compiled with checks in
+  enforcing TUs and without them elsewhere, and the linker keeps one copy
+  arbitrarily -- the situation long accepted for mixing sanitized and
+  unsanitized TUs.  Code imported from a named module currently follows the
+  same rule: it is checked only if the *importing* TU enforces the profile,
+  even when the module interface itself did.
+
+The pilot's zero-divisor check deliberately mirrors UBSan's blind spots:
+GCC vector-extension integer division, ``_Complex int`` division, and (in C
+only) compound assignment of a scalar by a ``_Complex`` operand are not
+checked.
+
+
 Test Profiles
 =============
 
-Clang also ships four ``test::`` profiles (``test::type_cast``,
-``test::uninit_read``, ``test::class_final``, and ``test::ctor_final``) that
-exist only to exercise the framework in the test suite.  They are inert
-without an additional ``-cc1``-only flag; see
+Clang also ships five ``test::`` profiles (``test::type_cast``,
+``test::uninit_read``, ``test::class_final``, ``test::ctor_final``, and
+``test::arith``) that exist only to exercise the framework in the test
+suite.  They are inert without an additional ``-cc1``-only flag; see
 :doc:`ProfilesFrameworkInternals`.
 
 
