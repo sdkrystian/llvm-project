@@ -889,6 +889,10 @@ public:
   // Check for undefined division and modulus behaviors.
   void EmitUndefinedBehaviorIntegerDivAndRemCheck(const BinOpInfo &Ops,
                                                   llvm::Value *Zero,bool isDiv);
+  // Emit the pattern-5 runtime profile check of an integer division or
+  // remainder when a profile riding the check is enforced: trap on a zero
+  // divisor.
+  void EmitIntegerDivRemProfileCheck(const BinOpInfo &Ops);
   // Common helper for getting how wide LHS of shift is.
   static Value *GetMaximumShiftAmount(Value *LHS, Value *RHS, bool RHSIsSigned);
 
@@ -4289,6 +4293,32 @@ void ScalarExprEmitter::EmitUndefinedBehaviorIntegerDivAndRemCheck(
     EmitBinOpCheck(Checks, Ops);
 }
 
+// The runtime-checked profile rules (pattern 5): a profile, one of its
+// rules, and the trap diagnostic the rule's check reports at runtime.
+constexpr CodeGenFunction::ProfileRuntimeCheckEntry RuntimeProfiles[] = {
+    {"test::arith", "zero_divide", diag::trap_profile_zero_divide},
+};
+
+void ScalarExprEmitter::EmitIntegerDivRemProfileCheck(const BinOpInfo &Ops) {
+  if (!CGF.getLangOpts().Profiles)
+    return;
+  // Integer-only, like the sanitizer's zero-divisor check, and no dead check
+  // for a constant nonzero divisor. Emitted independently of any sanitizer
+  // configuration: a profile's guarantee must not be voidable through
+  // sanitizer knobs (ignorelists, no_sanitize, hot cutoffs), so under
+  // -fsanitize=integer-divide-by-zero the same predicate is simply
+  // instrumented twice -- redundant, never wrong.
+  if (!Ops.Ty->isIntegerType() || !Ops.mayHaveIntegerDivisionByZero())
+    return;
+  const auto *Entry =
+      CGF.getActiveProfileRuntimeCheck(RuntimeProfiles, Ops.E->getExprLoc());
+  if (!Entry)
+    return;
+  llvm::Value *NonZero = Builder.CreateICmpNE(
+      Ops.RHS, llvm::Constant::getNullValue(Ops.RHS->getType()));
+  CGF.EmitProfileRuntimeCheck(*Entry, NonZero, Ops.E->getExprLoc());
+}
+
 Value *ScalarExprEmitter::EmitDiv(const BinOpInfo &Ops) {
   {
     SanitizerDebugLocation SanScope(&CGF,
@@ -4311,6 +4341,10 @@ Value *ScalarExprEmitter::EmitDiv(const BinOpInfo &Ops) {
           std::make_pair(NonZero, SanitizerKind::SO_FloatDivideByZero), Ops);
     }
   }
+
+  // After the sanitizer block: a SanitizerDebugLocation may not nest inside a
+  // live scope, and the profile check is independent of sanitizer state.
+  EmitIntegerDivRemProfileCheck(Ops);
 
   if (Ops.Ty->isConstantMatrixType()) {
     llvm::MatrixBuilder MB(Builder);
@@ -4356,6 +4390,10 @@ Value *ScalarExprEmitter::EmitRem(const BinOpInfo &Ops) {
     llvm::Value *Zero = llvm::Constant::getNullValue(ConvertType(Ops.Ty));
     EmitUndefinedBehaviorIntegerDivAndRemCheck(Ops, Zero, false);
   }
+
+  // After the sanitizer block: a SanitizerDebugLocation may not nest inside a
+  // live scope, and the profile check is independent of sanitizer state.
+  EmitIntegerDivRemProfileCheck(Ops);
 
   if (Ops.Ty->hasUnsignedIntegerRepresentation())
     return Builder.CreateURem(Ops.LHS, Ops.RHS, "rem");
