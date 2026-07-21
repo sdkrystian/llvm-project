@@ -343,7 +343,7 @@ dominion and is not checked; implicit template instantiations are exempt.
 Test Profiles
 =============
 
-The four built-in ``test::`` profiles exist only to exercise the framework in
+The five built-in ``test::`` profiles exist only to exercise the framework in
 the test suite.  They are gated on the ``-cc1``-only
 ``-fprofiles-test-profiles`` flag: under ``-fprofiles`` alone their
 designators are still parsed, recorded, and exported across modules, but
@@ -359,6 +359,8 @@ enforced, so no ``test::`` rule ever fires.  Because that gate keys on the
   class, on instantiations rather than dependent patterns.
 - ``test::ctor_final`` -- pattern 4; fires once per user-defined,
   non-delegating constructor.
+- ``test::arith`` -- pattern 5; its ``zero_divide`` rule emits a runtime
+  zero-divisor trap check on integer division and remainder.
 
 The names ``test::other``, ``test::bounds``, ``test::new_profile``, and
 ``test::not_enforced`` are deliberately *not* implemented and appear in
