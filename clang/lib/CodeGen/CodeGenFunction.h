@@ -675,6 +675,34 @@ public:
     }
   };
 
+  /// A profile rule enforced by a runtime check (pattern 5): the profile, one
+  /// of its rules, and the trap diagnostic the rule's check reports when it
+  /// fails at runtime. The element type of the opt-in table each runtime
+  /// check site consults (the \c Name member follows the framework's
+  /// table-entry convention).
+  struct ProfileRuntimeCheckEntry {
+    StringRef Name;
+    StringRef Rule;
+    unsigned TrapDiagID;
+  };
+
+  /// The first entry of \p Entries whose profile is enforced, with \p Loc not
+  /// exempt and the rule not suppressed for the code being emitted; null if
+  /// none -- the emission gate of a pattern-5 check site. Every row of one
+  /// table guards the identical runtime check, so one trap suffices and
+  /// table order is priority.
+  const ProfileRuntimeCheckEntry *
+  getActiveProfileRuntimeCheck(ArrayRef<ProfileRuntimeCheckEntry> Entries,
+                               SourceLocation Loc);
+
+  /// Emit \p Entry's runtime check: a conditional branch to a trap
+  /// (SanitizerHandler::ProfileViolation) taken when \p Passed is false, its
+  /// debug location pointing at \p Loc, and -- under the default Detailed
+  /// -fsanitize-debug-trap-reasons mode, when debug info is emitted -- the
+  /// entry's trap diagnostic naming the violated profile as the trap reason.
+  void EmitProfileRuntimeCheck(const ProfileRuntimeCheckEntry &Entry,
+                               llvm::Value *Passed, SourceLocation Loc);
+
   /// HLSL Branch attribute.
   HLSLControlFlowHintAttr::Spelling HLSLControlFlowAttr =
       HLSLControlFlowHintAttr::SpellingNotCalculated;
