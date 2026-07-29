@@ -5458,7 +5458,16 @@ Decl *Sema::ParsedFreeStandingDeclSpec(Scope *S, AccessSpecifier AS,
         << DS.getSourceRange();
     for (const ParsedAttr &AL : DeclAttrs)
       if (AL.getKind() == ParsedAttr::AT_ProfilesEnforce)
-        Diag(AL.getLoc(), diag::err_profiles_enforce_not_at_tu_scope);
+        // P3589R2 [decl.attr.enforce]p1 allows the attribute only on an
+        // empty-declaration at translation-unit scope. Blame whichever of the
+        // two this is: a decl-specifier-seq that declares nothing (`int;`) is
+        // still not an empty-declaration wherever it appears, while a genuine
+        // empty-declaration reaching here at all means it is not at
+        // translation-unit scope (one at that scope is an EmptyDecl, checked
+        // in handleProfilesEnforceAttr instead).
+        Diag(AL.getLoc(), DS.isEmpty()
+                              ? diag::err_profiles_enforce_not_at_tu_scope
+                              : diag::err_profiles_enforce_not_empty_decl);
     return TagD;
   }
 

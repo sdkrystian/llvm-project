@@ -40,6 +40,11 @@ void enforced_func();
 struct EnforceInClass {
   [[profiles::enforce(test::type_cast)]]; // expected-warning {{declaration does not declare anything}} \
                                         // expected-error {{'profiles::enforce' attribute on empty-declaration must be at translation unit scope}}
+  // A member declaration that declares nothing is still not an
+  // empty-declaration, so the complaint is about the form rather than the
+  // scope. (At namespace scope the parser rejects the attribute list first.)
+  [[profiles::enforce(test::type_cast)]] int; // expected-warning {{declaration does not declare anything}} \
+                                             // expected-error {{'profiles::enforce' attribute only allowed on empty-declarations and module-declarations}}
 };
 
 // ===================================================================
