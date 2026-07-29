@@ -302,7 +302,12 @@ subobject indeterminate -- is consistent with the marker; any other
 synthesized initialization contradicts it and is rejected (§5.3): a member or
 base with a user-provided default constructor, a default member initializer,
 a virtual table pointer, or a value-initialization (``= P()``), all of which
-initialize something.  The same rule covers a marked data member whose type's
+initialize something.  ``uninit_with_initializer`` reports the two cases
+differently: a *written* initializer contradicts the marker outright, while a
+*default*-initialization that is not a no-op is reported against the type,
+with a note giving the reason (a constructor runs, a default member
+initializer runs, nothing is left indeterminate, or the type has no usable
+default constructor).  The same rule covers a marked data member whose type's
 default-initialization is not a no-op:
 
 .. code-block:: c++
@@ -311,8 +316,9 @@ default-initialization is not a no-op:
    struct S { int x; Str s; };
 
    void g() {
-     S s4 [[uninit]];   // error: 's4.s' is default-constructed, so 's4' is
-                        // not left uninitialized (uninit_with_initializer, §5.3)
+     S s4 [[uninit]];   // error: default-initialization of 'S' does not leave
+                        // it uninitialized -- 's4.s' is default-constructed
+                        // (uninit_with_initializer, §5.3)
    }
 
    struct Buf {

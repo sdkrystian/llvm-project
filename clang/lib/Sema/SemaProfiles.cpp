@@ -631,26 +631,55 @@ bool SemaProfiles::defaultInitIsVacuous(QualType T) {
   return defaultInitLeavesScalarIndeterminate(T, /*HonorUninitMarkers=*/false);
 }
 
-// Whether the declaration initializer \p Init is a vacuous
-// default-initialization of \p T: one that runs no code and leaves the object
-// factually uninitialized, hence consistent with an [[uninit]] marker. No
-// initializer at all (a scalar default-init synthesizes none) is vacuous; a
-// synthesized trivial default-constructor call is vacuous iff the type's
-// default-initialization is (defaultInitIsVacuous); anything else -- a
-// user-written initializer, a `= P()` value-initialization (a
-// CXXTemporaryObjectExpr, which zeroes), any zero-initializing construction
-// -- initializes the object and contradicts the marker. The shared guard of
-// static_marker and uninit_with_initializer keeps the pair complementary by
-// construction: exactly one of the two fires for a marked static.
-static bool isVacuousDefaultInit(SemaProfiles &SP, const Expr *Init,
-                                 QualType T) {
+// Whether \p Init is the *shape* of a plain default-initialization -- the
+// language's own, not something the user wrote. No initializer at all (a
+// scalar default-init synthesizes none) qualifies, as does a synthesized
+// default-constructor call; a `= P()` value-initialization (a
+// CXXTemporaryObjectExpr, which zeroes), any zero-initializing construction,
+// and every user-written initializer do not. Whether such a
+// default-initialization is *vacuous* is the type's business
+// (defaultInitIsVacuous), so the two questions are asked separately: an
+// [[uninit]] marker is contradicted for two different reasons -- a written
+// initializer, or a default-initialization that is not a no-op -- and they
+// deserve different diagnostics.
+static bool isDefaultInitShape(const Expr *Init) {
   if (!Init)
     return true;
-  if (const auto *CCE = dyn_cast<CXXConstructExpr>(Init->IgnoreImplicit()))
-    return CCE->getConstructor()->isDefaultConstructor() &&
-           !isa<CXXTemporaryObjectExpr>(CCE) &&
-           !CCE->requiresZeroInitialization() && SP.defaultInitIsVacuous(T);
-  return false;
+  const auto *CCE = dyn_cast<CXXConstructExpr>(Init->IgnoreImplicit());
+  return CCE && CCE->getConstructor()->isDefaultConstructor() &&
+         !isa<CXXTemporaryObjectExpr>(CCE) &&
+         !CCE->requiresZeroInitialization();
+}
+
+// Whether the declaration initializer \p Init is a vacuous
+// default-initialization of \p T: one that runs no code and leaves the object
+// factually uninitialized, hence consistent with an [[uninit]] marker. The
+// shared guard of static_marker and uninit_with_initializer keeps the pair
+// complementary by construction: exactly one of the two fires for a marked
+// static.
+static bool isVacuousDefaultInit(SemaProfiles &SP, const Expr *Init,
+                                 QualType T) {
+  return isDefaultInitShape(Init) && (!Init || SP.defaultInitIsVacuous(T));
+}
+
+// Why default-initialization of \p BaseTy is not the no-op an [[uninit]]
+// marker claims, as the select index of note_init_uninit_marker_type: a
+// non-trivial default constructor runs code (0); a trivial one that leaves no
+// subobject uninitialized has nothing to acknowledge (1); a deleted or absent
+// one makes the marker unsatisfiable (2). Shared by the variable and data
+// member flavors of uninit_with_initializer so both explain it the same way.
+static unsigned uninitMarkerNonVacuityReason(QualType BaseTy) {
+  const auto *RD = BaseTy->getAsCXXRecordDecl();
+  if (!RD || !RD->hasDefinition())
+    return 1;
+  const CXXRecordDecl *Def = RD->getDefinition();
+  bool Deleted = !Def->hasDefaultConstructor();
+  for (const CXXConstructorDecl *Ctor : Def->ctors())
+    if (Ctor->isDefaultConstructor() && Ctor->isDeleted())
+      Deleted = true;
+  if (Deleted)
+    return 2;
+  return Def->hasTrivialDefaultConstructor() ? 1 : 0;
 }
 
 void SemaProfiles::checkInitProfileUninitDecl(const VarDecl *Var) {
@@ -777,8 +806,26 @@ void SemaProfiles::checkInitProfileUninitWithInitializer(const ValueDecl *D,
   // contradicts it.
   if (isVacuousDefaultInit(*this, Init, D->getType()))
     return;
+  bool IsMember = isa<FieldDecl>(D);
+  // The marker is contradicted for one of two reasons, which read very
+  // differently to a user. A *default*-initialization that is not a no-op
+  // initializes something without the user writing anything, so saying the
+  // entity "has an initializer" would be wrong; report the type and why, as
+  // the initializer-less data member flavor in
+  // runStdInitUninitFieldMarkerCallback does.
+  if (isDefaultInitShape(Init)) {
+    QualType BaseTy = getASTContext().getBaseElementType(D->getType());
+    Diag(Loc, diag::err_init_uninit_not_left_uninitialized)
+        << Profile << D->getDeclName() << D->getType() << IsMember;
+    SourceLocation NoteLoc = Loc;
+    if (const auto *DD = dyn_cast<DeclaratorDecl>(D))
+      NoteLoc = DD->getTypeSpecStartLoc();
+    Diag(NoteLoc, diag::note_init_uninit_marker_type)
+        << BaseTy << uninitMarkerNonVacuityReason(BaseTy);
+    return;
+  }
   Diag(Loc, diag::err_init_uninit_with_initializer)
-      << Profile << D->getDeclName() << isa<FieldDecl>(D);
+      << Profile << D->getDeclName() << IsMember;
 }
 
 void SemaProfiles::checkInitProfileMarkerPlacement(const Decl *D) {
@@ -2151,27 +2198,10 @@ void runStdInitUninitFieldMarkerCallback(Sema &S, CXXRecordDecl *RD) {
     if (!S.Profiles().shouldEmitProfileViolation(
             "std::init", "uninit_with_initializer", UA->getLocation(), F))
       continue;
-    S.Diag(UA->getLocation(), diag::err_init_uninit_member_initialized)
-        << "std::init" << F->getDeclName() << F->getType();
-    // Distinguish the non-vacuity reasons for the note: a non-trivial default
-    // constructor runs code (0); a trivial one that leaves no subobject
-    // uninitialized has nothing to acknowledge (1); a deleted or absent one
-    // makes the marker unsatisfiable (2).
-    unsigned Reason = 1;
-    if (const auto *MemberRD = BaseTy->getAsCXXRecordDecl();
-        MemberRD && MemberRD->hasDefinition()) {
-      const CXXRecordDecl *Def = MemberRD->getDefinition();
-      bool Deleted = !Def->hasDefaultConstructor();
-      for (const CXXConstructorDecl *Ctor : Def->ctors())
-        if (Ctor->isDefaultConstructor() && Ctor->isDeleted())
-          Deleted = true;
-      if (Deleted)
-        Reason = 2;
-      else if (!Def->hasTrivialDefaultConstructor())
-        Reason = 0;
-    }
-    S.Diag(F->getTypeSpecStartLoc(), diag::note_init_uninit_member_type)
-        << BaseTy << Reason;
+    S.Diag(UA->getLocation(), diag::err_init_uninit_not_left_uninitialized)
+        << "std::init" << F->getDeclName() << F->getType() << /*IsMember=*/1;
+    S.Diag(F->getTypeSpecStartLoc(), diag::note_init_uninit_marker_type)
+        << BaseTy << uninitMarkerNonVacuityReason(BaseTy);
   }
 }
 

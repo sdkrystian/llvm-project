@@ -37,10 +37,13 @@ void test_init_alone() {
 struct WithCtor { WithCtor(); };
 
 void test_class_synthesized_init() {
-  // The implicit default-constructor call is the initializer, so the marker
-  // contradicts it even though there is no explicit initializer.
-  WithCtor x [[uninit]]; // expected-error {{variable 'x' cannot be both '[[uninit]]' and have an initializer under profile 'std::init'}}
-  [[uninit]] WithCtor y; // expected-error {{variable 'y' cannot be both '[[uninit]]' and have an initializer under profile 'std::init'}}
+  // The implicit default-constructor call initializes the object, so the
+  // marker is contradicted -- but the user wrote no initializer, so the
+  // diagnostic names the type and why instead.
+  WithCtor x [[uninit]]; // expected-error {{variable 'x' cannot be marked '[[uninit]]' under profile 'std::init'; default-initialization of its type 'WithCtor' does not leave it uninitialized}} \
+                         // expected-note {{default-initialization of 'WithCtor' runs a constructor}}
+  [[uninit]] WithCtor y; // expected-error {{variable 'y' cannot be marked '[[uninit]]' under profile 'std::init'; default-initialization of its type 'WithCtor' does not leave it uninitialized}} \
+                         // expected-note {{default-initialization of 'WithCtor' runs a constructor}}
   (void)x; (void)y;
 }
 
@@ -128,8 +131,11 @@ void template_never_instantiated() {
 }
 
 // Default-initialization that is not a genuine no-op contradicts the marker
-// exactly like a written initializer (paper §4.2 rule 2, §5.3): something is
-// initialized, so the object is not left uninitialized.
+// just as a written initializer does (paper §4.2 rule 2, §5.3): something is
+// initialized, so the object is not left uninitialized. The wording differs --
+// there is no initializer to point at, only a type -- and the note gives the
+// reason: a constructor runs (Mixed, Polymorphic), a default member
+// initializer runs (WithNSDMIMember), or nothing is left indeterminate.
 struct MixedInner { MixedInner(); };
 struct Mixed { int x; MixedInner s; };
 struct WithNSDMIMember { int a; int b = 0; };
@@ -137,10 +143,16 @@ struct Polymorphic { virtual void f(); int x; };
 struct TrivialAgg { int x; };
 
 void test_default_init_not_noop() {
-  Mixed s4 [[uninit]];            // expected-error {{variable 's4' cannot be both '[[uninit]]' and have an initializer under profile 'std::init'}}
-  WithNSDMIMember q [[uninit]];   // expected-error {{variable 'q' cannot be both '[[uninit]]' and have an initializer under profile 'std::init'}}
-  Polymorphic v [[uninit]];       // expected-error {{variable 'v' cannot be both '[[uninit]]' and have an initializer under profile 'std::init'}}
-  [[uninit]] Mixed arr[2];        // expected-error {{variable 'arr' cannot be both '[[uninit]]' and have an initializer under profile 'std::init'}}
+  Mixed s4 [[uninit]];            // expected-error {{variable 's4' cannot be marked '[[uninit]]' under profile 'std::init'; default-initialization of its type 'Mixed' does not leave it uninitialized}} \
+                                  // expected-note {{default-initialization of 'Mixed' runs a constructor}}
+  WithNSDMIMember q [[uninit]];   // expected-error {{variable 'q' cannot be marked '[[uninit]]' under profile 'std::init'; default-initialization of its type 'WithNSDMIMember' does not leave it uninitialized}} \
+                                  // expected-note {{default-initialization of 'WithNSDMIMember' runs a constructor}}
+  Polymorphic v [[uninit]];       // expected-error {{variable 'v' cannot be marked '[[uninit]]' under profile 'std::init'; default-initialization of its type 'Polymorphic' does not leave it uninitialized}} \
+                                  // expected-note {{default-initialization of 'Polymorphic' runs a constructor}}
+  // The error names the array type, the note the element type whose
+  // default-initialization is the problem.
+  [[uninit]] Mixed arr[2];        // expected-error {{variable 'arr' cannot be marked '[[uninit]]' under profile 'std::init'; default-initialization of its type 'Mixed[2]' does not leave it uninitialized}} \
+                                  // expected-note {{default-initialization of 'Mixed' runs a constructor}}
   TrivialAgg t [[uninit]];        // OK: a genuine no-op, 't.x' really is left
                                   // indeterminate
   (void)s4; (void)q; (void)v; (void)arr; (void)t;

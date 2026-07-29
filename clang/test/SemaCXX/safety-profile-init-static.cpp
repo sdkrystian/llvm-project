@@ -123,26 +123,30 @@ void test_local_statics_marked() {
 int g_marked_with_init [[uninit]] = 0; // expected-error {{variable 'g_marked_with_init' cannot be both '[[uninit]]' and have an initializer under profile 'std::init'}}
 
 void test_local_static_running_ctor() {
-  // The synthesized constructor call is a real initializer, so this stays
-  // uninit_with_initializer (R4); static_marker stays silent (one error).
-  static WithCtor w [[uninit]]; // expected-error {{variable 'w' cannot be both '[[uninit]]' and have an initializer under profile 'std::init'}}
+  // The synthesized constructor call initializes the object, so this stays
+  // uninit_with_initializer (R4) -- in its no-written-initializer wording;
+  // static_marker stays silent (one error).
+  static WithCtor w [[uninit]]; // expected-error {{variable 'w' cannot be marked '[[uninit]]' under profile 'std::init'; default-initialization of its type 'WithCtor' does not leave it uninitialized}} \
+                                // expected-note {{default-initialization of 'WithCtor' runs a constructor}}
   (void)w;
 }
 
 struct MixedAgg { int x; WithCtor s; };
 void test_local_static_mixed() {
   // A default-initialization that is not a no-op (a member's user-provided
-  // constructor runs) is a real initializer too, so the mixed aggregate
+  // constructor runs) initializes the object too, so the mixed aggregate
   // SWITCHES to uninit_with_initializer; static_marker stays silent -- the
   // shared vacuity guard keeps the pair complementary (exactly one error).
-  static MixedAgg m [[uninit]]; // expected-error {{variable 'm' cannot be both '[[uninit]]' and have an initializer under profile 'std::init'}}
+  static MixedAgg m [[uninit]]; // expected-error {{variable 'm' cannot be marked '[[uninit]]' under profile 'std::init'; default-initialization of its type 'MixedAgg' does not leave it uninitialized}} \
+                                // expected-note {{default-initialization of 'MixedAgg' runs a constructor}}
   (void)m;
 }
 
 // At namespace scope the same case additionally draws the independent
 // static_runtime_init (the member's constructor is a runtime initializer) --
 // a pre-existing pairing, not a static_marker double.
-MixedAgg g_mixed_marked [[uninit]]; // expected-error {{variable 'g_mixed_marked' cannot be both '[[uninit]]' and have an initializer under profile 'std::init'}} \
+MixedAgg g_mixed_marked [[uninit]]; // expected-error {{variable 'g_mixed_marked' cannot be marked '[[uninit]]' under profile 'std::init'; default-initialization of its type 'MixedAgg' does not leave it uninitialized}} \
+                                    // expected-note {{default-initialization of 'MixedAgg' runs a constructor}} \
                                     // expected-error {{non-local variable 'g_mixed_marked' requires constant initialization under profile 'std::init'}}
 
 // Suppression: rule-targeted and whole-profile.
