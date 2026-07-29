@@ -152,6 +152,31 @@ int test_escape_placement_new() {
   return a.m; // OK: escaped
 }
 
+// Reaching an *untracked* sibling member is not one of those escapes:
+// accessing `n` cannot give `sm` a value, so the tracked member stays tracked
+// across a sibling read, store, or increment.
+struct Siblings {
+  int sm [[uninit]]; // expected-note 3 {{member 'sm' declared here}}
+  int n = 0;
+};
+int test_sibling_read_not_an_escape() {
+  Siblings s;
+  int v = s.n;
+  return v + s.sm; // expected-error {{member 'sm' is read before initialization under profile 'std::init'}}
+}
+
+int test_sibling_write_not_an_escape() {
+  Siblings s;
+  s.n = 1;
+  return s.sm; // expected-error {{member 'sm' is read before initialization under profile 'std::init'}}
+}
+
+int test_sibling_incdec_not_an_escape() {
+  Siblings s;
+  ++s.n;
+  return s.sm; // expected-error {{member 'sm' is read before initialization under profile 'std::init'}}
+}
+
 // A class with a user-provided constructor is trusted (paper §5.1): its
 // constructor body may have assigned the member, which local analysis cannot
 // see. This pins the deliberate trust decision for non-current-object member

@@ -2381,8 +2381,13 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC) {
     return;
   const unsigned N = PairField.size();
 
-  // A `V.m` access on a tracked local, resolved to its pair index and its
-  // base DeclRefExpr; Idx is ~0u (and Base null) when E is not one.
+  // A `V.m` access on a tracked local, resolved to its base DeclRefExpr and,
+  // when m is one of the tracked members, its pair index. Base is null (and
+  // Idx ~0u) when E is not such an access at all; Base is set with Idx left
+  // ~0u when the accessed member is an *untracked* sibling -- reaching one
+  // member never exposes another, so the base is still consumed rather than
+  // escaping (the escape arm below would otherwise credit every tracked
+  // member of V and lose the diagnostic for them).
   struct TrackedAccess {
     unsigned Idx = ~0u;
     const DeclRefExpr *Base = nullptr;
@@ -2393,12 +2398,10 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC) {
     if (!DRE)
       return {};
     const auto *V = dyn_cast<VarDecl>(DRE->getDecl());
-    if (!V)
+    if (!V || !VarRange.count(V))
       return {};
     auto It = PairIdx.find({V, F});
-    if (It == PairIdx.end())
-      return {};
-    return {It->second, DRE};
+    return {It == PairIdx.end() ? ~0u : It->second, DRE};
   };
 
   // First pass: the base DeclRefExprs consumed by a recognized member read or
