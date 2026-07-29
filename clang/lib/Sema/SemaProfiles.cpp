@@ -634,9 +634,12 @@ bool SemaProfiles::defaultInitIsVacuous(QualType T) {
 // Whether \p Init is the *shape* of a plain default-initialization -- the
 // language's own, not something the user wrote. No initializer at all (a
 // scalar default-init synthesizes none) qualifies, as does a synthesized
-// default-constructor call; a `= P()` value-initialization (a
-// CXXTemporaryObjectExpr, which zeroes), any zero-initializing construction,
-// and every user-written initializer do not. Whether such a
+// default-constructor call. Every written form is excluded: a `= P()`
+// value-initialization (a CXXTemporaryObjectExpr, which zeroes), any
+// zero-initializing construction, and -- since a written `T x{}` on a type
+// with a user-provided default constructor is none of those -- a construction
+// carrying list-initialization or a written paren/brace range (the same
+// written-form test getTrackedLocalAggregate uses). Whether such a
 // default-initialization is *vacuous* is the type's business
 // (defaultInitIsVacuous), so the two questions are asked separately: an
 // [[uninit]] marker is contradicted for two different reasons -- a written
@@ -648,7 +651,8 @@ static bool isDefaultInitShape(const Expr *Init) {
   const auto *CCE = dyn_cast<CXXConstructExpr>(Init->IgnoreImplicit());
   return CCE && CCE->getConstructor()->isDefaultConstructor() &&
          !isa<CXXTemporaryObjectExpr>(CCE) &&
-         !CCE->requiresZeroInitialization();
+         !CCE->requiresZeroInitialization() && !CCE->isListInitialization() &&
+         CCE->getParenOrBraceRange().isInvalid();
 }
 
 // Whether the declaration initializer \p Init is a vacuous

@@ -44,7 +44,20 @@ void test_class_synthesized_init() {
                          // expected-note {{default-initialization of 'WithCtor' runs a constructor}}
   [[uninit]] WithCtor y; // expected-error {{variable 'y' cannot be marked '[[uninit]]' under profile 'std::init'; default-initialization of its type 'WithCtor' does not leave it uninitialized}} \
                          // expected-note {{default-initialization of 'WithCtor' runs a constructor}}
-  (void)x; (void)y;
+  // A *written* `{}` is an initializer, whichever form the AST records it in:
+  // value-initialization of a type whose default constructor is trivial
+  // zero-initializes, while one with a user-provided default constructor just
+  // calls it -- neither is the language's own default-initialization, so both
+  // keep the "has an initializer" wording.
+  WithCtor z [[uninit]]{}; // expected-error {{variable 'z' cannot be both '[[uninit]]' and have an initializer under profile 'std::init'}}
+  (void)x; (void)y; (void)z;
+}
+
+struct TrivialCtor { int a; };
+
+void test_written_brace_on_trivial() {
+  TrivialCtor t [[uninit]]{}; // expected-error {{variable 't' cannot be both '[[uninit]]' and have an initializer under profile 'std::init'}}
+  (void)t;
 }
 
 struct MarkedMemberAgg { int x [[uninit]]; };
@@ -178,3 +191,10 @@ void use_templated_nsdmi() {
   WithTemplatedNSDMI<int> w = {}; // expected-note {{in instantiation of default member initializer 'WithTemplatedNSDMI<int>::m' requested here}}
   (void)w;
 }
+
+// A written `{}` NSDMI on a type with a user-provided default constructor is
+// an initializer too, not the language's default-initialization -- the member
+// twin of test_class_synthesized_init's `z`.
+struct WithBracedNSDMI {
+  WithCtor m [[uninit]]{}; // expected-error {{member 'm' cannot be both '[[uninit]]' and have an initializer under profile 'std::init'}}
+};
