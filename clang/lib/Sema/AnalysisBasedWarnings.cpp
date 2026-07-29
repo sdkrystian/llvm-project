@@ -3866,8 +3866,11 @@ static void configureBaseCFGBuildOptions(AnalysisDeclContext &AC) {
 }
 
 // The always-add statement classes of the main pass's non-linearized CFG
-// configuration; shared with the post-error profile rerun.
-static void addNonLinearizedAlwaysAddClasses(AnalysisDeclContext &AC) {
+// configuration; shared with the post-error profile rerun. \p ForCFGProfile
+// adds the classes only a CFG-based profile needs, so an ordinary compile
+// keeps the CFG shape the other analyses have always seen.
+static void addNonLinearizedAlwaysAddClasses(AnalysisDeclContext &AC,
+                                             bool ForCFGProfile) {
   AC.getCFGBuildOptions()
       .setAlwaysAdd(Stmt::BinaryOperatorClass)
       .setAlwaysAdd(Stmt::CompoundAssignOperatorClass)
@@ -3875,11 +3878,14 @@ static void addNonLinearizedAlwaysAddClasses(AnalysisDeclContext &AC) {
       .setAlwaysAdd(Stmt::CStyleCastExprClass)
       .setAlwaysAdd(Stmt::DeclRefExprClass)
       .setAlwaysAdd(Stmt::ImplicitCastExprClass)
-      .setAlwaysAdd(Stmt::UnaryOperatorClass)
-      // The std::init ctor-body pass scans this-capturing lambda bodies from
-      // the LambdaExpr's element; without always-add, a lambda in a
-      // non-statement position never gets its own CFG element.
-      .setAlwaysAdd(Stmt::LambdaExprClass);
+      .setAlwaysAdd(Stmt::UnaryOperatorClass);
+  // The std::init ctor-body pass scans this-capturing lambda bodies from the
+  // LambdaExpr's element; without always-add, a lambda in a non-statement
+  // position never gets its own CFG element. Nothing else wants it, and the
+  // linearized configuration below (setAllAlwaysAdd) covers it anyway, so it
+  // is added only for a profile that rides this CFG.
+  if (ForCFGProfile)
+    AC.getCFGBuildOptions().setAlwaysAdd(Stmt::LambdaExprClass);
 }
 
 // std::init: the CFG-based std::init checks -- the constructor-body
@@ -3906,7 +3912,8 @@ static void runUninitProfileAnalysisAfterError(Sema &S, const Decl *D) {
   AnalysisDeclContext AC(/*Mgr=*/nullptr, D);
 
   configureBaseCFGBuildOptions(AC);
-  addNonLinearizedAlwaysAddClasses(AC);
+  // Only reached with a CFG profile enforced (see the IssueWarnings caller).
+  addNonLinearizedAlwaysAddClasses(AC, /*ForCFGProfile=*/true);
 
   if (CFG *cfg = AC.getCFG()) {
     UninitValsDiagReporter reporter(S, AC, /*ProfileOnly=*/true);
@@ -4179,7 +4186,7 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
     // Unreachable code analysis and thread safety require a linearized CFG.
     AC.getCFGBuildOptions().setAllAlwaysAdd();
   } else {
-    addNonLinearizedAlwaysAddClasses(AC);
+    addNonLinearizedAlwaysAddClasses(AC, hasEnforcedCFGProfile());
   }
   if (EnableLifetimeSafetyAnalysis)
     AC.getCFGBuildOptions().AddLifetime = true;
