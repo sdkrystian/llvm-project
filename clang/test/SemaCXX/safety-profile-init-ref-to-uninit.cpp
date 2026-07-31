@@ -1859,9 +1859,12 @@ void test_construct_at_bridge() {
 // uninitialized, but there is no way of recording that in the code"): a
 // call to a [[now_uninit]] function withdraws the parse-order credit of the
 // storage bound to each pointer/reference parameter, so the storage is
-// uninitialized again. Re-construction becomes legal, and a second
-// destruction, or binding the storage to an unmarked target, is the
-// ordinary unmarked-direction violation.
+// uninitialized again. Re-construction becomes legal, binding the storage
+// to an unmarked target is the ordinary unmarked-direction violation, and
+// a second destruction is the dedicated double_destroy violation: the
+// callee's own parameters accept storage in any live state (initialized,
+// or never constructed -- the raw-release shape; see Limitations), but
+// never storage already destroyed.
 template <class T>
 [[now_uninit]] void destroy_at(T *p);
 [[now_uninit]] void nu_wipe(int *p);
@@ -1882,7 +1885,61 @@ void test_double_destroy() {
   int u [[uninit]];
   now_init_fill(&u);
   nu_wipe(&u); // OK
-  nu_wipe(&u); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  nu_wipe(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+}
+
+// Destroying storage that was never initialized is accepted: [[now_uninit]]
+// also covers raw-release callees (free), whose operand may never have been
+// constructed. Recovering this diagnostic needs the lifetime-end and
+// storage-release roles split apart (see Limitations).
+void test_destroy_never_initialized() {
+  int u [[uninit]];
+  nu_wipe(&u); // OK (accepted since the parameter takes any live state)
+  int *r [[ref_to_uninit]] = &u; // OK: still uninitialized
+  (void)r;
+}
+
+// A whole-entity store retires the destroyed state -- a write to a built-in
+// is its (re)initialization -- so a later destroy is not a double destroy.
+void test_store_retires_destroyed() {
+  int u [[uninit]];
+  u = 5;
+  nu_wipe(&u);
+  u = 7;
+  nu_wipe(&u); // OK
+}
+
+// The destroyed state is per shape, exactly like the credit it shadows.
+void test_double_destroy_pointee(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  nu_wipe(p);
+  nu_wipe(p); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+}
+void test_double_destroy_member() {
+  struct M { int m [[uninit]]; } a;
+  a.m = 5;
+  nu_wipe(&a.m);
+  nu_wipe(&a.m); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+}
+
+// Reseating a marked pointer retires its pointee's destroyed state with the
+// rest of the pointee facts: they described the old pointee.
+void test_reseat_clears_destroyed(int *p [[ref_to_uninit]],
+                                  int *q [[ref_to_uninit]]) {
+  *p = 5;
+  nu_wipe(p);
+  p = q;
+  nu_wipe(p); // OK: this is the new pointee's first destroy
+}
+
+// A *conditional* destroy records no destroyed state -- it may not have
+// run, so a later destroy is not a definite double destroy.
+void test_conditional_destroy_no_destroyed_state(bool c) {
+  int u [[uninit]];
+  u = 5;
+  if (c)
+    nu_wipe(&u);
+  nu_wipe(&u); // OK
 }
 
 void test_use_after_destroy_binding() {
@@ -2014,6 +2071,28 @@ void test_reinit_reverse_direction() {
   nu_reinit(&u);
   int *r [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   (void)r;
+}
+
+// A reinitializer called on *initialized* storage is exactly what a
+// reinitializer exists for: the [[now_uninit]] half makes its parameter
+// accept storage in any live state, so the marked parameter's
+// requires-uninit direction must not reject it.
+void test_reinit_on_initialized() {
+  int u [[uninit]];
+  u = 5;
+  nu_reinit(&u); // OK
+  int *q = &u;   // OK: net state is initialized
+  (void)q;
+}
+
+// ...but its destroy half is as invalid on *destroyed* storage as anyone
+// else's; construct_at (a plain [[now_init]] function) is the sanctioned
+// recovery path.
+void test_reinit_on_destroyed() {
+  int u [[uninit]];
+  u = 5;
+  nu_wipe(&u);
+  nu_reinit(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
 }
 
 // The reverse direction applies through the assignment funnel too: a

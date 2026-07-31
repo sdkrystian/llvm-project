@@ -413,9 +413,10 @@ public:
   /// (P4222R2 §4.4's missing destroy_at recording), so the binding
   /// *withdraws* the parse-order credit the equivalent [[now_init]] call
   /// would have recorded: the storage classifies as uninitialized again,
-  /// re-construction becomes legal, and a second destruction or an
-  /// unmarked-target binding of the storage is the ordinary
-  /// unmarked-direction violation. Called from the tail of
+  /// re-construction becomes legal, an unmarked-target binding of the
+  /// storage is the ordinary unmarked-direction violation, and a second
+  /// destruction is the dedicated double_destroy violation (the destroyed
+  /// state a Definite withdrawal records). Called from the tail of
   /// checkInitProfileRefToUninitBinding when \p Target is a
   /// pointer/reference parameter of a [[now_uninit]] function -- the
   /// parameters are unmarked (they receive initialized memory), so unlike

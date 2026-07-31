@@ -14458,4 +14458,7 @@ def err_init_uninit_ref_capture : ProfileRuleError<
 def err_init_member_call_on_uninit : ProfileRuleError<
   "calling member function %1 binds its implicit object parameter to "
   "uninitialized memory under profile '%0'">;
+def err_init_double_destroy : ProfileRuleError<
+  "storage already destroyed by a '[[now_uninit]]' function is destroyed "
+  "again under profile '%0'">;
 } // end of sema component.

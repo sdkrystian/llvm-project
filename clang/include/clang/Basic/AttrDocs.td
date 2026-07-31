@@ -1122,6 +1122,11 @@ an ordinary pointer or reference, is diagnosed:
     destroy_at(&u);    // error: double destruction
   }
 
+The parameters themselves accept storage in any live state -- initialized
+memory, or storage that was never constructed at all (the raw-release
+shape) -- so only the double destruction above is rejected at the call
+itself.
+
 Because the attribute covers *every* pointer or reference parameter, apply
 it only to functions that end the lifetime of every such argument's
 storage. It requires at least one parameter of pointer or reference type
@@ -1129,7 +1134,8 @@ storage. It requires at least one parameter of pointer or reference type
 ``-fprofiles``. A function may carry both ``[[now_uninit]]`` and
 ``[[now_init]]``: such a reinitializer models destroy-then-construct, so
 the storage bound to its ``[[ref_to_uninit]]`` parameters is initialized
-after the call.
+after the call -- and calling it on already-initialized storage is exactly
+its purpose, so it is accepted.
 
 Outside the initialization profile the attribute is otherwise silently
 accepted and has no effect, so code that uses it remains valid when compiled

@@ -1634,11 +1634,38 @@ void SemaProfiles::checkInitProfileRefToUninitBinding(SourceLocation Loc,
   if (!getLangOpts().Profiles || T.isNull() || T->isDependentType() ||
       (!T->isPointerType() && !T->isReferenceType()))
     return;
-  // A null Target is a binding site with no declaration to carry the marker
-  // (a parameter of a call through a function pointer): always unmarked.
-  checkInitProfileRefToUninit(Loc,
-                              Target && Target->hasAttr<RefToUninitAttr>(),
-                              T->isReferenceType(), Src, D);
+  const auto *Parm = dyn_cast_or_null<ParmVarDecl>(Target);
+  const auto *Callee =
+      Parm ? dyn_cast<FunctionDecl>(Parm->getDeclContext()) : nullptr;
+  if (Callee && Callee->hasAttr<NowUninitAttr>()) {
+    // A [[now_uninit]] callee's pointer/reference parameter accepts storage
+    // in any live state instead of the marker-consistency check: the
+    // attribute declares destruction, whose operand is initialized memory
+    // for a plain destructor-like callee, *any* state for a raw-release
+    // one (free takes storage that may never have been constructed; see
+    // the Limitations note), and initialized storage is precisely what a
+    // dual-attributed reinitializer's destroy half exists for. The one
+    // state it must not take is storage *already* destroyed: a second
+    // destruction is P4222R2 §1's double-destroy error, and the destroyed
+    // state is definite by construction, so it may fire a diagnostic.
+    // That applies to a reinitializer too -- its destroy half is invalid
+    // on destroyed storage; construct_at (a plain [[now_init]] function
+    // with a marked parameter, whose binding check below is untouched) is
+    // the sanctioned recovery path. An instantiation-dependent source
+    // defers exactly like checkInitProfileRefToUninit's.
+    if (Src && !isa<RecoveryExpr>(Src->IgnoreParens()) &&
+        (D || !Src->isInstantiationDependent()) &&
+        shouldEmitProfileViolation("std::init", "double_destroy", Loc, D) &&
+        storageIsDestroyed(T, Src))
+      Diag(Loc, diag::err_init_double_destroy) << "std::init";
+  } else {
+    // A null Target is a binding site with no declaration to carry the
+    // marker (a parameter of a call through a function pointer): always
+    // unmarked.
+    checkInitProfileRefToUninit(Loc,
+                                Target && Target->hasAttr<RefToUninitAttr>(),
+                                T->isReferenceType(), Src, D);
+  }
   // Run after the check: the binding itself is judged against the
   // *pre-call* state, and only then does a [[now_init]] callee's promised
   // initialization -- or a [[now_uninit]] callee's promised destruction --

@@ -224,6 +224,8 @@ Rule                        Diagnoses
 ``uninit_write``            A write to a subobject of an ``[[uninit]]`` object.
 ``ref_to_uninit``           A pointer or reference binding inconsistent with its
                             ``[[ref_to_uninit]]`` marking.
+``double_destroy``          A ``[[now_uninit]]`` call on storage already
+                            destroyed.
 ``ctor_uninit_member``      A constructor that leaves a member or base subobject
                             uninitialized.
 ``static_runtime_init``     A non-local variable with a runtime initializer.
@@ -565,23 +567,31 @@ recording §4.4 notes is missing for ``destroy_at`` ("the object subjected to
 ``destroy_at()`` should be considered uninitialized, but there is no way of
 recording that in the code").  It declares that a function ends the lifetime
 of the storage passed to each of its pointer or reference parameters (which
-are unmarked -- destruction takes initialized memory; apply the attribute
-only to functions that destroy *every* such argument's storage), and a call
-to one *withdraws* exactly the credit the equivalent ``[[now_init]]`` call
-would have recorded.  A *conditional* call -- under an ``if``, a loop, or
-any of the constructs listed above -- may or may not have destroyed the
-storage, so it withdraws only the credit's firing strength: a following
-marked binding is no longer forced, while an unmarked binding stays
-accepted.  Declare ``destroy_at`` as ``template<class T> void
+are unmarked; apply the attribute only to functions that destroy *every*
+such argument's storage), and a call to one *withdraws* exactly the credit
+the equivalent ``[[now_init]]`` call would have recorded.  A *conditional*
+call -- under an ``if``, a loop, or any of the constructs listed above --
+may or may not have destroyed the storage, so it withdraws only the
+credit's firing strength (a following marked binding is no longer forced,
+while an unmarked binding stays accepted) and records no destroyed state.
+The parameters themselves accept storage in any live state: initialized
+memory (the ordinary destructor-like case, and exactly what a
+reinitializer's destroy half takes), or storage never constructed at all
+(the raw-release shape; see `Limitations`_) -- but never storage a
+``[[now_uninit]]`` call already destroyed.  That is a double destruction
+(rule ``double_destroy``), definite by construction: only an unconditional
+same-function destroy records the destroyed state, and any store or
+``[[now_init]]`` call retires it.  Declare ``destroy_at`` as
+``template<class T> void
 destroy_at(T* p) [[now_uninit]];`` and the construct/destroy/construct cycle
-is legal, a second destruction is rejected (the storage no longer refers to
-initialized memory, so binding it to the unmarked parameter is the
-unmarked-direction violation), and binding the destroyed storage to an
-ordinary pointer or reference is rejected the same way.  A function may
+is legal, a second destruction is rejected, and binding the destroyed
+storage to an ordinary pointer or reference is rejected as the
+unmarked-direction violation.  A function may
 carry both attributes -- a reinitializer that destroys and then
 reconstructs its argument's storage -- and models destroy-then-construct:
 the storage bound to its ``[[ref_to_uninit]]`` parameters is initialized
-after the call.
+after the call, and calling it on already-initialized storage is exactly
+its purpose, so it is accepted.
 
 
 Constructors
@@ -704,6 +714,13 @@ false positive.
   which treat the call as an escape, so it is a missed diagnostic; a destroy
   inside a constructor body earns no kill bit in the ctor-body dataflow
   either).  Writes through ``[[ref_to_uninit]]`` are still not verified.
+- ``[[now_uninit]]`` covers both "ends an object's lifetime"
+  (``destroy_at``) and "releases raw storage" (``free``), so destroying
+  storage that was never initialized is accepted: ``int u [[uninit]];
+  destroy_at(&u);`` is not diagnosed.  Splitting the two roles apart is the
+  follow-up that recovers this diagnostic -- a storage-release callee would
+  then stop being ``[[now_uninit]]``-equivalent -- while double destruction
+  and use-after-destroy are retained either way.
 - A ``new`` expression whose result is not bound to anything (``new int;``)
   is not checked.
 - A call through a function pointer cannot see parameter markers on the
