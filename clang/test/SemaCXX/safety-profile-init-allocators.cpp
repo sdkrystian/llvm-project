@@ -17,6 +17,7 @@ extern "C" void *malloc(size_t);
 extern "C" void *calloc(size_t, size_t);
 extern "C" void *realloc(void *, size_t);
 extern "C" void *aligned_alloc(size_t, size_t);
+extern "C" void free(void *);
 
 void take_uninit_ptr(int *p [[ref_to_uninit]]);
 void take_ptr(int *p);
@@ -111,4 +112,70 @@ void test_suppress() {
 template <class T>
 void template_malloc_arg() {
   take_ptr((int *)malloc(4)); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// ============================================================
+// Storage-release callees (the deallocation side)
+// ============================================================
+
+// free, realloc's pointer argument, and replaceable global operator delete
+// release the storage they are handed: the binding accepts a pointer in any
+// state ([[now_uninit]]-equivalent), so deallocating never-written storage
+// is legal -- the RAII buffer below is the motivating shape -- and the
+// storage's credit is withdrawn, so a whole-`*p` read through a marked
+// pointer after the release is the read-through violation again. Like the
+// allocator side, free/realloc recognition keys on Clang's builtin
+// knowledge (-fno-builtin loses the relaxation, never more).
+struct RAIIBuf {
+  int *p [[ref_to_uninit]];
+  RAIIBuf() : p((int *)malloc(16)) {}
+  ~RAIIBuf() { free(p); } // OK: releasing storage in any state
+};
+
+void test_free_uninit(int *p [[ref_to_uninit]]) {
+  free(p); // OK: never-initialized storage may be released
+}
+void test_free_initialized(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  free(p); // OK: initialized storage may be released
+}
+void test_builtin_free(int *p [[ref_to_uninit]]) {
+  __builtin_free(p); // OK: same recognition by builtin ID
+}
+void test_operator_delete(int *p [[ref_to_uninit]],
+                          int *q [[ref_to_uninit]]) {
+  ::operator delete(p);   // OK: replaceable global deallocation
+  ::operator delete[](q); // OK
+}
+void test_read_after_free(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  int x = *p; // OK: credited
+  free(p);
+  int y = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  (void)x; (void)y;
+}
+void test_realloc_releases_pointer_argument(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  int *r = (int *)realloc(p, 32); // OK both ways: unknown source, releasing sink
+  int x = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  (void)r; (void)x;
+}
+
+// Ending the object's lifetime and then releasing its storage are two
+// different, correctly ordered operations: the release callees are exempt
+// from the double-destroy check.
+template <class T> [[now_uninit]] void destroy_at(T *p);
+void test_destroy_then_free(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  destroy_at(p);
+  free(p); // OK: not a double destroy
+}
+
+// A class-specific operator delete is not replaceable; its semantics belong
+// to its class, so its parameter stays the ordinary unmarked target.
+struct PoolDeallocated {
+  static void operator delete(void *);
+};
+void test_class_specific_operator_delete(int *p [[ref_to_uninit]]) {
+  PoolDeallocated::operator delete(p); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 }

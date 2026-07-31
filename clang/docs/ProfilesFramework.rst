@@ -593,6 +593,21 @@ the storage bound to its ``[[ref_to_uninit]]`` parameters is initialized
 after the call, and calling it on already-initialized storage is exactly
 its purpose, so it is accepted.
 
+The standard storage-release callees are recognized without annotation and
+treated like ``[[now_uninit]]`` at the call: ``free``, ``realloc`` (its
+pointer argument), and replaceable global ``::operator delete`` /
+``::operator delete[]`` (sized and nothrow forms included; class-specific
+and destroying overloads excluded) accept a pointer in any state -- an
+RAII buffer's ``free(p)`` on a ``[[ref_to_uninit]]`` member is legal
+whether or not the buffer was ever written -- and withdraw the storage's
+credit, so a read through a marked pointer after ``free(p)`` is diagnosed
+again.  Unlike a ``[[now_uninit]]`` callee they are exempt from
+``double_destroy``: ``destroy_at(p); free(p);`` is correct, because ending
+an object's lifetime and releasing its storage are different operations.
+Like the allocator side, the ``free``/``realloc`` recognition keys on
+Clang's builtin knowledge, which ``-fno-builtin`` disables -- losing the
+relaxation there, never accepting anything new elsewhere.
+
 
 Constructors
 ------------

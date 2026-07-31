@@ -1242,21 +1242,32 @@ enum class AllocatorCalleeRole {
   /// Returns storage affirmatively neither -- realloc's preserved prefix
   /// plus indeterminate tail.
   ReturnsUnknown,
+  /// Returns no storage at all (a pure release callee, present for its
+  /// ReleasesStorage column): never consulted as a source -- a void return
+  /// cannot reach the recognizers -- and inert (trusted) if it ever were.
+  ReturnsNothing,
 };
 
-// The known allocator callees, keyed by builtin ID: the malloc and alloca
+// The known allocator and deallocator callees, keyed by builtin ID: the
+// source side (Role) says what the return value is -- the malloc and alloca
 // families return uninitialized memory, calloc returns zero-initialized
-// memory, realloc a preserved prefix plus an indeterminate tail. The builtin
-// ID is absent under -fno-builtin / -ffreestanding (or on a non-matching
-// declaration), where an allocator falls back to the trusted default -- a
-// missed diagnostic, never a false positive. Future known callees go here;
-// the raw ::operator new arm below is name-keyed, not builtin-keyed, and
-// stays beside its user. (getBuiltinFunctionEffects in
+// memory, realloc a preserved prefix plus an indeterminate tail -- and the
+// sink side (ReleasesStorage) says whether the callee releases the storage
+// its pointer argument denotes, making it [[now_uninit]]-equivalent at the
+// binding site (free, and realloc's pointer parameter). The builtin ID is
+// absent under -fno-builtin / -ffreestanding (or on a non-matching
+// declaration), where an allocator falls back to the trusted default and a
+// release callee goes unrecognized -- a missed diagnostic or a missed
+// relaxation, never a false positive or a false acceptance elsewhere.
+// Future known callees go here; the raw ::operator new arm below and the
+// operator delete arm of isStorageReleaseCallee are name-keyed, not
+// builtin-keyed, and stay beside their users. (getBuiltinFunctionEffects in
 // SemaFunctionEffects.cpp groups almost exactly this set for the
 // `allocating` effect.)
 struct AllocatorCalleeEntry {
   unsigned BuiltinID;
   AllocatorCalleeRole Role;
+  bool ReleasesStorage = false;
 };
 
 static constexpr AllocatorCalleeEntry AllocatorCallees[] = {
@@ -1275,8 +1286,14 @@ static constexpr AllocatorCalleeEntry AllocatorCallees[] = {
      AllocatorCalleeRole::ReturnsUninitialized},
     {Builtin::BIcalloc, AllocatorCalleeRole::ReturnsInitialized},
     {Builtin::BI__builtin_calloc, AllocatorCalleeRole::ReturnsInitialized},
-    {Builtin::BIrealloc, AllocatorCalleeRole::ReturnsUnknown},
-    {Builtin::BI__builtin_realloc, AllocatorCalleeRole::ReturnsUnknown},
+    {Builtin::BIrealloc, AllocatorCalleeRole::ReturnsUnknown,
+     /*ReleasesStorage=*/true},
+    {Builtin::BI__builtin_realloc, AllocatorCalleeRole::ReturnsUnknown,
+     /*ReleasesStorage=*/true},
+    {Builtin::BIfree, AllocatorCalleeRole::ReturnsNothing,
+     /*ReleasesStorage=*/true},
+    {Builtin::BI__builtin_free, AllocatorCalleeRole::ReturnsNothing,
+     /*ReleasesStorage=*/true},
 };
 
 static std::optional<AllocatorCalleeRole>
@@ -1288,6 +1305,28 @@ getAllocatorCalleeRole(const FunctionDecl *FD) {
     if (Entry.BuiltinID == ID)
       return Entry.Role;
   return std::nullopt;
+}
+
+// A callee that releases the storage its pointer argument denotes: the
+// table's ReleasesStorage rows, plus replaceable global operator delete /
+// operator delete[] -- sized and nothrow forms included, class-specific and
+// destroying overloads excluded (isReplaceableGlobalAllocationFunction).
+// Releasing storage leaves it as uninitialized as ending the object's
+// lifetime does, so the binding sites treat such a callee's pointer
+// parameter like a [[now_uninit]] one -- except for the double-destroy
+// check: destroy_at(p); free(p); is correct, because ending an object's
+// lifetime and releasing its storage are different operations.
+static bool isStorageReleaseCallee(const FunctionDecl *FD) {
+  if (FD->getDeclName().isAnyOperatorDelete() &&
+      FD->isReplaceableGlobalAllocationFunction())
+    return true;
+  unsigned ID = FD->getBuiltinID();
+  if (ID == 0)
+    return false;
+  for (const AllocatorCalleeEntry &Entry : AllocatorCallees)
+    if (Entry.BuiltinID == ID)
+      return Entry.ReleasesStorage;
+  return false;
 }
 
 // A call to a [[ref_to_uninit]]-returning function yields uninitialized
@@ -1320,6 +1359,10 @@ static UninitStorage classifyRefToUninitCallee(const CallExpr *CE,
       return UninitStorage::Initialized;
     case AllocatorCalleeRole::ReturnsUnknown:
       return UninitStorage::Unknown;
+    case AllocatorCalleeRole::ReturnsNothing:
+      // A void return never reaches these recognizers; keep the trusted
+      // default if it somehow did.
+      break;
     }
   }
   if (!RefersToUninit)
@@ -1637,23 +1680,31 @@ void SemaProfiles::checkInitProfileRefToUninitBinding(SourceLocation Loc,
   const auto *Parm = dyn_cast_or_null<ParmVarDecl>(Target);
   const auto *Callee =
       Parm ? dyn_cast<FunctionDecl>(Parm->getDeclContext()) : nullptr;
-  if (Callee && Callee->hasAttr<NowUninitAttr>()) {
-    // A [[now_uninit]] callee's pointer/reference parameter accepts storage
-    // in any live state instead of the marker-consistency check: the
-    // attribute declares destruction, whose operand is initialized memory
-    // for a plain destructor-like callee, *any* state for a raw-release
-    // one (free takes storage that may never have been constructed; see
-    // the Limitations note), and initialized storage is precisely what a
-    // dual-attributed reinitializer's destroy half exists for. The one
-    // state it must not take is storage *already* destroyed: a second
-    // destruction is P4222R2 §1's double-destroy error, and the destroyed
-    // state is definite by construction, so it may fire a diagnostic.
-    // That applies to a reinitializer too -- its destroy half is invalid
-    // on destroyed storage; construct_at (a plain [[now_init]] function
-    // with a marked parameter, whose binding check below is untouched) is
-    // the sanctioned recovery path. An instantiation-dependent source
-    // defers exactly like checkInitProfileRefToUninit's.
-    if (Src && !isa<RecoveryExpr>(Src->IgnoreParens()) &&
+  if (Callee && (Callee->hasAttr<NowUninitAttr>() ||
+                 isStorageReleaseCallee(Callee))) {
+    // A [[now_uninit]] callee's pointer/reference parameter -- and a known
+    // storage-release callee's (free, realloc's pointer, replaceable
+    // global operator delete), which is [[now_uninit]]-equivalent here --
+    // accepts storage in any live state instead of the marker-consistency
+    // check: the attribute declares destruction, whose operand is
+    // initialized memory for a plain destructor-like callee, *any* state
+    // for a raw-release one (free takes storage that may never have been
+    // constructed; see the Limitations note), and initialized storage is
+    // precisely what a dual-attributed reinitializer's destroy half exists
+    // for. The one state a [[now_uninit]] callee must not take is storage
+    // *already* destroyed: a second destruction is P4222R2 §1's
+    // double-destroy error, and the destroyed state is definite by
+    // construction, so it may fire a diagnostic. That applies to a
+    // reinitializer too -- its destroy half is invalid on destroyed
+    // storage; construct_at (a plain [[now_init]] function with a marked
+    // parameter, whose binding check below is untouched) is the sanctioned
+    // recovery path. A storage-release callee is exempt:
+    // destroy_at(p); free(p); is correct -- ending an object's lifetime
+    // and releasing its storage are different operations. An
+    // instantiation-dependent source defers exactly like
+    // checkInitProfileRefToUninit's.
+    if (Callee->hasAttr<NowUninitAttr>() && Src &&
+        !isa<RecoveryExpr>(Src->IgnoreParens()) &&
         (D || !Src->isInstantiationDependent()) &&
         shouldEmitProfileViolation("std::init", "double_destroy", Loc, D) &&
         storageIsDestroyed(T, Src))
@@ -1713,8 +1764,15 @@ void SemaProfiles::recordNowUninitArgument(const ValueDecl *Target, QualType T,
   const auto *Parm = dyn_cast_or_null<ParmVarDecl>(Target);
   if (!Parm || !Src)
     return;
+  // A known storage-release callee (free, realloc's pointer parameter,
+  // replaceable global operator delete) withdraws like a [[now_uninit]]
+  // one: the released storage no longer holds the object the credit
+  // described, so a whole-`*q` read through a marked pointer after free(q)
+  // classifies uninitialized again. (Unmarked pointers stay untracked;
+  // use-after-free through them is the invalidation profile's job.)
   const auto *FD = dyn_cast_or_null<FunctionDecl>(Parm->getDeclContext());
-  if (!FD || !FD->hasAttr<NowUninitAttr>())
+  if (!FD ||
+      !(FD->hasAttr<NowUninitAttr>() || isStorageReleaseCallee(FD)))
     return;
   // Not enforcement- or suppression-gated (a suppressed destroy still
   // destroys), but a call in a never-executed context destroys nothing.
