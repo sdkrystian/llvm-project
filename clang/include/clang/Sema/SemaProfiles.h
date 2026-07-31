@@ -440,24 +440,37 @@ public:
   /// recordInitProfileStore and recordNowInitArgument.
   bool inNeverExecutedContext() const;
 
+  /// How firmly a consult may rely on recorded store credit. A `Maybe`
+  /// consult asks whether a store happened somewhere earlier in parse order
+  /// -- enough to *suppress* a diagnostic (the storage may well be
+  /// initialized), never to fire one. A `Definite` consult uses credit as
+  /// the firing basis of a diagnostic and therefore needs the store to be
+  /// certain. Recording is strength-blind for now: every recorded credit
+  /// answers either query.
+  enum class InitCreditStrength { Maybe, Definite };
+
   /// True if \p VD is a local [[uninit]] variable credited by a recorded
-  /// whole-entity store; the recognizers then classify it as initialized
-  /// (which also enables the paper's reverse-direction rule: a credited
-  /// entity requires an unmarked target).
-  bool hasWholeObjectStoreCredit(const ValueDecl *VD) const;
+  /// whole-entity store of at least \p Strength; the recognizers then
+  /// classify it as initialized (which also enables the paper's
+  /// reverse-direction rule: a credited entity requires an unmarked target).
+  bool hasWholeObjectStoreCredit(const ValueDecl *VD,
+                                 InitCreditStrength Strength) const;
 
   /// True if \p VD is a [[ref_to_uninit]] local/parameter pointer or
-  /// reference credited by a recorded store through it; the storage behind
-  /// it then classifies as initialized (until a pointer is reseated --
-  /// references cannot be reseated, so no *store* ever clears their credit;
-  /// a [[now_uninit]] callee withdraws either kind).
-  bool hasPointeeStoreCredit(const ValueDecl *VD) const;
+  /// reference credited by a recorded store through it of at least
+  /// \p Strength; the storage behind it then classifies as initialized
+  /// (until a pointer is reseated -- references cannot be reseated, so no
+  /// *store* ever clears their credit; a [[now_uninit]] callee withdraws
+  /// either kind).
+  bool hasPointeeStoreCredit(const ValueDecl *VD,
+                             InitCreditStrength Strength) const;
 
   /// True if the [[uninit]] member \p F of the base object identified by
   /// \p Base (see resolveMemberStoreBase; null returns false) is credited by
-  /// a recorded whole-member store; the member then classifies as
-  /// initialized through that same base.
-  bool hasMemberStoreCredit(const Decl *Base, const FieldDecl *F) const;
+  /// a recorded whole-member store of at least \p Strength; the member then
+  /// classifies as initialized through that same base.
+  bool hasMemberStoreCredit(const Decl *Base, const FieldDecl *F,
+                            InitCreditStrength Strength) const;
 
   /// Resolve the identity key of a member access's base object for the
   /// per-object member store credit: the parse-time pattern of the enclosing
@@ -491,7 +504,8 @@ public:
     void clearWholeStored(const VarDecl *VD) {
       Entity[VD] &= ~unsigned(WholeStored);
     }
-    bool hasWholeStored(const VarDecl *VD) const {
+    bool hasWholeStored(const VarDecl *VD,
+                        InitCreditStrength Strength) const {
       auto It = Entity.find(VD);
       return It != Entity.end() && (It->second & WholeStored);
     }
@@ -504,7 +518,8 @@ public:
     void clearPointee(const VarDecl *VD) {
       Entity[VD] &= ~unsigned(PointeeStored);
     }
-    bool hasPointeeStored(const VarDecl *VD) const {
+    bool hasPointeeStored(const VarDecl *VD,
+                          InitCreditStrength Strength) const {
       auto It = Entity.find(VD);
       return It != Entity.end() && (It->second & PointeeStored);
     }
@@ -521,7 +536,8 @@ public:
     void clearMemberStored(const Decl *Base, const FieldDecl *F) {
       Member[{Base, F}] &= ~unsigned(WholeStored);
     }
-    bool hasMemberStored(const Decl *Base, const FieldDecl *F) const {
+    bool hasMemberStored(const Decl *Base, const FieldDecl *F,
+                         InitCreditStrength Strength) const {
       auto It = Member.find({Base, F});
       return It != Member.end() && (It->second & WholeStored);
     }

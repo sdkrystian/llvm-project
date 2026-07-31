@@ -966,21 +966,31 @@ enum class UninitStorage { Initialized, Uninitialized, Unknown };
 // Credit: when non-null, the recognizers consult the parse-order store
 // credit recorded by SemaProfiles::recordInitProfileStore -- a credited
 // entity classifies as Initialized. Null in the constexpr presets; the
-// checking entry points attach it via withCredit.
+// checking entry points attach it via withCredit, choosing the Strength
+// every consult below passes to the credit queries: Maybe for a consult
+// that only ever *suppresses* a diagnostic on credit (the default),
+// Definite for one that uses credit as a diagnostic's firing basis.
+using InitCreditStrength = SemaProfiles::InitCreditStrength;
+
 struct UninitAccessOpts {
   bool DropTopLevelUninit = false;
   bool TrustRefToUninit = false;
   bool SubscriptBase = false;
   const SemaProfiles *Credit = nullptr;
+  InitCreditStrength Strength = InitCreditStrength::Maybe;
 
   UninitAccessOpts withoutTopLevelDrop() const {
-    return {false, TrustRefToUninit, SubscriptBase, Credit};
+    return {false, TrustRefToUninit, SubscriptBase, Credit, Strength};
   }
   UninitAccessOpts withSubscriptBase() const {
-    return {DropTopLevelUninit, TrustRefToUninit, true, Credit};
+    return {DropTopLevelUninit, TrustRefToUninit, true, Credit, Strength};
   }
   UninitAccessOpts withCredit(const SemaProfiles *SP) const {
-    return {DropTopLevelUninit, TrustRefToUninit, SubscriptBase, SP};
+    return withCredit(SP, InitCreditStrength::Maybe);
+  }
+  UninitAccessOpts withCredit(const SemaProfiles *SP,
+                              InitCreditStrength St) const {
+    return {DropTopLevelUninit, TrustRefToUninit, SubscriptBase, SP, St};
   }
 };
 
@@ -1275,7 +1285,7 @@ pointerRefersToUninitStorage(ASTContext &Ctx, const Expr *E,
     // Uninitialized": no preset regression) and is skipped below an element
     // access (SubscriptBase), preserving §5.4's random-access ban.
     if (Opts.Credit && !Opts.SubscriptBase &&
-        Opts.Credit->hasPointeeStoreCredit(VD))
+        Opts.Credit->hasPointeeStoreCredit(VD, Opts.Strength))
       return UninitStorage::Initialized;
     return Opts.TrustRefToUninit ? UninitStorage::Unknown
                                  : UninitStorage::Uninitialized;
@@ -1341,10 +1351,12 @@ static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
   // cannot be reseated, so that credit never lapses).
   auto DeclDenotesUninit = [&](const ValueDecl *VD) {
     return (!Opts.DropTopLevelUninit && VD->hasAttr<UninitAttr>() &&
-            !(Opts.Credit && Opts.Credit->hasWholeObjectStoreCredit(VD))) ||
+            !(Opts.Credit &&
+              Opts.Credit->hasWholeObjectStoreCredit(VD, Opts.Strength))) ||
            (!Opts.TrustRefToUninit && VD->getType()->isReferenceType() &&
             VD->hasAttr<RefToUninitAttr>() &&
-            !(Opts.Credit && Opts.Credit->hasPointeeStoreCredit(VD)));
+            !(Opts.Credit &&
+              Opts.Credit->hasPointeeStoreCredit(VD, Opts.Strength)));
   };
   if (const auto *DRE = dyn_cast<DeclRefExpr>(E))
     return DeclDenotesUninit(DRE->getDecl()) ? UninitStorage::Uninitialized
@@ -1377,7 +1389,7 @@ static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
     if (const auto *F = dyn_cast<FieldDecl>(MD);
         F && Opts.Credit && F->hasAttr<UninitAttr>() &&
         Opts.Credit->hasMemberStoreCredit(
-            Opts.Credit->resolveMemberStoreBase(ME), F))
+            Opts.Credit->resolveMemberStoreBase(ME), F, Opts.Strength))
       return UninitStorage::Initialized;
     if (DeclDenotesUninit(MD))
       return UninitStorage::Uninitialized;
@@ -1661,10 +1673,11 @@ void SemaProfiles::checkInitProfileRefCapture(SourceLocation Loc,
   // copy capture is not this check's: it reads the variable in the enclosing
   // function's CFG, which is the flow-based uninit_read pass's territory.
   bool UninitNoCredit =
-      Var->hasAttr<UninitAttr>() && !hasWholeObjectStoreCredit(Var);
+      Var->hasAttr<UninitAttr>() &&
+      !hasWholeObjectStoreCredit(Var, InitCreditStrength::Maybe);
   bool RefNoCredit = Var->getType()->isReferenceType() &&
                      Var->hasAttr<RefToUninitAttr>() &&
-                     !hasPointeeStoreCredit(Var);
+                     !hasPointeeStoreCredit(Var, InitCreditStrength::Maybe);
   if (!UninitNoCredit && !RefNoCredit)
     return;
   // The only Expr-less deferral here: an instantiation-dependent captured
@@ -1940,19 +1953,21 @@ void SemaProfiles::recordInitProfileStore(const Expr *LHS) {
   }
 }
 
-bool SemaProfiles::hasWholeObjectStoreCredit(const ValueDecl *VD) const {
+bool SemaProfiles::hasWholeObjectStoreCredit(const ValueDecl *VD,
+                                             InitCreditStrength Strength) const {
   const auto *Var = dyn_cast<VarDecl>(VD);
-  return Var && StoreCredit.hasWholeStored(Var);
+  return Var && StoreCredit.hasWholeStored(Var, Strength);
 }
 
-bool SemaProfiles::hasPointeeStoreCredit(const ValueDecl *VD) const {
+bool SemaProfiles::hasPointeeStoreCredit(const ValueDecl *VD,
+                                         InitCreditStrength Strength) const {
   const auto *Var = dyn_cast<VarDecl>(VD);
-  return Var && StoreCredit.hasPointeeStored(Var);
+  return Var && StoreCredit.hasPointeeStored(Var, Strength);
 }
 
-bool SemaProfiles::hasMemberStoreCredit(const Decl *Base,
-                                        const FieldDecl *F) const {
-  return Base && F && StoreCredit.hasMemberStored(Base, F);
+bool SemaProfiles::hasMemberStoreCredit(const Decl *Base, const FieldDecl *F,
+                                        InitCreditStrength Strength) const {
+  return Base && F && StoreCredit.hasMemberStored(Base, F, Strength);
 }
 
 void SemaProfiles::checkInitProfileThrowOperand(const Expr *Operand) {
