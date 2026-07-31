@@ -2241,6 +2241,31 @@ void test_lambda_body_store_conditional() {
   int *r [[ref_to_uninit]] = &u; // OK: the lambda may never run
   (void)r;
 }
+// A block body is a lambda body's twin -- it may never run -- but
+// getCurFunctionDecl skips BlockDecls and a block body's scope carries the
+// function-scope flag, so neither the owner check nor the depth walk sees
+// it; the innermost-context walk must.
+void test_block_body_store_conditional(bool c) {
+  __block int u [[uninit]];
+  void (^b)() = ^{ u = 5; };
+  if (c)
+    b();
+  int *r [[ref_to_uninit]] = &u; // OK: the block may never run
+  int *q = &u;                   // OK: suppressing credit still applies
+  (void)r; (void)q;
+}
+// A destroy inside a block body is likewise merely possible: it revokes
+// the firing strength only and records no destroyed state.
+void test_block_body_destroy_conditional(bool c) {
+  __block int u [[uninit]];
+  u = 5;
+  void (^b)() = ^{ nu_wipe(&u); };
+  if (c)
+    b();
+  int *q = &u; // OK: suppressing credit survives
+  nu_wipe(&u); // OK: no destroyed state was recorded by the block's destroy
+  (void)q;
+}
 // A store in a plain nested { } block is unconditional: the block scope
 // carries no control flag, so the credit keeps its firing strength.
 void test_plain_block_store_still_fires() {

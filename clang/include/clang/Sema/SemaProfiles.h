@@ -529,7 +529,10 @@ public:
   /// current-object member credit, which resolveMemberStoreBase already
   /// keys on that pattern. The same-function requirement is what stops a
   /// store inside a lambda body from definitely crediting an enclosing
-  /// function's local. Everything else records Maybe.
+  /// function's local; the enclosing function is resolved from the context
+  /// chain directly, so a store inside a *block* body -- which
+  /// getCurFunctionDecl would skip -- stays Maybe too. Everything else
+  /// records Maybe.
   InitCreditStrength currentStoreStrength(const Decl *CreditKey) const;
 
   /// True if \p VD is a local [[uninit]] variable credited by a recorded

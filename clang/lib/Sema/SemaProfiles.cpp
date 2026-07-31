@@ -2171,10 +2171,25 @@ SemaProfiles::currentStoreStrength(const Decl *CreditKey) const {
   // pattern, which no user-code consult ever matches.
   if (!SemaRef.getCurScope() || currentConditionalDepth() != 0)
     return InitCreditStrength::Maybe;
-  const FunctionDecl *Enclosing =
-      getParseTimePattern(SemaRef.getCurFunctionDecl(/*AllowLambda=*/true));
-  if (!Enclosing)
+  // The innermost function-like context, walked from CurContext directly:
+  // getCurFunctionDecl skips blocks and captured regions, but a store
+  // inside a block body must not definitely credit the enclosing
+  // function's entity -- the block may never run. (The depth walk cannot
+  // see this either: a block body's scope carries FnScope, so a store at
+  // its top level is depth 0 *within the block*.) Only a FunctionDecl --
+  // a plain function, a method, a lambda call operator -- earns Definite;
+  // block-, captured-, and ObjC-method-owned stores stay Maybe, as they
+  // were when this predicate keyed on getCurFunctionDecl.
+  const DeclContext *Innermost = SemaRef.CurContext;
+  while (Innermost && !Innermost->isFunctionOrMethod())
+    Innermost = Innermost->getParent();
+  const auto *InnermostFn = dyn_cast_or_null<FunctionDecl>(Innermost);
+  if (!InnermostFn)
     return InitCreditStrength::Maybe;
+  // Normalized to its parse-time pattern to match the member-credit key
+  // (an identity while parsing -- inTemplateInstantiation was excluded
+  // above -- kept for symmetry with resolveMemberStoreBase).
+  const DeclContext *Enclosing = getParseTimePattern(InnermostFn);
   // The credited entity's owning function: the DeclContext of a credited
   // local/parameter (or of the directly named local base object of member
   // credit); for current-object member credit the key *is* the owning

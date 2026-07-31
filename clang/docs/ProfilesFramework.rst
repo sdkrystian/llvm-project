@@ -523,8 +523,8 @@ entity's own function: after a top-level ``u = 5;`` a later
 ``int *r [[ref_to_uninit]] = &u;`` is rejected -- a definitely initialized
 entity requires an unmarked target (§4.2) -- while a store under an
 ``if``, a loop, a ``switch``, a ``try``, ``&&``/``||``/``?:``, or inside a
-lambda body may not have executed on the path that reaches the binding, so
-the marked binding stays legal: never a false positive.  (The
+lambda or block body may not have executed on the path that reaches the
+binding, so the marked binding stays legal: never a false positive.  (The
 conditionality test is syntactic and errs the same way: a store in a
 condition itself, in a ``do`` body, or in the taken branch of
 ``if constexpr`` conservatively counts as conditional.)  Element accesses
