@@ -98,6 +98,21 @@ void test_class_trivial() {
   (void)t;
 }
 
+// An out-of-line '= default' definition keeps the default constructor
+// user-provided ([class.default.ctor]), so the class stays trusted at each
+// use, exactly like WithCtor above -- the defect is reported once, at the
+// constructor's definition (ctor_uninit_member; see
+// safety-profile-init-ctor.cpp), not at every declaration.
+struct OutOfLineDefaulted {
+  int m; // expected-note {{member 'm' declared here}}
+  OutOfLineDefaulted();
+};
+OutOfLineDefaulted::OutOfLineDefaulted() = default; // expected-error {{constructor does not initialize member 'm' under profile 'std::init'}}
+void test_class_out_of_line_defaulted_ctor() {
+  OutOfLineDefaulted o; // OK: trusted (contrast Trivial above)
+  (void)o;
+}
+
 void test_static_local() {
   static int s;
   thread_local int t;

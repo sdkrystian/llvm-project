@@ -22,11 +22,21 @@ struct OutOfLine {
 };
 OutOfLine::OutOfLine() {} // expected-error {{test profile fired on finalization of a constructor for class 'OutOfLine' under profile 'test::ctor_final'}}
 
-// A defaulted constructor has no body that reaches the dispatch.
+// An in-class defaulted constructor has no definition of its own to reach
+// the dispatch (it is not user-provided).
 struct Defaulted {
   int x;
   Defaulted() = default;
 };
+
+// An out-of-line '= default' *is* the constructor's definition
+// (user-provided per [class.default.ctor]) and dispatches there, like a
+// written body.
+struct DefaultedOutOfLine {
+  int x;
+  DefaultedOutOfLine();
+};
+DefaultedOutOfLine::DefaultedOutOfLine() = default; // expected-error {{test profile fired on finalization of a constructor for class 'DefaultedOutOfLine' under profile 'test::ctor_final'}}
 
 // A class with no user-declared constructor never reaches the dispatch.
 struct NoCtor {

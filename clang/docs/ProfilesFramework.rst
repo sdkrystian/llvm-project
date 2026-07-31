@@ -625,6 +625,19 @@ members has nothing to initialize.  A delegating constructor is exempt --
 its target initializes the members -- and so is a union's own constructor,
 whose members are mutually exclusive (§5.6).
 
+A default constructor explicitly defaulted *after* its first declaration
+(``struct S { int d; S(); }; S::S() = default;``) is user-provided
+([class.default.ctor]), so the class is trusted at every use exactly like
+one with a written constructor body -- and the constructor itself is
+checked at the ``= default`` definition, where it writes no
+member-initializers: every member must have a default member initializer
+or an ``[[uninit]]`` marker, and every base an initializing default
+constructor of its own.  The in-class form (``S() = default;`` in the
+class body) takes a different route: it is not user-provided, so the class
+is not trusted and each indeterminate use draws ``uninit_decl`` at the
+variable instead.  A defaulted *copy* or *move* constructor initializes
+every member from its source and is never flagged.
+
 
 Global and Static Variables
 ---------------------------

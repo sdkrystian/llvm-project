@@ -159,6 +159,77 @@ struct OutOfLineBase : Base { // expected-note {{base class 'Base' declared here
 };
 OutOfLineBase::OutOfLineBase() {} // expected-error {{constructor does not initialize base class 'Base' under profile 'std::init'}}
 
+// ============================================================
+// Out-of-line explicitly-defaulted default constructors
+// ============================================================
+
+// An out-of-line '= default' definition is user-provided
+// ([class.default.ctor]), so the class stays trusted at every use -- and the
+// constructor itself is checked here, at its definition, exactly once. The
+// defaulted definition writes no member-initializers, so every
+// indeterminate-capable member must be covered by an NSDMI or [[uninit]].
+// (The in-class form is never user-provided: nothing is checked at a
+// definition, and each use draws uninit_decl instead -- see
+// safety-profile-init-decl.cpp.)
+struct OutOfLineDefaulted {
+  int x; // expected-note {{member 'x' declared here}}
+  OutOfLineDefaulted();
+};
+OutOfLineDefaulted::OutOfLineDefaulted() = default; // expected-error {{constructor does not initialize member 'x' under profile 'std::init'}}
+
+struct OutOfLineDefaultedNSDMI {
+  int x = 0;
+  OutOfLineDefaultedNSDMI();
+};
+OutOfLineDefaultedNSDMI::OutOfLineDefaultedNSDMI() = default; // OK
+
+struct OutOfLineDefaultedMarked {
+  int x [[uninit]];
+  OutOfLineDefaultedMarked();
+};
+OutOfLineDefaultedMarked::OutOfLineDefaultedMarked() = default; // OK: acknowledged
+
+struct OutOfLineDefaultedBase : Base { // expected-note {{base class 'Base' declared here}}
+  OutOfLineDefaultedBase();
+};
+OutOfLineDefaultedBase::OutOfLineDefaultedBase() = default; // expected-error {{constructor does not initialize base class 'Base' under profile 'std::init'}}
+
+// A use before the '= default' definition is parsed stays accepted -- the
+// class is trusted on the strength of the declaration alone -- and the
+// error is reported exactly once, at the definition.
+struct DefaultedAfterUse {
+  int x; // expected-note {{member 'x' declared here}}
+  DefaultedAfterUse();
+};
+void use_defaulted_before_definition() {
+  DefaultedAfterUse d; // OK: trusted
+  (void)d;
+}
+DefaultedAfterUse::DefaultedAfterUse() = default; // expected-error {{constructor does not initialize member 'x' under profile 'std::init'}}
+
+// An out-of-line defaulted *copy* (or move) constructor is equally
+// user-provided, but it initializes every member while *writing* no
+// initializer; it must never reach the written-initializer checks.
+struct OutOfLineDefaultedCopy {
+  int x;
+  OutOfLineDefaultedCopy() : x(0) {}
+  OutOfLineDefaultedCopy(const OutOfLineDefaultedCopy &);
+};
+OutOfLineDefaultedCopy::OutOfLineDefaultedCopy(
+    const OutOfLineDefaultedCopy &) = default; // OK: not a default constructor
+
+// A class-template member: the pattern's defaulted definition is dependent
+// and defers; each instantiation is checked at the point its definition is
+// instantiated.
+template <typename T>
+struct TmplDefaulted {
+  T x; // expected-note {{member 'x' declared here}}
+  TmplDefaulted();
+};
+template <typename T>
+TmplDefaulted<T>::TmplDefaulted() = default; // expected-error {{constructor does not initialize member 'x' under profile 'std::init'}}
+template struct TmplDefaulted<int>; // expected-note {{in instantiation of member function 'TmplDefaulted<int>::TmplDefaulted' requested here}}
+
 template <typename T>
 struct TmplBase : T { // expected-note {{base class 'Base' declared here}}
   TmplBase() {} // expected-error {{constructor does not initialize base class 'Base' under profile 'std::init'}}
