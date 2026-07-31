@@ -424,12 +424,46 @@ public:
   void recordNowUninitArgument(const ValueDecl *Target, QualType T,
                                const Expr *Src);
 
+  /// The tracked storage a lifetime-annotated callee's argument denotes, as
+  /// resolved by resolveLifetimeAnnotatedStorage: the whole [[uninit]]
+  /// entity (Whole), the storage behind a marked pointer or reference
+  /// (Pointee), the [[uninit]] member of a trackable base object (Member),
+  /// or nothing trackable (None).
+  struct LifetimeAnnotatedStorage {
+    enum class Kind { None, Whole, Pointee, Member };
+    Kind StorageKind = Kind::None;
+    /// The credited local/parameter (Whole and Pointee).
+    const VarDecl *Entity = nullptr;
+    /// The member store-credit key (Member; resolveMemberStoreBase's base).
+    const Decl *Base = nullptr;
+    const FieldDecl *Field = nullptr;
+
+    static LifetimeAnnotatedStorage whole(const VarDecl *VD) {
+      return {Kind::Whole, VD, nullptr, nullptr};
+    }
+    static LifetimeAnnotatedStorage pointee(const VarDecl *VD) {
+      return {Kind::Pointee, VD, nullptr, nullptr};
+    }
+    static LifetimeAnnotatedStorage member(const Decl *Base,
+                                           const FieldDecl *F) {
+      return {Kind::Member, nullptr, Base, F};
+    }
+  };
+
   /// The shared shape walk of recordNowInitArgument and
   /// recordNowUninitArgument: resolve \p Src (bound as \p T) to the storage
   /// the annotated callee initializes or destroys -- &u / u (whole-entity),
   /// p / *p / &*p (marked-pointer pointee), r (marked-reference referent),
-  /// &base.m / base.m (per-object member) -- and add (\p Withdraw false) or
-  /// remove (true) the corresponding credit bit.
+  /// &base.m / base.m (per-object member) -- through the recognizers'
+  /// explicit-cast pass-through. Marker-keyed on the source side: an
+  /// ordinary unmarked argument resolves to None.
+  LifetimeAnnotatedStorage resolveLifetimeAnnotatedStorage(QualType T,
+                                                           const Expr *Src)
+      const;
+
+  /// Resolve \p Src (bound as \p T, see resolveLifetimeAnnotatedStorage)
+  /// and add (\p Withdraw false) or remove (true) the resolved storage's
+  /// credit bit.
   void recordLifetimeAnnotatedArgument(QualType T, const Expr *Src,
                                        bool Withdraw);
 

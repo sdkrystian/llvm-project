@@ -1560,34 +1560,21 @@ void SemaProfiles::recordNowUninitArgument(const ValueDecl *Target, QualType T,
   recordLifetimeAnnotatedArgument(T, Src, /*Withdraw=*/true);
 }
 
-void SemaProfiles::recordLifetimeAnnotatedArgument(QualType T, const Expr *Src,
-                                                   bool Withdraw) {
-  // A [[now_init]] callee's initialization marks the resolved storage
-  // stored; a [[now_uninit]] callee's destruction clears the mark.
-  auto ApplyWhole = [&](const VarDecl *VD) {
-    if (Withdraw)
-      StoreCredit.clearWholeStored(VD);
-    else
-      StoreCredit.markWholeStored(VD);
-  };
-  auto ApplyPointee = [&](const VarDecl *VD) {
-    if (Withdraw)
-      StoreCredit.clearPointee(VD);
-    else
-      StoreCredit.markPointeeStored(VD);
-  };
+SemaProfiles::LifetimeAnnotatedStorage
+SemaProfiles::resolveLifetimeAnnotatedStorage(QualType T,
+                                              const Expr *Src) const {
   const Expr *E = Src->IgnoreParenImpCasts();
   // Mirror the recognizers' explicit-cast pass-through (paper §4.3: a cast
   // of a marked pointer is itself marked; a reference cast denotes the same
-  // storage): the callee initializes the same storage either way.
+  // storage): the callee affects the same storage either way.
   while (const auto *CE = dyn_cast<ExplicitCastExpr>(E)) {
     const Expr *Sub = CE->getSubExpr();
     if (!Sub->getType()->isPointerType() && !Sub->isGLValue())
       break;
     E = Sub->IgnoreParenImpCasts();
   }
-  // The glvalue whose storage the callee initializes: the operand of &G for
-  // a pointer parameter, or the bound glvalue itself for a reference one.
+  // The glvalue whose storage the callee affects: the operand of &G for a
+  // pointer parameter, or the bound glvalue itself for a reference one.
   const Expr *Glvalue = nullptr;
   if (const auto *UO = dyn_cast<UnaryOperator>(E);
       UO && UO->getOpcode() == UO_AddrOf)
@@ -1595,51 +1582,74 @@ void SemaProfiles::recordLifetimeAnnotatedArgument(QualType T, const Expr *Src,
   else if (T->isReferenceType())
     Glvalue = E;
   if (Glvalue) {
-    // &base.m / base.m: per-object whole-member credit, under exactly the
+    // &base.m / base.m: the per-object member shape, under exactly the
     // member-store keys (resolveMemberStoreBase); an untrackable base -- a
     // parameter-reached object, a deeper chain -- resolves null and stays
     // strict, the same boundary as a direct store.
     if (const auto *ME = dyn_cast<MemberExpr>(Glvalue)) {
       if (const auto *F = dyn_cast<FieldDecl>(ME->getMemberDecl());
           F && F->hasAttr<UninitAttr>())
-        if (const Decl *Base = resolveMemberStoreBase(ME)) {
-          if (Withdraw)
-            StoreCredit.clearMemberStored(Base, F);
-          else
-            StoreCredit.markMemberStored(Base, F);
-        }
-      return;
+        if (const Decl *Base = resolveMemberStoreBase(ME))
+          return LifetimeAnnotatedStorage::member(Base, F);
+      return {};
     }
-    // &*p / *p: the callee initializes (or destroys) the pointee of a
-    // marked pointer.
+    // &*p / *p: the pointee of a marked pointer.
     if (const auto *UO = dyn_cast<UnaryOperator>(Glvalue);
         UO && UO->getOpcode() == UO_Deref) {
       if (const VarDecl *VD = getCreditableMarkedPointer(UO->getSubExpr()))
-        ApplyPointee(VD);
-      return;
+        return LifetimeAnnotatedStorage::pointee(VD);
+      return {};
     }
     if (const auto *VD =
             dyn_cast_or_null<VarDecl>(getDirectlyNamedDecl(Glvalue));
         VD && VD->hasLocalStorage()) {
-      // &u / u: the whole [[uninit]] entity is initialized (or destroyed)
-      // by the callee, exactly as `u = e` would credit it.
+      // &u / u: the whole [[uninit]] entity, exactly the storage `u = e`
+      // would credit.
       if (VD->hasAttr<UninitAttr>())
-        ApplyWhole(VD);
-      // r (a marked reference bound onward): its referent is initialized; a
-      // reference cannot be reseated, so no store ever clears the credit --
-      // only a [[now_uninit]] callee's withdrawal does.
-      else if (VD->getType()->isReferenceType() &&
-               VD->hasAttr<RefToUninitAttr>())
-        ApplyPointee(VD);
+        return LifetimeAnnotatedStorage::whole(VD);
+      // r (a marked reference bound onward): its referent; a reference
+      // cannot be reseated, so no store ever clears that credit -- only a
+      // [[now_uninit]] callee's withdrawal does.
+      if (VD->getType()->isReferenceType() && VD->hasAttr<RefToUninitAttr>())
+        return LifetimeAnnotatedStorage::pointee(VD);
     }
-    return;
+    return {};
   }
-  // p as a pointer value: the callee initializes (or destroys) p's pointee
-  // -- §6.2's initialize2(p) example verbatim. Only a directly named marked
-  // local/parameter pointer is trackable; reseating p afterwards clears
-  // pointee credit like any other.
+  // p as a pointer value: p's pointee -- §6.2's initialize2(p) example
+  // verbatim. Only a directly named marked local/parameter pointer is
+  // trackable; reseating p afterwards clears pointee credit like any other.
   if (const VarDecl *VD = getCreditableMarkedPointer(E))
-    ApplyPointee(VD);
+    return LifetimeAnnotatedStorage::pointee(VD);
+  return {};
+}
+
+void SemaProfiles::recordLifetimeAnnotatedArgument(QualType T, const Expr *Src,
+                                                   bool Withdraw) {
+  // A [[now_init]] callee's initialization marks the resolved storage
+  // stored; a [[now_uninit]] callee's destruction clears the mark.
+  LifetimeAnnotatedStorage Storage = resolveLifetimeAnnotatedStorage(T, Src);
+  switch (Storage.StorageKind) {
+  case LifetimeAnnotatedStorage::Kind::None:
+    break;
+  case LifetimeAnnotatedStorage::Kind::Whole:
+    if (Withdraw)
+      StoreCredit.clearWholeStored(Storage.Entity);
+    else
+      StoreCredit.markWholeStored(Storage.Entity);
+    break;
+  case LifetimeAnnotatedStorage::Kind::Pointee:
+    if (Withdraw)
+      StoreCredit.clearPointee(Storage.Entity);
+    else
+      StoreCredit.markPointeeStored(Storage.Entity);
+    break;
+  case LifetimeAnnotatedStorage::Kind::Member:
+    if (Withdraw)
+      StoreCredit.clearMemberStored(Storage.Base, Storage.Field);
+    else
+      StoreCredit.markMemberStored(Storage.Base, Storage.Field);
+    break;
+  }
 }
 
 void SemaProfiles::checkInitProfileVariadicArgument(const Expr *Arg) {
