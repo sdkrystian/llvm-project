@@ -1148,17 +1148,70 @@ classifyUninitPassThrough(const Expr *E, UninitStorage EmptyListState,
   return std::nullopt;
 }
 
+// The role a known allocator callee's return value plays as an uninit
+// source (paper §4.3: functions like malloc "must be known to an analyzer
+// enforcing the initialization profile").
+enum class AllocatorCalleeRole {
+  /// Returns freshly allocated, uninitialized storage -- classified like a
+  /// [[ref_to_uninit]] return, including the trusted-marker degradation.
+  ReturnsUninitialized,
+  /// Returns initialized (zero-filled) storage.
+  ReturnsInitialized,
+  /// Returns storage affirmatively neither -- realloc's preserved prefix
+  /// plus indeterminate tail.
+  ReturnsUnknown,
+};
+
+// The known allocator callees, keyed by builtin ID: the malloc and alloca
+// families return uninitialized memory, calloc returns zero-initialized
+// memory, realloc a preserved prefix plus an indeterminate tail. The builtin
+// ID is absent under -fno-builtin / -ffreestanding (or on a non-matching
+// declaration), where an allocator falls back to the trusted default -- a
+// missed diagnostic, never a false positive. Future known callees go here;
+// the raw ::operator new arm below is name-keyed, not builtin-keyed, and
+// stays beside its user. (getBuiltinFunctionEffects in
+// SemaFunctionEffects.cpp groups almost exactly this set for the
+// `allocating` effect.)
+struct AllocatorCalleeEntry {
+  unsigned BuiltinID;
+  AllocatorCalleeRole Role;
+};
+
+static constexpr AllocatorCalleeEntry AllocatorCallees[] = {
+    {Builtin::BImalloc, AllocatorCalleeRole::ReturnsUninitialized},
+    {Builtin::BI__builtin_malloc, AllocatorCalleeRole::ReturnsUninitialized},
+    {Builtin::BIaligned_alloc, AllocatorCalleeRole::ReturnsUninitialized},
+    {Builtin::BIalloca, AllocatorCalleeRole::ReturnsUninitialized},
+    {Builtin::BI__builtin_alloca, AllocatorCalleeRole::ReturnsUninitialized},
+    {Builtin::BI__builtin_alloca_uninitialized,
+     AllocatorCalleeRole::ReturnsUninitialized},
+    {Builtin::BI__builtin_alloca_with_align,
+     AllocatorCalleeRole::ReturnsUninitialized},
+    {Builtin::BI__builtin_alloca_with_align_uninitialized,
+     AllocatorCalleeRole::ReturnsUninitialized},
+    {Builtin::BI__builtin_operator_new,
+     AllocatorCalleeRole::ReturnsUninitialized},
+    {Builtin::BIcalloc, AllocatorCalleeRole::ReturnsInitialized},
+    {Builtin::BI__builtin_calloc, AllocatorCalleeRole::ReturnsInitialized},
+    {Builtin::BIrealloc, AllocatorCalleeRole::ReturnsUnknown},
+    {Builtin::BI__builtin_realloc, AllocatorCalleeRole::ReturnsUnknown},
+};
+
+static std::optional<AllocatorCalleeRole>
+getAllocatorCalleeRole(const FunctionDecl *FD) {
+  unsigned ID = FD->getBuiltinID();
+  if (ID == 0)
+    return std::nullopt;
+  for (const AllocatorCalleeEntry &Entry : AllocatorCallees)
+    if (Entry.BuiltinID == ID)
+      return Entry.Role;
+  return std::nullopt;
+}
+
 // A call to a [[ref_to_uninit]]-returning function yields uninitialized
 // storage (the pointed-to memory, or the returned referent) -- deferred to
-// Unknown when the marker is trusted (a store). Known allocator callees are
-// classified the same way without a marker (paper §4.3: functions like
-// malloc "must be known to an analyzer enforcing the initialization
-// profile"): the malloc and alloca families return uninitialized memory,
-// calloc returns zero-initialized memory, and realloc returns a preserved
-// prefix plus an indeterminate tail -- affirmatively neither, so Unknown.
-// The builtin ID is absent under -fno-builtin / -ffreestanding (or a
-// non-matching declaration), where an allocator falls back to the trusted
-// default below -- a missed diagnostic, never a false positive. Any other
+// Unknown when the marker is trusted (a store). Known allocator callees
+// (the table above) are classified the same way without a marker. Any other
 // unmarked direct callee is trusted Initialized (paper §4.3); a call with
 // no direct callee (through a function pointer) is Unknown. Shared by both
 // recognizers.
@@ -1176,26 +1229,16 @@ static UninitStorage classifyRefToUninitCallee(const CallExpr *CE,
   if (FD->getDeclName().getCXXOverloadedOperator() == OO_New ||
       FD->getDeclName().getCXXOverloadedOperator() == OO_Array_New)
     RefersToUninit |= FD->isReplaceableGlobalAllocationFunction();
-  switch (FD->getBuiltinID()) {
-  case Builtin::BImalloc:
-  case Builtin::BI__builtin_malloc:
-  case Builtin::BIaligned_alloc:
-  case Builtin::BIalloca:
-  case Builtin::BI__builtin_alloca:
-  case Builtin::BI__builtin_alloca_uninitialized:
-  case Builtin::BI__builtin_alloca_with_align:
-  case Builtin::BI__builtin_alloca_with_align_uninitialized:
-  case Builtin::BI__builtin_operator_new:
-    RefersToUninit = true;
-    break;
-  case Builtin::BIcalloc:
-  case Builtin::BI__builtin_calloc:
-    return UninitStorage::Initialized;
-  case Builtin::BIrealloc:
-  case Builtin::BI__builtin_realloc:
-    return UninitStorage::Unknown;
-  default:
-    break;
+  if (std::optional<AllocatorCalleeRole> Role = getAllocatorCalleeRole(FD)) {
+    switch (*Role) {
+    case AllocatorCalleeRole::ReturnsUninitialized:
+      RefersToUninit = true;
+      break;
+    case AllocatorCalleeRole::ReturnsInitialized:
+      return UninitStorage::Initialized;
+    case AllocatorCalleeRole::ReturnsUnknown:
+      return UninitStorage::Unknown;
+    }
   }
   if (!RefersToUninit)
     return UninitStorage::Initialized;
