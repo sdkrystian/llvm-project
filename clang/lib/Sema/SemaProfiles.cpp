@@ -1775,29 +1775,44 @@ void SemaProfiles::recordLifetimeAnnotatedArgument(QualType T, const Expr *Src,
     break;
   case LifetimeAnnotatedStorage::Kind::Whole:
     if (Withdraw)
-      StoreCredit.clearWholeStored(Storage.Entity,
-                                   currentStoreStrength(Storage.Entity));
+      StoreCredit.destroyWhole(Storage.Entity,
+                               currentStoreStrength(Storage.Entity));
     else
       StoreCredit.markWholeStored(Storage.Entity,
                                   currentStoreStrength(Storage.Entity));
     break;
   case LifetimeAnnotatedStorage::Kind::Pointee:
     if (Withdraw)
-      StoreCredit.clearPointee(Storage.Entity,
-                               currentStoreStrength(Storage.Entity));
+      StoreCredit.destroyPointee(Storage.Entity,
+                                 currentStoreStrength(Storage.Entity));
     else
       StoreCredit.markPointeeStored(Storage.Entity,
                                     currentStoreStrength(Storage.Entity));
     break;
   case LifetimeAnnotatedStorage::Kind::Member:
     if (Withdraw)
-      StoreCredit.clearMemberStored(Storage.Base, Storage.Field,
-                                    currentStoreStrength(Storage.Base));
+      StoreCredit.destroyMember(Storage.Base, Storage.Field,
+                                currentStoreStrength(Storage.Base));
     else
       StoreCredit.markMemberStored(Storage.Base, Storage.Field,
                                    currentStoreStrength(Storage.Base));
     break;
   }
+}
+
+bool SemaProfiles::storageIsDestroyed(QualType T, const Expr *Src) const {
+  LifetimeAnnotatedStorage Storage = resolveLifetimeAnnotatedStorage(T, Src);
+  switch (Storage.StorageKind) {
+  case LifetimeAnnotatedStorage::Kind::None:
+    return false;
+  case LifetimeAnnotatedStorage::Kind::Whole:
+    return StoreCredit.isWholeDestroyed(Storage.Entity);
+  case LifetimeAnnotatedStorage::Kind::Pointee:
+    return StoreCredit.isPointeeDestroyed(Storage.Entity);
+  case LifetimeAnnotatedStorage::Kind::Member:
+    return StoreCredit.isMemberDestroyed(Storage.Base, Storage.Field);
+  }
+  llvm_unreachable("unknown LifetimeAnnotatedStorage kind");
 }
 
 void SemaProfiles::checkInitProfileVariadicArgument(const Expr *Arg) {
@@ -2152,13 +2167,13 @@ void SemaProfiles::recordInitProfileStore(const Expr *LHS) {
     // cannot be reseated, so the credit is never cleared.
     StoreCredit.markPointeeStored(VD, currentStoreStrength(VD));
   } else if (VD->getType()->isPointerType()) {
-    // p = q / p += n / ++p reseats the marked pointer: any pointee credit no
-    // longer describes the new pointee -- retired wholesale (Definite),
-    // whatever the reseat's own conditionality: the parse-order status quo.
-    // The clear lives here in the tail funnel -- not in
-    // checkInitProfilePointerAssignment, which runs only for plain
-    // assignment and would miss compound reseats.
-    StoreCredit.clearPointee(VD, InitCreditStrength::Definite);
+    // p = q / p += n / ++p reseats the marked pointer: every pointee fact
+    // -- credit and the destroyed state -- described the old pointee, so
+    // all of it is retired wholesale, whatever the reseat's own
+    // conditionality (the parse-order status quo). The clear lives here in
+    // the tail funnel -- not in checkInitProfilePointerAssignment, which
+    // runs only for plain assignment and would miss compound reseats.
+    StoreCredit.clearPointee(VD);
   }
 }
 

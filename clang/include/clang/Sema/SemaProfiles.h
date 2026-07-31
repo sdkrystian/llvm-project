@@ -474,9 +474,17 @@ public:
   /// and add (\p Withdraw false) or remove (true) the resolved storage's
   /// credit, at the strength the current parse position earns toward it
   /// (currentStoreStrength; for a withdrawal, the strength rule described
-  /// at recordNowUninitArgument).
+  /// at recordNowUninitArgument). A Definite withdrawal also records the
+  /// storage as destroyed; any recorded store retires that state.
   void recordLifetimeAnnotatedArgument(QualType T, const Expr *Src,
                                        bool Withdraw);
+
+  /// True if the storage \p Src (bound as \p T) denotes -- resolved through
+  /// the same shapes as recordLifetimeAnnotatedArgument -- is in the
+  /// destroyed state: definitely destroyed by a [[now_uninit]] callee and
+  /// not stored or reinitialized since. Read-only; untrackable shapes are
+  /// never destroyed.
+  bool storageIsDestroyed(QualType T, const Expr *Src) const;
 
   /// True if the current expression-evaluation context never executes at
   /// runtime (unevaluated or discarded-statement), mirroring
@@ -615,20 +623,28 @@ public:
     /// The [[uninit]] entity itself was assigned (u = e, u @= e, ++u).
     /// Every store earns the Maybe credit; a \p Strength of Definite (an
     /// unconditional store in the owning function, currentStoreStrength)
-    /// earns the Definite bit besides.
+    /// earns the Definite bit besides. A store at either strength retires
+    /// the destroyed state: a write to a built-in *is* its initialization,
+    /// and clearing on a conditional store only converts a would-be
+    /// double-destroy error into a missed diagnostic.
     void markWholeStored(const VarDecl *VD, InitCreditStrength Strength) {
       Entity[VD] |= storedBits(WholeStoredMaybe, WholeStoredDefinite,
                                Strength);
+      Entity[VD] &= ~unsigned(WholeDestroyed);
     }
-    /// A [[now_uninit]] callee's withdrawal of whole-entity credit.
-    /// \p Strength is the *destroy's* certainty: a Definite destroy
-    /// withdraws both strengths; a merely-possible one withdraws only the
-    /// Definite claim -- it may have destroyed the storage, so no
-    /// credit-fired diagnostic may rely on it, while the Maybe credit
-    /// (which only ever suppresses) survives.
-    void clearWholeStored(const VarDecl *VD, InitCreditStrength Strength) {
+    /// A [[now_uninit]] callee destroyed the whole entity. \p Strength is
+    /// the *destroy's* certainty: a Definite destroy withdraws credit of
+    /// both strengths and records the destroyed state; a merely-possible
+    /// one withdraws only the Definite claim -- it may have destroyed the
+    /// storage, so no credit-fired diagnostic may rely on it, while the
+    /// Maybe credit (which only ever suppresses) survives -- and records
+    /// no destroyed state, since that state is a diagnostic's firing basis
+    /// and must be definite by construction.
+    void destroyWhole(const VarDecl *VD, InitCreditStrength Strength) {
       Entity[VD] &= ~clearedBits(WholeStoredMaybe, WholeStoredDefinite,
                                  Strength);
+      if (Strength == InitCreditStrength::Definite)
+        Entity[VD] |= WholeDestroyed;
     }
     bool hasWholeStored(const VarDecl *VD,
                         InitCreditStrength Strength) const {
@@ -637,21 +653,34 @@ public:
              (It->second & queriedBit(WholeStoredMaybe, WholeStoredDefinite,
                                       Strength));
     }
+    bool isWholeDestroyed(const VarDecl *VD) const {
+      auto It = Entity.find(VD);
+      return It != Entity.end() && (It->second & WholeDestroyed);
+    }
 
     /// The storage behind the [[ref_to_uninit]] entity was written through
-    /// the exact *p / r lvalue (strength semantics as for markWholeStored).
+    /// the exact *p / r lvalue (strength and destroyed-state semantics as
+    /// for markWholeStored).
     void markPointeeStored(const VarDecl *VD, InitCreditStrength Strength) {
       Entity[VD] |= storedBits(PointeeStoredMaybe, PointeeStoredDefinite,
                                Strength);
+      Entity[VD] &= ~unsigned(PointeeDestroyed);
     }
-    /// Reseating a marked pointer -- or a [[now_uninit]] callee's
-    /// withdrawal: the pointee credit no longer describes the storage.
-    /// A reseat passes Definite (any reseat retires the credit wholesale,
-    /// whatever its own conditionality -- the parse-order status quo); a
-    /// withdrawal passes the destroy's certainty, as for clearWholeStored.
-    void clearPointee(const VarDecl *VD, InitCreditStrength Strength) {
+    /// A [[now_uninit]] callee destroyed the pointee (semantics as for
+    /// destroyWhole).
+    void destroyPointee(const VarDecl *VD, InitCreditStrength Strength) {
       Entity[VD] &= ~clearedBits(PointeeStoredMaybe, PointeeStoredDefinite,
                                  Strength);
+      if (Strength == InitCreditStrength::Definite)
+        Entity[VD] |= PointeeDestroyed;
+    }
+    /// Reseating a marked pointer: every pointee fact -- credit of both
+    /// strengths and the destroyed state -- described the old pointee, so
+    /// all of it is retired wholesale, whatever the reseat's own
+    /// conditionality (the parse-order status quo).
+    void clearPointee(const VarDecl *VD) {
+      Entity[VD] &= ~unsigned(PointeeStoredMaybe | PointeeStoredDefinite |
+                              PointeeDestroyed);
     }
     bool hasPointeeStored(const VarDecl *VD,
                           InitCreditStrength Strength) const {
@@ -660,24 +689,31 @@ public:
              (It->second & queriedBit(PointeeStoredMaybe,
                                       PointeeStoredDefinite, Strength));
     }
+    bool isPointeeDestroyed(const VarDecl *VD) const {
+      auto It = Entity.find(VD);
+      return It != Entity.end() && (It->second & PointeeDestroyed);
+    }
 
     /// The [[uninit]] member \p F of the base object \p Base (a
     /// resolveMemberStoreBase key) was assigned whole. Only whole-member
     /// stores are ever recorded: member *pointee* stores (*a.p = e) are
     /// deliberately never credited -- per-object pointee aliasing (copies
-    /// share pointees) makes them unsound to approximate. Strength
-    /// semantics as for markWholeStored.
+    /// share pointees) makes them unsound to approximate. Strength and
+    /// destroyed-state semantics as for markWholeStored.
     void markMemberStored(const Decl *Base, const FieldDecl *F,
                           InitCreditStrength Strength) {
       Member[{Base, F}] |= storedBits(WholeStoredMaybe, WholeStoredDefinite,
                                       Strength);
+      Member[{Base, F}] &= ~unsigned(WholeDestroyed);
     }
-    /// A [[now_uninit]] callee's withdrawal of whole-member credit
-    /// (strength semantics as for clearWholeStored).
-    void clearMemberStored(const Decl *Base, const FieldDecl *F,
-                           InitCreditStrength Strength) {
+    /// A [[now_uninit]] callee destroyed the member (semantics as for
+    /// destroyWhole).
+    void destroyMember(const Decl *Base, const FieldDecl *F,
+                       InitCreditStrength Strength) {
       Member[{Base, F}] &= ~clearedBits(WholeStoredMaybe, WholeStoredDefinite,
                                         Strength);
+      if (Strength == InitCreditStrength::Definite)
+        Member[{Base, F}] |= WholeDestroyed;
     }
     bool hasMemberStored(const Decl *Base, const FieldDecl *F,
                          InitCreditStrength Strength) const {
@@ -686,16 +722,28 @@ public:
              (It->second & queriedBit(WholeStoredMaybe, WholeStoredDefinite,
                                       Strength));
     }
+    bool isMemberDestroyed(const Decl *Base, const FieldDecl *F) const {
+      auto It = Member.find({Base, F});
+      return It != Member.end() && (It->second & WholeDestroyed);
+    }
 
   private:
-    /// The per-entry credit bits, one pair per strength: a Definite store
+    /// The per-entry bits: one stored pair per strength -- a Definite store
     /// sets both bits of its pair, so the Maybe bit is exactly "any store"
-    /// and the Definite bit exactly "an unconditional owner-function store".
+    /// and the Definite bit exactly "an unconditional owner-function store"
+    /// -- plus a destroyed bit per shape, recording that the storage's
+    /// lifetime was definitely ended and not restarted (P4222R2 §1:
+    /// destroying an object twice is an error). Destroyed is
+    /// Definite-by-construction: only an unconditional same-function
+    /// destroy sets it, so it can serve as a diagnostic's firing basis
+    /// without a strength of its own.
     enum Flags : unsigned {
       WholeStoredMaybe = 1u << 0,
       PointeeStoredMaybe = 1u << 1,
       WholeStoredDefinite = 1u << 2,
       PointeeStoredDefinite = 1u << 3,
+      WholeDestroyed = 1u << 4,
+      PointeeDestroyed = 1u << 5,
     };
 
     /// The bits a store of \p Strength sets.
@@ -705,7 +753,7 @@ public:
                  ? (MaybeBit | DefiniteBit)
                  : MaybeBit;
     }
-    /// The bits a withdrawal of \p Strength clears.
+    /// The stored bits a destroy of \p Strength clears.
     static unsigned clearedBits(unsigned MaybeBit, unsigned DefiniteBit,
                                 InitCreditStrength Strength) {
       return Strength == InitCreditStrength::Definite
