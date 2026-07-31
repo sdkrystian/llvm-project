@@ -3101,4 +3101,3 @@ Attr *Sema::CreateAnnotationAttr(const ParsedAttr &AL) {
 
   return CreateAnnotationAttr(AL, Str, Args);
 }
-
