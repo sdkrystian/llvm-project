@@ -511,14 +511,21 @@ static bool anyLeafHasNSDMI(const CXXRecordDecl *RD) {
   return false;
 }
 
+// UntrustRoot bypasses the user-provided default-constructor trust for the
+// *root* record only (recursion always re-trusts): defaultInitIsVacuous uses
+// it to ask the factual question about a class whose out-of-line defaulted
+// default constructor is user-provided yet initializes nothing.
 static bool defaultInitLeavesScalarIndeterminateImpl(
     ASTContext &Ctx, QualType T, bool HonorUninitMarkers,
-    llvm::SmallPtrSetImpl<const CXXRecordDecl *> &Visited) {
+    llvm::SmallPtrSetImpl<const CXXRecordDecl *> &Visited,
+    bool UntrustRoot = false) {
   if (T->isDependentType() || T->isIncompleteType())
     return false;
   if (const ArrayType *AT = Ctx.getAsArrayType(T))
+    // An array of T default-initializes its elements: same question, same
+    // root (an [[uninit]] S s[4] stands or falls with S itself).
     return defaultInitLeavesScalarIndeterminateImpl(
-        Ctx, AT->getElementType(), HonorUninitMarkers, Visited);
+        Ctx, AT->getElementType(), HonorUninitMarkers, Visited, UntrustRoot);
   if (T->isReferenceType())
     return false;
   const auto *RD = T->getAsCXXRecordDecl();
@@ -537,7 +544,7 @@ static bool defaultInitLeavesScalarIndeterminateImpl(
   // unnamed bit-fields are not members ([class.bit]) and cannot be named or
   // initialized, so a union of only unnamed bit-fields counts as empty.
   if (RD->isUnion()) {
-    if (RD->hasUserProvidedDefaultConstructor())
+    if (!UntrustRoot && RD->hasUserProvidedDefaultConstructor())
       return false;
     bool AnyMember = false;
     bool AllStdByte = true;
@@ -576,7 +583,7 @@ static bool defaultInitLeavesScalarIndeterminateImpl(
     return false;
   // Trust a user-provided default constructor: ctor_uninit_member checks at its
   // definition.
-  if (RD->hasUserProvidedDefaultConstructor())
+  if (!UntrustRoot && RD->hasUserProvidedDefaultConstructor())
     return false;
   for (const CXXBaseSpecifier &Base : RD->bases())
     if (defaultInitLeavesScalarIndeterminateImpl(Ctx, Base.getType(),
@@ -604,16 +611,87 @@ bool SemaProfiles::defaultInitLeavesScalarIndeterminate(QualType T,
                                                   HonorUninitMarkers, Visited);
 }
 
+// Whether RD has a default constructor explicitly defaulted *after* its
+// first declaration: the one default-constructor form that is user-provided
+// ([class.default.ctor]) while potentially initializing nothing. RD's
+// record-level triviality bit misreports it forever -- addedMember saw the
+// plain first declaration and marked the class non-trivial, and both the
+// deferred recomputation at class completion and Sema::SpecialMemberIsTrivial
+// refuse user-provided members -- so a caller that needs the truth must
+// recompute it from the class shape (below).
+static bool hasOutOfLineDefaultedDefaultCtor(const CXXRecordDecl *RD) {
+  for (const CXXConstructorDecl *Ctor : RD->ctors()) {
+    if (!Ctor->isDefaultConstructor() || Ctor->isDeleted())
+      continue;
+    for (const FunctionDecl *R : Ctor->redecls())
+      if (R->isExplicitlyDefaulted() && R->isThisDeclarationADefinition())
+        return true;
+  }
+  return false;
+}
+
+// Whether RD's explicitly-defaulted default constructor is trivial --
+// initializes nothing at all -- recomputed from the class shape because
+// every stored triviality bit misreports the out-of-line defaulted form
+// (see above). The ingredients of [class.default.ctor]p3, each answered
+// from subobject state that *is* accurate: no vtable pointer to write
+// (dynamic class), no default member initializer anywhere it would apply
+// (an anonymous-record member's leaves make that member's own record
+// non-trivial, which the member check sees), and only trivially
+// default-constructible bases and members. Conservative by construction: a
+// subobject whose own bit is poisoned the same way reads non-trivial, so
+// the recovery is missed there and the marker stays rejected -- never the
+// reverse.
+static bool defaultedDefaultCtorIsTrivial(ASTContext &Ctx,
+                                          const CXXRecordDecl *RD) {
+  if (RD->isDynamicClass())
+    return false;
+  for (const CXXBaseSpecifier &Base : RD->bases()) {
+    const auto *BRD = Base.getType()->getAsCXXRecordDecl();
+    if (!BRD || !BRD->hasDefinition() || !BRD->hasTrivialDefaultConstructor())
+      return false;
+  }
+  for (const FieldDecl *F : RD->fields()) {
+    if (F->hasInClassInitializer())
+      return false;
+    if (const auto *FRD =
+            Ctx.getBaseElementType(F->getType())->getAsCXXRecordDecl())
+      if (!FRD->hasDefinition() || !FRD->hasTrivialDefaultConstructor())
+        return false;
+  }
+  return true;
+}
+
 bool SemaProfiles::defaultInitIsVacuous(QualType T) {
   QualType BaseTy = getASTContext().getBaseElementType(T);
+  bool UntrustRoot = false;
   if (const auto *RD = BaseTy->getAsCXXRecordDecl()) {
     // A non-trivial default constructor (user-provided anywhere in the
     // subtree, a default member initializer, a virtual table pointer)
     // initializes something, contradicting an [[uninit]] marker (paper §4.2
     // rule 2, §5.3). hasTrivialDefaultConstructor asserts without a
     // definition.
-    if (!RD->hasDefinition() || !RD->hasTrivialDefaultConstructor())
+    if (!RD->hasDefinition())
       return false;
+    if (!RD->hasTrivialDefaultConstructor()) {
+      // The record-level bit is poisoned for a default constructor
+      // explicitly defaulted after its first declaration (see the helpers
+      // above), so recompute the definition's triviality from the class
+      // shape: when it is trivial, the defaulted definition runs no code,
+      // and the marker's factual question falls to the walk below with the
+      // root's user-provided trust -- exactly the trust that misreports
+      // this class -- bypassed. Subobject trust stays intact, and only the
+      // marker rules use this recovery: the uninit_decl walk keeps trusting
+      // the class, which is what makes the constructor-definition check the
+      // single diagnosis point. A marker written *before* the '= default'
+      // definition has been parsed still sees the unrecovered state and
+      // stays rejected (see Limitations).
+      const CXXRecordDecl *Def = RD->getDefinition();
+      if (!hasOutOfLineDefaultedDefaultCtor(Def) ||
+          !defaultedDefaultCtorIsTrivial(getASTContext(), Def))
+        return false;
+      UntrustRoot = true;
+    }
     // A deleted default constructor keeps the triviality bit, but makes
     // default-initialization ill-formed rather than a no-op: the entity can
     // never be left default-initialized, so the marker is unsatisfiable. Only
@@ -629,7 +707,10 @@ bool SemaProfiles::defaultInitIsVacuous(QualType T) {
   // type (e.g. an empty struct) has nothing uninitialized, so the marker
   // contradicts it too, while a type whose only indeterminate scalars are
   // themselves marked members really is left uninitialized.
-  return defaultInitLeavesScalarIndeterminate(T, /*HonorUninitMarkers=*/false);
+  llvm::SmallPtrSet<const CXXRecordDecl *, 8> Visited;
+  return defaultInitLeavesScalarIndeterminateImpl(getASTContext(), T,
+                                                  /*HonorUninitMarkers=*/false,
+                                                  Visited, UntrustRoot);
 }
 
 // Whether \p Init is the *shape* of a plain default-initialization -- the

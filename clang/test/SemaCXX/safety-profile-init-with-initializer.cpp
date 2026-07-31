@@ -60,6 +60,58 @@ void test_written_brace_on_trivial() {
   (void)t;
 }
 
+// A default constructor explicitly defaulted *after* its first declaration
+// is user-provided, yet a trivial defaulted definition initializes nothing:
+// the marker is factually correct and accepted. (The record-level
+// triviality bit is poisoned forever by the plain first declaration, so the
+// definition's triviality is recomputed from the class shape.)
+struct OutOfLineDefaulted {
+  int d [[uninit]]; // acknowledged, so the constructor check stays quiet
+  OutOfLineDefaulted();
+};
+OutOfLineDefaulted::OutOfLineDefaulted() = default;
+void test_out_of_line_defaulted_marker() {
+  OutOfLineDefaulted s [[uninit]]; // OK: the defaulted definition runs no code
+  [[uninit]] OutOfLineDefaulted arr[2]; // OK: element-wise the same question
+  (void)s; (void)arr;
+}
+
+// The recovery keys on the *definition's* triviality: an NSDMI or a vtable
+// pointer makes the defaulted definition initialize something, so the
+// marker stays contradicted.
+struct OutOfLineDefaultedNSDMI {
+  int d = 0;
+  OutOfLineDefaultedNSDMI();
+};
+OutOfLineDefaultedNSDMI::OutOfLineDefaultedNSDMI() = default;
+struct OutOfLineDefaultedPolymorphic {
+  int d [[uninit]];
+  OutOfLineDefaultedPolymorphic();
+  virtual void v();
+};
+OutOfLineDefaultedPolymorphic::OutOfLineDefaultedPolymorphic() = default;
+void test_out_of_line_defaulted_nonvacuous_marker() {
+  OutOfLineDefaultedNSDMI n [[uninit]]; // expected-error {{variable 'n' cannot be marked '[[uninit]]' under profile 'std::init'; default-initialization of its type 'OutOfLineDefaultedNSDMI' does not leave it uninitialized}} \
+                                        // expected-note {{default-initialization of 'OutOfLineDefaultedNSDMI' runs a constructor}}
+  OutOfLineDefaultedPolymorphic p [[uninit]]; // expected-error {{variable 'p' cannot be marked '[[uninit]]' under profile 'std::init'; default-initialization of its type 'OutOfLineDefaultedPolymorphic' does not leave it uninitialized}} \
+                                              // expected-note {{default-initialization of 'OutOfLineDefaultedPolymorphic' runs a constructor}}
+  (void)n; (void)p;
+}
+
+// Declaration-order caveat (see Limitations): a marker written before the
+// '= default' definition has been parsed still sees the
+// declared-but-undefined constructor and stays rejected.
+struct DefaultedAfterMarker {
+  int d [[uninit]];
+  DefaultedAfterMarker();
+};
+void test_marker_before_defaulted_definition() {
+  DefaultedAfterMarker m [[uninit]]; // expected-error {{variable 'm' cannot be marked '[[uninit]]' under profile 'std::init'; default-initialization of its type 'DefaultedAfterMarker' does not leave it uninitialized}} \
+                                     // expected-note {{default-initialization of 'DefaultedAfterMarker' runs a constructor}}
+  (void)m;
+}
+DefaultedAfterMarker::DefaultedAfterMarker() = default;
+
 struct MarkedMemberAgg { int x [[uninit]]; };
 
 void test_marked_member_agg() {

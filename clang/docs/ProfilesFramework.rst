@@ -636,7 +636,10 @@ constructor of its own.  The in-class form (``S() = default;`` in the
 class body) takes a different route: it is not user-provided, so the class
 is not trusted and each indeterminate use draws ``uninit_decl`` at the
 variable instead.  A defaulted *copy* or *move* constructor initializes
-every member from its source and is never flagged.
+every member from its source and is never flagged.  When such a defaulted
+definition is trivial -- it initializes nothing at all -- ``[[uninit]]``
+on a variable of the type is accepted once the ``= default`` definition
+has been parsed (see `Limitations`_ for the ordering caveat).
 
 
 Global and Static Variables
@@ -719,6 +722,11 @@ false positive.
   initialized by the most-derived class).
 - A read of a tracked member inside another member's default initializer is
   not detected.
+- ``[[uninit]]`` on a type whose default constructor is explicitly defaulted
+  *after* its first declaration is accepted only once the ``= default``
+  definition has been parsed: a marker written between the class definition
+  and the constructor's still sees a declared-but-undefined constructor and
+  is rejected as running a constructor.
 - Whole-entity store credit is parse-order only: a store under a condition
   (or inside a lambda body) credits every later use in parse order, so a
   read or binding on a path that skips the store is a missed diagnostic.
