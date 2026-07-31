@@ -2384,10 +2384,10 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC) {
   // A `V.m` access on a tracked local, resolved to its base DeclRefExpr and,
   // when m is one of the tracked members, its pair index. Base is null (and
   // Idx ~0u) when E is not such an access at all; Base is set with Idx left
-  // ~0u when the accessed member is an *untracked* sibling -- reaching one
-  // member never exposes another, so the base is still consumed rather than
-  // escaping (the escape arm below would otherwise credit every tracked
-  // member of V and lose the diagnostic for them).
+  // ~0u when the accessed member is an *untracked* sibling of a shape that
+  // cannot reach another member, so the base is consumed rather than escaping
+  // (the escape arm below would otherwise credit every tracked member of V and
+  // lose the diagnostic for them).
   struct TrackedAccess {
     unsigned Idx = ~0u;
     const DeclRefExpr *Base = nullptr;
@@ -2401,7 +2401,21 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC) {
     if (!V || !VarRange.count(V))
       return {};
     auto It = PairIdx.find({V, F});
-    return {It == PairIdx.end() ? ~0u : It->second, DRE};
+    if (It != PairIdx.end())
+      return {It->second, DRE};
+    // An untracked sibling. Reaching it consumes the base without exposing
+    // the object -- but only for a member that cannot itself reach one: a
+    // pointer or reference member may denote a tracked member (a
+    // [[ref_to_uninit]] member aimed at one by a default member initializer
+    // needs no `&V.m` in the body, so nothing else escapes the object), and a
+    // class or array member can hold such a value. Restricting the benign
+    // shapes to the scalars this pass tracks keeps the escape crediting
+    // conservative, which for locals must stay a missed diagnostic rather
+    // than become a false positive.
+    QualType FT = F->getType();
+    if (!FT->isIntegralOrEnumerationType() && !FT->isFloatingType())
+      return {};
+    return {~0u, DRE};
   };
 
   // First pass: the base DeclRefExprs consumed by a recognized member read or

@@ -152,9 +152,9 @@ int test_escape_placement_new() {
   return a.m; // OK: escaped
 }
 
-// Reaching an *untracked* sibling member is not one of those escapes:
-// accessing `n` cannot give `sm` a value, so the tracked member stays tracked
-// across a sibling read, store, or increment.
+// Reaching an *untracked* sibling of a scalar shape is not one of those
+// escapes: accessing `n` cannot give `sm` a value, so the tracked member stays
+// tracked across a sibling read, store, or increment.
 struct Siblings {
   int sm [[uninit]]; // expected-note 3 {{member 'sm' declared here}}
   int n = 0;
@@ -175,6 +175,35 @@ int test_sibling_incdec_not_an_escape() {
   Siblings s;
   ++s.n;
   return s.sm; // expected-error {{member 'sm' is read before initialization under profile 'std::init'}}
+}
+
+// A pointer or reference sibling is the exception: its *value* can denote the
+// tracked member, and a marked one can be aimed at it by a default member
+// initializer -- with no `&a.sm` anywhere to escape the object. Reaching such a
+// sibling therefore stays an escape, so a store through it keeps crediting the
+// tracked member. Erring the other way would make this pass reject a store it
+// simply cannot see, and for locals its imprecision must stay a missed
+// diagnostic (contrast the ctor-body pass, which is strict by design).
+struct SelfAimed {
+  int sm [[uninit]];
+  int *p [[ref_to_uninit]] = &sm;
+};
+int test_pointer_sibling_still_escapes() {
+  SelfAimed a;
+  *a.p = 5;      // initializes a.sm through the marked member
+  return a.sm;   // OK: reaching 'p' escaped the object
+}
+
+// The same boundary with no aliasing in sight: a bare value read of a pointer
+// sibling is an escape too, because the recognizer cannot tell the two apart.
+struct PtrSibling {
+  int sm [[uninit]];
+  int *p = nullptr;
+};
+int test_pointer_sibling_read_escapes(PtrSibling a) {
+  int *local = a.p;
+  (void)local;
+  return a.sm;   // OK: escaped (a missed diagnostic, deliberately)
 }
 
 // A class with a user-provided constructor is trusted (paper §5.1): its
