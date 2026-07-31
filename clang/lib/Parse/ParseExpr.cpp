@@ -37,6 +37,7 @@
 #include "clang/Sema/SemaObjC.h"
 #include "clang/Sema/SemaOpenACC.h"
 #include "clang/Sema/SemaOpenMP.h"
+#include "clang/Sema/SemaProfiles.h"
 #include "clang/Sema/SemaSYCL.h"
 #include "clang/Sema/TypoCorrection.h"
 #include "llvm/ADT/SmallVector.h"
@@ -398,6 +399,11 @@ Parser::ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec) {
     // Special case handling for the ternary operator.
     ExprResult TernaryMiddle(true);
     if (NextTokPrec == prec::Conditional) {
+      // The middle operand is conditionally evaluated and introduces no
+      // parser Scope; bump the profile store recorder's expression depth
+      // for the region (see SemaProfiles::currentConditionalDepth).
+      SemaProfiles::ConditionalExprRegion CondMiddle(Actions.Profiles(),
+                                                     /*Conditional=*/true);
       if (getLangOpts().CPlusPlus11 && Tok.is(tok::l_brace)) {
         // Parse a braced-init-list here for error recovery purposes.
         SourceLocation BraceLoc = Tok.getLocation();
@@ -471,6 +477,16 @@ Parser::ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec) {
     // braced-init-list on the RHS of an assignment. For better diagnostics,
     // parse as if we were allowed braced-init-lists everywhere, and check that
     // they only appear on the RHS of assignments later.
+    //
+    // The right operand of && and || and the operand after a conditional's
+    // ':' (this same region, including the GNU x ?: y form) are
+    // conditionally evaluated and introduce no parser Scope; bump the
+    // profile store recorder's expression depth while they -- including any
+    // tighter-binding continuation the recursive call below parses -- are
+    // in flight (see SemaProfiles::currentConditionalDepth).
+    SemaProfiles::ConditionalExprRegion CondRHS(
+        Actions.Profiles(),
+        OpToken.isOneOf(tok::question, tok::ampamp, tok::pipepipe));
     ExprResult RHS;
     bool RHSIsInitList = false;
     if (getLangOpts().CPlusPlus11 && Tok.is(tok::l_brace)) {

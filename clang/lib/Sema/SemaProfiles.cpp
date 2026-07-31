@@ -26,6 +26,7 @@
 #include "clang/Basic/SourceManager.h"
 #include "clang/Sema/Attr.h"
 #include "clang/Sema/ParsedAttr.h"
+#include "clang/Sema/Scope.h"
 #include "clang/Sema/Sema.h"
 
 using namespace clang;
@@ -1928,6 +1929,19 @@ void SemaProfiles::checkInitProfileIncDec(Expr *Operand, SourceLocation OpLoc) {
 bool SemaProfiles::inNeverExecutedContext() const {
   return SemaRef.isUnevaluatedContext() ||
          SemaRef.currentEvaluationContext().isDiscardedStatementContext();
+}
+
+unsigned SemaProfiles::currentConditionalDepth() const {
+  unsigned Depth = ConditionalExprDepth;
+  // Count the conditional scopes from the current parse position up to --
+  // and excluding -- the nearest function scope. Any flag beyond a plain
+  // declaration/compound-statement block marks a scope conditional (see the
+  // header comment for the rationale and the known conservatisms).
+  for (const Scope *S = SemaRef.getCurScope();
+       S && !(S->getFlags() & Scope::FnScope); S = S->getParent())
+    if (S->getFlags() & ~unsigned(Scope::DeclScope | Scope::CompoundStmtScope))
+      ++Depth;
+  return Depth;
 }
 
 void SemaProfiles::recordInitProfileStore(const Expr *LHS) {

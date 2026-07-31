@@ -519,6 +519,59 @@ public:
   /// object also reachable other ways) -- is untrackable per object: null.
   const Decl *resolveMemberStoreBase(const MemberExpr *ME) const;
 
+  /// Depth of conditionally-evaluated *expression* regions enclosing the
+  /// current parse position -- the right operand of && and ||, and the
+  /// operands after a conditional's ? and : (including the GNU x ?: y
+  /// form). These are the only conditional constructs that introduce no
+  /// parser Scope, so the scope walk of currentConditionalDepth cannot see
+  /// them; the parser bumps this counter around them instead (via
+  /// ConditionalExprRegion). Deliberately not saved and restored around a
+  /// lambda body nested inside a conditional expression
+  /// (c ? [&]{ ... }() : 0), so stores in such a body conservatively count
+  /// as conditional -- only ever losing a credit-fired diagnostic, never
+  /// adding a false positive.
+  unsigned ConditionalExprDepth = 0;
+
+  /// RAII bump of ConditionalExprDepth around a conditionally-evaluated
+  /// expression region; inert when \p Conditional is false (the same parse
+  /// site also handles unconditional operators).
+  class ConditionalExprRegion {
+    SemaProfiles *SP;
+
+  public:
+    ConditionalExprRegion(SemaProfiles &SP, bool Conditional)
+        : SP(Conditional ? &SP : nullptr) {
+      if (this->SP)
+        ++this->SP->ConditionalExprDepth;
+    }
+    ConditionalExprRegion(const ConditionalExprRegion &) = delete;
+    ConditionalExprRegion &operator=(const ConditionalExprRegion &) = delete;
+    ~ConditionalExprRegion() {
+      if (SP)
+        --SP->ConditionalExprDepth;
+    }
+  };
+
+  /// How many conditionally-executed regions enclose the current parse
+  /// position within the innermost function body: ConditionalExprDepth plus
+  /// the number of conditional parser scopes from the current scope up to --
+  /// and excluding -- the nearest function scope (or the top, if none). A
+  /// scope counts as conditional when it carries any flag beyond a plain
+  /// declaration/compound-statement block: safe by default, since a future
+  /// statement kind cannot silently become "unconditional", while plain
+  /// nested { } blocks correctly do not count. Stopping at the nearest
+  /// function scope makes a store at a lambda body's top level depth 0
+  /// *within the lambda* -- isolation from the *enclosing* function's
+  /// entities is a same-function predicate's job, not depth's. Known
+  /// conservatisms, each of which can only lose a credit-fired diagnostic
+  /// and never adds a false positive: a store in an if/while/for
+  /// *condition* or a for *init-statement* counts as conditional (the
+  /// control scope is pushed before the parens are parsed), and both
+  /// do { } while bodies and the taken branch of if constexpr count as
+  /// conditional. Parser-only: meaningless during template instantiation,
+  /// where getCurScope() does not track the instantiated function.
+  unsigned currentConditionalDepth() const;
+
   /// Parse-order store credit (see recordInitProfileStore): one façade owns
   /// the whole-entity/pointee credit of local variables and the per-object
   /// whole-member credit, so every mutation and query is a named operation
