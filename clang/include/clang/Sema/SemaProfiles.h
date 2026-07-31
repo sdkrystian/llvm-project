@@ -522,7 +522,10 @@ public:
   /// body that owns the credited entity -- outside template instantiation
   /// (the parser scope chain is parser-only state, and the requires-uninit
   /// direction ignores credit while instantiating anyway), at conditional
-  /// depth 0 (currentConditionalDepth), with the enclosing function's
+  /// depth 0 (currentConditionalDepth), before the function has branched
+  /// by goto (a goto earlier in the body could skip a later store without
+  /// introducing any scope; the tracking flag is shared with switch, an
+  /// over-inclusion in the safe direction), with the enclosing function's
   /// parse-time pattern equal to the entity's owning function: the
   /// DeclContext of a credited local/parameter (or of the directly named
   /// local base object of member credit), or the key itself for

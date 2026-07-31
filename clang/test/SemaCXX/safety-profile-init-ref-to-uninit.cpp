@@ -2299,6 +2299,54 @@ void test_store_in_condition_suppresses_only(bool c) {
   int *q = &u;                   // OK: suppressing credit applies
   (void)r; (void)q;
 }
+// A goto seen earlier in the function can skip any later store without
+// introducing a scope, so a store after one records suppressing credit
+// only...
+void test_store_after_goto(bool c) {
+  int u [[uninit]];
+  if (c)
+    goto skip;
+  u = 5;
+skip:;
+  int *r [[ref_to_uninit]] = &u; // OK: the goto path skips the store
+  int *q = &u;                   // OK: suppressing credit applies
+  (void)r; (void)q;
+}
+// ...while a store *before* the first goto keeps its firing strength: no
+// later jump can skip it on any path that still reaches the binding.
+void test_store_before_goto(bool c) {
+  int u [[uninit]];
+  u = 5;
+  if (c)
+    goto skip;
+skip:;
+  int *r [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)r;
+}
+// A goto-skippable *destroy* records no destroyed state either: the later
+// destroy may be the only one that ran.
+void test_destroy_after_goto(bool c) {
+  int u [[uninit]];
+  u = 5;
+  if (c)
+    goto skip;
+  nu_wipe(&u);
+skip:;
+  nu_wipe(&u); // OK: the first destroy may have been skipped
+}
+// The branch flag is shared with switch, so a store after one is
+// conservatively suppressing-only too -- a documented over-inclusion in
+// the safe direction (a switch cannot actually skip a later store).
+void test_store_after_switch(int n) {
+  int u [[uninit]];
+  switch (n) {
+  default:
+    break;
+  }
+  u = 5;
+  int *r [[ref_to_uninit]] = &u; // OK: conservatively conditional
+  (void)r;
+}
 
 // Store credit is recorded at pattern-parse time too: non-dependent
 // store-then-read inside a template is checked at definition time (the

@@ -527,7 +527,10 @@ lambda or block body may not have executed on the path that reaches the
 binding, so the marked binding stays legal: never a false positive.  (The
 conditionality test is syntactic and errs the same way: a store in a
 condition itself, in a ``do`` body, or in the taken branch of
-``if constexpr`` conservatively counts as conditional.)  Element accesses
+``if constexpr`` conservatively counts as conditional, and a store after a
+``goto`` -- which could jump over it without introducing any scope -- or
+after a ``switch`` (the shared branch flag) earns the suppressing credit
+only.)  Element accesses
 (``p[i]``) are never credited in either direction (§5.4's random-access
 ban applies even to ``p[0]``), element stores earn no credit, and address
 escapes (passing ``&u`` to a ``[[ref_to_uninit]]`` parameter) never count
@@ -793,7 +796,12 @@ false positive.
   syntactic and conservative in the same direction: a store in an
   ``if``/``while``/``for`` condition or a ``for`` init-statement, in a
   ``do`` body, or in the taken branch of ``if constexpr`` counts as
-  conditional.  ``[[now_uninit]]`` withdrawal mirrors the split: a
+  conditional, and once a function has branched -- ``goto``, indirect or
+  ``asm goto``, or a ``switch``, which shares the tracking flag -- every
+  later store counts as conditional too (a goto earlier in the body could
+  skip the store without introducing any scope; the switch inclusion is a
+  further over-approximation).  ``[[now_uninit]]`` withdrawal mirrors the
+  split: a
   conditional destroy revokes only the firing strength and leaves the
   suppressing credit in place.  The requires-uninitialized direction also
   consults credit at definition time only -- an instantiation re-walk does

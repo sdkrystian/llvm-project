@@ -27,6 +27,7 @@
 #include "clang/Sema/Attr.h"
 #include "clang/Sema/ParsedAttr.h"
 #include "clang/Sema/Scope.h"
+#include "clang/Sema/ScopeInfo.h"
 #include "clang/Sema/Sema.h"
 
 using namespace clang;
@@ -2170,6 +2171,19 @@ SemaProfiles::currentStoreStrength(const Decl *CreditKey) const {
   // operator=, so their member credit keys on that operator's parse-time
   // pattern, which no user-code consult ever matches.
   if (!SemaRef.getCurScope() || currentConditionalDepth() != 0)
+    return InitCreditStrength::Maybe;
+  // A goto seen *earlier* in this function body can jump over any later
+  // store without introducing a scope (if (c) goto skip; u = 5; skip:),
+  // which neither the scope walk nor the expression-depth counter can see
+  // -- so once the current function has branched (goto, indirect goto, asm
+  // goto; a switch shares the flag, an over-inclusion in the safe
+  // direction), every later store records Maybe only: lost requires-uninit
+  // diagnostics, never a false positive. A goto *after* a store cannot
+  // skip it -- every path from the goto's target to a later consult
+  // re-passes the store or never reaches the consult -- so stores before
+  // the first branch keep their strength.
+  const sema::FunctionScopeInfo *FSI = SemaRef.getCurFunction();
+  if (!FSI || FSI->HasBranchIntoScope || FSI->HasIndirectGoto)
     return InitCreditStrength::Maybe;
   // The innermost function-like context, walked from CurContext directly:
   // getCurFunctionDecl skips blocks and captured regions, but a store
