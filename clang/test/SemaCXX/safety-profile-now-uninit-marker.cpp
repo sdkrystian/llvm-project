@@ -19,6 +19,14 @@ void wipe_after_name [[now_uninit]] (int *p);
 // a lifetime for its argument's storage.
 [[now_init]] [[now_uninit]] void reinit(int *p [[ref_to_uninit]]);
 
+// The exact construct_at/destroy_at declarations the documentation
+// recommends (ProfilesFramework.rst's lifecycle section and the
+// now_init/now_uninit AttributeReference entries): the prefix
+// decl-specifier position must compile as written.
+template<class T, class... A>
+[[now_init]] T* construct_at(T* p [[ref_to_uninit]], A&&... args);
+template<class T> [[now_uninit]] void destroy_at(T* p);
+
 struct S {
   [[now_uninit]] void wipe_member(int *p);
   [[now_uninit]] void wipe_out_of_line(int *p);

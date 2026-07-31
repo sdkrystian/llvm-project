@@ -210,6 +210,18 @@ entries for their placement rules); the rules below carry weight only while
 ``std::init`` is enforced.  Reads and writes of ``std::byte`` objects are
 exempt from all of them (§4.5).
 
+**Marker placement.**  The marker family -- ``[[uninit]]``,
+``[[ref_to_uninit]]``, ``[[now_init]]``, and ``[[now_uninit]]`` --
+appertains to *declarations*, in either of the two standard positions: the
+prefix decl-specifier position (``[[now_uninit]] void destroy_at(T* p);``)
+or the declarator-id position (``int u [[uninit]];``,
+``void destroy_at [[now_uninit]] (T* p);``).  The *type* positions some of
+the paper's examples use -- after a ``*`` or ``&``, after an array bound,
+or after a parameter list -- are rejected: neither
+``int arr[10] [[uninit]];`` nor ``void destroy_at(T* p) [[now_uninit]];``
+compiles.  The markers' exact placement and spelling track an open
+committee question (P4222R2 §4.7).
+
 Each rule has a name, so it can be suppressed individually with
 ``[[profiles::suppress(std::init, rule: "name")]]`` (see `Suppressing
 Enforcement`_):
@@ -582,8 +594,8 @@ reinitializer's destroy half takes), or storage never constructed at all
 (rule ``double_destroy``), definite by construction: only an unconditional
 same-function destroy records the destroyed state, and any store or
 ``[[now_init]]`` call retires it.  Declare ``destroy_at`` as
-``template<class T> void
-destroy_at(T* p) [[now_uninit]];`` and the construct/destroy/construct cycle
+``template<class T> [[now_uninit]] void destroy_at(T* p);`` and the
+construct/destroy/construct cycle
 is legal, a second destruction is rejected, and binding the destroyed
 storage to an ordinary pointer or reference is rejected as the
 unmarked-direction violation.  A function may
