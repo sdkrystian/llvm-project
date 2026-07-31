@@ -179,3 +179,42 @@ struct PoolDeallocated {
 void test_class_specific_operator_delete(int *p [[ref_to_uninit]]) {
   PoolDeallocated::operator delete(p); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 }
+
+// The delete-*expression* performs the same withdrawal without ever
+// passing through the parameter-binding funnel: no diagnostic on the
+// operand in any state (matching its historical silence), and `delete q`
+// agrees with `::operator delete(q)` on what follows.
+void test_delete_uninit(int *p [[ref_to_uninit]]) {
+  delete p; // OK: releasing never-written storage
+}
+void test_read_after_delete(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  int x = *p; // OK: credited
+  delete p;
+  int y = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  (void)x; (void)y;
+}
+void test_read_after_delete_array(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  delete[] p;
+  int x = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  (void)x;
+}
+// A non-dependent delete inside a template withdraws at definition time,
+// like every other non-dependent release.
+template <class T>
+void template_delete(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  delete p;
+  int x = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  (void)x;
+}
+
+// __builtin_operator_delete binds its operand against a type-only entity
+// (no ParmVarDecl, no callee in sight), so the release relaxation cannot
+// key on it: marked storage keeps the unmarked-direction error -- a known
+// gap (see Limitations), like the builtin-ID-less _aligned_free and
+// reallocarray.
+void test_builtin_operator_delete_gap(int *p [[ref_to_uninit]]) {
+  __builtin_operator_delete(p); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}

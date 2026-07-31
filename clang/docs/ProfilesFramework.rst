@@ -604,9 +604,12 @@ credit, so a read through a marked pointer after ``free(p)`` is diagnosed
 again.  Unlike a ``[[now_uninit]]`` callee they are exempt from
 ``double_destroy``: ``destroy_at(p); free(p);`` is correct, because ending
 an object's lifetime and releasing its storage are different operations.
-Like the allocator side, the ``free``/``realloc`` recognition keys on
-Clang's builtin knowledge, which ``-fno-builtin`` disables -- losing the
-relaxation there, never accepting anything new elsewhere.
+The ``delete`` and ``delete[]`` *expressions* perform the same withdrawal
+-- with no diagnostic on the operand, matching their historical silence --
+so ``delete q;`` and ``::operator delete(q);`` agree on everything that
+follows.  Like the allocator side, the ``free``/``realloc`` recognition
+keys on Clang's builtin knowledge, which ``-fno-builtin`` disables --
+losing the relaxation there, never accepting anything new elsewhere.
 
 
 Constructors
@@ -736,6 +739,12 @@ false positive.
   follow-up that recovers this diagnostic -- a storage-release callee would
   then stop being ``[[now_uninit]]``-equivalent -- while double destruction
   and use-after-destroy are retained either way.
+- ``__builtin_operator_delete`` binds its operand with no parameter
+  declaration in sight, so the storage-release relaxation cannot recognize
+  it: passing ``[[ref_to_uninit]]`` storage keeps the unmarked-direction
+  error.  ``_aligned_free`` and ``reallocarray`` carry no Clang builtin ID
+  and are likewise unrecognized; declaring such a function
+  ``[[now_uninit]]`` is the workaround.
 - A ``new`` expression whose result is not bound to anything (``new int;``)
   is not checked.
 - A call through a function pointer cannot see parameter markers on the

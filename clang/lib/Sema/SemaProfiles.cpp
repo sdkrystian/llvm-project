@@ -1885,6 +1885,26 @@ void SemaProfiles::recordLifetimeAnnotatedArgument(QualType T, const Expr *Src,
   }
 }
 
+void SemaProfiles::checkInitProfileDeleteOperand(const Expr *Operand) {
+  // The delete-expression twin of a storage-release callee's binding: the
+  // operand's storage is released, so its credit is withdrawn -- a later
+  // whole-`*q` read through a marked pointer classifies uninitialized
+  // again -- with no binding diagnostic, matching both the funnel's
+  // release relaxation and this expression's historical silence. An
+  // instantiation-dependent operand defers: TreeTransform re-invokes
+  // ActOnCXXDelete at instantiation, re-running this hook with the
+  // substituted operand.
+  if (!getLangOpts().Profiles || !Operand ||
+      Operand->isInstantiationDependent())
+    return;
+  // A delete in a never-executed context releases nothing (the recorders'
+  // shared gate).
+  if (inNeverExecutedContext())
+    return;
+  recordLifetimeAnnotatedArgument(Operand->getType(), Operand,
+                                  /*Withdraw=*/true);
+}
+
 bool SemaProfiles::storageIsDestroyed(QualType T, const Expr *Src) const {
   LifetimeAnnotatedStorage Storage = resolveLifetimeAnnotatedStorage(T, Src);
   switch (Storage.StorageKind) {

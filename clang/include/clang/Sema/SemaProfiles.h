@@ -487,6 +487,19 @@ public:
   /// never destroyed.
   bool storageIsDestroyed(QualType T, const Expr *Src) const;
 
+  /// std::init: a delete-expression releases its operand's storage like a
+  /// storage-release callee, but the operand never passes through the
+  /// parameter-binding funnel (Sema::ActOnCXXDelete converts it with no
+  /// InitializedEntity, and a usual operator delete's void* parameter skips
+  /// the conversion entirely), so this hook -- hosted just before the
+  /// CXXDeleteExpr is built -- records the same credit withdrawal, with no
+  /// binding diagnostic of its own: `delete q` and `::operator delete(q)`
+  /// agree, and a later whole-`*q` read through the marked pointer is
+  /// diagnosed. An instantiation-dependent operand defers to the rebuilt
+  /// expression (TreeTransform re-invokes ActOnCXXDelete); never-executed
+  /// contexts withdraw nothing, as everywhere.
+  void checkInitProfileDeleteOperand(const Expr *Operand);
+
   /// True if the current expression-evaluation context never executes at
   /// runtime (unevaluated or discarded-statement), mirroring
   /// shouldEmitProfileViolation's context checks: a store or a callee
