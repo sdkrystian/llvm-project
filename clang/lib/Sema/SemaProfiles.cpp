@@ -1505,25 +1505,36 @@ void SemaProfiles::checkInitProfileRefToUninit(SourceLocation Loc,
   static constexpr StringRef Rule = "ref_to_uninit";
   if (!shouldEmitProfileViolation(Profile, Rule, Loc, D))
     return;
-  // Parse-order credit is recorded once and never rewound, so when an
-  // instantiation re-walks a statement the pattern already checked, the
-  // re-check runs against post-pattern state -- including credit this very
-  // statement recorded (a reused [[now_init]] argument, a this-member store
-  // keyed to the pattern). For the requires-uninit direction that would turn
-  // the pattern's pass into a false "must refer to uninitialized memory" at
-  // instantiation, so a marked target classifies without credit while
-  // instantiating: the reverse direction diagnoses at definition time, and a
-  // violation established only by credit in fully dependent code is a missed
-  // diagnostic -- the usual parse-order trade, never a false positive.
-  // Direct classification (an initialized global, a marked entity) is
-  // unaffected, so credit-free reverse violations still repeat per
-  // instantiation, and the accepting direction keeps credit everywhere (a
-  // deferred binding needs the instantiation-time record to pass).
-  UninitStorage SrcState = classifyUninitSource(
-      getASTContext(), Src, IsReference,
-      TargetIsRefToUninit && SemaRef.inTemplateInstantiation()
-          ? UninitBindAccess
-          : UninitBindAccess.withCredit(this));
+  // Credit is asymmetric between the two directions. For an unmarked
+  // target, credit only ever *suppresses* the diagnostic, so any store
+  // earlier in parse order suffices: Maybe. For a marked target the
+  // diagnostic *fires on* credit ("must refer to uninitialized memory"),
+  // which is only sound when the store provably ran, so the consult is
+  // Definite: an unconditional store in the entity's own function. A store
+  // under an if/loop/lambda earns only Maybe credit and cannot reject a
+  // legal marked binding on the untaken path -- never a false positive.
+  //
+  // While instantiating, the requires-uninit direction classifies without
+  // credit entirely: parse-order credit is recorded once and never rewound,
+  // so when an instantiation re-walks a statement the pattern already
+  // checked, the re-check runs against post-pattern state -- including
+  // credit this very statement recorded (a reused [[now_init]] argument, a
+  // this-member store keyed to the pattern), which would turn the pattern's
+  // pass into a false "must refer to uninitialized memory". The reverse
+  // direction diagnoses at definition time, and a violation established
+  // only by credit in fully dependent code is a missed diagnostic -- the
+  // usual parse-order trade, never a false positive. Direct classification
+  // (an initialized global, a marked entity) is unaffected, so credit-free
+  // reverse violations still repeat per instantiation, and the accepting
+  // direction keeps credit everywhere (a deferred binding needs the
+  // instantiation-time record to pass).
+  UninitAccessOpts Opts = UninitBindAccess;
+  if (!TargetIsRefToUninit)
+    Opts = Opts.withCredit(this, InitCreditStrength::Maybe);
+  else if (!SemaRef.inTemplateInstantiation())
+    Opts = Opts.withCredit(this, InitCreditStrength::Definite);
+  UninitStorage SrcState =
+      classifyUninitSource(getASTContext(), Src, IsReference, Opts);
   unsigned IsRef = IsReference ? 1 : 0;
   // A marked target is a violation only against an affirmatively Initialized
   // source: an Unknown one (pointer arithmetic, an integer-to-pointer cast, a
@@ -1670,28 +1681,40 @@ SemaProfiles::resolveLifetimeAnnotatedStorage(QualType T,
 void SemaProfiles::recordLifetimeAnnotatedArgument(QualType T, const Expr *Src,
                                                    bool Withdraw) {
   // A [[now_init]] callee's initialization marks the resolved storage
-  // stored; a [[now_uninit]] callee's destruction clears the mark.
+  // stored; a [[now_uninit]] callee's destruction clears the mark. Both
+  // directions share one strength: for the credit it is the store's
+  // certainty (only an unconditional same-function call may fire the
+  // requires-uninit direction), for the withdrawal the destroy's -- a
+  // conditional destroy may or may not have run, so it kills only the
+  // Definite claim and leaves the suppression-only Maybe credit in place
+  // (see recordNowUninitArgument).
   LifetimeAnnotatedStorage Storage = resolveLifetimeAnnotatedStorage(T, Src);
   switch (Storage.StorageKind) {
   case LifetimeAnnotatedStorage::Kind::None:
     break;
   case LifetimeAnnotatedStorage::Kind::Whole:
     if (Withdraw)
-      StoreCredit.clearWholeStored(Storage.Entity);
+      StoreCredit.clearWholeStored(Storage.Entity,
+                                   currentStoreStrength(Storage.Entity));
     else
-      StoreCredit.markWholeStored(Storage.Entity);
+      StoreCredit.markWholeStored(Storage.Entity,
+                                  currentStoreStrength(Storage.Entity));
     break;
   case LifetimeAnnotatedStorage::Kind::Pointee:
     if (Withdraw)
-      StoreCredit.clearPointee(Storage.Entity);
+      StoreCredit.clearPointee(Storage.Entity,
+                               currentStoreStrength(Storage.Entity));
     else
-      StoreCredit.markPointeeStored(Storage.Entity);
+      StoreCredit.markPointeeStored(Storage.Entity,
+                                    currentStoreStrength(Storage.Entity));
     break;
   case LifetimeAnnotatedStorage::Kind::Member:
     if (Withdraw)
-      StoreCredit.clearMemberStored(Storage.Base, Storage.Field);
+      StoreCredit.clearMemberStored(Storage.Base, Storage.Field,
+                                    currentStoreStrength(Storage.Base));
     else
-      StoreCredit.markMemberStored(Storage.Base, Storage.Field);
+      StoreCredit.markMemberStored(Storage.Base, Storage.Field,
+                                   currentStoreStrength(Storage.Base));
     break;
   }
 }
@@ -1931,6 +1954,42 @@ bool SemaProfiles::inNeverExecutedContext() const {
          SemaRef.currentEvaluationContext().isDiscardedStatementContext();
 }
 
+SemaProfiles::InitCreditStrength
+SemaProfiles::currentStoreStrength(const Decl *CreditKey) const {
+  // The parser scope chain is parser-only state (see Sema::getCurScope):
+  // during template instantiation it describes whatever the parser happens
+  // to be doing, not the instantiated function -- and the requires-uninit
+  // direction ignores credit while instantiating anyway.
+  if (SemaRef.inTemplateInstantiation())
+    return InitCreditStrength::Maybe;
+  // Synthesized special members build member-wise assignments through
+  // CheckAssignmentOperands *outside* template instantiation with a stale
+  // getCurScope() (Sema::DefineImplicitCopyAssignment). Harmless without
+  // further machinery: those stores target this->m of the synthesized
+  // operator=, so their member credit keys on that operator's parse-time
+  // pattern, which no user-code consult ever matches.
+  if (!SemaRef.getCurScope() || currentConditionalDepth() != 0)
+    return InitCreditStrength::Maybe;
+  const FunctionDecl *Enclosing =
+      getParseTimePattern(SemaRef.getCurFunctionDecl(/*AllowLambda=*/true));
+  if (!Enclosing)
+    return InitCreditStrength::Maybe;
+  // The credited entity's owning function: the DeclContext of a credited
+  // local/parameter (or of the directly named local base object of member
+  // credit); for current-object member credit the key *is* the owning
+  // function's parse-time pattern (see resolveMemberStoreBase). The
+  // same-function requirement stops a store inside a lambda body from
+  // definitely crediting an enclosing function's local -- depth alone
+  // cannot, since the walk stops at the lambda's own function scope.
+  const DeclContext *Owner = nullptr;
+  if (const auto *VD = dyn_cast<VarDecl>(CreditKey))
+    Owner = VD->getDeclContext();
+  else if (const auto *FD = dyn_cast<FunctionDecl>(CreditKey))
+    Owner = FD;
+  return Owner == Enclosing ? InitCreditStrength::Definite
+                            : InitCreditStrength::Maybe;
+}
+
 unsigned SemaProfiles::currentConditionalDepth() const {
   unsigned Depth = ConditionalExprDepth;
   // Count the conditional scopes from the current parse position up to --
@@ -1969,7 +2028,7 @@ void SemaProfiles::recordInitProfileStore(const Expr *LHS) {
   if (const auto *UO = dyn_cast<UnaryOperator>(E);
       UO && UO->getOpcode() == UO_Deref) {
     if (const VarDecl *VD = getCreditableMarkedPointer(UO->getSubExpr()))
-      StoreCredit.markPointeeStored(VD);
+      StoreCredit.markPointeeStored(VD, currentStoreStrength(VD));
     return;
   }
   // a.m = e / this->m = e / m = e (also `@=` and `++`, via the shared
@@ -1991,7 +2050,7 @@ void SemaProfiles::recordInitProfileStore(const Expr *LHS) {
     if (const auto *F = dyn_cast<FieldDecl>(ME->getMemberDecl());
         F && F->hasAttr<UninitAttr>())
       if (const Decl *Base = resolveMemberStoreBase(ME))
-        StoreCredit.markMemberStored(Base, F);
+        StoreCredit.markMemberStored(Base, F, currentStoreStrength(Base));
     return;
   }
   // Only a directly named local-storage variable can be credited beyond
@@ -2002,7 +2061,7 @@ void SemaProfiles::recordInitProfileStore(const Expr *LHS) {
   // u = e (also u @= e and ++u, via the inc-dec host): assigning the whole
   // [[uninit]] entity is its initialization (paper §4.2/§4.5).
   if (VD->hasAttr<UninitAttr>()) {
-    StoreCredit.markWholeStored(VD);
+    StoreCredit.markWholeStored(VD, currentStoreStrength(VD));
     return;
   }
   if (!VD->hasAttr<RefToUninitAttr>())
@@ -2010,13 +2069,15 @@ void SemaProfiles::recordInitProfileStore(const Expr *LHS) {
   if (VD->getType()->isReferenceType()) {
     // r = e stores through the marked reference to its referent; a reference
     // cannot be reseated, so the credit is never cleared.
-    StoreCredit.markPointeeStored(VD);
+    StoreCredit.markPointeeStored(VD, currentStoreStrength(VD));
   } else if (VD->getType()->isPointerType()) {
     // p = q / p += n / ++p reseats the marked pointer: any pointee credit no
-    // longer describes the new pointee. The clear lives here in the tail
-    // funnel -- not in checkInitProfilePointerAssignment, which runs only
-    // for plain assignment and would miss compound reseats.
-    StoreCredit.clearPointee(VD);
+    // longer describes the new pointee -- retired wholesale (Definite),
+    // whatever the reseat's own conditionality: the parse-order status quo.
+    // The clear lives here in the tail funnel -- not in
+    // checkInitProfilePointerAssignment, which runs only for plain
+    // assignment and would miss compound reseats.
+    StoreCredit.clearPointee(VD, InitCreditStrength::Definite);
   }
 }
 

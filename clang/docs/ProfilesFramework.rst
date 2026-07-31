@@ -498,16 +498,28 @@ initialized (§4.2, §4.5).  After ``u = 5;`` the ``[[uninit]]`` variable
 ``u`` counts as initialized, and after ``*p = 5;`` the marked pointer's
 pointee does, for every later ``*p`` access -- until ``p`` is reseated
 (``p = q``, ``p += n``, ``p++``), which withdraws the credit; a store
-through a marked *reference* credits its referent permanently.  The credit
-works in both directions: ``int *q = &u;`` after the store is accepted, and
-``int *r [[ref_to_uninit]] = &u;`` is now rejected -- a credited entity
-requires an unmarked target (§4.2).  Element accesses (``p[i]``) are never
-credited in either direction (§5.4's random-access ban applies even to
-``p[0]``), element stores earn no credit, and address escapes (passing
-``&u`` to a ``[[ref_to_uninit]]`` parameter) never count -- the paper
-reserves callee-initialization for ``now_init()`` (§6.2).  Class-typed
-whole-object assignment never credits either: it is a member ``operator=``
-call on uninitialized storage, rejected as above.
+through a marked *reference* credits its referent permanently.  The two
+directions consult the credit differently, because they use it
+differently.  Credit *suppresses* the unmarked-target diagnostic in plain
+parse order: ``int *q = &u;`` after any earlier store -- even one under a
+condition -- is accepted, since the storage may well be initialized (the
+untaken path is a missed diagnostic, see `Limitations`_).  Credit *fires*
+the marked-target diagnostic only when the store is unconditional in the
+entity's own function: after a top-level ``u = 5;`` a later
+``int *r [[ref_to_uninit]] = &u;`` is rejected -- a definitely initialized
+entity requires an unmarked target (§4.2) -- while a store under an
+``if``, a loop, a ``switch``, a ``try``, ``&&``/``||``/``?:``, or inside a
+lambda body may not have executed on the path that reaches the binding, so
+the marked binding stays legal: never a false positive.  (The
+conditionality test is syntactic and errs the same way: a store in a
+condition itself, in a ``do`` body, or in the taken branch of
+``if constexpr`` conservatively counts as conditional.)  Element accesses
+(``p[i]``) are never credited in either direction (§5.4's random-access
+ban applies even to ``p[0]``), element stores earn no credit, and address
+escapes (passing ``&u`` to a ``[[ref_to_uninit]]`` parameter) never count
+-- the paper reserves callee-initialization for ``now_init()`` (§6.2).
+Class-typed whole-object assignment never credits either: it is a member
+``operator=`` call on uninitialized storage, rejected as above.
 
 Whole-member stores are credited too, keyed per base object: after
 ``a.m = 5;`` on a directly named local, or ``this->m = 5;`` on the current
@@ -523,8 +535,10 @@ through a pointer, reference, or any other object -- including a copy, per
 §5.2 -- stays strict), and never member *pointee* stores (``*w.p = 5;``),
 whose aliasing is per-value: a copy of the object shares the pointee.  The
 credit is purely parse-order, with no dominance or flow analysis: a store
-under a condition credits everything after it, so a binding on the untaken
-path is a missed diagnostic (see `Limitations`_).
+under a condition still credits -- and so suppresses -- everything after
+it, so a binding on the untaken path is a missed diagnostic (see
+`Limitations`_); only the requires-uninitialized direction insists on an
+unconditional store, exactly as for locals.
 
 One kind of call *does* count as initialization: §6.2's ``[[now_init]]``
 attribute (its placement and spelling track an open committee question)
@@ -535,7 +549,8 @@ storage earns exactly the credit the equivalent direct store would --
 ``fill(&u)`` credits ``u`` whole, ``fill(p)`` credits the marked pointer's
 pointee (until ``p`` is reseated), ``fill(&a.m)`` credits the ``(a, m)``
 pair -- with the same boundaries and the same reverse-direction consequence
-(a second ``fill(&u)`` is rejected: ``u`` no longer refers to uninitialized
+(after an *unconditional* ``fill(&u)`` in the entity's own function, a
+second ``fill(&u)`` is rejected: ``u`` no longer refers to uninitialized
 memory, which incidentally catches double ``construct_at``).  This is R2
 §4.5's requested library annotation: declare ``construct_at`` with
 ``[[now_init]]`` and a ``[[ref_to_uninit]]`` first parameter and the
@@ -553,7 +568,11 @@ of the storage passed to each of its pointer or reference parameters (which
 are unmarked -- destruction takes initialized memory; apply the attribute
 only to functions that destroy *every* such argument's storage), and a call
 to one *withdraws* exactly the credit the equivalent ``[[now_init]]`` call
-would have recorded.  Declare ``destroy_at`` as ``template<class T> void
+would have recorded.  A *conditional* call -- under an ``if``, a loop, or
+any of the constructs listed above -- may or may not have destroyed the
+storage, so it withdraws only the credit's firing strength: a following
+marked binding is no longer forced, while an unmarked binding stays
+accepted.  Declare ``destroy_at`` as ``template<class T> void
 destroy_at(T* p) [[now_uninit]];`` and the construct/destroy/construct cycle
 is legal, a second destruction is rejected (the storage no longer refers to
 initialized memory, so binding it to the unmarked parameter is the
@@ -692,11 +711,22 @@ false positive.
   read or binding on a path that skips the store is a missed diagnostic.
   ``[[now_init]]`` call credit outside constructor bodies is parse-order in
   the same way (inside them it is a real dataflow fact, as above).  The
-  requires-uninitialized direction consults this credit at definition time
-  only -- an instantiation re-walk does not rewind parse-order state, so
-  re-checked statements must not trip over credit they themselves recorded
-  -- which makes a reverse-direction violation established only by credit
-  in fully dependent code a missed diagnostic as well.
+  requires-uninitialized direction is stricter about what it *fires* on:
+  only a store (or ``[[now_init]]`` call) unconditionally executed in the
+  entity's own function forces a later binding onto an unmarked target, so
+  a conditional store leaves both binding directions legal -- more missed
+  diagnostics, still no false positive.  The conditionality test is
+  syntactic and conservative in the same direction: a store in an
+  ``if``/``while``/``for`` condition or a ``for`` init-statement, in a
+  ``do`` body, or in the taken branch of ``if constexpr`` counts as
+  conditional.  ``[[now_uninit]]`` withdrawal mirrors the split: a
+  conditional destroy revokes only the firing strength and leaves the
+  suppressing credit in place.  The requires-uninitialized direction also
+  consults credit at definition time only -- an instantiation re-walk does
+  not rewind parse-order state, so re-checked statements must not trip over
+  credit they themselves recorded -- which makes a reverse-direction
+  violation established only by credit in fully dependent code a missed
+  diagnostic as well.
 - In a template, a violation in non-dependent code is diagnosed at definition
   time and may be repeated at instantiation.
 

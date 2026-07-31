@@ -1982,6 +1982,22 @@ void test_destroy_through_function_pointer() {
   (void)q;
 }
 
+// A *conditional* destroy is not an unconditional withdrawal: it revokes
+// only the credit's firing strength -- the destroy may have run, so the
+// requires-uninit direction may no longer fire on the credit -- while the
+// suppressing credit survives (the storage may still be initialized), so
+// the unmarked direction gains no new errors either. Both bindings below
+// are accepted.
+void test_conditional_destroy(bool c) {
+  int u [[uninit]];
+  now_init_fill(&u);
+  if (c)
+    nu_wipe(&u);
+  int *q = &u;                   // OK: suppressing credit survives
+  int *r [[ref_to_uninit]] = &u; // OK: no definite credit left to fire on
+  (void)q; (void)r;
+}
+
 // A callee carrying both markers is a reinitializer: it destroys and then
 // constructs its argument's storage, so the net post-call state is
 // initialized (withdrawal is recorded before credit).
@@ -2036,6 +2052,148 @@ void test_marked_ref_read_before_store(int &r [[ref_to_uninit]]) {
   int x = r; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
   r = 5;
   (void)x;
+}
+
+// The requires-uninit direction fires on credit only when the store is
+// *unconditional* in the entity's own function: a store under an if, a
+// loop, a switch, a try, &&/||/?:, or inside a lambda body may not have
+// executed on the path reaching the binding, so a marked binding after it
+// stays legal -- rejecting it would be a false positive on the untaken
+// path. The lenient direction is untouched: the same conditional store
+// still suppresses the unmarked-target error (the documented parse-order
+// missed diagnostic).
+void test_conditional_store_if(bool c) {
+  int u [[uninit]];
+  if (c)
+    u = 5;
+  int *r [[ref_to_uninit]] = &u; // OK: the store may not have run
+  int *q = &u;                   // OK: suppressing credit still applies
+  (void)r; (void)q;
+}
+void test_conditional_store_else(bool c) {
+  int u [[uninit]];
+  if (c)
+    ;
+  else
+    u = 5;
+  int *r [[ref_to_uninit]] = &u; // OK
+  (void)r;
+}
+void test_conditional_store_while(bool c) {
+  int u [[uninit]];
+  while (c)
+    u = 5;
+  int *r [[ref_to_uninit]] = &u; // OK
+  (void)r;
+}
+void test_conditional_store_for(int n) {
+  int u [[uninit]];
+  for (int i = 0; i < n; ++i)
+    u = 5;
+  int *r [[ref_to_uninit]] = &u; // OK
+  (void)r;
+}
+// A do-body store always runs, but the walk conservatively counts the loop
+// scope as conditional -- a missed strict-direction diagnostic, never a
+// false positive.
+void test_conditional_store_do(bool c) {
+  int u [[uninit]];
+  do
+    u = 5;
+  while (c);
+  int *r [[ref_to_uninit]] = &u; // OK: conservatively conditional
+  (void)r;
+}
+void test_conditional_store_switch(int n) {
+  int u [[uninit]];
+  switch (n) {
+  case 0:
+    u = 5;
+    break;
+  default:
+    break;
+  }
+  int *r [[ref_to_uninit]] = &u; // OK
+  (void)r;
+}
+void test_conditional_store_try() {
+  int u [[uninit]];
+  try {
+    u = 5;
+  } catch (...) {
+  }
+  int *r [[ref_to_uninit]] = &u; // OK: conservatively conditional
+  (void)r;
+}
+void test_conditional_store_catch() {
+  int u [[uninit]];
+  try {
+  } catch (...) {
+    u = 5;
+  }
+  int *r [[ref_to_uninit]] = &u; // OK
+  (void)r;
+}
+void test_conditional_store_logical_and(bool c) {
+  int u [[uninit]];
+  (void)(c && (u = 5));
+  int *r [[ref_to_uninit]] = &u; // OK: the RHS of && is conditional
+  (void)r;
+}
+void test_conditional_store_logical_or(bool c) {
+  int u [[uninit]];
+  (void)(c || (u = 5));
+  int *r [[ref_to_uninit]] = &u; // OK: the RHS of || is conditional
+  (void)r;
+}
+void test_conditional_store_ternary(bool c) {
+  int u [[uninit]];
+  int v [[uninit]];
+  (void)(c ? (u = 5) : 0);
+  (void)(c ? 0 : (v = 5));
+  int *ru [[ref_to_uninit]] = &u; // OK: the ?-arm is conditional
+  int *rv [[ref_to_uninit]] = &v; // OK: the :-arm is conditional
+  (void)ru; (void)rv;
+}
+void test_lambda_body_store_conditional() {
+  int u [[uninit]];
+  auto f = [&] { u = 5; };
+  (void)f;
+  int *r [[ref_to_uninit]] = &u; // OK: the lambda may never run
+  (void)r;
+}
+// A store in a plain nested { } block is unconditional: the block scope
+// carries no control flag, so the credit keeps its firing strength.
+void test_plain_block_store_still_fires() {
+  int u [[uninit]];
+  {
+    u = 5;
+  }
+  int *r [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)r;
+}
+// A store and a marked binding both at the top level of one lambda body:
+// the conditional-depth walk stops at the *nearest* function scope, so the
+// store is unconditional within the lambda and still fires.
+void test_lambda_toplevel_store_still_fires() {
+  auto f = [] {
+    int u [[uninit]];
+    u = 5;
+    int *r [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+    (void)r;
+  };
+  f();
+}
+// A store in a control-statement *condition* always runs, but the control
+// scope is pushed before the parens are parsed, so it conservatively
+// counts as conditional: suppressing credit only.
+void test_store_in_condition_suppresses_only(bool c) {
+  int u [[uninit]];
+  if ((u = 5))
+    ;
+  int *r [[ref_to_uninit]] = &u; // OK: conservatively conditional
+  int *q = &u;                   // OK: suppressing credit applies
+  (void)r; (void)q;
 }
 
 // Store credit is recorded at pattern-parse time too: non-dependent

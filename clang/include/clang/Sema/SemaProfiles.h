@@ -381,7 +381,10 @@ public:
   /// (§5.4/§5.5 ban element-wise tracking), and escapes never credit (§6.2
   /// reserves callee-initialization for now_init()). Purely parse-order --
   /// no dominance or flow analysis -- so the credit errs only toward missed
-  /// diagnostics. Deliberately not gated on enforcement or
+  /// diagnostics: every store records Maybe credit (suppression only), and
+  /// only an unconditional store in the credited entity's own function
+  /// records the Definite credit a diagnostic may fire on (see
+  /// currentStoreStrength). Deliberately not gated on enforcement or
   /// [[profiles::suppress]]: a suppressed store still initializes, and
   /// failing to credit it would turn suppression into later false positives.
   void recordInitProfileStore(const Expr *LHS);
@@ -420,7 +423,13 @@ public:
   /// same source shapes, which are marker-keyed on the source side, so an
   /// ordinary initialized argument withdraws nothing. Same gates as its
   /// sibling: not enforcement- or suppression-gated (a suppressed destroy
-  /// still destroys), but never-executed contexts withdraw nothing.
+  /// still destroys), but never-executed contexts withdraw nothing. The
+  /// withdrawal mirrors the recording's strength rule: an unconditional
+  /// same-function destroy withdraws credit of both strengths, while a
+  /// merely-possible one (under a condition, or in another function)
+  /// withdraws only the Definite claim -- it may have destroyed the
+  /// storage, so no credit-fired diagnostic may rely on it, but the Maybe
+  /// credit survives and the lenient direction gains no new errors.
   void recordNowUninitArgument(const ValueDecl *Target, QualType T,
                                const Expr *Src);
 
@@ -463,7 +472,9 @@ public:
 
   /// Resolve \p Src (bound as \p T, see resolveLifetimeAnnotatedStorage)
   /// and add (\p Withdraw false) or remove (true) the resolved storage's
-  /// credit bit.
+  /// credit, at the strength the current parse position earns toward it
+  /// (currentStoreStrength; for a withdrawal, the strength rule described
+  /// at recordNowUninitArgument).
   void recordLifetimeAnnotatedArgument(QualType T, const Expr *Src,
                                        bool Withdraw);
 
@@ -479,9 +490,25 @@ public:
   /// -- enough to *suppress* a diagnostic (the storage may well be
   /// initialized), never to fire one. A `Definite` consult uses credit as
   /// the firing basis of a diagnostic and therefore needs the store to be
-  /// certain. Recording is strength-blind for now: every recorded credit
-  /// answers either query.
+  /// certain: only a store unconditionally executed in the function body
+  /// owning the credited entity records it (see currentStoreStrength).
   enum class InitCreditStrength { Maybe, Definite };
+
+  /// The strength a store (or lifetime-annotated call) recorded at the
+  /// current parse position earns toward the credit keyed by \p CreditKey:
+  /// Definite iff the store is unconditionally executed in the function
+  /// body that owns the credited entity -- outside template instantiation
+  /// (the parser scope chain is parser-only state, and the requires-uninit
+  /// direction ignores credit while instantiating anyway), at conditional
+  /// depth 0 (currentConditionalDepth), with the enclosing function's
+  /// parse-time pattern equal to the entity's owning function: the
+  /// DeclContext of a credited local/parameter (or of the directly named
+  /// local base object of member credit), or the key itself for
+  /// current-object member credit, which resolveMemberStoreBase already
+  /// keys on that pattern. The same-function requirement is what stops a
+  /// store inside a lambda body from definitely crediting an enclosing
+  /// function's local. Everything else records Maybe.
+  InitCreditStrength currentStoreStrength(const Decl *CreditKey) const;
 
   /// True if \p VD is a local [[uninit]] variable credited by a recorded
   /// whole-entity store of at least \p Strength; the recognizers then
@@ -586,55 +613,111 @@ public:
   class InitStoreCreditMap {
   public:
     /// The [[uninit]] entity itself was assigned (u = e, u @= e, ++u).
-    void markWholeStored(const VarDecl *VD) { Entity[VD] |= WholeStored; }
+    /// Every store earns the Maybe credit; a \p Strength of Definite (an
+    /// unconditional store in the owning function, currentStoreStrength)
+    /// earns the Definite bit besides.
+    void markWholeStored(const VarDecl *VD, InitCreditStrength Strength) {
+      Entity[VD] |= storedBits(WholeStoredMaybe, WholeStoredDefinite,
+                               Strength);
+    }
     /// A [[now_uninit]] callee's withdrawal of whole-entity credit.
-    void clearWholeStored(const VarDecl *VD) {
-      Entity[VD] &= ~unsigned(WholeStored);
+    /// \p Strength is the *destroy's* certainty: a Definite destroy
+    /// withdraws both strengths; a merely-possible one withdraws only the
+    /// Definite claim -- it may have destroyed the storage, so no
+    /// credit-fired diagnostic may rely on it, while the Maybe credit
+    /// (which only ever suppresses) survives.
+    void clearWholeStored(const VarDecl *VD, InitCreditStrength Strength) {
+      Entity[VD] &= ~clearedBits(WholeStoredMaybe, WholeStoredDefinite,
+                                 Strength);
     }
     bool hasWholeStored(const VarDecl *VD,
                         InitCreditStrength Strength) const {
       auto It = Entity.find(VD);
-      return It != Entity.end() && (It->second & WholeStored);
+      return It != Entity.end() &&
+             (It->second & queriedBit(WholeStoredMaybe, WholeStoredDefinite,
+                                      Strength));
     }
 
     /// The storage behind the [[ref_to_uninit]] entity was written through
-    /// the exact *p / r lvalue.
-    void markPointeeStored(const VarDecl *VD) { Entity[VD] |= PointeeStored; }
+    /// the exact *p / r lvalue (strength semantics as for markWholeStored).
+    void markPointeeStored(const VarDecl *VD, InitCreditStrength Strength) {
+      Entity[VD] |= storedBits(PointeeStoredMaybe, PointeeStoredDefinite,
+                               Strength);
+    }
     /// Reseating a marked pointer -- or a [[now_uninit]] callee's
     /// withdrawal: the pointee credit no longer describes the storage.
-    void clearPointee(const VarDecl *VD) {
-      Entity[VD] &= ~unsigned(PointeeStored);
+    /// A reseat passes Definite (any reseat retires the credit wholesale,
+    /// whatever its own conditionality -- the parse-order status quo); a
+    /// withdrawal passes the destroy's certainty, as for clearWholeStored.
+    void clearPointee(const VarDecl *VD, InitCreditStrength Strength) {
+      Entity[VD] &= ~clearedBits(PointeeStoredMaybe, PointeeStoredDefinite,
+                                 Strength);
     }
     bool hasPointeeStored(const VarDecl *VD,
                           InitCreditStrength Strength) const {
       auto It = Entity.find(VD);
-      return It != Entity.end() && (It->second & PointeeStored);
+      return It != Entity.end() &&
+             (It->second & queriedBit(PointeeStoredMaybe,
+                                      PointeeStoredDefinite, Strength));
     }
 
     /// The [[uninit]] member \p F of the base object \p Base (a
     /// resolveMemberStoreBase key) was assigned whole. Only whole-member
     /// stores are ever recorded: member *pointee* stores (*a.p = e) are
     /// deliberately never credited -- per-object pointee aliasing (copies
-    /// share pointees) makes them unsound to approximate.
-    void markMemberStored(const Decl *Base, const FieldDecl *F) {
-      Member[{Base, F}] |= WholeStored;
+    /// share pointees) makes them unsound to approximate. Strength
+    /// semantics as for markWholeStored.
+    void markMemberStored(const Decl *Base, const FieldDecl *F,
+                          InitCreditStrength Strength) {
+      Member[{Base, F}] |= storedBits(WholeStoredMaybe, WholeStoredDefinite,
+                                      Strength);
     }
-    /// A [[now_uninit]] callee's withdrawal of whole-member credit.
-    void clearMemberStored(const Decl *Base, const FieldDecl *F) {
-      Member[{Base, F}] &= ~unsigned(WholeStored);
+    /// A [[now_uninit]] callee's withdrawal of whole-member credit
+    /// (strength semantics as for clearWholeStored).
+    void clearMemberStored(const Decl *Base, const FieldDecl *F,
+                           InitCreditStrength Strength) {
+      Member[{Base, F}] &= ~clearedBits(WholeStoredMaybe, WholeStoredDefinite,
+                                        Strength);
     }
     bool hasMemberStored(const Decl *Base, const FieldDecl *F,
                          InitCreditStrength Strength) const {
       auto It = Member.find({Base, F});
-      return It != Member.end() && (It->second & WholeStored);
+      return It != Member.end() &&
+             (It->second & queriedBit(WholeStoredMaybe, WholeStoredDefinite,
+                                      Strength));
     }
 
   private:
-    /// The per-entry credit bits.
+    /// The per-entry credit bits, one pair per strength: a Definite store
+    /// sets both bits of its pair, so the Maybe bit is exactly "any store"
+    /// and the Definite bit exactly "an unconditional owner-function store".
     enum Flags : unsigned {
-      WholeStored = 1u << 0,
-      PointeeStored = 1u << 1,
+      WholeStoredMaybe = 1u << 0,
+      PointeeStoredMaybe = 1u << 1,
+      WholeStoredDefinite = 1u << 2,
+      PointeeStoredDefinite = 1u << 3,
     };
+
+    /// The bits a store of \p Strength sets.
+    static unsigned storedBits(unsigned MaybeBit, unsigned DefiniteBit,
+                               InitCreditStrength Strength) {
+      return Strength == InitCreditStrength::Definite
+                 ? (MaybeBit | DefiniteBit)
+                 : MaybeBit;
+    }
+    /// The bits a withdrawal of \p Strength clears.
+    static unsigned clearedBits(unsigned MaybeBit, unsigned DefiniteBit,
+                                InitCreditStrength Strength) {
+      return Strength == InitCreditStrength::Definite
+                 ? (MaybeBit | DefiniteBit)
+                 : DefiniteBit;
+    }
+    /// The bit a query at \p Strength tests.
+    static unsigned queriedBit(unsigned MaybeBit, unsigned DefiniteBit,
+                               InitCreditStrength Strength) {
+      return Strength == InitCreditStrength::Definite ? DefiniteBit
+                                                      : MaybeBit;
+    }
 
     /// Whole-entity and pointee credit, keyed by the credited
     /// local/parameter (only local-storage VarDecls carrying the relevant
