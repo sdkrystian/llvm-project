@@ -1548,18 +1548,22 @@ void SemaProfiles::recordNowUninitArgument(const ValueDecl *Target, QualType T,
   recordLifetimeAnnotatedArgument(T, Src, /*Withdraw=*/true);
 }
 
-// Add or remove a credit bit: a [[now_init]] callee's initialization adds
-// it, a [[now_uninit]] callee's destruction withdraws it (removal of an
-// absent entry leaves a harmless zero entry behind).
-static void applyCreditBit(unsigned &Entry, unsigned Bit, bool Withdraw) {
-  if (Withdraw)
-    Entry &= ~Bit;
-  else
-    Entry |= Bit;
-}
-
 void SemaProfiles::recordLifetimeAnnotatedArgument(QualType T, const Expr *Src,
                                                    bool Withdraw) {
+  // A [[now_init]] callee's initialization marks the resolved storage
+  // stored; a [[now_uninit]] callee's destruction clears the mark.
+  auto ApplyWhole = [&](const VarDecl *VD) {
+    if (Withdraw)
+      StoreCredit.clearWholeStored(VD);
+    else
+      StoreCredit.markWholeStored(VD);
+  };
+  auto ApplyPointee = [&](const VarDecl *VD) {
+    if (Withdraw)
+      StoreCredit.clearPointee(VD);
+    else
+      StoreCredit.markPointeeStored(VD);
+  };
   const Expr *E = Src->IgnoreParenImpCasts();
   // Mirror the recognizers' explicit-cast pass-through (paper §4.3: a cast
   // of a marked pointer is itself marked; a reference cast denotes the same
@@ -1586,8 +1590,12 @@ void SemaProfiles::recordLifetimeAnnotatedArgument(QualType T, const Expr *Src,
     if (const auto *ME = dyn_cast<MemberExpr>(Glvalue)) {
       if (const auto *F = dyn_cast<FieldDecl>(ME->getMemberDecl());
           F && F->hasAttr<UninitAttr>())
-        if (const Decl *Base = resolveMemberStoreBase(ME))
-          applyCreditBit(MemberStoreCredit[{Base, F}], WholeStored, Withdraw);
+        if (const Decl *Base = resolveMemberStoreBase(ME)) {
+          if (Withdraw)
+            StoreCredit.clearMemberStored(Base, F);
+          else
+            StoreCredit.markMemberStored(Base, F);
+        }
       return;
     }
     // &*p / *p: the callee initializes (or destroys) the pointee of a
@@ -1595,7 +1603,7 @@ void SemaProfiles::recordLifetimeAnnotatedArgument(QualType T, const Expr *Src,
     if (const auto *UO = dyn_cast<UnaryOperator>(Glvalue);
         UO && UO->getOpcode() == UO_Deref) {
       if (const VarDecl *VD = getCreditableMarkedPointer(UO->getSubExpr()))
-        applyCreditBit(InitStoreCredit[VD], PointeeStored, Withdraw);
+        ApplyPointee(VD);
       return;
     }
     if (const auto *VD =
@@ -1604,13 +1612,13 @@ void SemaProfiles::recordLifetimeAnnotatedArgument(QualType T, const Expr *Src,
       // &u / u: the whole [[uninit]] entity is initialized (or destroyed)
       // by the callee, exactly as `u = e` would credit it.
       if (VD->hasAttr<UninitAttr>())
-        applyCreditBit(InitStoreCredit[VD], WholeStored, Withdraw);
+        ApplyWhole(VD);
       // r (a marked reference bound onward): its referent is initialized; a
       // reference cannot be reseated, so no store ever clears the credit --
       // only a [[now_uninit]] callee's withdrawal does.
       else if (VD->getType()->isReferenceType() &&
                VD->hasAttr<RefToUninitAttr>())
-        applyCreditBit(InitStoreCredit[VD], PointeeStored, Withdraw);
+        ApplyPointee(VD);
     }
     return;
   }
@@ -1619,7 +1627,7 @@ void SemaProfiles::recordLifetimeAnnotatedArgument(QualType T, const Expr *Src,
   // local/parameter pointer is trackable; reseating p afterwards clears
   // pointee credit like any other.
   if (const VarDecl *VD = getCreditableMarkedPointer(E))
-    applyCreditBit(InitStoreCredit[VD], PointeeStored, Withdraw);
+    ApplyPointee(VD);
 }
 
 void SemaProfiles::checkInitProfileVariadicArgument(const Expr *Arg) {
@@ -1881,7 +1889,7 @@ void SemaProfiles::recordInitProfileStore(const Expr *LHS) {
   if (const auto *UO = dyn_cast<UnaryOperator>(E);
       UO && UO->getOpcode() == UO_Deref) {
     if (const VarDecl *VD = getCreditableMarkedPointer(UO->getSubExpr()))
-      InitStoreCredit[VD] |= PointeeStored;
+      StoreCredit.markPointeeStored(VD);
     return;
   }
   // a.m = e / this->m = e / m = e (also `@=` and `++`, via the shared
@@ -1903,7 +1911,7 @@ void SemaProfiles::recordInitProfileStore(const Expr *LHS) {
     if (const auto *F = dyn_cast<FieldDecl>(ME->getMemberDecl());
         F && F->hasAttr<UninitAttr>())
       if (const Decl *Base = resolveMemberStoreBase(ME))
-        MemberStoreCredit[{Base, F}] |= WholeStored;
+        StoreCredit.markMemberStored(Base, F);
     return;
   }
   // Only a directly named local-storage variable can be credited beyond
@@ -1914,7 +1922,7 @@ void SemaProfiles::recordInitProfileStore(const Expr *LHS) {
   // u = e (also u @= e and ++u, via the inc-dec host): assigning the whole
   // [[uninit]] entity is its initialization (paper §4.2/§4.5).
   if (VD->hasAttr<UninitAttr>()) {
-    InitStoreCredit[VD] |= WholeStored;
+    StoreCredit.markWholeStored(VD);
     return;
   }
   if (!VD->hasAttr<RefToUninitAttr>())
@@ -1922,38 +1930,29 @@ void SemaProfiles::recordInitProfileStore(const Expr *LHS) {
   if (VD->getType()->isReferenceType()) {
     // r = e stores through the marked reference to its referent; a reference
     // cannot be reseated, so the credit is never cleared.
-    InitStoreCredit[VD] |= PointeeStored;
+    StoreCredit.markPointeeStored(VD);
   } else if (VD->getType()->isPointerType()) {
     // p = q / p += n / ++p reseats the marked pointer: any pointee credit no
     // longer describes the new pointee. The clear lives here in the tail
     // funnel -- not in checkInitProfilePointerAssignment, which runs only
     // for plain assignment and would miss compound reseats.
-    InitStoreCredit[VD] &= ~unsigned(PointeeStored);
+    StoreCredit.clearPointee(VD);
   }
 }
 
 bool SemaProfiles::hasWholeObjectStoreCredit(const ValueDecl *VD) const {
   const auto *Var = dyn_cast<VarDecl>(VD);
-  if (!Var)
-    return false;
-  auto It = InitStoreCredit.find(Var);
-  return It != InitStoreCredit.end() && (It->second & WholeStored);
+  return Var && StoreCredit.hasWholeStored(Var);
 }
 
 bool SemaProfiles::hasPointeeStoreCredit(const ValueDecl *VD) const {
   const auto *Var = dyn_cast<VarDecl>(VD);
-  if (!Var)
-    return false;
-  auto It = InitStoreCredit.find(Var);
-  return It != InitStoreCredit.end() && (It->second & PointeeStored);
+  return Var && StoreCredit.hasPointeeStored(Var);
 }
 
 bool SemaProfiles::hasMemberStoreCredit(const Decl *Base,
                                         const FieldDecl *F) const {
-  if (!Base || !F)
-    return false;
-  auto It = MemberStoreCredit.find({Base, F});
-  return It != MemberStoreCredit.end() && (It->second & WholeStored);
+  return Base && F && StoreCredit.hasMemberStored(Base, F);
 }
 
 void SemaProfiles::checkInitProfileThrowOperand(const Expr *Operand) {

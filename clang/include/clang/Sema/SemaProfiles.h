@@ -472,36 +472,86 @@ public:
   /// object also reachable other ways) -- is untrackable per object: null.
   const Decl *resolveMemberStoreBase(const MemberExpr *ME) const;
 
-  /// Store-credit bits for recordInitProfileStore.
-  enum InitStoreCreditFlags : unsigned {
+  /// Parse-order store credit (see recordInitProfileStore): one façade owns
+  /// the whole-entity/pointee credit of local variables and the per-object
+  /// whole-member credit, so every mutation and query is a named operation
+  /// on a single seam -- the place a new kind of recorded fact (or a
+  /// flow-sensitive replacement) slots in.
+  ///
+  /// Entries persist across the translation unit; only the named clear
+  /// operations ever remove a fact. The keys are unique declarations, and
+  /// template instantiations build fresh declarations, so pattern-time and
+  /// instantiation-time state stay independent. A clear of an absent entry
+  /// leaves a harmless zero entry behind.
+  class InitStoreCreditMap {
+  public:
     /// The [[uninit]] entity itself was assigned (u = e, u @= e, ++u).
-    WholeStored = 1u << 0,
+    void markWholeStored(const VarDecl *VD) { Entity[VD] |= WholeStored; }
+    /// A [[now_uninit]] callee's withdrawal of whole-entity credit.
+    void clearWholeStored(const VarDecl *VD) {
+      Entity[VD] &= ~unsigned(WholeStored);
+    }
+    bool hasWholeStored(const VarDecl *VD) const {
+      auto It = Entity.find(VD);
+      return It != Entity.end() && (It->second & WholeStored);
+    }
+
     /// The storage behind the [[ref_to_uninit]] entity was written through
     /// the exact *p / r lvalue.
-    PointeeStored = 1u << 1,
+    void markPointeeStored(const VarDecl *VD) { Entity[VD] |= PointeeStored; }
+    /// Reseating a marked pointer -- or a [[now_uninit]] callee's
+    /// withdrawal: the pointee credit no longer describes the storage.
+    void clearPointee(const VarDecl *VD) {
+      Entity[VD] &= ~unsigned(PointeeStored);
+    }
+    bool hasPointeeStored(const VarDecl *VD) const {
+      auto It = Entity.find(VD);
+      return It != Entity.end() && (It->second & PointeeStored);
+    }
+
+    /// The [[uninit]] member \p F of the base object \p Base (a
+    /// resolveMemberStoreBase key) was assigned whole. Only whole-member
+    /// stores are ever recorded: member *pointee* stores (*a.p = e) are
+    /// deliberately never credited -- per-object pointee aliasing (copies
+    /// share pointees) makes them unsound to approximate.
+    void markMemberStored(const Decl *Base, const FieldDecl *F) {
+      Member[{Base, F}] |= WholeStored;
+    }
+    /// A [[now_uninit]] callee's withdrawal of whole-member credit.
+    void clearMemberStored(const Decl *Base, const FieldDecl *F) {
+      Member[{Base, F}] &= ~unsigned(WholeStored);
+    }
+    bool hasMemberStored(const Decl *Base, const FieldDecl *F) const {
+      auto It = Member.find({Base, F});
+      return It != Member.end() && (It->second & WholeStored);
+    }
+
+  private:
+    /// The per-entry credit bits.
+    enum Flags : unsigned {
+      WholeStored = 1u << 0,
+      PointeeStored = 1u << 1,
+    };
+
+    /// Whole-entity and pointee credit, keyed by the credited
+    /// local/parameter (only local-storage VarDecls carrying the relevant
+    /// marker are ever inserted).
+    llvm::DenseMap<const VarDecl *, unsigned> Entity;
+
+    /// Whole-member credit, keyed per base object: the base is the directly
+    /// named local-storage VarDecl (a.m = e) or, for the current object
+    /// (this->m = e / m = e), the parse-time pattern of the enclosing
+    /// function declaration -- so credit recorded in one function body can
+    /// never satisfy a binding in another, two locals of the same type
+    /// never share credit, and instantiations agree with their pattern on
+    /// statements they reuse from it (see resolveMemberStoreBase).
+    llvm::DenseMap<std::pair<const Decl *, const FieldDecl *>, unsigned>
+        Member;
   };
 
-  /// Parse-order store credit, keyed by the credited local/parameter (only
-  /// local-storage VarDecls carrying the relevant marker are ever inserted).
-  /// Never cleared across the translation unit: the keys are unique
-  /// declarations, and template instantiations build fresh declarations, so
-  /// pattern-time and instantiation-time state stay independent.
-  llvm::DenseMap<const VarDecl *, unsigned> InitStoreCredit;
-
-  /// Parse-order whole-member store credit, keyed per base object: the base
-  /// is the directly named local-storage VarDecl (a.m = e) or, for the
-  /// current object (this->m = e / m = e), the parse-time pattern of the
-  /// enclosing function declaration -- so credit recorded in one function
-  /// body can never satisfy a binding in another, two locals of the same
-  /// type never share credit, and instantiations agree with their pattern
-  /// on statements they reuse from it (see resolveMemberStoreBase). Only
-  /// WholeStored is ever set: member *pointee* stores (*a.p = e) are
-  /// deliberately never credited -- per-object pointee aliasing (copies
-  /// share pointees) makes them unsound to approximate.
-  /// Never cleared, for the same reasons as InitStoreCredit (instantiations
-  /// key on fresh field and function declarations).
-  llvm::DenseMap<std::pair<const Decl *, const FieldDecl *>, unsigned>
-      MemberStoreCredit;
+  /// The recorded std::init store credit; mutated by the recorders above,
+  /// consulted through the has*Credit queries.
+  InitStoreCreditMap StoreCredit;
 
   /// std::init / ref_to_uninit (paper §5): a thrown pointer copy-initializes
   /// the exception object, which cannot carry [[ref_to_uninit]]; a no-op for
