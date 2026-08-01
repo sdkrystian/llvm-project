@@ -2916,9 +2916,13 @@ CFGBlock *CFGBuilder::VisitCallExpr(CallExpr *C, AddStmtChoice asc) {
       NoReturn = true;
     if (FD->hasAttr<NoThrowAttr>())
       AddEHEdge = false;
+    // A builtin that never evaluates its arguments (__builtin_constant_p,
+    // __builtin_object_size, ...) contributes no argument evaluation at run
+    // time. __builtin_assume is separate: it carries no UnevaluatedArguments
+    // bit, and its argument is omitted exactly when it has side effects
+    // (evaluated otherwise, so the analyzer can consume the assumption).
     if (isBuiltinAssumeWithSideEffects(FD->getASTContext(), C) ||
-        FD->getBuiltinID() == Builtin::BI__builtin_object_size ||
-        FD->getBuiltinID() == Builtin::BI__builtin_dynamic_object_size)
+        C->isUnevaluatedBuiltinCall(*Context))
       OmitArguments = true;
   }
 

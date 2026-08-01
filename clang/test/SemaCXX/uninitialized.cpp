@@ -1763,4 +1763,12 @@ bool g() {
 }
 } // namespace noexcept_operand
 
+namespace unevaluated_builtin_arg {
+// __builtin_constant_p() does not evaluate its argument.
+bool f() {
+  int x;
+  return __builtin_constant_p(x); // no-warning
+}
+} // namespace unevaluated_builtin_arg
+
 #endif
