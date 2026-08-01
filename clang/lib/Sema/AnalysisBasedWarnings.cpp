@@ -2114,6 +2114,9 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
     }
   }
 
+  // Event extraction. Every statement class matched below must be CFG-shape
+  // stable: see the linearized-CFG invariant at
+  // addNonLinearizedAlwaysAddClasses.
   const unsigned NumBlocks = cfg->getNumBlockIDs();
   std::vector<SmallVector<DefAssignEvent, 4>> Events(NumBlocks);
   for (const CFGBlock *B : *cfg) {
@@ -2522,7 +2525,9 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC) {
   // value first); a tracked copy's DeclStmt is a per-member Copy, whose
   // dest-member state becomes the source member's at that point; any
   // non-benign DeclRefExpr naming a tracked local is an escape, modeled as
-  // a Write of every one of its tracked members.
+  // a Write of every one of its tracked members. Every statement class
+  // matched here must be CFG-shape stable: see the linearized-CFG invariant
+  // at addNonLinearizedAlwaysAddClasses.
   const unsigned NumBlocks = cfg->getNumBlockIDs();
   std::vector<SmallVector<DefAssignEvent, 4>> Events(NumBlocks);
   for (const CFGBlock *B : *cfg) {
@@ -3851,6 +3856,21 @@ static void configureBaseCFGBuildOptions(AnalysisDeclContext &AC) {
 // configuration; shared with the post-error profile rerun. \p ForCFGProfile
 // adds the classes only a CFG-based profile needs, so an ordinary compile
 // keeps the CFG shape the other analyses have always seen.
+//
+// Linearized-CFG invariant: when unreachable-code, thread-safety, consumed,
+// or lifetime analysis is enabled, the main path instead builds a fully
+// linearized CFG (setAllAlwaysAdd) containing every one of these classes
+// plus arbitrary extra elements; the post-error rerun is always
+// non-linearized. The member passes (checkInitProfileCtorBody /
+// checkInitProfileLocalMembers) must recover the SAME event stream from
+// either shape, so their extraction loops may match only statement classes
+// that are in this always-add set (lvalue-to-rvalue ImplicitCastExpr,
+// (compound-)assignment BinaryOperator, ++/-- UnaryOperator, DeclRefExpr,
+// LambdaExpr via ForCFGProfile) or are unconditional CFG elements
+// (CFGInitializer, CallExpr, DeclStmt). An element only linearization adds
+// must never match an extraction arm -- it would add events on one path
+// only. Adding a new arm means adding its class here, not relying on
+// linearization.
 static void addNonLinearizedAlwaysAddClasses(AnalysisDeclContext &AC,
                                              bool ForCFGProfile) {
   AC.getCFGBuildOptions()

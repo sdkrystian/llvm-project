@@ -4,6 +4,11 @@
 // analyzed through the post-error path; the same constructor-body diagnostics
 // must still fire there.
 // RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -std=c++23 -Wno-uninitialized -DLEADING_ERROR %s
+// -Wunreachable-code makes the main path build a fully linearized CFG
+// (setAllAlwaysAdd); the pass must recover the same events from it (the
+// linearized-CFG invariant at addNonLinearizedAlwaysAddClasses). The
+// post-error rerun is always non-linearized, so this axis is clean-only.
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -std=c++23 -Wno-uninitialized -Wunreachable-code %s
 
 // no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
 [[profiles::enforce(std::init)]];
