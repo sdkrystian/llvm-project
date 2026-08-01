@@ -405,7 +405,17 @@ SemaProfiles::ProfileSuppressScope::ProfileSuppressScope(
 /// uninitialized variable at its declarator -- so each arm gates on the
 /// marker that the construct's real end has been seen. Returning invalid
 /// falls back to scope-lifetime bounding, which is exact mid-parse.
+///
+/// Deliberately dyn_cast dispatch with a fail-open tail, not a Decl::Kind
+/// switch: a switch would fail open for a newly added *derived* kind anyway
+/// (recreating the same defect one level down), while here every unhandled
+/// declaration kind reaches the tail explicitly. The tail's invalid return
+/// is safe by construction: with no recorded end, the entry's scope
+/// lifetime bounds the dominion, which can only make the dominion *longer*
+/// -- more suppression, never a false positive.
 static SourceLocation getCompletedConstructEnd(const Decl *D) {
+  // Self-gating: the brace range is set only by ActOnTagFinishDefinition,
+  // so a mid-parse tag yields an invalid end with no explicit gate.
   if (const auto *TD = dyn_cast<TagDecl>(D))
     return TD->getBraceRange().getEnd();
   if (const auto *FD = dyn_cast<FunctionDecl>(D)) {
@@ -416,6 +426,8 @@ static SourceLocation getCompletedConstructEnd(const Decl *D) {
     return SourceLocation();
   }
   if (const auto *VD = dyn_cast<VarDecl>(D)) {
+    // A declarator with no initializer attached yet ends -- valid but early
+    // -- at the declarator itself; gate on the initializer.
     if (VD->hasInit())
       return VD->getSourceRange().getEnd();
     return SourceLocation();
@@ -427,8 +439,12 @@ static SourceLocation getCompletedConstructEnd(const Decl *D) {
       return FD->getInClassInitializer()->getEndLoc();
     return SourceLocation();
   }
+  // Self-gating: the r-brace is recorded only when the namespace body
+  // finishes.
   if (const auto *ND = dyn_cast<NamespaceDecl>(D))
     return ND->getRBraceLoc();
+  // Fail-open tail (see above): an unhandled declaration kind gets
+  // scope-lifetime bounding, the longer -- suppression-favoring -- dominion.
   return SourceLocation();
 }
 
