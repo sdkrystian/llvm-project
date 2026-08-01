@@ -1879,6 +1879,16 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC, unsigned NumTracked,
     }
     EntryState[B->getBlockID()] = In;
     applyDefAssignEvents(Events[B->getBlockID()], In, /*Offending=*/nullptr);
+    // Enqueue-skip subtlety: ExitState starts at the all-assigned top, so a
+    // block whose computed exit *equals* top enqueues no successors -- and a
+    // successor all of whose predecessors keep top exits may never be
+    // dequeued at all. That is sound only because such a successor's
+    // EntryState also stays top -- exactly the meet of its all-top
+    // predecessor exits -- and the reporting replay below walks every block
+    // from EntryState, dequeued or not. Lowering the initial ExitState,
+    // seeding EntryState differently, or replaying only dequeued blocks
+    // would each break the others' assumption; change them together or not
+    // at all.
     if (In != ExitState[B->getBlockID()]) {
       ExitState[B->getBlockID()] = In;
       Worklist.enqueueSuccessors(B);

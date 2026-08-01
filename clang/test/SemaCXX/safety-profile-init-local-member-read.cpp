@@ -87,6 +87,18 @@ int test_loop_read_first_iteration(int n) {
   return t;
 }
 
+// A loop-body read after an unconditional assignment stays clean: the loop's
+// back-edge join must re-converge on "assigned" (pinning the fixpoint's
+// initialized-top enqueue skip; see runDefiniteAssignment).
+int test_loop_clean_after_assign(int n) {
+  Agg x;
+  x.m = 1;
+  int acc = 0;
+  for (int i = 0; i < n; ++i)
+    acc += x.m;
+  return acc;
+}
+
 // sizeof neither reads the member (unevaluated) nor escapes the object.
 int test_sizeof_neither_reads_nor_escapes() {
   Agg a;

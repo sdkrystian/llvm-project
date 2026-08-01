@@ -186,6 +186,22 @@ struct LoopBodyThenRead {
   }
 };
 
+// Reads inside a loop body after unconditional assignments stay clean: the
+// loop's back-edge join must re-converge on "assigned" (pinning the
+// fixpoint's initialized-top enqueue skip; see runDefiniteAssignment).
+struct LoopBodyCleanAfterAssign {
+  int a [[uninit]];
+  int b [[uninit]];
+  LoopBodyCleanAfterAssign(int n) {
+    a = 1;
+    b = 2;
+    for (int i = 0; i < n; ++i) {
+      int x = a + b;
+      (void)x;
+    }
+  }
+};
+
 // std::byte may be read while uninitialized (paper §4.5).
 struct ByteExempt {
   std::byte b [[uninit]];
