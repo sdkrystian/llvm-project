@@ -855,6 +855,18 @@ public:
   bool diagnoseInvalidUninitMarker(const Decl *D, SourceLocation AttrLoc,
                                    bool Diagnose = true);
 
+  /// A [[now_init]] function with no [[ref_to_uninit]] parameter is a
+  /// vacuous promise (P4222R2 §6.2): diagnose
+  /// err_now_init_attr_no_marked_parameter and drop the attribute. Called
+  /// from ActOnFunctionDeclarator after CheckFunctionDeclaration has merged
+  /// parameter attributes from previous declarations, so a marker written on
+  /// any declaration counts (the parse-time attribute handler runs before
+  /// merging and cannot see an inherited marker). An inherited [[now_init]]
+  /// is skipped: the declaration that wrote it was already checked. Not
+  /// profile policy -- fires regardless of -fprofiles, like the parse-time
+  /// marker subject checks.
+  void checkNowInitVacuity(FunctionDecl *FD);
+
   class ProfileSuppressScope {
     Sema &S;
     unsigned Count = 0;

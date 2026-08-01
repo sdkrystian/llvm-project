@@ -47,6 +47,23 @@ void fill_redecl_template(T p) {}
 template void fill_redecl_template<int *>(int *);
 template void fill_redecl_template<int>(int);
 
+// The vacuity rule is checked after redeclaration merging, so [[now_init]]
+// on a later declaration sees the marker inherited from an earlier one: the
+// reverse order is accepted.
+void fill_reverse(int *p [[ref_to_uninit]]);
+[[now_init]] void fill_reverse(int *p);
+
+template <typename T>
+void fill_reverse_template(T *p [[ref_to_uninit]]);
+template <typename T>
+[[now_init]] void fill_reverse_template(T *p);
+
+// With no declaration marking the parameter, the promise is still vacuous on
+// the redeclaration that writes [[now_init]].
+void unmarked_everywhere(int *p);
+[[now_init]] void unmarked_everywhere(int *p); // expected-error {{'now_init' attribute requires at least one parameter marked '[[ref_to_uninit]]'}} \
+                                               // no-profiles-error {{'now_init' attribute requires at least one parameter marked '[[ref_to_uninit]]'}}
+
 int bad_var [[now_init]]; // expected-error {{'now_init' attribute only applies to functions}} \
                           // no-profiles-error {{'now_init' attribute only applies to functions}}
 

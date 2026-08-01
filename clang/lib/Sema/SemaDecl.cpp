@@ -10964,6 +10964,11 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
             Previous.getResultKind() != LookupResultKind::FoundOverloaded) &&
            "previous declaration set still overloaded");
 
+    // The [[now_init]] vacuity rule is checked only now: a [[ref_to_uninit]]
+    // parameter marker written on a previous declaration arrives in the
+    // merge above, after the parse-time attribute handlers have run.
+    Profiles().checkNowInitVacuity(NewFD);
+
     NamedDecl *PrincipalDecl = (FunctionTemplate
                                 ? cast<NamedDecl>(FunctionTemplate)
                                 : NewFD);

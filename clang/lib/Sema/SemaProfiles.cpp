@@ -1000,6 +1000,35 @@ bool SemaProfiles::diagnoseInvalidRefToUninitMarker(const Decl *D,
   return false;
 }
 
+void SemaProfiles::checkNowInitVacuity(FunctionDecl *FD) {
+  // [[now_init]] asserts that the callee initializes the storage bound to
+  // each of its [[ref_to_uninit]] parameters (P4222R2 §6.2), so a function
+  // with no marked parameter would make it a vacuous promise; reject it. The
+  // check runs from ActOnFunctionDeclarator, after CheckFunctionDeclaration
+  // has merged the parameters' attributes from any previous declaration, so
+  // a marker written on any declaration of the function counts. An inherited
+  // [[now_init]] is skipped -- the declaration that wrote it was already
+  // checked, and re-diagnosing a merged copy would blame the wrong
+  // declaration. A dependent parameter's marker is attached to the pattern
+  // unvalidated (its type check defers to instantiation), so a template with
+  // a marked dependent parameter passes; should the instantiation drop that
+  // marker, the inherited [[now_init]] goes inert rather than re-diagnosed,
+  // like the dropped marker itself (instantiations never re-enter this
+  // check). Like the other marker subject checks, this fires regardless of
+  // -fprofiles.
+  const auto *A = FD->getAttr<NowInitAttr>();
+  if (!A || A->isInherited())
+    return;
+
+  if (llvm::any_of(FD->parameters(), [](const ParmVarDecl *P) {
+        return P->hasAttr<RefToUninitAttr>();
+      }))
+    return;
+
+  Diag(A->getLocation(), diag::err_now_init_attr_no_marked_parameter);
+  FD->dropAttr<NowInitAttr>();
+}
+
 // std::init / ref_to_uninit (paper §5). Two mutually-recursive local
 // recognizers over the syntactic form of a source expression -- no flow
 // analysis and no type-system tracking. Uninitialized storage is only ever
