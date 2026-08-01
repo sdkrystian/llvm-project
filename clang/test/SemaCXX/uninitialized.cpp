@@ -1750,4 +1750,17 @@ void aggregate() {
   (void)specialized_implicit;
 }
 
+namespace noexcept_operand {
+// The noexcept operator's operand is an unevaluated operand: a mention there
+// is not a read.
+void f() {
+  int x;
+  (void)noexcept(x + 1); // no-warning
+}
+bool g() {
+  int y;
+  return noexcept(y + 1); // no-warning
+}
+} // namespace noexcept_operand
+
 #endif

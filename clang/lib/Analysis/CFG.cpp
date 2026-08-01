@@ -604,6 +604,7 @@ private:
                                        AddStmtChoice asc);
   CFGBlock *VisitCXXTemporaryObjectExpr(CXXTemporaryObjectExpr *C,
                                         AddStmtChoice asc);
+  CFGBlock *VisitCXXNoexceptExpr(CXXNoexceptExpr *S, AddStmtChoice asc);
   CFGBlock *VisitCXXThrowExpr(CXXThrowExpr *T);
   CFGBlock *VisitCXXTryStmt(CXXTryStmt *S);
   CFGBlock *VisitCXXTypeidExpr(CXXTypeidExpr *S, AddStmtChoice asc);
@@ -2438,6 +2439,9 @@ CFGBlock *CFGBuilder::Visit(Stmt * S, AddStmtChoice asc,
 
     case Stmt::CXXTryStmtClass:
       return VisitCXXTryStmt(cast<CXXTryStmt>(S));
+
+    case Stmt::CXXNoexceptExprClass:
+      return VisitCXXNoexceptExpr(cast<CXXNoexceptExpr>(S), asc);
 
     case Stmt::CXXTypeidExprClass:
       return VisitCXXTypeidExpr(cast<CXXTypeidExpr>(S), asc);
@@ -4336,6 +4340,21 @@ CFGBlock *CFGBuilder::VisitCXXThrowExpr(CXXThrowExpr *T) {
   // Add the statement to the block.  This may create new blocks if S contains
   // control-flow (short-circuit operations).
   return VisitStmt(T, AddStmtChoice::AlwaysAdd);
+}
+
+CFGBlock *CFGBuilder::VisitCXXNoexceptExpr(CXXNoexceptExpr *S,
+                                           AddStmtChoice asc) {
+  if (asc.alwaysAdd(*this, S)) {
+    autoCreateBlock();
+    appendStmt(Block, S);
+  }
+
+  // C++ [expr.unary.noexcept]p1:
+  //   The noexcept operator determines whether the evaluation of its operand,
+  //   which is an unevaluated operand, can throw an exception.
+  // Unlike typeid, the operand is unevaluated unconditionally, so never build
+  // a CFG for it.
+  return Block;
 }
 
 CFGBlock *CFGBuilder::VisitCXXTypeidExpr(CXXTypeidExpr *S, AddStmtChoice asc) {
