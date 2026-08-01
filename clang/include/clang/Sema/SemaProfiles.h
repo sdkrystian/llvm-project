@@ -471,14 +471,24 @@ public:
                                                            const Expr *Src)
       const;
 
+  /// What a lifecycle-annotated (or release-recognized) callee does to the
+  /// storage handed to it. Construct adds credit. Destroy and Release both
+  /// withdraw it, but only Destroy -- a genuine [[now_uninit]] end of the
+  /// object's lifetime -- records the destroyed state double_destroy fires
+  /// on: a storage *release* (free, realloc's pointer, operator delete, the
+  /// delete-expression) leaves no object to destroy again, and post-release
+  /// use is the invalidation profile's rule, not this one's.
+  enum class LifetimeAnnotationEffect { Construct, Destroy, Release };
+
   /// Resolve \p Src (bound as \p T, see resolveLifetimeAnnotatedStorage)
-  /// and add (\p Withdraw false) or remove (true) the resolved storage's
-  /// credit, at the strength the current parse position earns toward it
-  /// (currentStoreStrength; for a withdrawal, the strength rule described
-  /// at recordNowUninitArgument). A Definite withdrawal also records the
-  /// storage as destroyed; any recorded store retires that state.
+  /// and add (Construct) or remove (Destroy, Release) the resolved
+  /// storage's credit, at the strength the current parse position earns
+  /// toward it (currentStoreStrength; for a withdrawal, the strength rule
+  /// described at recordNowUninitArgument). A Definite Destroy also records
+  /// the storage as destroyed; a Release never does; any recorded store
+  /// retires that state.
   void recordLifetimeAnnotatedArgument(QualType T, const Expr *Src,
-                                       bool Withdraw);
+                                       LifetimeAnnotationEffect Effect);
 
   /// True if the storage \p Src (bound as \p T) denotes -- resolved through
   /// the same shapes as recordLifetimeAnnotatedArgument -- is in the
@@ -652,18 +662,21 @@ public:
                                Strength);
       Entity[VD] &= ~unsigned(WholeDestroyed);
     }
-    /// A [[now_uninit]] callee destroyed the whole entity. \p Strength is
-    /// the *destroy's* certainty: a Definite destroy withdraws credit of
-    /// both strengths and records the destroyed state; a merely-possible
-    /// one withdraws only the Definite claim -- it may have destroyed the
-    /// storage, so no credit-fired diagnostic may rely on it, while the
-    /// Maybe credit (which only ever suppresses) survives -- and records
-    /// no destroyed state, since that state is a diagnostic's firing basis
-    /// and must be definite by construction.
-    void destroyWhole(const VarDecl *VD, InitCreditStrength Strength) {
+    /// A [[now_uninit]] or storage-release callee destroyed the whole
+    /// entity. \p Strength is the *destroy's* certainty: a Definite destroy
+    /// withdraws credit of both strengths; a merely-possible one withdraws
+    /// only the Definite claim -- it may have destroyed the storage, so no
+    /// credit-fired diagnostic may rely on it, while the Maybe credit
+    /// (which only ever suppresses) survives. The destroyed state is
+    /// recorded only for a Definite destroy that also ends the object's
+    /// lifetime (\p EndsLifetime; a storage *release* leaves no object to
+    /// destroy again): that state is a diagnostic's firing basis and must
+    /// be definite by construction.
+    void destroyWhole(const VarDecl *VD, InitCreditStrength Strength,
+                      bool EndsLifetime) {
       Entity[VD] &= ~clearedBits(WholeStoredMaybe, WholeStoredDefinite,
                                  Strength);
-      if (Strength == InitCreditStrength::Definite)
+      if (Strength == InitCreditStrength::Definite && EndsLifetime)
         Entity[VD] |= WholeDestroyed;
     }
     bool hasWholeStored(const VarDecl *VD,
@@ -686,12 +699,13 @@ public:
                                Strength);
       Entity[VD] &= ~unsigned(PointeeDestroyed);
     }
-    /// A [[now_uninit]] callee destroyed the pointee (semantics as for
-    /// destroyWhole).
-    void destroyPointee(const VarDecl *VD, InitCreditStrength Strength) {
+    /// A [[now_uninit]] or storage-release callee destroyed the pointee
+    /// (semantics as for destroyWhole).
+    void destroyPointee(const VarDecl *VD, InitCreditStrength Strength,
+                        bool EndsLifetime) {
       Entity[VD] &= ~clearedBits(PointeeStoredMaybe, PointeeStoredDefinite,
                                  Strength);
-      if (Strength == InitCreditStrength::Definite)
+      if (Strength == InitCreditStrength::Definite && EndsLifetime)
         Entity[VD] |= PointeeDestroyed;
     }
     /// Reseating a marked pointer: every pointee fact -- credit of both
@@ -726,13 +740,13 @@ public:
                                       Strength);
       Member[{Base, F}] &= ~unsigned(WholeDestroyed);
     }
-    /// A [[now_uninit]] callee destroyed the member (semantics as for
-    /// destroyWhole).
+    /// A [[now_uninit]] or storage-release callee destroyed the member
+    /// (semantics as for destroyWhole).
     void destroyMember(const Decl *Base, const FieldDecl *F,
-                       InitCreditStrength Strength) {
+                       InitCreditStrength Strength, bool EndsLifetime) {
       Member[{Base, F}] &= ~clearedBits(WholeStoredMaybe, WholeStoredDefinite,
                                         Strength);
-      if (Strength == InitCreditStrength::Definite)
+      if (Strength == InitCreditStrength::Definite && EndsLifetime)
         Member[{Base, F}] |= WholeDestroyed;
     }
     bool hasMemberStored(const Decl *Base, const FieldDecl *F,
@@ -755,8 +769,9 @@ public:
     /// lifetime was definitely ended and not restarted (P4222R2 §1:
     /// destroying an object twice is an error). Destroyed is
     /// Definite-by-construction: only an unconditional same-function
-    /// destroy sets it, so it can serve as a diagnostic's firing basis
-    /// without a strength of its own.
+    /// lifetime-ending destroy sets it (a storage *release* clears credit
+    /// but sets no destroyed state), so it can serve as a diagnostic's
+    /// firing basis without a strength of its own.
     enum Flags : unsigned {
       WholeStoredMaybe = 1u << 0,
       PointeeStoredMaybe = 1u << 1,

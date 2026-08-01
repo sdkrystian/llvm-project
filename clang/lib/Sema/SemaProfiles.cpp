@@ -1860,7 +1860,7 @@ void SemaProfiles::recordNowInitArgument(const ValueDecl *Target, QualType T,
   // never-executed context earns no credit.
   if (inNeverExecutedContext())
     return;
-  recordLifetimeAnnotatedArgument(T, Src, /*Withdraw=*/false);
+  recordLifetimeAnnotatedArgument(T, Src, LifetimeAnnotationEffect::Construct);
 }
 
 void SemaProfiles::recordNowUninitArgument(const ValueDecl *Target, QualType T,
@@ -1896,7 +1896,15 @@ void SemaProfiles::recordNowUninitArgument(const ValueDecl *Target, QualType T,
   // destroys), but a call in a never-executed context destroys nothing.
   if (inNeverExecutedContext())
     return;
-  recordLifetimeAnnotatedArgument(T, Src, /*Withdraw=*/true);
+  // A [[now_uninit]] callee ends the object's lifetime -- recording the
+  // destroyed state double_destroy fires on -- while a plain release callee
+  // only releases the storage: free(p); destroy_at(p); must not trip
+  // double_destroy on free's account. A dual-attributed callee stays a
+  // destroy.
+  recordLifetimeAnnotatedArgument(T, Src,
+                                  FD->hasAttr<NowUninitAttr>()
+                                      ? LifetimeAnnotationEffect::Destroy
+                                      : LifetimeAnnotationEffect::Release);
 }
 
 SemaProfiles::LifetimeAnnotatedStorage
@@ -1962,16 +1970,19 @@ SemaProfiles::resolveLifetimeAnnotatedStorage(QualType T,
   return {};
 }
 
-void SemaProfiles::recordLifetimeAnnotatedArgument(QualType T, const Expr *Src,
-                                                   bool Withdraw) {
+void SemaProfiles::recordLifetimeAnnotatedArgument(
+    QualType T, const Expr *Src, LifetimeAnnotationEffect Effect) {
   // A [[now_init]] callee's initialization marks the resolved storage
-  // stored; a [[now_uninit]] callee's destruction clears the mark. Both
-  // directions share one strength: for the credit it is the store's
-  // certainty (only an unconditional same-function call may fire the
-  // requires-uninit direction), for the withdrawal the destroy's -- a
-  // conditional destroy may or may not have run, so it kills only the
-  // Definite claim and leaves the suppression-only Maybe credit in place
-  // (see recordNowUninitArgument).
+  // stored; a [[now_uninit]] callee's destruction -- or a release callee's
+  // deallocation -- clears the mark. All directions share one strength: for
+  // the credit it is the store's certainty (only an unconditional
+  // same-function call may fire the requires-uninit direction), for the
+  // withdrawal the destroy's -- a conditional destroy may or may not have
+  // run, so it kills only the Definite claim and leaves the
+  // suppression-only Maybe credit in place (see recordNowUninitArgument).
+  // Only a Destroy records the destroyed state (LifetimeAnnotationEffect).
+  bool Withdraw = Effect != LifetimeAnnotationEffect::Construct;
+  bool EndsLifetime = Effect == LifetimeAnnotationEffect::Destroy;
   LifetimeAnnotatedStorage Storage = resolveLifetimeAnnotatedStorage(T, Src);
   switch (Storage.StorageKind) {
   case LifetimeAnnotatedStorage::Kind::None:
@@ -1979,7 +1990,8 @@ void SemaProfiles::recordLifetimeAnnotatedArgument(QualType T, const Expr *Src,
   case LifetimeAnnotatedStorage::Kind::Whole:
     if (Withdraw)
       StoreCredit.destroyWhole(Storage.Entity,
-                               currentStoreStrength(Storage.Entity));
+                               currentStoreStrength(Storage.Entity),
+                               EndsLifetime);
     else
       StoreCredit.markWholeStored(Storage.Entity,
                                   currentStoreStrength(Storage.Entity));
@@ -1987,7 +1999,8 @@ void SemaProfiles::recordLifetimeAnnotatedArgument(QualType T, const Expr *Src,
   case LifetimeAnnotatedStorage::Kind::Pointee:
     if (Withdraw)
       StoreCredit.destroyPointee(Storage.Entity,
-                                 currentStoreStrength(Storage.Entity));
+                                 currentStoreStrength(Storage.Entity),
+                                 EndsLifetime);
     else
       StoreCredit.markPointeeStored(Storage.Entity,
                                     currentStoreStrength(Storage.Entity));
@@ -1995,7 +2008,8 @@ void SemaProfiles::recordLifetimeAnnotatedArgument(QualType T, const Expr *Src,
   case LifetimeAnnotatedStorage::Kind::Member:
     if (Withdraw)
       StoreCredit.destroyMember(Storage.Base, Storage.Field,
-                                currentStoreStrength(Storage.Base));
+                                currentStoreStrength(Storage.Base),
+                                EndsLifetime);
     else
       StoreCredit.markMemberStored(Storage.Base, Storage.Field,
                                    currentStoreStrength(Storage.Base));
@@ -2019,8 +2033,11 @@ void SemaProfiles::checkInitProfileDeleteOperand(const Expr *Operand) {
   // shared gate).
   if (inNeverExecutedContext())
     return;
+  // A Release, like operator delete's binding: the storage is gone, but no
+  // destroyed state is recorded -- delete p; destroy_at(p); is the
+  // invalidation profile's problem, not double_destroy's.
   recordLifetimeAnnotatedArgument(Operand->getType(), Operand,
-                                  /*Withdraw=*/true);
+                                  LifetimeAnnotationEffect::Release);
 }
 
 bool SemaProfiles::storageIsDestroyed(QualType T, const Expr *Src) const {

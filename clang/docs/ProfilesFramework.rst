@@ -624,10 +624,14 @@ and destroying overloads excluded) accept a pointer in any state -- an
 RAII buffer's ``free(p)`` on a ``[[ref_to_uninit]]`` member is legal
 whether or not the buffer was ever written -- and withdraw the storage's
 credit, so a read through a marked pointer after ``free(p)`` is diagnosed
-again.  Unlike a ``[[now_uninit]]`` callee they are exempt from
-``double_destroy``: ``destroy_at(p); free(p);`` is correct, because ending
-an object's lifetime and releasing its storage are different operations.
-The ``delete`` and ``delete[]`` *expressions* perform the same withdrawal
+again.  A release records no *destroyed* state, though: releasing storage
+ends no object's lifetime, so both orders relative to a ``[[now_uninit]]``
+call sit outside ``double_destroy``'s scope -- ``destroy_at(p); free(p);``
+is correct (different operations, correctly ordered), and ``free(p);
+destroy_at(p);`` is not flagged either (post-release use is the
+invalidation profile's rule; only a second ``[[now_uninit]]`` destroy of
+the same storage fires).  The ``delete`` and ``delete[]`` *expressions*
+perform the same credit withdrawal, likewise recording no destroyed state
 -- with no diagnostic on the operand, matching their historical silence --
 so ``delete q;`` and ``::operator delete(q);`` agree on everything that
 follows.  Like the allocator side, trusted ``free``/``realloc`` recognition
