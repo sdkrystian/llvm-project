@@ -559,7 +559,8 @@ entity's own function: after a top-level ``u = 5;`` a later
 entity requires an unmarked target (§4.2) -- while a store under an
 ``if``, a loop, a ``switch``, a ``try``, ``&&``/``||``/``?:``, or inside a
 lambda or block body may not have executed on the path that reaches the
-binding, so the marked binding stays legal: never a false positive.  (The
+binding, so the marked binding stays legal -- the mechanism errs toward
+missed diagnostics (see `Limitations`_).  (The
 conditionality test is syntactic and errs the same way: a store in a
 condition itself, in a ``do`` body, or in the taken branch of
 ``if constexpr`` conservatively counts as conditional, and a store after a
@@ -762,10 +763,14 @@ produce a read of a not-yet-initialized object:
 Limitations
 -----------
 
-The implemented slice is deliberately conservative.  The first entry below
-is a deliberate strictness -- it rejects code the paper itself rejects --
-rather than an omission; each of the others is a missed diagnostic, never a
-false positive.
+The implemented slice is conservative in both directions.  The first group
+below lists *deliberate strictnesses*: places where the analysis rejects
+what it cannot prove safe, even though the code may be correct --
+``[[profiles::suppress]]`` is the escape hatch there.  The second group
+lists *missed diagnostics*: accepted flows the analysis does not see;
+those entries never cause a rejection.
+
+**Deliberate strictnesses (may reject correct code):**
 
 - Inside a constructor body, only a plain assignment to an ``[[uninit]]``
   member or a call to a ``[[now_init]]`` function (§6.2) counts as its
@@ -785,6 +790,27 @@ false positive.
   missed diagnostic, never a false positive.  That escape-crediting is an
   interim leniency relative to the paper (which credits only ``now_init``);
   tightening it to ``[[now_init]]`` callees alone is future work.
+- A by-value *parameter* of a tracked class is a copy of the caller's
+  argument, so its marked members are tracked from an unassigned start: a
+  read before a local assignment (or an escape of the parameter) is
+  rejected even if the caller assigned the member first (see `Reads of
+  Uninitialized Objects`_).  A *const* by-value parameter cannot be
+  assigned locally at all, so no code change can satisfy the analysis --
+  suppression is the only remedy there.
+- A ``this``-capturing lambda might run immediately, so member reads in
+  its body count at the point the lambda is created, and writes there earn
+  no credit (see `Reads of Uninitialized Objects`_): a lambda that is only
+  ever run later, after the members are assigned, is rejected the same
+  way.
+- The flow-based read passes promote every use a path *may* reach
+  uninitialized to the profile error, path-insensitively: with two
+  correlated conditions (``if (c) x = 1; ... if (c) use(x);``) the read is
+  rejected although no executable path reads uninitialized memory --
+  the shape ``-Wuninitialized`` reports as only "may be uninitialized"
+  is a hard error under the profile.
+
+**Missed diagnostics (never rejections):**
+
 - ``construct_at``/``destroy_at`` flow is modeled through the annotations:
   a ``[[now_init]]``-annotated ``construct_at`` declaration checks the
   lifecycle start (including double construction, via the reverse-direction
