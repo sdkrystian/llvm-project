@@ -43,6 +43,15 @@ void test_suppress_var_init() {
   (void)y;
 }
 
+// A declarator-id suppression on the definition covers the body for the
+// CFG-routed rules (Decl-based suppression, not the parse-time stack).
+// no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+void test_suppress_declarator_id [[profiles::suppress(test::uninit_read)]] () {
+  int x;
+  int y = x;
+  (void)y;
+}
+
 void test_discarded_branch() {
   int x;
   if constexpr (false) {

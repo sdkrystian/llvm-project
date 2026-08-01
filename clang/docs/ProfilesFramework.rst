@@ -117,7 +117,18 @@ there:
    }
 
 A suppression covers exactly the tokens of the declaration or statement it
-appertains to -- nothing more.  For a variable declaration that includes the
+appertains to -- nothing more.  The declarator-id position works too: on a
+function definition it covers the whole definition, mem-initializers and
+body included, ending with it --
+
+.. code-block:: c++
+
+   void legacy_code [[profiles::suppress(std::safety)]] () { /* exempt */ }
+
+-- for free functions, inline members, and out-of-line definitions alike
+(the attribute must be on the *definition*; one written on a previous
+declaration does not carry over).  For a variable declaration the covered
+tokens include the
 initializer, so violations inside the initializer are silenced; but the
 variable is *not* marked as exempt at later uses, which appear in other
 declarations or statements and are checked normally:
