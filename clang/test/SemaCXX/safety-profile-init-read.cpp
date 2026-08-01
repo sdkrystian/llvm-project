@@ -18,7 +18,7 @@
 [[profiles::enforce(test::uninit_read)]];
 #endif
 
-namespace std { enum class byte : unsigned char {}; }
+namespace std { enum class byte : unsigned char {}; class type_info; }
 
 #ifdef LEADING_ERROR
 int leading_unrelated_error = undeclared_identifier;
@@ -76,6 +76,17 @@ void test_marker_then_write_then_read() {
   (void)y;
 }
 
+// An unevaluated mention of the variable is not a read.
+void test_unevaluated_contexts() {
+  int x [[uninit]];
+  (void)sizeof(x);
+  (void)noexcept(x + 1);
+  (void)__builtin_constant_p(x);
+  (void)typeid(x);
+  bool r = requires { x + 1; };
+  (void)r;
+}
+
 void test_param(int p) {
   int y = p;
   (void)y;
@@ -84,6 +95,15 @@ void test_param(int p) {
 #ifndef DEMOTE
 void test_marker_does_not_excuse_read() {
   int x [[uninit]]; // expected-note {{variable 'x' is declared here}}
+  int y = x; // expected-error {{variable 'x' is read before initialization under profile 'std::init'}}
+  (void)y;
+}
+
+// An unevaluated mention earns no assignment credit either: the following
+// real read still fires.
+void test_unevaluated_no_credit() {
+  int x [[uninit]]; // expected-note {{variable 'x' is declared here}}
+  (void)__builtin_constant_p(x = 1);
   int y = x; // expected-error {{variable 'x' is read before initialization under profile 'std::init'}}
   (void)y;
 }

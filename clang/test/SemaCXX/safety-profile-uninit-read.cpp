@@ -11,6 +11,8 @@
 // no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
 [[profiles::enforce(test::other)]];
 
+namespace std { class type_info; }
+
 #ifdef LEADING_ERROR
 int leading_unrelated_error = undeclared_identifier;
 // expected-error@-1 {{use of undeclared identifier 'undeclared_identifier'}}
@@ -54,6 +56,20 @@ void test_unevaluated() {
   using T = decltype(x);
   (void)sizeof(x);
   (void)static_cast<T>(0);
+  (void)noexcept(x + 1);
+  (void)__builtin_constant_p(x);
+  (void)typeid(x);
+  bool r = requires { x + 1; };
+  (void)r;
+}
+
+// An unevaluated mention earns no assignment credit either: the following
+// real read still fires.
+void test_unevaluated_no_credit() {
+  int x; // expected-note {{variable 'x' is declared here}}
+  (void)__builtin_constant_p(x = 1);
+  int y = x; // expected-error {{variable 'x' is read before initialization under profile 'test::uninit_read'}}
+  (void)y;
 }
 
 void test_param(int p) {

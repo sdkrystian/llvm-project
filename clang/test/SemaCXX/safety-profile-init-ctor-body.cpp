@@ -13,7 +13,7 @@ int leading_unrelated_error = undeclared_identifier;
 // expected-error@-1 {{use of undeclared identifier 'undeclared_identifier'}}
 #endif
 
-namespace std { enum class byte : unsigned char {}; }
+namespace std { enum class byte : unsigned char {}; class type_info; }
 
 // A [[uninit]] member that is never read needs no assignment: the constructor
 // is not required to initialize it (paper §5.1/§5.3).
@@ -36,6 +36,32 @@ struct ReadAfterAssign {
 struct ReadBeforeAssign {
   int m [[uninit]]; // expected-note {{member 'm' declared here}}
   ReadBeforeAssign() { int y = m; (void)y; m = 1; } // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+};
+
+// An unevaluated mention of the member is not a read.
+struct UnevaluatedMention {
+  int m [[uninit]];
+  UnevaluatedMention() {
+    (void)sizeof(m);
+    (void)noexcept(m + 1);
+    (void)__builtin_constant_p(m);
+    (void)typeid(m);
+    bool r = requires { m + 1; };
+    (void)r;
+    m = 1;
+  }
+};
+
+// An unevaluated mention earns no assignment credit either: the following
+// real read still fires.
+struct UnevaluatedNoCredit {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  UnevaluatedNoCredit() {
+    (void)__builtin_constant_p(m = 1);
+    int y = m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    (void)y;
+    m = 1;
+  }
 };
 
 struct SelfReadOnRHS {

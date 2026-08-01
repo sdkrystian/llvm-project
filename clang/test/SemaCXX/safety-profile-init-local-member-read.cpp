@@ -15,7 +15,7 @@
 // no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
 [[profiles::enforce(std::init)]];
 
-namespace std { enum class byte : unsigned char {}; }
+namespace std { enum class byte : unsigned char {}; class type_info; }
 
 #ifdef LEADING_ERROR
 int leading_unrelated_error = undeclared_identifier;
@@ -24,7 +24,7 @@ int leading_unrelated_error = undeclared_identifier;
 #endif
 
 struct Agg {
-  int m [[uninit]]; // expected-note 18 {{member 'm' declared here}}
+  int m [[uninit]]; // expected-note 20 {{member 'm' declared here}}
 };
 void take_ref(Agg &);
 // The pointee is uninitialized memory, so the parameter carries the marker
@@ -86,6 +86,24 @@ int test_loop_read_first_iteration(int n) {
 int test_sizeof_neither_reads_nor_escapes() {
   Agg a;
   (void)sizeof(a.m);
+  return a.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+}
+
+// The other unevaluated contexts behave like sizeof: no read, no escape.
+int test_unevaluated_matrix() {
+  Agg a;
+  (void)noexcept(a.m + 1);
+  (void)__builtin_constant_p(a.m);
+  (void)typeid(a.m);
+  bool r = requires { a.m + 1; };
+  (void)r;
+  return a.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+}
+
+// An unevaluated mention earns no assignment credit either.
+int test_unevaluated_no_credit() {
+  Agg a;
+  (void)__builtin_constant_p(a.m = 1);
   return a.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
 }
 
