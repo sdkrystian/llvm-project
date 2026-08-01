@@ -217,6 +217,59 @@ int test_sibling_incdec_not_an_escape() {
   return s.sm; // expected-error {{member 'sm' is read before initialization under profile 'std::init'}}
 }
 
+// An access to a member of an *anonymous* struct is a sibling access like
+// any other: reaching `x.a` cannot give `x.m` a value, so the tracked member
+// stays tracked (the anonymous step is peeled, not treated as an escape).
+struct Mix {
+  struct {
+    int a [[uninit]];
+  };
+  int m [[uninit]]; // expected-note 2 {{member 'm' declared here}}
+};
+int test_anon_sibling_read_not_an_escape() {
+  Mix x;
+  int v = x.a;
+  return v + x.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+}
+int test_anon_sibling_write_not_an_escape() {
+  Mix x;
+  x.a = 1;
+  return x.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+}
+
+// An anonymous-union leaf can neither be tracked nor reach a tracked member
+// ([[uninit]] is banned on union members, so the NSDMI builds the fixture),
+// so consuming the base is sound for unions too.
+struct MixU {
+  union {
+    int a = 0;
+    float b;
+  };
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+};
+int test_anon_union_sibling_not_an_escape() {
+  MixU x;
+  int v = x.a;
+  return v + x.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+}
+
+// A pointer leaf inside an anonymous struct keeps the escape: its value may
+// denote the tracked member, exactly like a named pointer sibling
+// (pointer_marker bans the marker on pointers, so the NSDMI builds the
+// fixture).
+struct MixP {
+  struct {
+    int *p = nullptr;
+  };
+  int m [[uninit]];
+};
+int test_anon_pointer_sibling_still_escapes() {
+  MixP x;
+  int *q = x.p;
+  (void)q;
+  return x.m; // OK: escaped (a missed diagnostic, deliberately)
+}
+
 // A pointer or reference sibling is the exception: its *value* can denote the
 // tracked member, and a marked one can be aimed at it by a default member
 // initializer -- with no `&a.sm` anywhere to escape the object. Reaching such a
