@@ -766,21 +766,28 @@ void SemaProfiles::checkInitProfileUninitDecl(const VarDecl *Var) {
   // excluded -- those are zero-initialized; runtime-init concerns are R3's.
   static constexpr StringRef Profile = "std::init";
   static constexpr StringRef Rule = "uninit_decl";
-  // The enforcement check gates the (possibly recursive) type walk below so
-  // it runs only under the profile, not on every default-initialized
-  // variable.
+  // Enforcement first: the call site (ActOnUninitializedDecl) is ungated, so
+  // every compile would otherwise pay the type walk below. The hoisted gate
+  // is evaluated in the same call as shouldEmitProfileViolation's identical
+  // first conjunct, with nothing but const queries in between, so it cannot
+  // change any answer; the cheap decl-state tests likewise run before the
+  // type walk.
+  if (!isProfileEnforced(Profile))
+    return;
+  if (Var->isInvalidDecl() || Var->getStorageDuration() != SD_Automatic ||
+      Var->hasAttr<UninitAttr>())
+    return;
   QualType BaseTy = getASTContext().getBaseElementType(Var->getType());
-  if (!Var->isInvalidDecl() && Var->getStorageDuration() == SD_Automatic &&
-      !Var->hasAttr<UninitAttr>() &&
-      // std::byte may be left uninitialized (paper §4), so it -- and arrays
-      // of it -- are exempt from this rule.
-      !BaseTy->isStdByteType() &&
+  // std::byte may be left uninitialized (paper §4), so it -- and arrays
+  // of it -- are exempt from this rule.
+  if (!BaseTy->isStdByteType() &&
       shouldEmitProfileViolation(Profile, Rule, Var->getLocation(), Var) &&
       // A definition with no initializer (scalar / pointer / enum, or an
       // array of them), or a class/aggregate type -- possibly the element
       // type of an array -- whose default-init leaves a scalar subobject
       // indeterminate (its synthesized constructor call provides an
-      // initializer, so the !getInit() test alone misses it).
+      // initializer, so the !getInit() test alone misses it). The
+      // suppression walk stays ahead of the recursive type walk.
       (!Var->getInit() ||
        (BaseTy->isRecordType() &&
         defaultInitLeavesScalarIndeterminate(Var->getType(),
@@ -809,16 +816,23 @@ void SemaProfiles::checkInitProfileStaticMarker(const VarDecl *Var) {
   // runs first, from ActOnUninitializedDecl, after the synthesized
   // default-initialization is attached).
   static constexpr StringRef Profile = "std::init";
+  // Enforcement first (same rationale as checkInitProfileUninitDecl: the
+  // call site is ungated, the hoisted gate is shouldEmitProfileViolation's
+  // own first conjunct, and only const queries run in between), then the
+  // cheap decl-state tests, then the type walk.
+  if (!isProfileEnforced(Profile))
+    return;
+  if (Var->isInvalidDecl() ||
+      (Var->getStorageDuration() != SD_Static &&
+       Var->getStorageDuration() != SD_Thread) ||
+      !Var->hasAttr<UninitAttr>())
+    return;
   QualType BaseTy = getASTContext().getBaseElementType(Var->getType());
-  if (!Var->isInvalidDecl() &&
-      (Var->getStorageDuration() == SD_Static ||
-       Var->getStorageDuration() == SD_Thread) &&
-      Var->hasAttr<UninitAttr>() &&
-      // A union or pointer object -- or an array of them -- marked [[uninit]]
-      // is already rejected by union_marker / pointer_marker (regardless of
-      // storage duration, and keyed on the same base element type), and they
-      // retain the marker; do not pile a second diagnostic on top.
-      !BaseTy->isUnionType() && !BaseTy->isPointerType() &&
+  // A union or pointer object -- or an array of them -- marked [[uninit]]
+  // is already rejected by union_marker / pointer_marker (regardless of
+  // storage duration, and keyed on the same base element type), and they
+  // retain the marker; do not pile a second diagnostic on top.
+  if (!BaseTy->isUnionType() && !BaseTy->isPointerType() &&
       shouldEmitProfileViolation(Profile, "static_marker", Var->getLocation(),
                                  Var) &&
       isVacuousDefaultInit(*this, Var->getInit(), Var->getType())) {
@@ -2241,6 +2255,14 @@ static bool isMemberChainOfUninitObject(const Expr *E) {
 void SemaProfiles::checkInitProfileReadThrough(SourceLocation Loc,
                                                const Expr *Glvalue,
                                                QualType ValueType) {
+  // Enforcement first: the lvalue-to-rvalue chokepoint calls this for every
+  // load (behind only the call site's LangOpts.Profiles gate), so nothing
+  // below should run without the profile. The hoisted gate is
+  // shouldEmitProfileViolation's own first conjunct, evaluated in the same
+  // call with only const queries in between, so it cannot change any
+  // answer.
+  if (!isProfileEnforced("std::init"))
+    return;
   // A RecoveryExpr is a placeholder for an expression that already failed, not
   // a read the user wrote, so it must not drive this rule.
   if (!Glvalue || isa<RecoveryExpr>(Glvalue->IgnoreParens()))
