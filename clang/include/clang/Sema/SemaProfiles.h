@@ -370,23 +370,16 @@ public:
   /// credit last, after both pre-store checks.
   void checkInitProfileIncDec(Expr *Operand, SourceLocation OpLoc);
 
-  /// std::init: record parse-order whole-entity store credit for \p LHS, the
-  /// left operand of a completed built-in assignment (called from the tail
-  /// of Sema::CheckAssignmentOperands) or the operand of a built-in ++/--.
+  /// std::init: record parse-order store credit for \p LHS, the left
+  /// operand of a completed built-in assignment (called from the tail of
+  /// Sema::CheckAssignmentOperands) or the operand of a built-in ++/--.
   /// Assigning a whole [[uninit]] local is its initialization (paper
-  /// §4.2/§4.5), and a store through the exact `*p` / `r` lvalue of a
-  /// [[ref_to_uninit]] local or parameter initializes the pointee (§4.3); a
-  /// store to a marked *pointer* itself reseats it and clears its pointee
-  /// credit. Element stores (p[i] = e) neither credit nor invalidate
-  /// (§5.4/§5.5 ban element-wise tracking), and escapes never credit (§6.2
-  /// reserves callee-initialization for now_init()). Purely parse-order --
-  /// no dominance or flow analysis -- so the credit errs only toward missed
-  /// diagnostics: every store records Maybe credit (suppression only), and
-  /// only an unconditional store in the credited entity's own function
-  /// records the Definite credit a diagnostic may fire on (see
-  /// currentStoreStrength). Deliberately not gated on enforcement or
-  /// [[profiles::suppress]]: a suppressed store still initializes, and
-  /// failing to credit it would turn suppression into later false positives.
+  /// §4.2/§4.5), a store through the exact `*p` / `r` lvalue of a marked
+  /// local or parameter initializes the pointee (§4.3), and a store to a
+  /// marked *pointer* itself reseats it and clears its pointee credit;
+  /// element stores (p[i] = e) neither credit nor invalidate (§5.4/§5.5)
+  /// and escapes never credit (§6.2). For the strength and gating rules see
+  /// "Parse-Order Store Credit" in ProfilesFrameworkInternals.rst.
   void recordInitProfileStore(const Expr *LHS);
 
   /// std::init / [[now_init]] (P4222R2 §6.2): a [[now_init]] callee
@@ -533,35 +526,20 @@ public:
   /// recordInitProfileStore and recordNowInitArgument.
   bool inNeverExecutedContext() const;
 
-  /// How firmly a consult may rely on recorded store credit. A `Maybe`
-  /// consult asks whether a store happened somewhere earlier in parse order
-  /// -- enough to *suppress* a diagnostic (the storage may well be
-  /// initialized), never to fire one. A `Definite` consult uses credit as
-  /// the firing basis of a diagnostic and therefore needs the store to be
-  /// certain: only a store unconditionally executed in the function body
-  /// owning the credited entity records it (see currentStoreStrength).
+  /// How firmly a consult may rely on recorded store credit: a `Maybe`
+  /// consult only ever *suppresses* a diagnostic (the storage may well be
+  /// initialized); a `Definite` consult uses credit as a diagnostic's
+  /// firing basis. See "Parse-Order Store Credit" in
+  /// ProfilesFrameworkInternals.rst.
   enum class InitCreditStrength { Maybe, Definite };
 
   /// The strength a store (or lifetime-annotated call) recorded at the
   /// current parse position earns toward the credit keyed by \p CreditKey:
   /// Definite iff the store is unconditionally executed in the function
-  /// body that owns the credited entity -- outside template instantiation
-  /// (the parser scope chain is parser-only state, and the requires-uninit
-  /// direction ignores credit while instantiating anyway), at conditional
-  /// depth 0 (currentConditionalDepth), before the function has branched
-  /// by goto (a goto earlier in the body could skip a later store without
-  /// introducing any scope; the tracking flag is shared with switch, an
-  /// over-inclusion in the safe direction), with the enclosing function's
-  /// parse-time pattern equal to the entity's owning function: the
-  /// DeclContext of a credited local/parameter (or of the directly named
-  /// local base object of member credit), or the key itself for
-  /// current-object member credit, which resolveMemberStoreBase already
-  /// keys on that pattern. The same-function requirement is what stops a
-  /// store inside a lambda body from definitely crediting an enclosing
-  /// function's local; the enclosing function is resolved from the context
-  /// chain directly, so a store inside a *block* body -- which
-  /// getCurFunctionDecl would skip -- stays Maybe too. Everything else
-  /// records Maybe.
+  /// body that owns the credited entity. The full rule set -- the
+  /// conditional-depth, goto-flag, and same-function-pattern requirements
+  /// -- lives under "Parse-Order Store Credit" in
+  /// ProfilesFrameworkInternals.rst.
   InitCreditStrength currentStoreStrength(const Decl *CreditKey) const;
 
   /// True if \p VD is a local [[uninit]] variable credited by a recorded
@@ -653,17 +631,13 @@ public:
   /// where getCurScope() does not track the instantiated function.
   unsigned currentConditionalDepth() const;
 
-  /// Parse-order store credit (see recordInitProfileStore): one façade owns
-  /// the whole-entity/pointee credit of local variables and the per-object
-  /// whole-member credit, so every mutation and query is a named operation
-  /// on a single seam -- the place a new kind of recorded fact (or a
-  /// flow-sensitive replacement) slots in.
-  ///
-  /// Entries persist across the translation unit; only the named clear
-  /// operations ever remove a fact. The keys are unique declarations, and
-  /// template instantiations build fresh declarations, so pattern-time and
-  /// instantiation-time state stay independent. A clear of an absent entry
-  /// leaves a harmless zero entry behind.
+  /// Parse-order store credit: one façade owns the whole-entity/pointee
+  /// credit of local variables and the per-object whole-member credit, so
+  /// every mutation and query is a named operation on a single seam -- the
+  /// place a new kind of recorded fact (or a flow-sensitive replacement)
+  /// slots in. A clear of an absent entry leaves a harmless zero entry
+  /// behind. See "Parse-Order Store Credit" in
+  /// ProfilesFrameworkInternals.rst.
   class InitStoreCreditMap {
   public:
     /// The [[uninit]] entity itself was assigned (u = e, u @= e, ++u).

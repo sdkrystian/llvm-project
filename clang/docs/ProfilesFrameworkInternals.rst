@@ -301,3 +301,69 @@ indeterminate, trusting user-provided default constructors -- the paper's
 trust-the-constructor principle (P4222R1.1 §5.1), which is also why members
 of objects initialized by a user-provided constructor are deliberately not
 flow-tracked.
+
+
+Parse-Order Store Credit (std::init)
+====================================
+
+The ``std::init`` recognizers classify storage from an expression's
+syntactic form alone; *parse-order store credit* refines that classification
+by remembering the stores and lifetime-annotated calls seen earlier in the
+translation unit.  ``recordInitProfileStore`` records direct stores; the
+``recordNowInitArgument`` / ``recordNowUninitArgument`` pair records what a
+``[[now_init]]`` / ``[[now_uninit]]`` callee does to the storage bound to
+its parameters; ``InitStoreCreditMap`` is the façade that owns the recorded
+facts, keyed by unique declarations (entries persist across the translation
+unit, only the named clear operations remove a fact, and template
+instantiations build fresh declarations, so pattern-time and
+instantiation-time state stay independent).  This section is the canonical
+rationale for all of them; the code comments carry only site-specific
+deltas.
+
+**Credit is parse-order.**  There is no dominance or flow analysis: a store
+counts for every consult that happens later in parse order, whatever the
+control flow between them.  The design consequently errs only toward missed
+diagnostics -- crediting a store the execution might skip can at worst
+*suppress* a diagnostic, never manufacture one.
+
+**Two strengths.**  Every store records ``Maybe`` credit, which only ever
+*suppresses* a diagnostic (the storage may well be initialized).  A
+diagnostic may *fire* only on ``Definite`` credit, which needs the store to
+be certain.  ``currentStoreStrength`` decides, and its rules are the API
+contract: the strength a store (or lifetime-annotated call) recorded at the
+current parse position earns toward the credit keyed by a given key is
+``Definite`` iff the store is unconditionally executed in the function body
+that owns the credited entity -- outside template instantiation (the parser
+scope chain is parser-only state, and the requires-uninit direction ignores
+credit while instantiating anyway), at conditional depth 0
+(``currentConditionalDepth``), before the function has branched by ``goto``
+(a ``goto`` earlier in the body could skip a later store without
+introducing any scope; the tracking flag is shared with ``switch``, an
+over-inclusion in the safe direction), with the enclosing function's
+parse-time pattern equal to the entity's owning function: the
+``DeclContext`` of a credited local/parameter (or of the directly named
+local base object of member credit), or the key itself for current-object
+member credit, which ``resolveMemberStoreBase`` already keys on that
+pattern.  The same-function requirement is what stops a store inside a
+lambda body from definitely crediting an enclosing function's local; the
+enclosing function is resolved from the context chain directly, so a store
+inside a *block* body -- which ``getCurFunctionDecl`` would skip -- stays
+``Maybe`` too.  Everything else records ``Maybe``.
+
+**Recording is not gated on enforcement or suppression.**  A suppressed
+store still initializes, and failing to credit it would turn suppression
+into later false positives.  There is likewise no in-template gate:
+non-dependent code in a template is checked at definition time and must
+find pattern-time credit (instantiations rebuild their ``DeclRefExpr``\ s
+against fresh declarations, so they re-record independently).  The one gate
+is never-executed contexts -- unevaluated and discarded-statement contexts,
+mirroring ``shouldEmitProfileViolation``: a store there never executes, so
+it earns no credit and a destroy there withdraws none.
+
+**Withdrawal mirrors recording.**  A ``[[now_uninit]]`` or storage-release
+callee withdraws credit at the strength the destroy itself earns under the
+same rules: an unconditional same-function destroy withdraws credit of both
+strengths, while a merely-possible one withdraws only the ``Definite``
+claim -- it may have destroyed the storage, so no credit-fired diagnostic
+may rely on it, but the ``Maybe`` credit survives and the lenient direction
+gains no new errors.

@@ -1076,12 +1076,10 @@ enum class UninitStorage { Initialized, Uninitialized, Unknown };
 // p[0] is not credited even though it denotes the same storage as *p.
 //
 // Credit: when non-null, the recognizers consult the parse-order store
-// credit recorded by SemaProfiles::recordInitProfileStore -- a credited
-// entity classifies as Initialized. Null in the constexpr presets; the
-// checking entry points attach it via withCredit, choosing the Strength
-// every consult below passes to the credit queries: Maybe for a consult
-// that only ever *suppresses* a diagnostic on credit (the default),
-// Definite for one that uses credit as a diagnostic's firing basis.
+// credit ("Parse-Order Store Credit" in ProfilesFrameworkInternals.rst) --
+// a credited entity classifies as Initialized. Null in the constexpr
+// presets; the checking entry points attach it via withCredit, choosing the
+// Strength every consult below passes to the credit queries.
 using InitCreditStrength = SemaProfiles::InitCreditStrength;
 
 struct UninitAccessOpts {
@@ -2440,14 +2438,9 @@ unsigned SemaProfiles::currentConditionalDepth() const {
 void SemaProfiles::recordInitProfileStore(const Expr *LHS) {
   if (!getLangOpts().Profiles || !LHS)
     return;
-  // A store in an unevaluated or discarded-statement context never executes
-  // (mirroring shouldEmitProfileViolation's context checks), so it earns no
-  // credit. There is deliberately no enforcement or [[profiles::suppress]]
-  // gate -- a suppressed store still initializes; failing to credit it would
-  // turn suppression into later false positives -- and no in-template gate:
-  // non-dependent code in a template is checked at definition time and must
-  // find pattern-time credit (instantiations rebuild their DeclRefExprs
-  // against fresh decls, so they re-record independently).
+  // Only the never-executed-context gate applies here -- deliberately no
+  // enforcement, suppression, or in-template gate; see "Parse-Order Store
+  // Credit" in ProfilesFrameworkInternals.rst.
   if (inNeverExecutedContext())
     return;
   // Peel transparent casts so a cast-form store credits like its uncast
