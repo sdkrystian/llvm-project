@@ -1087,18 +1087,27 @@ struct UninitAccessOpts {
   const SemaProfiles *Credit = nullptr;
   InitCreditStrength Strength = InitCreditStrength::Maybe;
 
+  // Copy-then-mutate, so each helper names only the field it changes and
+  // adding a field cannot silently drop out of a positional rebuild.
   UninitAccessOpts withoutTopLevelDrop() const {
-    return {false, TrustRefToUninit, SubscriptBase, Credit, Strength};
+    UninitAccessOpts O = *this;
+    O.DropTopLevelUninit = false;
+    return O;
   }
   UninitAccessOpts withSubscriptBase() const {
-    return {DropTopLevelUninit, TrustRefToUninit, true, Credit, Strength};
+    UninitAccessOpts O = *this;
+    O.SubscriptBase = true;
+    return O;
   }
   UninitAccessOpts withCredit(const SemaProfiles *SP) const {
     return withCredit(SP, InitCreditStrength::Maybe);
   }
   UninitAccessOpts withCredit(const SemaProfiles *SP,
                               InitCreditStrength St) const {
-    return {DropTopLevelUninit, TrustRefToUninit, SubscriptBase, SP, St};
+    UninitAccessOpts O = *this;
+    O.Credit = SP;
+    O.Strength = St;
+    return O;
   }
 };
 
