@@ -1,11 +1,14 @@
-// All violations share one TU with a leading unrelated error: the early error
-// disables the analysis-based-warnings pass for later functions, so this also
-// verifies that an enforced CFG-uninit profile keeps diagnosing afterwards.
 // The DEMOTE run additionally enforces test::uninit_read to exercise profile
 // table ordering, which would otherwise change the std::init-only diagnostics.
-// RUN: %clang_cc1 -fsyntax-only -verify=expected,common -fprofiles -std=c++23 -Wno-uninitialized %s
-// RUN: %clang_cc1 -fsyntax-only -verify=demote,common -fprofiles -fprofiles-test-profiles -std=c++23 -Wno-uninitialized -DDEMOTE %s
-// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles,common -std=c++23 -Wno-uninitialized %s
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -std=c++23 -Wno-uninitialized %s
+// RUN: %clang_cc1 -fsyntax-only -verify=demote -fprofiles -fprofiles-test-profiles -std=c++23 -Wno-uninitialized -DDEMOTE %s
+// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -Wno-uninitialized %s
+// The LEADING_ERROR runs add a leading unrelated error so every later function
+// is analyzed through the post-error path; the same profile diagnostics must
+// still fire there.
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -std=c++23 -Wno-uninitialized -DLEADING_ERROR %s
+// RUN: %clang_cc1 -fsyntax-only -verify=demote -fprofiles -fprofiles-test-profiles -std=c++23 -Wno-uninitialized -DDEMOTE -DLEADING_ERROR %s
+// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -Wno-uninitialized -DLEADING_ERROR %s
 
 // no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
 [[profiles::enforce(std::init)]];
@@ -17,8 +20,12 @@
 
 namespace std { enum class byte : unsigned char {}; }
 
+#ifdef LEADING_ERROR
 int leading_unrelated_error = undeclared_identifier;
-// common-error@-1 {{use of undeclared identifier 'undeclared_identifier'}}
+// expected-error@-1 {{use of undeclared identifier 'undeclared_identifier'}}
+// demote-error@-2 {{use of undeclared identifier 'undeclared_identifier'}}
+// no-profiles-error@-3 {{use of undeclared identifier 'undeclared_identifier'}}
+#endif
 
 // The always-compiled suppress tests suppress both std::init and
 // test::uninit_read so the function-under-test demonstrates std::init behavior

@@ -1,9 +1,10 @@
-// All violations share one TU with a leading unrelated error: the early error
-// disables the analysis-based-warnings pass for later functions, so this also
-// verifies that the local-aggregate member check keeps diagnosing through the
-// post-error rerun.
-// RUN: %clang_cc1 -fsyntax-only -verify=expected,common -fprofiles -std=c++23 -Wno-uninitialized %s
-// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles,common -std=c++23 -Wno-uninitialized %s
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -std=c++23 -Wno-uninitialized %s
+// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -Wno-uninitialized %s
+// The LEADING_ERROR runs add a leading unrelated error so every later function
+// is analyzed through the post-error path; the same local-aggregate member
+// diagnostics must still fire there.
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -std=c++23 -Wno-uninitialized -DLEADING_ERROR %s
+// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -Wno-uninitialized -DLEADING_ERROR %s
 
 // std::init: an [[uninit]] scalar member of a constructor-less aggregate
 // local (the paper §5.3 "class exposing uninitialized members" pattern) is
@@ -16,8 +17,11 @@
 
 namespace std { enum class byte : unsigned char {}; }
 
+#ifdef LEADING_ERROR
 int leading_unrelated_error = undeclared_identifier;
-// common-error@-1 {{use of undeclared identifier 'undeclared_identifier'}}
+// expected-error@-1 {{use of undeclared identifier 'undeclared_identifier'}}
+// no-profiles-error@-2 {{use of undeclared identifier 'undeclared_identifier'}}
+#endif
 
 struct Agg {
   int m [[uninit]]; // expected-note 18 {{member 'm' declared here}}
