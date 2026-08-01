@@ -1905,7 +1905,6 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
           if (It == Index.end())
             continue;
           BlockEvents.push_back({Write, It->second, CI->getInit()});
-          Gen[B->getBlockID()].set(It->second);
         } else if (CI->isBaseInitializer()) {
           // A written base initializer (e.g. `: Base{1}`) gives the tracked
           // members of that constructor-less base subtree their values.
@@ -1918,7 +1917,6 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
                 if (It == Index.end())
                   return;
                 BlockEvents.push_back({Write, It->second, CI->getInit()});
-                Gen[B->getBlockID()].set(It->second);
               });
         }
         continue;
@@ -1949,7 +1947,6 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
           continue;
         BlockEvents.push_back(
             {BO->isCompoundAssignmentOp() ? ReadWrite : Write, It->second, BO});
-        Gen[B->getBlockID()].set(It->second);
       } else if (const auto *UO = dyn_cast<UnaryOperator>(St)) {
         // A built-in ++m / m++ / --m / m-- reads the old value and then writes,
         // but unlike -m / !m it carries no lvalue-to-rvalue cast, so the Read
@@ -1964,7 +1961,6 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
         if (It == Index.end())
           continue;
         BlockEvents.push_back({ReadWrite, It->second, UO});
-        Gen[B->getBlockID()].set(It->second);
       } else if (const auto *CE = dyn_cast<CallExpr>(St)) {
         // A call to a [[now_init]] function initializes the storage bound to
         // each of its [[ref_to_uninit]] parameters (P4222R2 §6.2) -- the
@@ -2015,11 +2011,9 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
             if (It == Index.end())
               continue;
             BlockEvents.push_back({Write, It->second, CE});
-            Gen[B->getBlockID()].set(It->second);
           } else if (isCurrentObjectBase(Arg)) {
             for (unsigned Idx = 0; Idx != N; ++Idx)
               BlockEvents.push_back({Write, Idx, CE});
-            Gen[B->getBlockID()].set();
           }
         }
       } else if (const auto *LE = dyn_cast<LambdaExpr>(St)) {
@@ -2062,6 +2056,12 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
         }
       }
     }
+    // Gen is derived from the event stream -- every non-Read event assigns
+    // its member -- so the fixpoint below and the replay can never disagree
+    // about what a block assigns.
+    for (const Event &Ev : BlockEvents)
+      if (Ev.Kind != Read)
+        Gen[B->getBlockID()].set(Ev.Idx);
   }
 
   // Forward "definitely assigned" dataflow: nothing is assigned at function
