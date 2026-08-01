@@ -1,17 +1,21 @@
-// All violations share one TU with a leading unrelated error: the early error
-// disables the analysis-based-warnings pass for later functions, so this also
-// verifies that an enforced CFG-uninit profile keeps diagnosing afterwards.
 // RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-test-profiles -std=c++23 -Wno-uninitialized %s
 // RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -Wno-uninitialized %s
+// The LEADING_ERROR runs add a leading unrelated error so every later function
+// is analyzed through the post-error path; the same profile diagnostics must
+// still fire there.
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-test-profiles -std=c++23 -Wno-uninitialized -DLEADING_ERROR %s
+// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -Wno-uninitialized -DLEADING_ERROR %s
 
 // no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
 [[profiles::enforce(test::uninit_read)]];
 // no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
 [[profiles::enforce(test::other)]];
 
+#ifdef LEADING_ERROR
 int leading_unrelated_error = undeclared_identifier;
 // expected-error@-1 {{use of undeclared identifier 'undeclared_identifier'}}
 // no-profiles-error@-2 {{use of undeclared identifier 'undeclared_identifier'}}
+#endif
 
 // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
 [[profiles::suppress(test::uninit_read)]]
