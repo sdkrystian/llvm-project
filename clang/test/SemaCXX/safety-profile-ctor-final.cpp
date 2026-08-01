@@ -38,6 +38,19 @@ struct DefaultedOutOfLine {
 };
 DefaultedOutOfLine::DefaultedOutOfLine() = default; // expected-error {{test profile fired on finalization of a constructor for class 'DefaultedOutOfLine' under profile 'test::ctor_final'}}
 
+// The dispatch is uniform over constructor kinds: an out-of-line defaulted
+// copy or move constructor is equally user-provided and fires too (a
+// profile that must not see them filters in its own callback).
+struct DefaultedCopyOutOfLine {
+  int x;
+  DefaultedCopyOutOfLine();
+  DefaultedCopyOutOfLine(const DefaultedCopyOutOfLine &);
+  DefaultedCopyOutOfLine(DefaultedCopyOutOfLine &&);
+};
+DefaultedCopyOutOfLine::DefaultedCopyOutOfLine() = default; // expected-error {{test profile fired on finalization of a constructor for class 'DefaultedCopyOutOfLine' under profile 'test::ctor_final'}}
+DefaultedCopyOutOfLine::DefaultedCopyOutOfLine(const DefaultedCopyOutOfLine &) = default; // expected-error {{test profile fired on finalization of a constructor for class 'DefaultedCopyOutOfLine' under profile 'test::ctor_final'}}
+DefaultedCopyOutOfLine::DefaultedCopyOutOfLine(DefaultedCopyOutOfLine &&) = default; // expected-error {{test profile fired on finalization of a constructor for class 'DefaultedCopyOutOfLine' under profile 'test::ctor_final'}}
+
 // A class with no user-declared constructor never reaches the dispatch.
 struct NoCtor {
   int x;
