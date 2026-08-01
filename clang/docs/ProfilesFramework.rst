@@ -589,7 +589,10 @@ parameter.  After a call to a ``[[now_init]]`` function, the argument's
 storage earns exactly the credit the equivalent direct store would --
 ``fill(&u)`` credits ``u`` whole, ``fill(p)`` credits the marked pointer's
 pointee (until ``p`` is reseated), ``fill(&a.m)`` credits the ``(a, m)``
-pair -- with the same boundaries and the same reverse-direction consequence
+pair, and ``fill(arr)`` credits a local ``[[uninit]]`` array whole (§6's
+``uninitialized_fill`` shape; the element form ``fill(&arr[0])`` earns
+nothing, §5.4) -- with the same boundaries and the same reverse-direction
+consequence
 (after an *unconditional* ``fill(&u)`` in the entity's own function, a
 second ``fill(&u)`` is rejected: ``u`` no longer refers to uninitialized
 memory, which incidentally catches double ``construct_at``).  This is R2

@@ -1977,12 +1977,20 @@ SemaProfiles::resolveLifetimeAnnotatedStorage(QualType T,
   // way.
   const Expr *E = ignoreTransparentCasts(Src);
   // The glvalue whose storage the callee affects: the operand of &G for a
-  // pointer parameter, or the bound glvalue itself for a reference one.
+  // pointer parameter, the bound glvalue itself for a reference one, or --
+  // for fill(arr) -- the array glvalue the stripped decay leaves behind
+  // (binding acceptance already has a dedicated decayed-array arm; the
+  // credit side resolves the same storage, so accept and credit agree). An
+  // element-address argument (fill(&arr[0])) still resolves nothing --
+  // §5.4's element ban -- and a file-scope [[uninit]] array fails the
+  // hasLocalStorage gate below like every other non-local.
   const Expr *Glvalue = nullptr;
   if (const auto *UO = dyn_cast<UnaryOperator>(E);
       UO && UO->getOpcode() == UO_AddrOf)
     Glvalue = UO->getSubExpr()->IgnoreParenImpCasts();
   else if (T->isReferenceType())
+    Glvalue = E;
+  else if (E->getType()->isArrayType())
     Glvalue = E;
   if (Glvalue) {
     // &base.m / base.m: the per-object member shape, under exactly the

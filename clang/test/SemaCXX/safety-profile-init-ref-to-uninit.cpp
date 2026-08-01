@@ -1995,6 +1995,44 @@ void test_reseat_clears_destroyed(int *p [[ref_to_uninit]],
   nu_wipe(p); // OK: this is the new pointee's first destroy
 }
 
+// A decayed-array argument credits the [[uninit]] array whole, exactly the
+// storage the dedicated acceptance arm already binds (§6's
+// uninitialized_fill(arr, ...) shape): accept and credit agree.
+void test_now_init_array_decay_credit() {
+  [[uninit]] int arr[8];
+  now_init_fill(arr); // OK: marked target, uninitialized source
+  ni_sink(arr);       // OK: the callee initialized the array whole
+  int x = arr[0];     // OK: credited
+  (void)x;
+}
+void test_now_init_array_decay_reverse() {
+  [[uninit]] int arr[8];
+  now_init_fill(arr);
+  now_init_fill(arr); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+// The element-address shape resolves nothing (§5.4's element ban), and a
+// file-scope [[uninit]] array is not a creditable local: neither earns
+// credit, so the unmarked binding after the call keeps failing.
+void test_now_init_array_element_no_credit() {
+  [[uninit]] int arr[8];
+  now_init_fill(&arr[0]);
+  ni_sink(arr); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+void test_now_init_array_static_no_credit() {
+  now_init_fill(g_uninit_arr);
+  int *q = g_uninit_arr; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)q;
+}
+// [[now_uninit]] withdrawal shares the resolver: a decayed-array argument
+// withdraws the whole-array credit again.
+void test_now_uninit_array_decay_withdrawal() {
+  [[uninit]] int arr[4];
+  now_init_fill(arr);
+  ni_sink(arr); // OK: credited
+  nu_wipe(arr);
+  ni_sink(arr); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
 // A *conditional* destroy records no destroyed state -- it may not have
 // run, so a later destroy is not a definite double destroy.
 void test_conditional_destroy_no_destroyed_state(bool c) {
