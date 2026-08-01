@@ -2457,16 +2457,20 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC) {
     return;
   const unsigned N = PairField.size();
 
-  // A `V.m` access on a tracked local, resolved to its base DeclRefExpr and,
-  // when m is one of the tracked members, its pair index. Base is null (and
-  // Idx ~0u) when E is not such an access at all; Base is set with Idx left
-  // ~0u when the accessed member is an *untracked* sibling of a shape that
-  // cannot reach another member, so the base is consumed rather than escaping
-  // (the escape arm below would otherwise credit every tracked member of V and
-  // lose the diagnostic for them).
+  // A `V.m` access on a tracked local, classified into one of three named
+  // states. NotMemberAccess: E is not such an access at all (also the
+  // conservative answer for member shapes that must stay escapes, below).
+  // TrackedMember: m is one of the tracked members; Idx is its pair index
+  // and Base the consumed base reference. UntrackedSibling: m is an
+  // untracked sibling of a shape that cannot reach another member, so the
+  // base is consumed (benign) rather than escaping -- the escape arm below
+  // would otherwise credit every tracked member of V and lose the
+  // diagnostic for them.
   struct TrackedAccess {
-    unsigned Idx = ~0u;
-    const DeclRefExpr *Base = nullptr;
+    enum Kind { NotMemberAccess, TrackedMember, UntrackedSibling };
+    Kind K = NotMemberAccess;
+    unsigned Idx = ~0u;              // TrackedMember only.
+    const DeclRefExpr *Base = nullptr; // Null iff NotMemberAccess.
   };
   auto LookupPair = [&](const Expr *E) -> TrackedAccess {
     const FieldDecl *F = nullptr;
@@ -2478,7 +2482,7 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC) {
       return {};
     auto It = PairIdx.find({V, F});
     if (It != PairIdx.end())
-      return {It->second, DRE};
+      return {TrackedAccess::TrackedMember, It->second, DRE};
     // An untracked sibling. Reaching it consumes the base without exposing
     // the object -- but only for a member that cannot itself reach one: a
     // pointer or reference member may denote a tracked member (a
@@ -2491,7 +2495,7 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC) {
     QualType FT = F->getType();
     if (!FT->isIntegralOrEnumerationType() && !FT->isFloatingType())
       return {};
-    return {~0u, DRE};
+    return {TrackedAccess::UntrackedSibling, ~0u, DRE};
   };
 
   // First pass: the base DeclRefExprs consumed by a recognized member read or
@@ -2550,26 +2554,26 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC) {
       if (const auto *ICE = dyn_cast<ImplicitCastExpr>(St)) {
         if (ICE->getCastKind() != CK_LValueToRValue)
           continue;
-        unsigned Idx = LookupPair(ICE->getSubExpr()).Idx;
-        if (Idx != ~0u)
-          BlockEvents.push_back({DefAssignEventKind::Read, Idx, ICE});
+        TrackedAccess TA = LookupPair(ICE->getSubExpr());
+        if (TA.K == TrackedAccess::TrackedMember)
+          BlockEvents.push_back({DefAssignEventKind::Read, TA.Idx, ICE});
       } else if (const auto *BO = dyn_cast<BinaryOperator>(St)) {
         if (!BO->isAssignmentOp())
           continue;
-        unsigned Idx = LookupPair(BO->getLHS()).Idx;
-        if (Idx == ~0u)
+        TrackedAccess TA = LookupPair(BO->getLHS());
+        if (TA.K != TrackedAccess::TrackedMember)
           continue;
         BlockEvents.push_back({BO->isCompoundAssignmentOp()
                                    ? DefAssignEventKind::ReadWrite
                                    : DefAssignEventKind::Write,
-                               Idx, BO});
+                               TA.Idx, BO});
       } else if (const auto *UO = dyn_cast<UnaryOperator>(St)) {
         if (!UO->isIncrementDecrementOp())
           continue;
-        unsigned Idx = LookupPair(UO->getSubExpr()).Idx;
-        if (Idx == ~0u)
+        TrackedAccess TA = LookupPair(UO->getSubExpr());
+        if (TA.K != TrackedAccess::TrackedMember)
           continue;
-        BlockEvents.push_back({DefAssignEventKind::ReadWrite, Idx, UO});
+        BlockEvents.push_back({DefAssignEventKind::ReadWrite, TA.Idx, UO});
       } else if (const auto *DRE = dyn_cast<DeclRefExpr>(St)) {
         if (Benign.count(DRE))
           continue;
