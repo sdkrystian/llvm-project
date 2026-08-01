@@ -397,11 +397,49 @@ public:
   /// "Parse-Order Store Credit" in ProfilesFrameworkInternals.rst.
   void recordInitProfileStore(const Expr *LHS);
 
+  /// What a direct callee does to the storage bound to its parameters,
+  /// derived once per binding by the funnel
+  /// (checkInitProfileRefToUninitBinding) from the callee's lifetime
+  /// attributes and the allocator-callee table. Each consumer reads only
+  /// the bits its direction may rely on: binding *acceptance* (which never
+  /// diagnoses) reads the union of the destroy and release bits, credit
+  /// withdrawal (a diagnostic's firing basis) reads the trusted release bit
+  /// only, and double_destroy keys on the destroy bit only (a storage
+  /// release leaves no object to destroy again).
+  struct CalleeLifecycleRoles {
+    /// [[now_init]]: the callee initializes the storage bound to its
+    /// [[ref_to_uninit]] parameters (P4222R2 §6.2).
+    bool InitializesRefToUninitParams = false;
+    /// [[now_uninit]]: the callee ends the lifetime of the storage bound
+    /// to its pointer/reference parameters (§4.4).
+    bool DestroysPointerParams = false;
+    /// A trusted storage-release callee (builtin ID or operator form):
+    /// free, realloc's pointer, replaceable global operator delete.
+    bool ReleasesStorageTrusted = false;
+    /// A name-only (untrusted) release match -- -fno-builtin /
+    /// -ffreestanding strips the ID: the name says what the function is
+    /// meant to be, but its semantics cannot be assumed, so this bit feeds
+    /// acceptance only.
+    bool ReleasesStorageByName = false;
+  };
+
+private:
+  /// The binding funnel's recorder tail: after the binding is judged
+  /// against the *pre-call* state, apply what the callee promises to do to
+  /// the bound storage -- withdraw first, then credit, so a callee carrying
+  /// both attributes (a reinitializer) nets to destroy-then-construct: the
+  /// storage is initialized after the call -- and, independent of the
+  /// callee's roles, record any mutable-alias escape of a marked pointer
+  /// object.
+  void recordLifecycleArguments(const CalleeLifecycleRoles &Roles,
+                                const ValueDecl *Target, QualType T,
+                                const Expr *Src);
+
   /// std::init / [[now_init]] (P4222R2 §6.2): a [[now_init]] callee
   /// initializes the storage bound to each of its [[ref_to_uninit]]
   /// parameters, so the binding earns the same parse-order credit the
-  /// equivalent direct store would. Called from the tail of
-  /// checkInitProfileRefToUninitBinding when \p Target is a marked parameter
+  /// equivalent direct store would. The credit arm of
+  /// recordLifecycleArguments, applied when \p Target is a marked parameter
   /// of a [[now_init]] function; recognizes the affirmatively creditable
   /// source shapes -- &u / u (whole-entity credit on an [[uninit]] local), p
   /// / *p / &*p (pointee credit on a marked local/parameter pointer; §6.2's
@@ -409,11 +447,12 @@ public:
   /// &base.m / base.m (per-object member credit, resolveMemberStoreBase
   /// keys) -- through the recognizers' explicit-cast pass-through. Variadic
   /// arguments, unmarked parameters, and calls through function pointers
-  /// never reach here (no marked ParmVarDecl target). Recorded regardless of
-  /// enforcement, suppression, or diagnosis of the binding itself (the
+  /// never earn anything (no marked ParmVarDecl target). Recorded regardless
+  /// of enforcement, suppression, or diagnosis of the binding itself (the
   /// callee still initializes; recordInitProfileStore's rationale), but not
   /// in never-executed contexts.
-  void recordNowInitArgument(const ValueDecl *Target, QualType T,
+  void recordNowInitArgument(const CalleeLifecycleRoles &Roles,
+                             const ValueDecl *Target, QualType T,
                              const Expr *Src);
 
   /// std::init / [[now_uninit]]: a [[now_uninit]] callee ends the lifetime
@@ -424,11 +463,12 @@ public:
   /// re-construction becomes legal, an unmarked-target binding of the
   /// storage is the ordinary unmarked-direction violation, and a second
   /// destruction is the dedicated double_destroy violation (the destroyed
-  /// state a Definite withdrawal records). Called from the tail of
-  /// checkInitProfileRefToUninitBinding when \p Target is a
-  /// pointer/reference parameter of a [[now_uninit]] function -- the
+  /// state a Definite withdrawal records). The withdrawal arm of
+  /// recordLifecycleArguments, applied when \p Target is a pointer/reference
+  /// parameter of a [[now_uninit]] or trusted storage-release callee -- the
   /// parameters are unmarked (they receive initialized memory), so unlike
-  /// recordNowInitArgument no parameter marker is required. Recognizes the
+  /// recordNowInitArgument no parameter marker is required; a release
+  /// withdraws like a destroy but records no destroyed state. Recognizes the
   /// same source shapes, which are marker-keyed on the source side, so an
   /// ordinary initialized argument withdraws nothing. Same gates as its
   /// sibling: not enforcement- or suppression-gated (a suppressed destroy
@@ -439,9 +479,11 @@ public:
   /// withdraws only the Definite claim -- it may have destroyed the
   /// storage, so no credit-fired diagnostic may rely on it, but the Maybe
   /// credit survives and the lenient direction gains no new errors.
-  void recordNowUninitArgument(const ValueDecl *Target, QualType T,
+  void recordNowUninitArgument(const CalleeLifecycleRoles &Roles,
+                               const ValueDecl *Target, QualType T,
                                const Expr *Src);
 
+public:
   /// std::init: binding a marked pointer *object* out through a mutable
   /// alias -- a T*& binding of p, or a T** binding of &p -- hands the
   /// callee (or the aliasing pointer) the power to reseat it, so any

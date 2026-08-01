@@ -1437,32 +1437,34 @@ static AllocatorCalleeMatch matchAllocatorCallee(const FunctionDecl *FD) {
   return {};
 }
 
-// A callee that releases the storage its pointer argument denotes: the
-// table's ReleasesStorage rows (free, realloc's pointer parameter,
-// replaceable global operator delete / operator delete[]). Releasing
+// Derive, once per binding, what \p FD does to the storage bound to its
+// parameters: the lifetime attributes plus the allocator-callee table's
+// ReleasesStorage rows (free, realloc's pointer parameter, replaceable
+// global operator delete / operator delete[]), split by trust. Releasing
 // storage leaves it as uninitialized as ending the object's lifetime does,
-// so the binding sites treat such a callee's pointer parameter like a
+// so the binding sites treat a release callee's pointer parameter like a
 // [[now_uninit]] one -- except for the double-destroy check:
 // destroy_at(p); free(p); is correct, because ending an object's lifetime
-// and releasing its storage are different operations. This is the *lenient*
-// query -- an untrusted name-only match counts -- used where the answer
-// only ever relaxes a diagnostic (the binding funnel's acceptance): a
-// declared free(p) should not reject its argument just because
-// -fno-builtin stripped the ID. Withdrawal must not key on it
-// (recordNowUninitArgument uses the trusted query instead): withdrawing on
-// an untrusted free could manufacture read-through false positives, while
-// stale credit is the documented missed-diagnostic direction.
-static bool isStorageReleaseCallee(const FunctionDecl *FD) {
+// and releasing its storage are different operations. The trusted/by-name
+// split preserves the lenient/strict query pair: acceptance may read the
+// union (a declared free(p) should not reject its argument just because
+// -fno-builtin stripped the ID), while withdrawal must key on the trusted
+// bit only -- withdrawing on an untrusted name-only free could manufacture
+// read-through false positives, while stale credit is the documented
+// missed-diagnostic direction.
+static SemaProfiles::CalleeLifecycleRoles
+getCalleeLifecycleRoles(const FunctionDecl *FD) {
+  SemaProfiles::CalleeLifecycleRoles Roles;
+  Roles.InitializesRefToUninitParams = FD->hasAttr<NowInitAttr>();
+  Roles.DestroysPointerParams = FD->hasAttr<NowUninitAttr>();
   AllocatorCalleeMatch M = matchAllocatorCallee(FD);
-  return M.Entry && M.Entry->ReleasesStorage;
-}
-
-// The strict twin: a *trusted* storage-release callee (the builtin ID or
-// operator form present), the only recognition on which credit withdrawal
-// -- a diagnostic's firing basis -- may rely.
-static bool isTrustedStorageReleaseCallee(const FunctionDecl *FD) {
-  const AllocatorCalleeEntry *Entry = findAllocatorCallee(FD);
-  return Entry && Entry->ReleasesStorage;
+  if (M.Entry && M.Entry->ReleasesStorage) {
+    if (M.Trusted)
+      Roles.ReleasesStorageTrusted = true;
+    else
+      Roles.ReleasesStorageByName = true;
+  }
+  return Roles;
 }
 
 // A call to a [[ref_to_uninit]]-returning function yields uninitialized
@@ -1827,8 +1829,12 @@ void SemaProfiles::checkInitProfileRefToUninitBinding(SourceLocation Loc,
   const auto *Parm = dyn_cast_or_null<ParmVarDecl>(Target);
   const auto *Callee =
       Parm ? dyn_cast<FunctionDecl>(Parm->getDeclContext()) : nullptr;
-  if (Callee && (Callee->hasAttr<NowUninitAttr>() ||
-                 isStorageReleaseCallee(Callee))) {
+  // The callee's lifecycle roles, derived once; every consumer below reads
+  // only the bits its direction may rely on (see CalleeLifecycleRoles).
+  CalleeLifecycleRoles Roles =
+      Callee ? getCalleeLifecycleRoles(Callee) : CalleeLifecycleRoles();
+  if (Roles.DestroysPointerParams || Roles.ReleasesStorageTrusted ||
+      Roles.ReleasesStorageByName) {
     // A [[now_uninit]] callee's pointer/reference parameter -- and a known
     // storage-release callee's (free, realloc's pointer, replaceable
     // global operator delete), which is [[now_uninit]]-equivalent here --
@@ -1838,19 +1844,21 @@ void SemaProfiles::checkInitProfileRefToUninitBinding(SourceLocation Loc,
     // for a raw-release one (free takes storage that may never have been
     // constructed; see the Limitations note), and initialized storage is
     // precisely what a dual-attributed reinitializer's destroy half exists
-    // for. The one state a [[now_uninit]] callee must not take is storage
-    // *already* destroyed: a second destruction is P4222R2 §1's
-    // double-destroy error, and the destroyed state is definite by
-    // construction, so it may fire a diagnostic. That applies to a
-    // reinitializer too -- its destroy half is invalid on destroyed
-    // storage; construct_at (a plain [[now_init]] function with a marked
-    // parameter, whose binding check below is untouched) is the sanctioned
-    // recovery path. A storage-release callee is exempt:
-    // destroy_at(p); free(p); is correct -- ending an object's lifetime
-    // and releasing its storage are different operations. An
-    // instantiation-dependent source defers exactly like
+    // for. Acceptance never diagnoses, so it reads the union of the
+    // release bits -- an untrusted name-only free still relaxes. The one
+    // state a [[now_uninit]] callee must not take is storage *already*
+    // destroyed: a second destruction is P4222R2 §1's double-destroy
+    // error, and the destroyed state is definite by construction, so it
+    // may fire a diagnostic. That applies to a reinitializer too -- its
+    // destroy half is invalid on destroyed storage; construct_at (a plain
+    // [[now_init]] function with a marked parameter, whose binding check
+    // below is untouched) is the sanctioned recovery path. A
+    // storage-release callee is exempt -- double_destroy keys on the
+    // destroy role alone: destroy_at(p); free(p); is correct, ending an
+    // object's lifetime and releasing its storage are different
+    // operations. An instantiation-dependent source defers exactly like
     // checkInitProfileRefToUninit's.
-    if (Callee->hasAttr<NowUninitAttr>() && Src &&
+    if (Roles.DestroysPointerParams && Src &&
         !isa<RecoveryExpr>(Src->IgnoreParens()) &&
         (D || !Src->isInstantiationDependent()) &&
         shouldEmitProfileViolation("std::init", "double_destroy", Loc, D) &&
@@ -1864,29 +1872,36 @@ void SemaProfiles::checkInitProfileRefToUninitBinding(SourceLocation Loc,
                                 Target && Target->hasAttr<RefToUninitAttr>(),
                                 T->isReferenceType(), Src, D);
   }
-  // Run after the check: the binding itself is judged against the
+  recordLifecycleArguments(Roles, Target, T, Src);
+}
+
+void SemaProfiles::recordLifecycleArguments(const CalleeLifecycleRoles &Roles,
+                                            const ValueDecl *Target,
+                                            QualType T, const Expr *Src) {
+  // Runs after the binding check: the binding itself is judged against the
   // *pre-call* state, and only then does a [[now_init]] callee's promised
   // initialization -- or a [[now_uninit]] callee's promised destruction --
   // take effect for what follows in parse order. The withdrawal runs before
   // the credit so a callee carrying both attributes (a reinitializer) nets
   // to destroy-then-construct: the storage is initialized after the call.
-  recordNowUninitArgument(Target, T, Src);
-  recordNowInitArgument(Target, T, Src);
+  // The alias escape runs last and is independent of the callee's roles.
+  recordNowUninitArgument(Roles, Target, T, Src);
+  recordNowInitArgument(Roles, Target, T, Src);
   recordInitProfilePointerAliasEscape(T, Src);
 }
 
-void SemaProfiles::recordNowInitArgument(const ValueDecl *Target, QualType T,
+void SemaProfiles::recordNowInitArgument(const CalleeLifecycleRoles &Roles,
+                                         const ValueDecl *Target, QualType T,
                                          const Expr *Src) {
   // Only the binding of a [[ref_to_uninit]] parameter of a [[now_init]]
   // function carries the callee's initialization promise (P4222R2 §6.2: the
   // attribute "would apply to every [[ref_to_uninit]] argument"). A variadic
   // argument, an unmarked parameter, or a call through a function pointer
   // presents no marked ParmVarDecl and earns nothing.
+  if (!Roles.InitializesRefToUninitParams)
+    return;
   const auto *Parm = dyn_cast_or_null<ParmVarDecl>(Target);
   if (!Parm || !Src || !Parm->hasAttr<RefToUninitAttr>())
-    return;
-  const auto *FD = dyn_cast_or_null<FunctionDecl>(Parm->getDeclContext());
-  if (!FD || !FD->hasAttr<NowInitAttr>())
     return;
   // Like recordInitProfileStore: no enforcement, suppression, or in-template
   // gate (a suppressed or pattern-parsed call still initializes; rebuilt
@@ -1897,34 +1912,31 @@ void SemaProfiles::recordNowInitArgument(const ValueDecl *Target, QualType T,
   recordLifetimeAnnotatedArgument(T, Src, LifetimeAnnotationEffect::Construct);
 }
 
-void SemaProfiles::recordNowUninitArgument(const ValueDecl *Target, QualType T,
+void SemaProfiles::recordNowUninitArgument(const CalleeLifecycleRoles &Roles,
+                                           const ValueDecl *Target, QualType T,
                                            const Expr *Src) {
   // The mirror of recordNowInitArgument: a [[now_uninit]] callee ends the
   // lifetime of the storage bound to each of its pointer/reference
   // parameters (P4222R2 §4.4's missing destroy_at recording). The
   // parameters are *unmarked* -- destruction takes initialized memory -- so
-  // the gate keys on the parameter's type, not a marker; the shape walk is
-  // marker-keyed on the source side, so an ordinary initialized argument
-  // withdraws nothing. A variadic argument or a call through a function
-  // pointer presents no ParmVarDecl and withdraws nothing (stale credit is
-  // a missed diagnostic, never a false positive -- the same boundary as
-  // [[now_init]]).
-  const auto *Parm = dyn_cast_or_null<ParmVarDecl>(Target);
-  if (!Parm || !Src)
-    return;
+  // the gate keys on the callee's role, not a parameter marker; the shape
+  // walk is marker-keyed on the source side, so an ordinary initialized
+  // argument withdraws nothing. A variadic argument or a call through a
+  // function pointer presents no ParmVarDecl and withdraws nothing (stale
+  // credit is a missed diagnostic, never a false positive -- the same
+  // boundary as [[now_init]]).
+  //
   // A known storage-release callee (free, realloc's pointer parameter,
   // replaceable global operator delete) withdraws like a [[now_uninit]]
   // one: the released storage no longer holds the object the credit
   // described, so a whole-`*q` read through a marked pointer after free(q)
   // classifies uninitialized again. (Unmarked pointers stay untracked;
   // use-after-free through them is the invalidation profile's job.) Only
-  // the *trusted* recognition may withdraw -- withdrawing on an untrusted
-  // name-only free could manufacture read-through false positives, while
-  // the stale credit an unwithdrawn release leaves behind is the documented
-  // missed-diagnostic direction.
-  const auto *FD = dyn_cast_or_null<FunctionDecl>(Parm->getDeclContext());
-  if (!FD ||
-      !(FD->hasAttr<NowUninitAttr>() || isTrustedStorageReleaseCallee(FD)))
+  // the *trusted* release bit may withdraw (see CalleeLifecycleRoles).
+  if (!Roles.DestroysPointerParams && !Roles.ReleasesStorageTrusted)
+    return;
+  const auto *Parm = dyn_cast_or_null<ParmVarDecl>(Target);
+  if (!Parm || !Src)
     return;
   // Not enforcement- or suppression-gated (a suppressed destroy still
   // destroys), but a call in a never-executed context destroys nothing.
@@ -1936,7 +1948,7 @@ void SemaProfiles::recordNowUninitArgument(const ValueDecl *Target, QualType T,
   // double_destroy on free's account. A dual-attributed callee stays a
   // destroy.
   recordLifetimeAnnotatedArgument(T, Src,
-                                  FD->hasAttr<NowUninitAttr>()
+                                  Roles.DestroysPointerParams
                                       ? LifetimeAnnotationEffect::Destroy
                                       : LifetimeAnnotationEffect::Release);
 }
