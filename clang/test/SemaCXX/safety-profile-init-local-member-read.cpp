@@ -97,6 +97,7 @@ int test_unevaluated_matrix() {
   (void)typeid(a.m);
   bool r = requires { a.m + 1; };
   (void)r;
+  [[assume(a.m == 1)]];
   return a.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
 }
 

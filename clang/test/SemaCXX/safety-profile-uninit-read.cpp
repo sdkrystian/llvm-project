@@ -61,6 +61,7 @@ void test_unevaluated() {
   (void)typeid(x);
   bool r = requires { x + 1; };
   (void)r;
+  [[assume(x == 1)]];
 }
 
 // An unevaluated mention earns no assignment credit either: the following

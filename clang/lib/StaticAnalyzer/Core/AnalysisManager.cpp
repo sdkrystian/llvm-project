@@ -42,6 +42,9 @@ AnalysisManager::AnalysisManager(ASTContext &ASTCtx, Preprocessor &PP,
   AnaCtxMgr.getCFGBuildOptions().OmitImplicitValueInitializers = true;
   AnaCtxMgr.getCFGBuildOptions().AddCXXDefaultInitExprInAggregates =
       Options.ShouldIncludeDefaultInitForAggregates;
+  // The engine consumes [[assume]] operands (ExprEngine::VisitAttributedStmt),
+  // so their expressions must be built into the CFG.
+  AnaCtxMgr.getCFGBuildOptions().AddAssumeAttrExprs = true;
 }
 
 AnalysisManager::~AnalysisManager() {

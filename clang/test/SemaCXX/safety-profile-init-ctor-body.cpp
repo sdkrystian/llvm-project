@@ -48,6 +48,7 @@ struct UnevaluatedMention {
     (void)typeid(m);
     bool r = requires { m + 1; };
     (void)r;
+    [[assume(m == 1)]];
     m = 1;
   }
 };

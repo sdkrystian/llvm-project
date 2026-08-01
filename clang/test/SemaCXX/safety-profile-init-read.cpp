@@ -85,6 +85,7 @@ void test_unevaluated_contexts() {
   (void)typeid(x);
   bool r = requires { x + 1; };
   (void)r;
+  [[assume(x == 1)]];
 }
 
 void test_param(int p) {

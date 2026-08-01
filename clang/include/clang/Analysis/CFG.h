@@ -1306,6 +1306,14 @@ public:
     bool AddVirtualBaseBranches = false;
     bool OmitImplicitValueInitializers = false;
     bool AssumeReachableDefaultInSwitchStatements = false;
+    // Include the operand of a [[assume]] attribute in the CFG, as
+    // block-level expressions preceding the AttributedStmt. The static
+    // analyzer opts in so it can consume assumptions
+    // (ExprEngine::VisitAttributedStmt reads the operand's SVal); everyone
+    // else keeps the default -- the operand is not evaluated at run time
+    // ([dcl.attr.assume]), so -Wuninitialized and similar dataflow consumers
+    // must not count it as a read.
+    bool AddAssumeAttrExprs = false;
 
     BuildOptions() = default;
 
