@@ -67,8 +67,8 @@ bool SemaProfiles::addProfileEnforcement(StringRef Name, StringRef Designator,
   return true;
 }
 
-// Unzip profile arguments into the parallel key/value/kind arrays that the
-// semantic attributes store (Attr.td cannot hold structured arguments).
+// Unzip profile arguments into the parallel key/value/kind arrays that
+// ProfilesSuppressAttr stores (Attr.td cannot hold structured arguments).
 static void unzipProfileArguments(ArrayRef<profiles::ProfileArgument> Arguments,
                                   SmallVectorImpl<StringRef> &Keys,
                                   SmallVectorImpl<StringRef> &Values,
@@ -80,28 +80,9 @@ static void unzipProfileArguments(ArrayRef<profiles::ProfileArgument> Arguments,
   }
 }
 
-static void appendProfileArgumentData(
-    ArrayRef<profiles::ProfileArgument> Arguments,
-    SmallVectorImpl<unsigned> *ArgumentCounts,
-    SmallVectorImpl<StringRef> *ArgumentKeys,
-    SmallVectorImpl<StringRef> *ArgumentValues,
-    SmallVectorImpl<unsigned> *ArgumentKinds) {
-  if (!ArgumentCounts)
-    return;
-
-  assert(ArgumentKeys && ArgumentValues && ArgumentKinds);
-  ArgumentCounts->push_back(Arguments.size());
-  unzipProfileArguments(Arguments, *ArgumentKeys, *ArgumentValues,
-                        *ArgumentKinds);
-}
-
 bool SemaProfiles::processProfilesEnforceAttr(
     const ParsedAttr &AL, Module *Mod, SmallVectorImpl<StringRef> *NewNames,
-    SmallVectorImpl<StringRef> *NewDesignators,
-    SmallVectorImpl<unsigned> *NewArgumentCounts,
-    SmallVectorImpl<StringRef> *NewArgumentKeys,
-    SmallVectorImpl<StringRef> *NewArgumentValues,
-    SmallVectorImpl<unsigned> *NewArgumentKinds) {
+    SmallVectorImpl<StringRef> *NewDesignators) {
   const auto &Args = AL.getProfileEnforceArgs();
   if (Args.Designators.empty()) {
     Diag(AL.getLoc(), diag::err_attribute_too_few_arguments) << AL << 1;
@@ -131,9 +112,6 @@ bool SemaProfiles::processProfilesEnforceAttr(
         NewNames->push_back(Name);
       if (NewDesignators)
         NewDesignators->push_back(Spelling);
-      appendProfileArgumentData(D.Arguments, NewArgumentCounts,
-                                NewArgumentKeys, NewArgumentValues,
-                                NewArgumentKinds);
     }
   }
   return true;
