@@ -1787,6 +1787,77 @@ static void collectTrackedUninitMembers(
   });
 }
 
+// Per-block ordered events recovered from the linearized CFG by the
+// definite-assignment passes: a value load of tracked entity Idx is a Read;
+// an assignment is a Write that marks it assigned after the RHS is
+// evaluated; a compound assignment or built-in ++/-- both reads and then
+// writes it.
+enum class DefAssignEventKind { Read, Write, ReadWrite };
+struct DefAssignEvent {
+  DefAssignEventKind Kind;
+  unsigned Idx;
+  const Expr *E;
+};
+
+// A call to a [[now_init]] function initializes the storage bound to each
+// of its [[ref_to_uninit]] parameters (P4222R2 §6.2) -- the paper's
+// sanctioned exception to the ctor-body pass's strict assignment-only
+// crediting. A current-object member passed as `&m` / `m` becomes assigned
+// at the call element (its argument-subexpression events, e.g. a read of
+// another member, precede it in the block); passing `this` / `*this` itself
+// to a marked parameter hands the callee the whole object to initialize, so
+// every tracked member is assigned. This is a real Gen bit in the dataflow,
+// not parse-order credit: a [[now_init]] call under a branch still does not
+// satisfy a read at the join (§1.2's all-branches rule). A plain (non-
+// [[now_init]]) callee earns nothing.
+static void appendNowInitCallEvents(
+    const CallExpr *CE, unsigned NumMembers,
+    const llvm::DenseMap<const FieldDecl *, unsigned> &Index,
+    SmallVectorImpl<DefAssignEvent> &BlockEvents) {
+  const FunctionDecl *Callee = CE->getDirectCallee();
+  if (!Callee || !Callee->hasAttr<NowInitAttr>())
+    return;
+  // Zip declared parameters with arguments. A member operator called
+  // through CXXOperatorCallExpr receives the object as argument 0
+  // ahead of its declared parameters -- for a C++23 static operator
+  // too, whose object argument is still evaluated -- so skip it. An
+  // explicit-object member function instead declares its object as
+  // parameter 0, so its mapping is already direct.
+  unsigned ArgOffset = 0;
+  if (isa<CXXOperatorCallExpr>(CE))
+    if (const auto *MD = dyn_cast<CXXMethodDecl>(Callee);
+        MD && !MD->isExplicitObjectMemberFunction())
+      ArgOffset = 1;
+  for (unsigned PI = 0, NP = Callee->getNumParams(); PI != NP; ++PI) {
+    if (PI + ArgOffset >= CE->getNumArgs())
+      break;
+    if (!Callee->getParamDecl(PI)->hasAttr<RefToUninitAttr>())
+      continue;
+    const Expr *Arg = CE->getArg(PI + ArgOffset)->IgnoreParenImpCasts();
+    // Peel explicit pointer/reference casts, mirroring the parse-time
+    // recognizers (§4.3: a cast marked pointer is itself marked).
+    while (const auto *Cast = dyn_cast<ExplicitCastExpr>(Arg)) {
+      const Expr *Sub = Cast->getSubExpr();
+      if (!Sub->getType()->isPointerType() && !Sub->isGLValue())
+        break;
+      Arg = Sub->IgnoreParenImpCasts();
+    }
+    const Expr *G = Arg;
+    if (const auto *AddrOf = dyn_cast<UnaryOperator>(Arg);
+        AddrOf && AddrOf->getOpcode() == UO_AddrOf)
+      G = AddrOf->getSubExpr();
+    if (const FieldDecl *F = getCurrentObjectMember(G)) {
+      auto It = Index.find(F);
+      if (It == Index.end())
+        continue;
+      BlockEvents.push_back({DefAssignEventKind::Write, It->second, CE});
+    } else if (isCurrentObjectBase(Arg)) {
+      for (unsigned Idx = 0; Idx != NumMembers; ++Idx)
+        BlockEvents.push_back({DefAssignEventKind::Write, Idx, CE});
+    }
+  }
+}
+
 // std::init constructor-body check (paper §7.1 "initialized ... before use").
 //
 // A [[uninit]] scalar data member is deliberately *not* required to be
@@ -1873,18 +1944,8 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
     }
   }
 
-  // Per-block ordered events recovered from the linearized CFG: a member load
-  // (an lvalue-to-rvalue conversion of `this->m`) is a Read; `m = e` is a Write
-  // that marks m assigned after the RHS is evaluated; a compound assignment
-  // `m op= e` both reads and then writes m.
-  enum EventKind { Read, Write, ReadWrite };
-  struct Event {
-    EventKind Kind;
-    unsigned Idx;
-    const Expr *E;
-  };
   const unsigned NumBlocks = cfg->getNumBlockIDs();
-  std::vector<SmallVector<Event, 4>> Events(NumBlocks);
+  std::vector<SmallVector<DefAssignEvent, 4>> Events(NumBlocks);
   std::vector<llvm::BitVector> Gen(NumBlocks, llvm::BitVector(N, false));
   for (const CFGBlock *B : *cfg) {
     auto &BlockEvents = Events[B->getBlockID()];
@@ -1904,7 +1965,8 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
           auto It = Index.find(F);
           if (It == Index.end())
             continue;
-          BlockEvents.push_back({Write, It->second, CI->getInit()});
+          BlockEvents.push_back(
+              {DefAssignEventKind::Write, It->second, CI->getInit()});
         } else if (CI->isBaseInitializer()) {
           // A written base initializer (e.g. `: Base{1}`) gives the tracked
           // members of that constructor-less base subtree their values.
@@ -1916,7 +1978,8 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
                 auto It = Index.find(F);
                 if (It == Index.end())
                   return;
-                BlockEvents.push_back({Write, It->second, CI->getInit()});
+                BlockEvents.push_back(
+                    {DefAssignEventKind::Write, It->second, CI->getInit()});
               });
         }
         continue;
@@ -1935,7 +1998,7 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
           continue;
         auto It = Index.find(F);
         if (It != Index.end())
-          BlockEvents.push_back({Read, It->second, ICE});
+          BlockEvents.push_back({DefAssignEventKind::Read, It->second, ICE});
       } else if (const auto *BO = dyn_cast<BinaryOperator>(St)) {
         if (!BO->isAssignmentOp())
           continue;
@@ -1945,8 +2008,10 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
         auto It = Index.find(F);
         if (It == Index.end())
           continue;
-        BlockEvents.push_back(
-            {BO->isCompoundAssignmentOp() ? ReadWrite : Write, It->second, BO});
+        BlockEvents.push_back({BO->isCompoundAssignmentOp()
+                                   ? DefAssignEventKind::ReadWrite
+                                   : DefAssignEventKind::Write,
+                               It->second, BO});
       } else if (const auto *UO = dyn_cast<UnaryOperator>(St)) {
         // A built-in ++m / m++ / --m / m-- reads the old value and then writes,
         // but unlike -m / !m it carries no lvalue-to-rvalue cast, so the Read
@@ -1960,62 +2025,9 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
         auto It = Index.find(F);
         if (It == Index.end())
           continue;
-        BlockEvents.push_back({ReadWrite, It->second, UO});
+        BlockEvents.push_back({DefAssignEventKind::ReadWrite, It->second, UO});
       } else if (const auto *CE = dyn_cast<CallExpr>(St)) {
-        // A call to a [[now_init]] function initializes the storage bound to
-        // each of its [[ref_to_uninit]] parameters (P4222R2 §6.2) -- the
-        // paper's sanctioned exception to the strict assignment-only
-        // crediting above. A current-object member passed as `&m` / `m`
-        // becomes assigned at the call element (its argument-subexpression
-        // events, e.g. a read of another member, precede it in the block);
-        // passing `this` / `*this` itself to a marked parameter hands the
-        // callee the whole object to initialize, so every tracked member is
-        // assigned. This is a real Gen bit in the dataflow, not parse-order
-        // credit: a [[now_init]] call under a branch still does not satisfy
-        // a read at the join (§1.2's all-branches rule). A plain (non-
-        // [[now_init]]) callee continues to earn nothing.
-        const FunctionDecl *Callee = CE->getDirectCallee();
-        if (!Callee || !Callee->hasAttr<NowInitAttr>())
-          continue;
-        // Zip declared parameters with arguments. A member operator called
-        // through CXXOperatorCallExpr receives the object as argument 0
-        // ahead of its declared parameters -- for a C++23 static operator
-        // too, whose object argument is still evaluated -- so skip it. An
-        // explicit-object member function instead declares its object as
-        // parameter 0, so its mapping is already direct.
-        unsigned ArgOffset = 0;
-        if (isa<CXXOperatorCallExpr>(CE))
-          if (const auto *MD = dyn_cast<CXXMethodDecl>(Callee);
-              MD && !MD->isExplicitObjectMemberFunction())
-            ArgOffset = 1;
-        for (unsigned PI = 0, NP = Callee->getNumParams(); PI != NP; ++PI) {
-          if (PI + ArgOffset >= CE->getNumArgs())
-            break;
-          if (!Callee->getParamDecl(PI)->hasAttr<RefToUninitAttr>())
-            continue;
-          const Expr *Arg = CE->getArg(PI + ArgOffset)->IgnoreParenImpCasts();
-          // Peel explicit pointer/reference casts, mirroring the parse-time
-          // recognizers (§4.3: a cast marked pointer is itself marked).
-          while (const auto *Cast = dyn_cast<ExplicitCastExpr>(Arg)) {
-            const Expr *Sub = Cast->getSubExpr();
-            if (!Sub->getType()->isPointerType() && !Sub->isGLValue())
-              break;
-            Arg = Sub->IgnoreParenImpCasts();
-          }
-          const Expr *G = Arg;
-          if (const auto *AddrOf = dyn_cast<UnaryOperator>(Arg);
-              AddrOf && AddrOf->getOpcode() == UO_AddrOf)
-            G = AddrOf->getSubExpr();
-          if (const FieldDecl *F = getCurrentObjectMember(G)) {
-            auto It = Index.find(F);
-            if (It == Index.end())
-              continue;
-            BlockEvents.push_back({Write, It->second, CE});
-          } else if (isCurrentObjectBase(Arg)) {
-            for (unsigned Idx = 0; Idx != N; ++Idx)
-              BlockEvents.push_back({Write, Idx, CE});
-          }
-        }
+        appendNowInitCallEvents(CE, N, Index, BlockEvents);
       } else if (const auto *LE = dyn_cast<LambdaExpr>(St)) {
         // The lambda body is a separate function and never appears in this
         // CFG, but a this-capturing lambda can read members the moment it is
@@ -2049,7 +2061,8 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
           if (F) {
             auto It = Index.find(F);
             if (It != Index.end())
-              BlockEvents.push_back({Read, It->second, cast<Expr>(Cur)});
+              BlockEvents.push_back(
+                  {DefAssignEventKind::Read, It->second, cast<Expr>(Cur)});
           }
           for (const Stmt *Child : Cur->children())
             Stack.push_back(Child);
@@ -2059,8 +2072,8 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
     // Gen is derived from the event stream -- every non-Read event assigns
     // its member -- so the fixpoint below and the replay can never disagree
     // about what a block assigns.
-    for (const Event &Ev : BlockEvents)
-      if (Ev.Kind != Read)
+    for (const DefAssignEvent &Ev : BlockEvents)
+      if (Ev.Kind != DefAssignEventKind::Read)
         Gen[B->getBlockID()].set(Ev.Idx);
   }
 
@@ -2106,16 +2119,16 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
   std::vector<SmallVector<const Expr *, 2>> Offending(N);
   for (const CFGBlock *B : *cfg) {
     llvm::BitVector Assigned = EntryState[B->getBlockID()];
-    for (const Event &Ev : Events[B->getBlockID()]) {
+    for (const DefAssignEvent &Ev : Events[B->getBlockID()]) {
       switch (Ev.Kind) {
-      case Read:
+      case DefAssignEventKind::Read:
         if (!Assigned.test(Ev.Idx))
           Offending[Ev.Idx].push_back(Ev.E);
         break;
-      case Write:
+      case DefAssignEventKind::Write:
         Assigned.set(Ev.Idx);
         break;
-      case ReadWrite:
+      case DefAssignEventKind::ReadWrite:
         if (!Assigned.test(Ev.Idx))
           Offending[Ev.Idx].push_back(Ev.E);
         Assigned.set(Ev.Idx);
