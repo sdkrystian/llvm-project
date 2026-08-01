@@ -435,7 +435,7 @@ class reverse_children {
   ArrayRef<Stmt *> children;
 
 public:
-  reverse_children(Stmt *S, ASTContext &Ctx);
+  reverse_children(Stmt *S, ASTContext &Ctx, bool AddAssumeAttrExprs);
 
   using iterator = ArrayRef<Stmt *>::reverse_iterator;
 
@@ -445,7 +445,8 @@ public:
 
 } // namespace
 
-reverse_children::reverse_children(Stmt *S, ASTContext &Ctx) {
+reverse_children::reverse_children(Stmt *S, ASTContext &Ctx,
+                                   bool AddAssumeAttrExprs) {
   if (CallExpr *CE = dyn_cast<CallExpr>(S)) {
     children = CE->getRawSubExprs();
     return;
@@ -464,13 +465,19 @@ reverse_children::reverse_children(Stmt *S, ASTContext &Ctx) {
     // For an attributed stmt, the "children()" returns only the NullStmt
     // (;) but semantically the "children" are supposed to be the
     // expressions _within_ i.e. the two square brackets i.e. [[ HERE ]]
-    // so we add the subexpressions first, _then_ add the "children"
+    // so we add the subexpressions first, _then_ add the "children".
+    // Only consumers that opted in see the assumption expressions: the
+    // operand of [[assume]] is never evaluated ([dcl.attr.assume]), so a
+    // mention there is not a read or a use (CFG::BuildOptions
+    // ::AddAssumeAttrExprs).
     auto *AS = cast<AttributedStmt>(S);
-    for (const auto *Attr : AS->getAttrs()) {
-      if (const auto *AssumeAttr = dyn_cast<CXXAssumeAttr>(Attr)) {
-        Expr *AssumeExpr = AssumeAttr->getAssumption();
-        if (!AssumeExpr->HasSideEffects(Ctx)) {
-          childrenBuf.push_back(AssumeExpr);
+    if (AddAssumeAttrExprs) {
+      for (const auto *Attr : AS->getAttrs()) {
+        if (const auto *AssumeAttr = dyn_cast<CXXAssumeAttr>(Attr)) {
+          Expr *AssumeExpr = AssumeAttr->getAssumption();
+          if (!AssumeExpr->HasSideEffects(Ctx)) {
+            childrenBuf.push_back(AssumeExpr);
+          }
         }
       }
     }
@@ -2578,7 +2585,7 @@ CFGBlock *CFGBuilder::VisitChildren(Stmt *S) {
 
   // Visit the children in their reverse order so that they appear in
   // left-to-right (natural) order in the CFG.
-  reverse_children RChildren(S, *Context);
+  reverse_children RChildren(S, *Context, BuildOpts.AddAssumeAttrExprs);
   for (Stmt *Child : RChildren) {
     if (Child)
       if (CFGBlock *R = Visit(Child))
@@ -2607,7 +2614,7 @@ CFGBlock *CFGBuilder::VisitInitListExpr(InitListExpr *ILE, AddStmtChoice asc) {
   }
   CFGBlock *B = Block;
 
-  reverse_children RChildren(ILE, *Context);
+  reverse_children RChildren(ILE, *Context, BuildOpts.AddAssumeAttrExprs);
   for (Stmt *Child : RChildren) {
     if (!Child)
       continue;

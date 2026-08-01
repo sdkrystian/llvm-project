@@ -1771,4 +1771,15 @@ bool f() {
 }
 } // namespace unevaluated_builtin_arg
 
+namespace assume_operand {
+// The operand of [[assume]] is never evaluated: a mention there is not a
+// read.
+int f() {
+  int x;
+  [[assume(x == 1)]]; // no-warning
+  x = 2;
+  return x;
+}
+} // namespace assume_operand
+
 #endif
