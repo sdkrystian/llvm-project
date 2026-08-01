@@ -214,6 +214,12 @@ int test28(void) {
   return sizeof(int[len]); // expected-warning{{variable 'len' is uninitialized when used here}}
 }
 
+// __builtin_constant_p() does not evaluate its argument.
+int test_builtin_constant_p(void) {
+  int x;
+  return __builtin_constant_p(x); // no-warning
+}
+
 void test29(void) {
   int x; // expected-note{{initialize the variable 'x' to silence this warning}}
   (void) ^{ (void) x; }; // expected-warning{{variable 'x' is uninitialized when captured by block}}
