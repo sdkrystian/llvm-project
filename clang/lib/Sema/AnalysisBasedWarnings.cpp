@@ -1791,13 +1791,139 @@ static void collectTrackedUninitMembers(
 // definite-assignment passes: a value load of tracked entity Idx is a Read;
 // an assignment is a Write that marks it assigned after the RHS is
 // evaluated; a compound assignment or built-in ++/-- both reads and then
-// writes it.
-enum class DefAssignEventKind { Read, Write, ReadWrite };
+// writes it; a Copy makes entity Idx's state the source entity SrcIdx's at
+// that point (the local pass's tracked-copy transfer).
+enum class DefAssignEventKind { Read, Write, ReadWrite, Copy };
 struct DefAssignEvent {
   DefAssignEventKind Kind;
   unsigned Idx;
   const Expr *E;
+  unsigned SrcIdx = 0; // Copy only: the source entity.
 };
+
+// Replay a block's events over State: the definite-assignment engine's one
+// block-level transfer function, shared by the fixpoint and the reporting
+// replay so the two can never disagree. When Offending is non-null, a read
+// of an entity not definitely assigned at its program point is collected.
+static void
+applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
+                     llvm::BitVector &State,
+                     std::vector<SmallVector<const Expr *, 2>> *Offending) {
+  for (const DefAssignEvent &Ev : BlockEvents) {
+    switch (Ev.Kind) {
+    case DefAssignEventKind::Read:
+      if (Offending && !State.test(Ev.Idx))
+        (*Offending)[Ev.Idx].push_back(Ev.E);
+      break;
+    case DefAssignEventKind::Write:
+      State.set(Ev.Idx);
+      break;
+    case DefAssignEventKind::ReadWrite:
+      if (Offending && !State.test(Ev.Idx))
+        (*Offending)[Ev.Idx].push_back(Ev.E);
+      State.set(Ev.Idx);
+      break;
+    case DefAssignEventKind::Copy:
+      if (State.test(Ev.SrcIdx))
+        State.set(Ev.Idx);
+      else
+        State.reset(Ev.Idx);
+      break;
+    }
+  }
+}
+
+// The forward "definitely assigned" dataflow under both member passes:
+// nothing is assigned at function entry; a block's entry is the
+// intersection over its predecessors' exits (an entity is definitely
+// assigned at a point only if assigned on every incoming path, the paper's
+// all-branches rule, §1.2/§1.3); a block's transfer is the event replay
+// above -- the same replay the reporting pass uses, and a caller-supplied
+// transfer is deliberately not offered: a new event kind is added here,
+// once, instead of re-opening the fixpoint/replay divergence class.
+// Unprocessed (unreachable) predecessors keep the all-assigned top, so
+// unreachable code is never flagged. The transfer is monotone *as a
+// function* (a larger input state yields a larger output state:
+// Read/Write/ReadWrite only set bits, and Copy projects the source bit),
+// not set-only -- Copy can clear a bit -- so termination follows from every
+// block's exit only ever descending from the all-assigned top in the finite
+// lattice. Returns, per tracked entity, the reads at program points where
+// the entity is not definitely assigned.
+static std::vector<SmallVector<const Expr *, 2>>
+runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC, unsigned NumTracked,
+                      ArrayRef<SmallVector<DefAssignEvent, 4>> Events) {
+  const unsigned NumBlocks = cfg.getNumBlockIDs();
+  std::vector<llvm::BitVector> EntryState(NumBlocks,
+                                          llvm::BitVector(NumTracked, true));
+  std::vector<llvm::BitVector> ExitState(NumBlocks,
+                                         llvm::BitVector(NumTracked, true));
+  const CFGBlock &CFGEntry = cfg.getEntry();
+  ForwardDataflowWorklist Worklist(cfg, AC);
+  Worklist.enqueueBlock(&CFGEntry);
+  while (const CFGBlock *B = Worklist.dequeue()) {
+    llvm::BitVector In(NumTracked, true);
+    if (B == &CFGEntry) {
+      In = llvm::BitVector(NumTracked, false);
+    } else {
+      bool First = true;
+      for (const CFGBlock *Pred : B->preds()) {
+        if (!Pred)
+          continue;
+        if (First) {
+          In = ExitState[Pred->getBlockID()];
+          First = false;
+        } else {
+          In &= ExitState[Pred->getBlockID()];
+        }
+      }
+    }
+    EntryState[B->getBlockID()] = In;
+    applyDefAssignEvents(Events[B->getBlockID()], In, /*Offending=*/nullptr);
+    if (In != ExitState[B->getBlockID()]) {
+      ExitState[B->getBlockID()] = In;
+      Worklist.enqueueSuccessors(B);
+    }
+  }
+
+  // Replay each block from its fixpoint entry state and collect reads of an
+  // entity that is not yet definitely assigned at that point.
+  std::vector<SmallVector<const Expr *, 2>> Offending(NumTracked);
+  for (const CFGBlock *B : cfg) {
+    llvm::BitVector Assigned = EntryState[B->getBlockID()];
+    applyDefAssignEvents(Events[B->getBlockID()], Assigned, &Offending);
+  }
+  return Offending;
+}
+
+// Report at the first offending read (in source order) that is not
+// suppressed, once per tracked entity, mirroring the local-variable
+// reporter. The profile identity ("std::init" / "uninit_read" /
+// err_init_member_read_before_init) is fixed here: exactly one CFG profile
+// row runs the member passes today.
+static void reportMemberReadsBeforeInit(
+    Sema &S, AnalysisDeclContext &AC,
+    MutableArrayRef<SmallVector<const Expr *, 2>> Offending,
+    ArrayRef<const FieldDecl *> TrackedFields) {
+  for (unsigned I = 0, N = Offending.size(); I != N; ++I) {
+    if (Offending[I].empty())
+      continue;
+    llvm::sort(Offending[I], [&](const Expr *A, const Expr *B) {
+      return S.SourceMgr.isBeforeInTranslationUnit(A->getBeginLoc(),
+                                                   B->getBeginLoc());
+    });
+    for (const Expr *R : Offending[I]) {
+      if (!S.Profiles().shouldEmitProfileViolation("std::init", "uninit_read",
+                                                   R, AC))
+        continue;
+      S.Diag(R->getBeginLoc(), diag::err_init_member_read_before_init)
+          << "std::init" << TrackedFields[I]->getDeclName();
+      S.Diag(TrackedFields[I]->getLocation(),
+             diag::note_init_uninit_member_here)
+          << TrackedFields[I]->getDeclName();
+      break;
+    }
+  }
+}
 
 // A call to a [[now_init]] function initializes the storage bound to each
 // of its [[ref_to_uninit]] parameters (P4222R2 §6.2) -- the paper's
@@ -1990,7 +2116,6 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
 
   const unsigned NumBlocks = cfg->getNumBlockIDs();
   std::vector<SmallVector<DefAssignEvent, 4>> Events(NumBlocks);
-  std::vector<llvm::BitVector> Gen(NumBlocks, llvm::BitVector(N, false));
   for (const CFGBlock *B : *cfg) {
     auto &BlockEvents = Events[B->getBlockID()];
     for (const CFGElement &Elem : *B) {
@@ -2076,94 +2201,13 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
         appendThisCaptureLambdaReadEvents(LE, Index, BlockEvents);
       }
     }
-    // Gen is derived from the event stream -- every non-Read event assigns
-    // its member -- so the fixpoint below and the replay can never disagree
-    // about what a block assigns.
-    for (const DefAssignEvent &Ev : BlockEvents)
-      if (Ev.Kind != DefAssignEventKind::Read)
-        Gen[B->getBlockID()].set(Ev.Idx);
   }
 
-  // Forward "definitely assigned" dataflow: nothing is assigned at function
-  // entry (written initializers generate their writes at their CFGInitializer
-  // elements); a block's entry is the intersection over its predecessors'
-  // exits (a member is definitely assigned only if assigned on every incoming
-  // path); a block's exit adds the members it assigns. Unprocessed
-  // (unreachable) predecessors keep the all-assigned top, so unreachable code
-  // is never flagged.
-  std::vector<llvm::BitVector> EntryState(NumBlocks, llvm::BitVector(N, true));
-  std::vector<llvm::BitVector> ExitState(NumBlocks, llvm::BitVector(N, true));
-  const CFGBlock &CFGEntry = cfg->getEntry();
-  ForwardDataflowWorklist Worklist(*cfg, AC);
-  Worklist.enqueueBlock(&CFGEntry);
-  while (const CFGBlock *B = Worklist.dequeue()) {
-    llvm::BitVector In(N, true);
-    if (B == &CFGEntry) {
-      In = llvm::BitVector(N, false);
-    } else {
-      bool First = true;
-      for (const CFGBlock *Pred : B->preds()) {
-        if (!Pred)
-          continue;
-        if (First) {
-          In = ExitState[Pred->getBlockID()];
-          First = false;
-        } else {
-          In &= ExitState[Pred->getBlockID()];
-        }
-      }
-    }
-    EntryState[B->getBlockID()] = In;
-    In |= Gen[B->getBlockID()];
-    if (In != ExitState[B->getBlockID()]) {
-      ExitState[B->getBlockID()] = In;
-      Worklist.enqueueSuccessors(B);
-    }
-  }
-
-  // Replay each block from its fixpoint entry state and collect reads of a
-  // member that is not yet definitely assigned at that point.
-  std::vector<SmallVector<const Expr *, 2>> Offending(N);
-  for (const CFGBlock *B : *cfg) {
-    llvm::BitVector Assigned = EntryState[B->getBlockID()];
-    for (const DefAssignEvent &Ev : Events[B->getBlockID()]) {
-      switch (Ev.Kind) {
-      case DefAssignEventKind::Read:
-        if (!Assigned.test(Ev.Idx))
-          Offending[Ev.Idx].push_back(Ev.E);
-        break;
-      case DefAssignEventKind::Write:
-        Assigned.set(Ev.Idx);
-        break;
-      case DefAssignEventKind::ReadWrite:
-        if (!Assigned.test(Ev.Idx))
-          Offending[Ev.Idx].push_back(Ev.E);
-        Assigned.set(Ev.Idx);
-        break;
-      }
-    }
-  }
-
-  // Report at the first offending read (in source order) that is not
-  // suppressed, once per member, mirroring the local-variable reporter.
-  for (unsigned I = 0; I != N; ++I) {
-    if (Offending[I].empty())
-      continue;
-    llvm::sort(Offending[I], [&](const Expr *A, const Expr *Bx) {
-      return S.SourceMgr.isBeforeInTranslationUnit(A->getBeginLoc(),
-                                                   Bx->getBeginLoc());
-    });
-    for (const Expr *R : Offending[I]) {
-      if (!S.Profiles().shouldEmitProfileViolation("std::init", "uninit_read",
-                                                   R, AC))
-        continue;
-      S.Diag(R->getBeginLoc(), diag::err_init_member_read_before_init)
-          << "std::init" << Members[I]->getDeclName();
-      S.Diag(Members[I]->getLocation(), diag::note_init_uninit_member_here)
-          << Members[I]->getDeclName();
-      break;
-    }
-  }
+  // Nothing is assigned at function entry: written initializers generate
+  // their writes at their CFGInitializer elements.
+  std::vector<SmallVector<const Expr *, 2>> Offending =
+      runDefiniteAssignment(*cfg, AC, N, Events);
+  reportMemberReadsBeforeInit(S, AC, Offending, Members);
 }
 
 // If E (stripped of parens and implicit casts, including the derived-to-base
@@ -2479,15 +2523,8 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC) {
   // dest-member state becomes the source member's at that point; any
   // non-benign DeclRefExpr naming a tracked local is an escape, modeled as
   // a Write of every one of its tracked members.
-  enum EventKind { Read, Write, ReadWrite, Copy };
-  struct Event {
-    EventKind Kind;
-    unsigned Idx;
-    const Expr *E;
-    unsigned SrcIdx = 0; // Copy only: the source (V, F) pair.
-  };
   const unsigned NumBlocks = cfg->getNumBlockIDs();
-  std::vector<SmallVector<Event, 4>> Events(NumBlocks);
+  std::vector<SmallVector<DefAssignEvent, 4>> Events(NumBlocks);
   for (const CFGBlock *B : *cfg) {
     auto &BlockEvents = Events[B->getBlockID()];
     for (const CFGElement &Elem : *B) {
@@ -2500,22 +2537,24 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC) {
           continue;
         unsigned Idx = LookupPair(ICE->getSubExpr()).Idx;
         if (Idx != ~0u)
-          BlockEvents.push_back({Read, Idx, ICE});
+          BlockEvents.push_back({DefAssignEventKind::Read, Idx, ICE});
       } else if (const auto *BO = dyn_cast<BinaryOperator>(St)) {
         if (!BO->isAssignmentOp())
           continue;
         unsigned Idx = LookupPair(BO->getLHS()).Idx;
         if (Idx == ~0u)
           continue;
-        BlockEvents.push_back(
-            {BO->isCompoundAssignmentOp() ? ReadWrite : Write, Idx, BO});
+        BlockEvents.push_back({BO->isCompoundAssignmentOp()
+                                   ? DefAssignEventKind::ReadWrite
+                                   : DefAssignEventKind::Write,
+                               Idx, BO});
       } else if (const auto *UO = dyn_cast<UnaryOperator>(St)) {
         if (!UO->isIncrementDecrementOp())
           continue;
         unsigned Idx = LookupPair(UO->getSubExpr()).Idx;
         if (Idx == ~0u)
           continue;
-        BlockEvents.push_back({ReadWrite, Idx, UO});
+        BlockEvents.push_back({DefAssignEventKind::ReadWrite, Idx, UO});
       } else if (const auto *DRE = dyn_cast<DeclRefExpr>(St)) {
         if (Benign.count(DRE))
           continue;
@@ -2526,7 +2565,7 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC) {
         if (It == VarRange.end())
           continue;
         for (unsigned Idx = It->second.first; Idx != It->second.second; ++Idx)
-          BlockEvents.push_back({Write, Idx, DRE});
+          BlockEvents.push_back({DefAssignEventKind::Write, Idx, DRE});
       } else if (const auto *DS = dyn_cast<DeclStmt>(St)) {
         // A tracked copy: each dest member's state becomes its source
         // member's, keyed per FieldDecl (a sliced copy shares the base's
@@ -2547,113 +2586,23 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC) {
           for (unsigned Idx = Range.first; Idx != Range.second; ++Idx) {
             auto SrcIt = PairIdx.find({CopyIt->second, PairField[Idx]});
             if (SrcIt != PairIdx.end())
-              BlockEvents.push_back({Copy, Idx, V->getInit(), SrcIt->second});
+              BlockEvents.push_back({DefAssignEventKind::Copy, Idx,
+                                     V->getInit(), SrcIt->second});
             else
-              BlockEvents.push_back({Write, Idx, V->getInit()});
+              BlockEvents.push_back(
+                  {DefAssignEventKind::Write, Idx, V->getInit()});
           }
         }
       }
     }
   }
 
-  // Replay a block's events over State: the block-level transfer function,
-  // shared by the fixpoint below and the reporting replay after it so the
-  // two always agree. When Offending is non-null, a read of a member not
-  // definitely assigned at its program point is collected. Copy projects
-  // the source bit onto the dest bit -- monotone like the set-only kinds,
-  // so the fixpoint below still terminates.
-  auto ApplyEvents =
-      [](ArrayRef<Event> BlockEvents, llvm::BitVector &State,
-         std::vector<SmallVector<const Expr *, 2>> *Offending) {
-        for (const Event &Ev : BlockEvents) {
-          switch (Ev.Kind) {
-          case Read:
-            if (Offending && !State.test(Ev.Idx))
-              (*Offending)[Ev.Idx].push_back(Ev.E);
-            break;
-          case Write:
-            State.set(Ev.Idx);
-            break;
-          case ReadWrite:
-            if (Offending && !State.test(Ev.Idx))
-              (*Offending)[Ev.Idx].push_back(Ev.E);
-            State.set(Ev.Idx);
-            break;
-          case Copy:
-            if (State.test(Ev.SrcIdx))
-              State.set(Ev.Idx);
-            else
-              State.reset(Ev.Idx);
-            break;
-          }
-        }
-      };
-
-  // Forward "definitely assigned" dataflow, identical in shape to the
-  // ctor-body pass's: nothing is assigned at function entry (a tracked local
-  // cannot be referenced before its DeclStmt anyway); a block's entry is the
-  // intersection over its predecessors' exits; unprocessed (unreachable)
-  // predecessors keep the all-assigned top, so unreachable code is never
-  // flagged. The transfer function is the event replay above (monotone:
-  // events only set bits), so the worklist still reaches a fixpoint.
-  std::vector<llvm::BitVector> EntryState(NumBlocks, llvm::BitVector(N, true));
-  std::vector<llvm::BitVector> ExitState(NumBlocks, llvm::BitVector(N, true));
-  const CFGBlock &CFGEntry = cfg->getEntry();
-  ForwardDataflowWorklist Worklist(*cfg, AC);
-  Worklist.enqueueBlock(&CFGEntry);
-  while (const CFGBlock *B = Worklist.dequeue()) {
-    llvm::BitVector In(N, true);
-    if (B == &CFGEntry) {
-      In = llvm::BitVector(N, false);
-    } else {
-      bool First = true;
-      for (const CFGBlock *Pred : B->preds()) {
-        if (!Pred)
-          continue;
-        if (First) {
-          In = ExitState[Pred->getBlockID()];
-          First = false;
-        } else {
-          In &= ExitState[Pred->getBlockID()];
-        }
-      }
-    }
-    EntryState[B->getBlockID()] = In;
-    ApplyEvents(Events[B->getBlockID()], In, /*Offending=*/nullptr);
-    if (In != ExitState[B->getBlockID()]) {
-      ExitState[B->getBlockID()] = In;
-      Worklist.enqueueSuccessors(B);
-    }
-  }
-
-  // Replay each block from its fixpoint entry state and collect reads of a
-  // member that is not yet definitely assigned at that point.
-  std::vector<SmallVector<const Expr *, 2>> Offending(N);
-  for (const CFGBlock *B : *cfg) {
-    llvm::BitVector Assigned = EntryState[B->getBlockID()];
-    ApplyEvents(Events[B->getBlockID()], Assigned, &Offending);
-  }
-
-  // Report at the first offending read (in source order) that is not
-  // suppressed, once per (local, member) pair, mirroring the ctor-body pass.
-  for (unsigned I = 0; I != N; ++I) {
-    if (Offending[I].empty())
-      continue;
-    llvm::sort(Offending[I], [&](const Expr *A, const Expr *Bx) {
-      return S.SourceMgr.isBeforeInTranslationUnit(A->getBeginLoc(),
-                                                   Bx->getBeginLoc());
-    });
-    for (const Expr *R : Offending[I]) {
-      if (!S.Profiles().shouldEmitProfileViolation("std::init", "uninit_read",
-                                                   R, AC))
-        continue;
-      S.Diag(R->getBeginLoc(), diag::err_init_member_read_before_init)
-          << "std::init" << PairField[I]->getDeclName();
-      S.Diag(PairField[I]->getLocation(), diag::note_init_uninit_member_here)
-          << PairField[I]->getDeclName();
-      break;
-    }
-  }
+  // Nothing is assigned at function entry: a tracked local cannot be
+  // referenced before its DeclStmt anyway, and a tracked by-value slot
+  // parameter starts all-unassigned by design (above).
+  std::vector<SmallVector<const Expr *, 2>> Offending =
+      runDefiniteAssignment(*cfg, AC, N, Events);
+  reportMemberReadsBeforeInit(S, AC, Offending, PairField);
 }
 
 class UninitValsDiagReporter : public UninitVariablesHandler {
