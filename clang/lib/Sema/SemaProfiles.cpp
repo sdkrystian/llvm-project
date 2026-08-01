@@ -714,21 +714,10 @@ bool SemaProfiles::defaultInitIsVacuous(QualType T) {
                                                   Visited, UntrustRoot);
 }
 
-// Whether \p Init is the *shape* of a plain default-initialization -- the
-// language's own, not something the user wrote. No initializer at all (a
-// scalar default-init synthesizes none) qualifies, as does a synthesized
-// default-constructor call. Every written form is excluded: a `= P()`
-// value-initialization (a CXXTemporaryObjectExpr, which zeroes), any
-// zero-initializing construction, and -- since a written `T x{}` on a type
-// with a user-provided default constructor is none of those -- a construction
-// carrying list-initialization or a written paren/brace range (the same
-// written-form test getTrackedLocalAggregate uses). Whether such a
-// default-initialization is *vacuous* is the type's business
-// (defaultInitIsVacuous), so the two questions are asked separately: an
-// [[uninit]] marker is contradicted for two different reasons -- a written
-// initializer, or a default-initialization that is not a no-op -- and they
-// deserve different diagnostics.
-static bool isDefaultInitShape(const Expr *Init) {
+// Documented at the declaration: the shape of the language's own plain
+// default-initialization, shared between the marker rules' initializer
+// guard below and getTrackedLocalAggregate's declaration-ran-nothing test.
+bool SemaProfiles::isDefaultInitShape(const Expr *Init) {
   if (!Init)
     return true;
   const auto *CCE = dyn_cast<CXXConstructExpr>(Init->IgnoreImplicit());
@@ -746,7 +735,8 @@ static bool isDefaultInitShape(const Expr *Init) {
 // static.
 static bool isVacuousDefaultInit(SemaProfiles &SP, const Expr *Init,
                                  QualType T) {
-  return isDefaultInitShape(Init) && (!Init || SP.defaultInitIsVacuous(T));
+  return SemaProfiles::isDefaultInitShape(Init) &&
+         (!Init || SP.defaultInitIsVacuous(T));
 }
 
 // Why default-initialization of \p BaseTy is not the no-op an [[uninit]]

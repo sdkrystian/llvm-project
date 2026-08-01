@@ -263,6 +263,21 @@ int test_value_initialized_forms() {
   return a.m + b.m + c.m; // OK
 }
 
+// The written `= T()` form stays untracked when a template rebuilds it: the
+// rebuilt initializer is still a zero-initializing value-construction, not
+// the plain default-init shape, in the pattern and in the instantiation
+// alike (pinning the shared default-init shape predicate).
+int test_value_init_zeroing_shape() {
+  Agg z = Agg();
+  return z.m; // OK
+}
+template <typename T>
+int template_value_init_zeroing_shape() {
+  T z = T();
+  return z.m; // OK: rebuilt as a zeroing construction, untracked
+}
+template int template_value_init_zeroing_shape<Agg>();
+
 // A copy does NOT give the [[uninit]] member a value -- it copies
 // indeterminate bits (a copy does not inherit initialization, paper §5.2)
 // -- but the source's per-member state is unknowable for an untracked

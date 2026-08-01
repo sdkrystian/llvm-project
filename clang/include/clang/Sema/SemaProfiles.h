@@ -217,6 +217,25 @@ public:
   /// initializer guard) and the field-marker flavor.
   bool defaultInitIsVacuous(QualType T);
 
+  /// Whether \p Init is the *shape* of a plain default-initialization -- the
+  /// language's own, not something the user wrote. No initializer at all (a
+  /// scalar default-init synthesizes none) qualifies, as does a synthesized
+  /// default-constructor call. Every written form is excluded: a `= P()`
+  /// value-initialization (a CXXTemporaryObjectExpr, which zeroes), any
+  /// zero-initializing construction, and -- since a written `T x{}` on a
+  /// type with a user-provided default constructor is none of those -- a
+  /// construction carrying list-initialization or a written paren/brace
+  /// range. The shared shape half of two separate questions: whether an
+  /// [[uninit]] marker's declaration wrote an initializer (whether such a
+  /// default-initialization is *vacuous* is the type's business,
+  /// defaultInitIsVacuous, so a written initializer and a non-no-op
+  /// default-initialization get different diagnostics), and whether a local
+  /// aggregate's declaration ran nothing before flow-tracking starts
+  /// (getTrackedLocalAggregate in AnalysisBasedWarnings.cpp, where a
+  /// zero-initializing construction gives every member a value -- excluding
+  /// it keeps the untracked, FP-safe direction).
+  static bool isDefaultInitShape(const Expr *Init);
+
   /// If \p E (stripped of parens and implicit casts) directly names a
   /// declaration -- a DeclRefExpr or a MemberExpr -- return that declaration;
   /// otherwise null. The std::init checks read [[ref_to_uninit]] /

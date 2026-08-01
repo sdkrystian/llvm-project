@@ -2226,22 +2226,18 @@ static const CXXRecordDecl *getTrackedLocalAggregate(const VarDecl *V) {
   if (!RD)
     return nullptr;
   // Declared without a real initializer: for a record local that is the
-  // synthesized call to the implicit default constructor (`Agg a;`). A
-  // value-initializing form -- `Agg a{}` / `= {}` (an InitListExpr),
-  // `Agg a = Agg()` (a CXXTemporaryObjectExpr) -- gives every member a
-  // value and leaves nothing to track. A *copy* does not: it copies
-  // indeterminate bits, and a copy does not inherit initialization (paper
-  // §5.2). A copy from a *tracked* local inherits the source's per-member
-  // state through the copy harvest in checkInitProfileLocalMembers; for an
-  // arbitrary untracked source that state is unknowable, so those copies
-  // stay untracked -- a missed diagnostic, never a false positive.
-  if (const Expr *Init = V->getInit()) {
-    const auto *CCE = dyn_cast<CXXConstructExpr>(Init->IgnoreImplicit());
-    if (!CCE || isa<CXXTemporaryObjectExpr>(CCE) ||
-        !CCE->getConstructor()->isDefaultConstructor() ||
-        CCE->isListInitialization() || CCE->getParenOrBraceRange().isValid())
-      return nullptr;
-  }
+  // synthesized call to the implicit default constructor (`Agg a;`), the
+  // shared plain-default-init shape. A value-initializing form -- `Agg a{}`
+  // / `= {}` (an InitListExpr), `Agg a = Agg()` (a CXXTemporaryObjectExpr),
+  // any zero-initializing construction -- gives every member a value and
+  // leaves nothing to track. A *copy* does not: it copies indeterminate
+  // bits, and a copy does not inherit initialization (paper §5.2). A copy
+  // from a *tracked* local inherits the source's per-member state through
+  // the copy harvest in checkInitProfileLocalMembers; for an arbitrary
+  // untracked source that state is unknowable, so those copies stay
+  // untracked -- a missed diagnostic, never a false positive.
+  if (!SemaProfiles::isDefaultInitShape(V->getInit()))
+    return nullptr;
   return RD;
 }
 
