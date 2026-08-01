@@ -460,8 +460,12 @@ marked pointer or reference, pointer and reference casts of those, a call to
 a marked function, a call to a known allocator (``malloc``,
 ``aligned_alloc``, ``alloca``, and raw ``::operator new`` calls return
 uninitialized memory, ``calloc`` zero-initialized memory, and ``realloc`` is
-unclassified; §4.3 -- keyed on Clang's builtin recognition, which
-``-fno-builtin`` disables), and a ``new``
+unclassified; §4.3 -- trusted recognition keys on Clang's builtin IDs, and
+where those are absent, under ``-fno-builtin`` or ``-ffreestanding``, a
+name-recognized allocator is *untrusted*: unclassified, so neither binding
+direction diagnoses -- never trusted as initialized like an arbitrary
+callee; the ``operator new``/``operator delete`` families are recognized by
+form and keep their recognition everywhere), and a ``new``
 expression that default-initializes a type with indeterminate scalars
 (``new int``, ``new int[n]``; §1.2) -- refined by one parse-order fact,
 whole-entity stores (below):
@@ -626,9 +630,14 @@ an object's lifetime and releasing its storage are different operations.
 The ``delete`` and ``delete[]`` *expressions* perform the same withdrawal
 -- with no diagnostic on the operand, matching their historical silence --
 so ``delete q;`` and ``::operator delete(q);`` agree on everything that
-follows.  Like the allocator side, the ``free``/``realloc`` recognition
-keys on Clang's builtin knowledge, which ``-fno-builtin`` disables --
-losing the relaxation there, never accepting anything new elsewhere.
+follows.  Like the allocator side, trusted ``free``/``realloc`` recognition
+keys on Clang's builtin IDs.  Where those are absent (``-fno-builtin``,
+``-ffreestanding``) the binding acceptance survives by name -- accepting a
+pointer never diagnoses, and a declared ``free`` should not reject its
+argument just because the ID is gone -- but the credit withdrawal does not:
+it is a diagnostic's firing basis and needs the trusted recognition, so a
+post-release read stays accepted there (a missed diagnostic, never a false
+positive).
 
 
 Constructors
