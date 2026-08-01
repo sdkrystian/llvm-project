@@ -5750,22 +5750,12 @@ static void handleProfilesEnforceAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
       Mod = M;
 
   SmallVector<StringRef, 4> Names, Designators;
-  SmallVector<unsigned, 4> ArgumentCounts, ArgumentKinds;
-  SmallVector<StringRef, 4> ArgumentKeys, ArgumentValues;
-  if (!S.Profiles().processProfilesEnforceAttr(AL, Mod, &Names, &Designators,
-                                    &ArgumentCounts, &ArgumentKeys,
-                                    &ArgumentValues, &ArgumentKinds))
+  if (!S.Profiles().processProfilesEnforceAttr(AL, Mod, &Names, &Designators))
     return;
 
-  D->addAttr(::new (S.Context)
-                 ProfilesEnforceAttr(S.Context, AL, Names.data(), Names.size(),
-                                     Designators.data(), Designators.size(),
-                                     ArgumentCounts.data(),
-                                     ArgumentCounts.size(), ArgumentKeys.data(),
-                                     ArgumentKeys.size(), ArgumentValues.data(),
-                                     ArgumentValues.size(),
-                                     ArgumentKinds.data(),
-                                     ArgumentKinds.size()));
+  D->addAttr(::new (S.Context) ProfilesEnforceAttr(
+      S.Context, AL, Names.data(), Names.size(), Designators.data(),
+      Designators.size()));
 }
 
 static void handleProfilesSuppressDeclAttr(Sema &S, Decl *D,

@@ -3513,13 +3513,12 @@ def Suppress : DeclOrStmtAttr {
 
 def ProfilesEnforce : Attr {
   let Spellings = [CXX11<"profiles", "enforce">];
+  // The designator strings already carry the canonicalized arguments;
+  // enforcement state is restored from the separate ENFORCED_PROFILES
+  // serialization record, so no per-argument arrays are stored here.
   let Args = [
     VariadicStringArgument<"ProfileNames">,
-    VariadicStringArgument<"ProfileDesignators">,
-    VariadicUnsignedArgument<"ProfileArgumentCounts">,
-    VariadicStringArgument<"ProfileArgumentKeys">,
-    VariadicStringArgument<"ProfileArgumentValues">,
-    VariadicUnsignedArgument<"ProfileArgumentKinds">
+    VariadicStringArgument<"ProfileDesignators">
   ];
   let LangOpts = [Profiles];
   let HasCustomParsing = 1;

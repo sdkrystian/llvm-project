@@ -82,13 +82,9 @@ public:
   const ProfileEnforcement *getProfileEnforcement(StringRef ProfileName) const;
   bool addProfileEnforcement(StringRef Name, StringRef Designator,
                              SourceLocation Loc);
-  bool processProfilesEnforceAttr(
-      const ParsedAttr &AL, Module *Mod, SmallVectorImpl<StringRef> *NewNames,
-      SmallVectorImpl<StringRef> *NewDesignators,
-      SmallVectorImpl<unsigned> *NewArgumentCounts = nullptr,
-      SmallVectorImpl<StringRef> *NewArgumentKeys = nullptr,
-      SmallVectorImpl<StringRef> *NewArgumentValues = nullptr,
-      SmallVectorImpl<unsigned> *NewArgumentKinds = nullptr);
+  bool processProfilesEnforceAttr(const ParsedAttr &AL, Module *Mod,
+                                  SmallVectorImpl<StringRef> *NewNames,
+                                  SmallVectorImpl<StringRef> *NewDesignators);
 
   ProfilesSuppressAttr *makeProfilesSuppressAttr(const ParsedAttr &AL);
 

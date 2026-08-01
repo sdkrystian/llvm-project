@@ -9,7 +9,7 @@
 
 [[profiles::enforce(test::type_cast)]];
 // CHECK: EmptyDecl
-// CHECK-NEXT: ProfilesEnforceAttr {{.*}} test::type_cast test::type_cast 0{{$}}
+// CHECK-NEXT: ProfilesEnforceAttr {{.*}} test::type_cast test::type_cast{{$}}
 
 [[profiles::enforce(test::type_cast)]];
 // CHECK: EmptyDecl
@@ -17,7 +17,7 @@
 
 [[profiles::enforce(std::safety, vendor(fortify: 3))]];
 // CHECK: EmptyDecl
-// CHECK-NEXT: ProfilesEnforceAttr {{.*}} std::safety vendor std::safety vendor(fortify : 3) 0 1 fortify 3 1{{$}}
+// CHECK-NEXT: ProfilesEnforceAttr {{.*}} std::safety vendor std::safety vendor(fortify : 3){{$}}
 
 [[profiles::enforce(std::safety)]];
 // CHECK: EmptyDecl
