@@ -2439,6 +2439,13 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC,
     }
   }
 
+  // Nothing tracked so far means nothing can become tracked: the copy
+  // harvest below only chains from an already-tracked source (it requires
+  // VarRange.count(Src)), so bail out before its repeated whole-CFG walks
+  // -- the common case for a function with no tracked aggregates.
+  if (PairField.empty())
+    return;
+
   // Second harvest: locals copy- or move-constructed from a *tracked* local.
   // The copy's members inherit the source's per-member state at the copy
   // point -- a copy does not inherit initialization (paper §5.2), it
@@ -2479,8 +2486,6 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC,
     }
   }
 
-  if (PairField.empty())
-    return;
   const unsigned N = PairField.size();
 
   // A `V.m` access on a tracked local, classified into one of three named
