@@ -5332,19 +5332,26 @@ bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
       *EndLoc = End;
 
     AttributePool &Pool = Attrs.getPool();
-    void *CustomData;
+    detail::ProfileEnforceArgs *EnforceArgs = nullptr;
+    detail::ProfileSuppressArgs *SuppressArgs = nullptr;
+    detail::ProfileRequireArgs *RequireArgs = nullptr;
     if (AttrName->isStr("enforce"))
-      CustomData = Pool.make<detail::ProfileEnforceArgs>();
+      EnforceArgs = Pool.make<detail::ProfileEnforceArgs>();
     else if (AttrName->isStr("suppress"))
-      CustomData = Pool.make<detail::ProfileSuppressArgs>();
+      SuppressArgs = Pool.make<detail::ProfileSuppressArgs>();
     else
-      CustomData = Pool.make<detail::ProfileRequireArgs>();
+      RequireArgs = Pool.make<detail::ProfileRequireArgs>();
 
     ParsedAttr *PA =
         Attrs.addNew(AttrName, SourceRange(AttrNameLoc, End),
                      AttributeScopeInfo(ScopeName, ScopeLoc), nullptr, 0,
                      ParsedAttr::Form::CXX11());
-    PA->setCustomData(CustomData);
+    if (EnforceArgs)
+      PA->setProfileEnforceArgs(EnforceArgs);
+    else if (SuppressArgs)
+      PA->setProfileSuppressArgs(SuppressArgs);
+    else
+      PA->setProfileRequireArgs(RequireArgs);
     return true;
   }
 
@@ -5364,7 +5371,13 @@ bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
     return true;
   };
 
-  void *CustomData = nullptr;
+  // The typed payload cannot be installed until the ParsedAttr exists, and
+  // addNew cannot be hoisted ahead of the grammar (each error path bails via
+  // SkipToRParen and must create no attribute), so exactly one of these
+  // typed locals is set here and installed after addNew below.
+  detail::ProfileEnforceArgs *EnforceArgs = nullptr;
+  detail::ProfileSuppressArgs *SuppressArgs = nullptr;
+  detail::ProfileRequireArgs *RequireArgs = nullptr;
   if (AttrName->isStr("enforce")) {
     SmallVector<ParsedProfileDesignator, 2> Parsed;
     if (ParseProfileDesignatorList(Parsed))
@@ -5379,7 +5392,7 @@ bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
 
     auto *Args = Pool.make<detail::ProfileEnforceArgs>();
     Args->Designators = Desigs;
-    CustomData = Args;
+    EnforceArgs = Args;
   } else if (AttrName->isStr("suppress")) {
     ParsedProfileSuppressArgs Parsed;
     if (ParseProfileSuppressBody(Parsed))
@@ -5396,7 +5409,7 @@ bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
       Args->RawArguments = RawBuf;
     }
     Args->Arguments = copyProfileArguments(Pool, Parsed.Arguments);
-    CustomData = Args;
+    SuppressArgs = Args;
   } else {
     ParsedProfileDesignator Parsed;
     if (ParseProfileDesignator(Parsed))
@@ -5407,7 +5420,7 @@ bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
     Args->Designator.Spelling = Pool.copyString(Parsed.Spelling);
     Args->Designator.Arguments =
         copyProfileArguments(Pool, Parsed.Arguments);
-    CustomData = Args;
+    RequireArgs = Args;
   }
 
   if (!Tok.is(tok::r_paren)) {
@@ -5423,6 +5436,11 @@ bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
       Attrs.addNew(AttrName, SourceRange(AttrNameLoc, RParen),
                    AttributeScopeInfo(ScopeName, ScopeLoc), nullptr, 0,
                    ParsedAttr::Form::CXX11());
-  PA->setCustomData(CustomData);
+  if (EnforceArgs)
+    PA->setProfileEnforceArgs(EnforceArgs);
+  else if (SuppressArgs)
+    PA->setProfileSuppressArgs(SuppressArgs);
+  else
+    PA->setProfileRequireArgs(RequireArgs);
   return true;
 }
