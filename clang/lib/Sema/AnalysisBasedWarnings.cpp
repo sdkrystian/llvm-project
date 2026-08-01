@@ -1858,6 +1858,50 @@ static void appendNowInitCallEvents(
   }
 }
 
+// The lambda body is a separate function and never appears in the enclosing
+// constructor's CFG, but a this-capturing lambda can read members the moment
+// it is created (it may be invoked immediately). Treat every member read in
+// its body -- and in nested lambda bodies, reached through children() -- as
+// a Read at the LambdaExpr's program point. Writes in the body earn no
+// assignment credit (the lambda may never run), consistent with the
+// intersection semantics; a lambda stored now and called only after the
+// member is assigned is still flagged (accepted imprecision). Capture
+// initializers are ordinary CFG elements, already handled by the caller's
+// other arms.
+static void appendThisCaptureLambdaReadEvents(
+    const LambdaExpr *LE,
+    const llvm::DenseMap<const FieldDecl *, unsigned> &Index,
+    SmallVectorImpl<DefAssignEvent> &BlockEvents) {
+  if (llvm::none_of(LE->captures(), [](const LambdaCapture &C) {
+        return C.capturesThis();
+      }))
+    return;
+  SmallVector<const Stmt *, 16> Stack(1, LE->getBody());
+  while (!Stack.empty()) {
+    const Stmt *Cur = Stack.pop_back_val();
+    if (!Cur)
+      continue;
+    const FieldDecl *F = nullptr;
+    if (const auto *BodyICE = dyn_cast<ImplicitCastExpr>(Cur);
+        BodyICE && BodyICE->getCastKind() == CK_LValueToRValue)
+      F = getCurrentObjectMember(BodyICE->getSubExpr());
+    else if (const auto *BodyBO = dyn_cast<BinaryOperator>(Cur);
+             BodyBO && BodyBO->isCompoundAssignmentOp())
+      F = getCurrentObjectMember(BodyBO->getLHS());
+    else if (const auto *BodyUO = dyn_cast<UnaryOperator>(Cur);
+             BodyUO && BodyUO->isIncrementDecrementOp())
+      F = getCurrentObjectMember(BodyUO->getSubExpr());
+    if (F) {
+      auto It = Index.find(F);
+      if (It != Index.end())
+        BlockEvents.push_back(
+            {DefAssignEventKind::Read, It->second, cast<Expr>(Cur)});
+    }
+    for (const Stmt *Child : Cur->children())
+      Stack.push_back(Child);
+  }
+}
+
 // std::init constructor-body check (paper §7.1 "initialized ... before use").
 //
 // A [[uninit]] scalar data member is deliberately *not* required to be
@@ -2029,44 +2073,7 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
       } else if (const auto *CE = dyn_cast<CallExpr>(St)) {
         appendNowInitCallEvents(CE, N, Index, BlockEvents);
       } else if (const auto *LE = dyn_cast<LambdaExpr>(St)) {
-        // The lambda body is a separate function and never appears in this
-        // CFG, but a this-capturing lambda can read members the moment it is
-        // created (it may be invoked immediately). Treat every member read in
-        // its body -- and in nested lambda bodies, reached through children()
-        // -- as a Read at the LambdaExpr's program point. Writes in the body
-        // earn no assignment credit (the lambda may never run), consistent
-        // with the intersection semantics; a lambda stored now and called
-        // only after the member is assigned is still flagged (accepted
-        // imprecision). Capture initializers are ordinary CFG elements,
-        // already handled by the arms above.
-        if (llvm::none_of(LE->captures(), [](const LambdaCapture &C) {
-              return C.capturesThis();
-            }))
-          continue;
-        SmallVector<const Stmt *, 16> Stack(1, LE->getBody());
-        while (!Stack.empty()) {
-          const Stmt *Cur = Stack.pop_back_val();
-          if (!Cur)
-            continue;
-          const FieldDecl *F = nullptr;
-          if (const auto *BodyICE = dyn_cast<ImplicitCastExpr>(Cur);
-              BodyICE && BodyICE->getCastKind() == CK_LValueToRValue)
-            F = getCurrentObjectMember(BodyICE->getSubExpr());
-          else if (const auto *BodyBO = dyn_cast<BinaryOperator>(Cur);
-                   BodyBO && BodyBO->isCompoundAssignmentOp())
-            F = getCurrentObjectMember(BodyBO->getLHS());
-          else if (const auto *BodyUO = dyn_cast<UnaryOperator>(Cur);
-                   BodyUO && BodyUO->isIncrementDecrementOp())
-            F = getCurrentObjectMember(BodyUO->getSubExpr());
-          if (F) {
-            auto It = Index.find(F);
-            if (It != Index.end())
-              BlockEvents.push_back(
-                  {DefAssignEventKind::Read, It->second, cast<Expr>(Cur)});
-          }
-          for (const Stmt *Child : Cur->children())
-            Stack.push_back(Child);
-        }
+        appendThisCaptureLambdaReadEvents(LE, Index, BlockEvents);
       }
     }
     // Gen is derived from the event stream -- every non-Read event assigns
