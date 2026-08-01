@@ -2979,3 +2979,31 @@ void template_member_call_nondependent_bad() {
   s.f(); // expected-error 2 {{calling member function 'f' binds its implicit object parameter to uninitialized memory under profile 'std::init'}}
 }
 template void template_member_call_nondependent_bad<int>(); // expected-note {{in instantiation of function template specialization 'template_member_call_nondependent_bad<int>' requested here}}
+
+// Redeclaration (§7.2 header/source split): a parameter's [[ref_to_uninit]]
+// written on any declaration is inherited by the parameter's later
+// redeclarations, so the definition keeps read-through checking and call
+// sites after the redeclaration still see the marker.
+void redecl_fill(int *p [[ref_to_uninit]]);
+void redecl_fill(int *p) {
+  int v = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  (void)v;
+  *p = 0;
+}
+
+void test_call_after_redecl() {
+  int u [[uninit]];
+  int i = 0;
+  redecl_fill(&u); // OK: the redeclared parameter inherited the marker
+  redecl_fill(&i); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// [[now_init]] credit survives the redeclaration: the call site resolves to
+// the latest declaration, whose parameter carries the inherited marker.
+[[now_init]] void redecl_now_init_fill(int *p [[ref_to_uninit]]);
+void redecl_now_init_fill(int *p);
+void test_now_init_credit_after_redecl() {
+  int u [[uninit]];
+  redecl_now_init_fill(&u); // OK: marked target, uninitialized source
+  ni_sink(&u);              // OK: the [[now_init]] callee initialized u
+}

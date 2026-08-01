@@ -1769,7 +1769,7 @@ def Uninit : InheritableAttr {
   let Documentation = [UninitDocs];
 }
 
-def RefToUninit : InheritableAttr {
+def RefToUninit : InheritableParamAttr {
   let Spellings = [CXX11<"", "ref_to_uninit", 202602>];
   let Subjects = SubjectList<[Var, Field, Function], ErrorDiag>;
   let Documentation = [RefToUninitDocs];

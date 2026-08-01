@@ -35,6 +35,18 @@ template <typename T>
 template void fill_dependent<int *>(int *);
 template void fill_dependent<int>(int);
 
+// The marker is inherited by a template redeclaration's parameter like any
+// other redeclaration's. A function template's parameter attributes are only
+// ever instantiated during deduction, where an invalid substituted type drops
+// the marker silently -- the inherited copy behaves exactly like the directly
+// written one above: instantiating with a non-pointer T stays inert.
+template <typename T>
+[[now_init]] void fill_redecl_template(T p [[ref_to_uninit]]);
+template <typename T>
+void fill_redecl_template(T p) {}
+template void fill_redecl_template<int *>(int *);
+template void fill_redecl_template<int>(int);
+
 int bad_var [[now_init]]; // expected-error {{'now_init' attribute only applies to functions}} \
                           // no-profiles-error {{'now_init' attribute only applies to functions}}
 

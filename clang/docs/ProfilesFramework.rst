@@ -499,7 +499,11 @@ Positions that cannot carry the marker -- a variadic argument, a parameter of
 a function called through a function pointer, the implicit object parameter,
 a pointer element of an array in aggregate initialization
 -- are checked as unmarked targets; suppress at the call site if the flow is
-intended.  A null pointer source -- ``nullptr``, ``0``, ``{}``, or a local
+intended.  A parameter's marker written on any declaration of the function is
+inherited by the parameter's later redeclarations, so a header's marker
+carries to the source file's definition (the §7.2 header/source split); the
+definition keeps its read-through checking and call sites after the
+redeclaration still see the marker.  A null pointer source -- ``nullptr``, ``0``, ``{}``, or a local
 variable initialized to null -- refers to no object, so it is accepted for
 marked and unmarked targets alike (§4.3, §8: the marker means "zero or more
 uninitialized objects"); a *parameter* with a null default argument is not a
