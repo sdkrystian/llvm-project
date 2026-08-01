@@ -26,6 +26,7 @@
 #include "clang/Sema/ParsedTemplate.h"
 #include "clang/Sema/Scope.h"
 #include "clang/Sema/SemaCodeCompletion.h"
+#include "clang/Sema/SemaProfiles.h"
 #include "llvm/ADT/STLForwardCompat.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/TimeProfiler.h"
@@ -1367,6 +1368,17 @@ Decl *Parser::ParseFunctionDefinition(ParsingDeclarator &D,
   // Break out of the ParsingDeclSpec context, too.  This const_cast is
   // safe because we're always the sole owner.
   D.getMutableDeclSpec().abort();
+
+  // A [[profiles::suppress]] on the definition's declarator-id covers the
+  // whole definition -- mem-initializers and body included -- for the
+  // location-routed parse-time rules, like ParseLexedMethodDef's scope does
+  // for an inline member (Decl-routed rules consult the declaration
+  // directly and need no scope). No lexical-parent walk: this parse is in
+  // place, so any enclosing suppress scopes are already on the stack. The
+  // scope's own lifetime bounds the suppression exactly to this parse
+  // (getCompletedConstructEnd is invalid for a body-pending function).
+  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(
+      Actions, Res ? Res->getAsFunction() : nullptr);
 
   if (BodyKind != Sema::FnBodyKind::Other) {
     Actions.SetFunctionBodyKind(Res, KWLoc, BodyKind, DeletedMessage);

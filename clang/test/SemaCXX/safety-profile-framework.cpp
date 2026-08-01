@@ -104,3 +104,50 @@ void test_enforced_profile_errors() {
 enum [[profiles::suppress(test::type_cast)]] SuppressedEnum { SE_A, SE_B };
 
 using SuppressedAlias [[profiles::suppress(test::type_cast)]] = int;
+
+// ===================================================================
+// Suppress on a definition's declarator-id covers the whole definition
+// (mem-initializers and body), for free functions and out-of-line
+// members alike; it ends with the definition.
+// ===================================================================
+void suppressed_free_def [[profiles::suppress(test::type_cast)]] () {
+  int *p = reinterpret_cast<int *>(0); // OK: suppressed
+  (void)p;
+}
+
+void after_suppressed_def() {
+  int *p = reinterpret_cast<int *>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+  (void)p;
+}
+
+struct OutOfLine {
+  void ool();
+  OutOfLine();
+  int *m;
+};
+void OutOfLine::ool [[profiles::suppress(test::type_cast)]] () {
+  int *p = reinterpret_cast<int *>(0); // OK: suppressed
+  (void)p;
+}
+OutOfLine::OutOfLine [[profiles::suppress(test::type_cast)]] ()
+    : m(reinterpret_cast<int *>(0)) { // OK: the mem-init is covered too
+  int *p = reinterpret_cast<int *>(0); // OK: suppressed
+  (void)p;
+}
+
+// Inline members, inline constructors (mem-init and body), variable
+// initializers, and NSDMIs were already covered by their own scopes.
+struct InlineSuppressPins {
+  int *n [[profiles::suppress(test::type_cast)]] = reinterpret_cast<int *>(0); // OK
+  void inline_member [[profiles::suppress(test::type_cast)]] () {
+    int *p = reinterpret_cast<int *>(0); // OK: suppressed
+    (void)p;
+  }
+  InlineSuppressPins [[profiles::suppress(test::type_cast)]] ()
+      : n(reinterpret_cast<int *>(0)) { // OK
+    int *p = reinterpret_cast<int *>(0); // OK: suppressed
+    (void)p;
+  }
+};
+int *suppressed_var_init [[profiles::suppress(test::type_cast)]] =
+    reinterpret_cast<int *>(0); // OK
