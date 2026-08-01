@@ -468,7 +468,10 @@ callee; the ``operator new``/``operator delete`` families are recognized by
 form and keep their recognition everywhere), and a ``new``
 expression that default-initializes a type with indeterminate scalars
 (``new int``, ``new int[n]``; §1.2) -- refined by one parse-order fact,
-whole-entity stores (below):
+whole-entity stores (below).  A named *function's* decayed pointer value is
+none of these: its ``[[ref_to_uninit]]`` describes the return value, so
+binding the function itself to a function pointer is accepted while a call
+to it stays a marked source:
 
 .. code-block:: c++
 

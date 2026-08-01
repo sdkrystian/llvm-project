@@ -3007,3 +3007,17 @@ void test_now_init_credit_after_redecl() {
   redecl_now_init_fill(&u); // OK: marked target, uninitialized source
   ni_sink(&u);              // OK: the [[now_init]] callee initialized u
 }
+
+// A marked function's [[ref_to_uninit]] describes its *return value*: the
+// function's own decayed pointer value is not uninitialized memory, so
+// binding it to an (unmarkable) function pointer -- or casting it to void*
+// -- is accepted, while a *call* to it stays a marked source.
+[[ref_to_uninit]] int *fnval_alloc();
+void test_function_value_not_uninit() {
+  int *(*fp1)() = fnval_alloc;  // OK: the function value, not its return
+  int *(*fp2)() = &fnval_alloc; // OK: same through the address-of arm
+  fp1 = fnval_alloc;            // OK: the assignment funnel agrees
+  void *v = (void *)fnval_alloc; // OK: the cast arm recurses into the same arm
+  int *r = fnval_alloc(); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)fp1; (void)fp2; (void)v; (void)r;
+}

@@ -1531,8 +1531,15 @@ pointerRefersToUninitStorage(ASTContext &Ctx, const Expr *E,
 
   // A value of a [[ref_to_uninit]] pointer is Uninitialized (Unknown when the
   // marker is trusted); an unmarked named pointer is a trusted Initialized
-  // pointer (paper §4.3).
-  if (const ValueDecl *VD = SemaProfiles::getDirectlyNamedDecl(E)) {
+  // pointer (paper §4.3). A named *function* is excluded: function-to-pointer
+  // decay hands this arm the FunctionDecl, whose [[ref_to_uninit]] describes
+  // its RETURN value, not the function pointer -- and a marked
+  // function-pointer target cannot legally exist (the marker is rejected on
+  // function pointers and references), so the value falls through to the
+  // remaining arms and ends Unknown: accepted for both directions, without
+  // turning a cast of it ((void *)f) into a trusted-Initialized source.
+  if (const ValueDecl *VD = SemaProfiles::getDirectlyNamedDecl(E);
+      VD && !isa<FunctionDecl>(VD)) {
     if (!VD->hasAttr<RefToUninitAttr>()) {
       // An unmarked *local* whose declaration initializer is null -- a null
       // pointer constant, or an empty braced list, which value-initializes to
