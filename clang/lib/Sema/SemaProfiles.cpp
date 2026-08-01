@@ -1867,6 +1867,7 @@ void SemaProfiles::checkInitProfileRefToUninitBinding(SourceLocation Loc,
   // to destroy-then-construct: the storage is initialized after the call.
   recordNowUninitArgument(Target, T, Src);
   recordNowInitArgument(Target, T, Src);
+  recordInitProfilePointerAliasEscape(T, Src);
 }
 
 void SemaProfiles::recordNowInitArgument(const ValueDecl *Target, QualType T,
@@ -1933,6 +1934,39 @@ void SemaProfiles::recordNowUninitArgument(const ValueDecl *Target, QualType T,
                                   FD->hasAttr<NowUninitAttr>()
                                       ? LifetimeAnnotationEffect::Destroy
                                       : LifetimeAnnotationEffect::Release);
+}
+
+void SemaProfiles::recordInitProfilePointerAliasEscape(QualType T,
+                                                       const Expr *Src) {
+  // A mutable alias of a marked pointer object: T*& binds the pointer
+  // glvalue itself, T** its address -- the funnel's pointer/reference type
+  // gate passes both, and getPointeeType() works uniformly. The
+  // pointee-of-the-binding must be a non-const pointer: whoever holds the
+  // alias can reseat the pointer, so the Definite pointee credit (the
+  // firing basis) is withdrawn while the suppressing Maybe credit survives.
+  // (At Maybe strength the destroyed state is never recorded, so
+  // EndsLifetime is inert here.)
+  if (!Src || T.isNull() || (!T->isPointerType() && !T->isReferenceType()))
+    return;
+  QualType Pointee = T->getPointeeType();
+  if (Pointee.isNull() || !Pointee->isPointerType() ||
+      Pointee.isConstQualified())
+    return;
+  // The recorders' shared gate: an escape in a never-executed context
+  // escapes nothing.
+  if (inNeverExecutedContext())
+    return;
+  const Expr *E = ignoreTransparentCasts(Src);
+  if (T->isPointerType()) {
+    // T**: peel the &p to reach the pointer object.
+    const auto *UO = dyn_cast<UnaryOperator>(E);
+    if (!UO || UO->getOpcode() != UO_AddrOf)
+      return;
+    E = UO->getSubExpr();
+  }
+  if (const VarDecl *VD = getCreditableMarkedPointer(E))
+    StoreCredit.destroyPointee(VD, InitCreditStrength::Maybe,
+                               /*EndsLifetime=*/false);
 }
 
 SemaProfiles::LifetimeAnnotatedStorage
@@ -2281,6 +2315,10 @@ void SemaProfiles::checkInitProfilePointerAssignment(Expr *LHS, Expr *RHS,
   const ValueDecl *VD = getDirectlyNamedDecl(ignoreTransparentCasts(LHS));
   checkInitProfileRefToUninit(OpLoc, VD && VD->hasAttr<RefToUninitAttr>(),
                               /*IsReference=*/false, RHS);
+  // An assignment can hand out a mutable alias of a marked pointer object
+  // (pp = &p) exactly like a binding does; the withdrawal mirrors the
+  // funnel's recorder tail.
+  recordInitProfilePointerAliasEscape(LHS->getType(), RHS);
 }
 
 void SemaProfiles::checkInitProfileAssignmentOperands(BinaryOperatorKind Opc,

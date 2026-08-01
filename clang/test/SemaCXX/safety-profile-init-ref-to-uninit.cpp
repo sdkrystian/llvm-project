@@ -1529,6 +1529,41 @@ void test_cast_reseat_clears(int *p [[ref_to_uninit]],
   (void)v;
 }
 
+// Handing out a *mutable alias* of the marked pointer object (T*& or T**)
+// lets the holder reseat it, so the escape withdraws the Definite pointee
+// credit -- the firing basis of the marked-target diagnostic -- while the
+// suppressing Maybe credit survives (the callee may equally leave the
+// pointer alone): the same "revoke only the firing strength" semantics as
+// a conditional [[now_uninit]] destroy.
+void alias_by_ref(int *&);
+void alias_by_ptr(int **);
+void alias_by_const_ref(int *const &);
+void test_alias_escape_by_reference(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  alias_by_ref(p);
+  int *m [[ref_to_uninit]] = p; // OK: the callee may have reseated p
+  int *u2 = p;                  // OK: the Maybe credit still suppresses
+  (void)m; (void)u2;
+}
+void test_alias_escape_by_pointer(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  alias_by_ptr(&p);
+  int *m [[ref_to_uninit]] = p; // OK: the callee may have reseated p
+  (void)m;
+}
+void test_const_alias_does_not_withdraw(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  alias_by_const_ref(p);
+  int *m [[ref_to_uninit]] = p; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)m;
+}
+void test_alias_escape_declaration_form(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  int **pp = &p;
+  int *m [[ref_to_uninit]] = p; // OK: pp can reseat p
+  (void)pp; (void)m;
+}
+
 // The *pointee* credit map keys on local VarDecls, so a [[ref_to_uninit]]
 // *member* pointer is never credited: a read through it keeps failing even
 // after a store through the exact same lvalue. The per-object *whole-member*

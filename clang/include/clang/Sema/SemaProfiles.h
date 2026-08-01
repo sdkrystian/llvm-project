@@ -434,6 +434,22 @@ public:
   void recordNowUninitArgument(const ValueDecl *Target, QualType T,
                                const Expr *Src);
 
+  /// std::init: binding a marked pointer *object* out through a mutable
+  /// alias -- a T*& binding of p, or a T** binding of &p -- hands the
+  /// callee (or the aliasing pointer) the power to reseat it, so any
+  /// Definite pointee credit can no longer serve as the marked-target
+  /// diagnostic's firing basis. Withdraws at Maybe strength: the Definite
+  /// claim goes, the suppressing Maybe credit survives (the callee may
+  /// equally leave the pointer alone) -- the same "revoke only the firing
+  /// strength" semantics as a conditional [[now_uninit]] destroy. A const
+  /// alias (T* const &) cannot reseat and withdraws nothing. Called from
+  /// the binding funnel's recorder tail and from pointer assignment; gated
+  /// on never-executed contexts like the other recorders. Stale reads
+  /// through the escaped pointer remain the documented parse-order missed
+  /// diagnostic; void* escapes of &p and ternary/comma-wrapped sources are
+  /// not recognized (missed withdrawals, toward missed diagnostics only).
+  void recordInitProfilePointerAliasEscape(QualType T, const Expr *Src);
+
   /// The tracked storage a lifetime-annotated callee's argument denotes, as
   /// resolved by resolveLifetimeAnnotatedStorage: the whole [[uninit]]
   /// entity (Whole), the storage behind a marked pointer or reference

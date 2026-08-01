@@ -528,7 +528,15 @@ through a transparent cast credits (and reseats) like its uncast form --
 ``(int &)u = 5`` credits ``u`` whole, ``*(int *)p = 5`` the pointee,
 ``(int *&)p = q`` reseats ``p`` -- exactly the transparency the
 recognizers already grant casts (§4.3), narrowing included: ``(char &)u =
-'x'`` credits ``u`` whole.  The two
+'x'`` credits ``u`` whole.  Handing out a *mutable alias* of the marked
+pointer object -- binding ``p`` to a ``T*&``, or ``&p`` to a ``T**``,
+whether as a call argument, an initializer, or an assignment source --
+lets the holder reseat it, so the escape withdraws the credit's firing
+strength while the suppressing credit survives, like a conditional
+``[[now_uninit]]`` destroy; a const alias (``T* const &``) cannot reseat
+and withdraws nothing.  (A ``void*`` escape of ``&p``, or an alias source
+wrapped in a ternary or comma, is not recognized -- missed withdrawals,
+toward missed diagnostics only.)  The two
 directions consult the credit differently, because they use it
 differently.  Credit *suppresses* the unmarked-target diagnostic in plain
 parse order: ``int *q = &u;`` after any earlier store -- even one under a
