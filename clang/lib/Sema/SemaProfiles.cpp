@@ -1219,14 +1219,35 @@ const Decl *SemaProfiles::resolveMemberStoreBase(const MemberExpr *ME) const {
   return nullptr;
 }
 
+// Strip what the recognizers see through on the way to a named entity:
+// parens, implicit casts, and explicit casts whose operand is a pointer or
+// glvalue (paper §4.3: a cast of a marked pointer is itself marked; a
+// reference cast denotes the same storage). Implicit casts are re-stripped
+// after every explicit-cast peel -- a cast's operand may itself be
+// parenthesized or implicitly converted -- so a single leading
+// IgnoreParenImpCasts is not equivalent. Shared by the store recorders and
+// the lifetime-annotated-argument resolver, so crediting sees through
+// exactly the casts recognition does.
+static const Expr *ignoreTransparentCasts(const Expr *E) {
+  E = E->IgnoreParenImpCasts();
+  while (const auto *CE = dyn_cast<ExplicitCastExpr>(E)) {
+    const Expr *Sub = CE->getSubExpr();
+    if (!Sub->getType()->isPointerType() && !Sub->isGLValue())
+      break;
+    E = Sub->IgnoreParenImpCasts();
+  }
+  return E;
+}
+
 // The directly named [[ref_to_uninit]] local/parameter *pointer* of \p E, if
 // any: the only pointer entity whose pointee state is tracked (the credit
 // map keys on VarDecls; a marked member pointer is the pinned per-object
-// aliasing boundary -- copies share pointees). Shared by the store-recording
-// deref arm and the [[now_init]] argument shapes.
+// aliasing boundary -- copies share pointees). Sees through transparent
+// casts, like the recognizers ((int *)p is still p). Shared by the
+// store-recording deref arm and the [[now_init]] argument shapes.
 static const VarDecl *getCreditableMarkedPointer(const Expr *E) {
-  const auto *VD =
-      dyn_cast_or_null<VarDecl>(SemaProfiles::getDirectlyNamedDecl(E));
+  const auto *VD = dyn_cast_or_null<VarDecl>(
+      SemaProfiles::getDirectlyNamedDecl(ignoreTransparentCasts(E)));
   if (VD && VD->hasLocalStorage() && VD->getType()->isPointerType() &&
       VD->hasAttr<RefToUninitAttr>())
     return VD;
@@ -1917,16 +1938,10 @@ void SemaProfiles::recordNowUninitArgument(const ValueDecl *Target, QualType T,
 SemaProfiles::LifetimeAnnotatedStorage
 SemaProfiles::resolveLifetimeAnnotatedStorage(QualType T,
                                               const Expr *Src) const {
-  const Expr *E = Src->IgnoreParenImpCasts();
-  // Mirror the recognizers' explicit-cast pass-through (paper §4.3: a cast
-  // of a marked pointer is itself marked; a reference cast denotes the same
-  // storage): the callee affects the same storage either way.
-  while (const auto *CE = dyn_cast<ExplicitCastExpr>(E)) {
-    const Expr *Sub = CE->getSubExpr();
-    if (!Sub->getType()->isPointerType() && !Sub->isGLValue())
-      break;
-    E = Sub->IgnoreParenImpCasts();
-  }
+  // Mirror the recognizers' explicit-cast pass-through
+  // (ignoreTransparentCasts): the callee affects the same storage either
+  // way.
+  const Expr *E = ignoreTransparentCasts(Src);
   // The glvalue whose storage the callee affects: the operand of &G for a
   // pointer parameter, or the bound glvalue itself for a reference one.
   const Expr *Glvalue = nullptr;
@@ -2258,10 +2273,12 @@ void SemaProfiles::checkInitProfilePointerAssignment(Expr *LHS, Expr *RHS,
   // readable marker yet -- getDirectlyNamedDecl would report it unmarked, a
   // false positive when the instantiated entity is [[ref_to_uninit]]. The
   // assignment is rebuilt at instantiation, where the marker is concrete.
-  // The source's dependence is the funnel's to defer on.
+  // The source's dependence is the funnel's to defer on. The marker is read
+  // through transparent casts ((int *&)p = q is p's own reseat, and p's
+  // marker must judge q), like every other marker read.
   if (LHS->isInstantiationDependent())
     return;
-  const ValueDecl *VD = getDirectlyNamedDecl(LHS);
+  const ValueDecl *VD = getDirectlyNamedDecl(ignoreTransparentCasts(LHS));
   checkInitProfileRefToUninit(OpLoc, VD && VD->hasAttr<RefToUninitAttr>(),
                               /*IsReference=*/false, RHS);
 }
@@ -2387,7 +2404,11 @@ void SemaProfiles::recordInitProfileStore(const Expr *LHS) {
   // against fresh decls, so they re-record independently).
   if (inNeverExecutedContext())
     return;
-  const Expr *E = LHS->IgnoreParenImpCasts();
+  // Peel transparent casts so a cast-form store credits like its uncast
+  // form ((int &)u = 5 credits u whole; *(int *)p = 5 credits p's pointee;
+  // (int *&)p = q reseats p), symmetric with the recognizers' cast
+  // pass-through.
+  const Expr *E = ignoreTransparentCasts(LHS);
   // *p = e: a store through the exact whole-`*p` lvalue of a marked
   // local/parameter pointer is the pointee's initialization (paper
   // §4.3/§4.5: for a built-in type, a write is its initialization).

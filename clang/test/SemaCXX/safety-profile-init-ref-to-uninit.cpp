@@ -1501,6 +1501,34 @@ void test_reseat_clears_credit(int *p [[ref_to_uninit]],
   (void)x; (void)y; (void)z;
 }
 
+// A store through a transparent cast credits (and reseats) exactly like its
+// uncast form, symmetric with the recognizers' cast pass-through (§4.3): a
+// cast does not launder the store any more than it launders the marking.
+void test_cast_store_credits_whole() {
+  int u [[uninit]];
+  (int &)u = 5;
+  int *q = &u; // OK: the cast store credited u whole
+  (void)q;
+}
+void test_cast_store_fires_reverse() {
+  int u [[uninit]];
+  (int &)u = 5;
+  int *m [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)m;
+}
+void test_cast_deref_store_credits_pointee(int *p [[ref_to_uninit]]) {
+  *(int *)p = 5;
+  int v = *p; // OK: the cast deref store credited the pointee
+  (void)v;
+}
+void test_cast_reseat_clears(int *p [[ref_to_uninit]],
+                             int *q [[ref_to_uninit]]) {
+  *p = 5;
+  (int *&)p = q; // OK both sides: p's own reseat, judged by p's marker
+  int v = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  (void)v;
+}
+
 // The *pointee* credit map keys on local VarDecls, so a [[ref_to_uninit]]
 // *member* pointer is never credited: a read through it keeps failing even
 // after a store through the exact same lvalue. The per-object *whole-member*

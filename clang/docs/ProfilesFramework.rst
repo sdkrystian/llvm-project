@@ -523,7 +523,12 @@ initialized (§4.2, §4.5).  After ``u = 5;`` the ``[[uninit]]`` variable
 ``u`` counts as initialized, and after ``*p = 5;`` the marked pointer's
 pointee does, for every later ``*p`` access -- until ``p`` is reseated
 (``p = q``, ``p += n``, ``p++``), which withdraws the credit; a store
-through a marked *reference* credits its referent permanently.  The two
+through a marked *reference* credits its referent permanently.  A store
+through a transparent cast credits (and reseats) like its uncast form --
+``(int &)u = 5`` credits ``u`` whole, ``*(int *)p = 5`` the pointee,
+``(int *&)p = q`` reseats ``p`` -- exactly the transparency the
+recognizers already grant casts (§4.3), narrowing included: ``(char &)u =
+'x'`` credits ``u`` whole.  The two
 directions consult the credit differently, because they use it
 differently.  Credit *suppresses* the unmarked-target diagnostic in plain
 parse order: ``int *q = &u;`` after any earlier store -- even one under a
