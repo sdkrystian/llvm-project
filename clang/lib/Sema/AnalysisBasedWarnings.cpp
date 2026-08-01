@@ -1700,12 +1700,20 @@ struct CFGProfileEntry {
   // std::byte may be read while uninitialized (paper §4); the initialization
   // profile exempts it, while the generic test profile does not.
   bool ExemptStdByte;
+  // Opt-in to the member read-before-init passes (checkInitProfileCtorBody
+  // and checkInitProfileLocalMembers): when non-zero, the passes run for
+  // this row and report offending reads with this diagnostic. The row
+  // threads the profile's *identity* (name, rule, diagnostics, byte
+  // exemption), not its semantics -- the tracked-member vocabulary those
+  // passes implement ([[uninit]] scalar members of constructor-less
+  // aggregates) is std::init's, so exactly one row may opt in today.
+  unsigned MemberReadDiagID = 0;
 };
 constexpr CFGProfileEntry CFGProfiles[] = {
     {"test::uninit_read", /*Rule=*/"", diag::err_profile_uninit_read,
      /*ExemptStdByte=*/false},
     {"std::init", "uninit_read", diag::err_init_uninit_read,
-     /*ExemptStdByte=*/true},
+     /*ExemptStdByte=*/true, diag::err_init_member_read_before_init},
 };
 
 // True if E denotes the current object: `this` (the implicit/explicit pointer
@@ -1763,14 +1771,15 @@ static void forEachCandidateUninitField(const CXXRecordDecl *RD, Fn Visit) {
 // built-in scalar (arithmetic or enum) members whose assignment counts as
 // initialization (§4.5), including those inherited from non-virtual,
 // constructor-less bases -- nothing can have assigned them before the
-// containing object's user code runs, so tracking them is sound. std::byte is
-// exempt (§4.5), matching R1/R2. Class-type and array members (which would
-// need construct_at flow modeling) and pointers (banned with [[uninit]] by R8)
+// containing object's user code runs, so tracking them is sound. std::byte
+// is exempt (§4.5) when the profile row says so (\p ExemptStdByte),
+// matching R1/R2. Class-type and array members (which would need
+// construct_at flow modeling) and pointers (banned with [[uninit]] by R8)
 // are out of scope.
 static void collectTrackedUninitMembers(
     Sema &S, const CXXRecordDecl *RD,
     SmallVectorImpl<const FieldDecl *> &Members,
-    llvm::DenseMap<const FieldDecl *, unsigned> &Index) {
+    llvm::DenseMap<const FieldDecl *, unsigned> &Index, bool ExemptStdByte) {
   forEachCandidateUninitField(RD, [&](const FieldDecl *F) {
     if (!F->hasAttr<UninitAttr>() || !F->getDeclName() ||
         F->hasInClassInitializer())
@@ -1778,7 +1787,7 @@ static void collectTrackedUninitMembers(
     QualType T = F->getType();
     if (!T->isIntegralOrEnumerationType() && !T->isFloatingType())
       return;
-    if (S.Context.getBaseElementType(T)->isStdByteType())
+    if (ExemptStdByte && S.Context.getBaseElementType(T)->isStdByteType())
       return;
     if (Index.count(F))
       return;
@@ -1907,13 +1916,13 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC, unsigned NumTracked,
 
 // Report at the first offending read (in source order) that is not
 // suppressed, once per tracked entity, mirroring the local-variable
-// reporter. The profile identity ("std::init" / "uninit_read" /
-// err_init_member_read_before_init) is fixed here: exactly one CFG profile
-// row runs the member passes today.
+// reporter. The profile identity -- name, rule, and the diagnostic to emit
+// -- arrives from the opted-in CFGProfiles row (MemberReadDiagID).
 static void reportMemberReadsBeforeInit(
     Sema &S, AnalysisDeclContext &AC,
     MutableArrayRef<SmallVector<const Expr *, 2>> Offending,
-    ArrayRef<const FieldDecl *> TrackedFields) {
+    ArrayRef<const FieldDecl *> TrackedFields, StringRef Name, StringRef Rule,
+    unsigned MemberReadDiagID) {
   for (unsigned I = 0, N = Offending.size(); I != N; ++I) {
     if (Offending[I].empty())
       continue;
@@ -1922,11 +1931,10 @@ static void reportMemberReadsBeforeInit(
                                                    B->getBeginLoc());
     });
     for (const Expr *R : Offending[I]) {
-      if (!S.Profiles().shouldEmitProfileViolation("std::init", "uninit_read",
-                                                   R, AC))
+      if (!S.Profiles().shouldEmitProfileViolation(Name, Rule, R, AC))
         continue;
-      S.Diag(R->getBeginLoc(), diag::err_init_member_read_before_init)
-          << "std::init" << TrackedFields[I]->getDeclName();
+      S.Diag(R->getBeginLoc(), MemberReadDiagID)
+          << Name << TrackedFields[I]->getDeclName();
       S.Diag(TrackedFields[I]->getLocation(),
              diag::note_init_uninit_member_here)
           << TrackedFields[I]->getDeclName();
@@ -2073,7 +2081,8 @@ static void appendThisCaptureLambdaReadEvents(
 // diagnostics only, subsuming [[now_init]] callees), while constructor
 // bodies get the paper's strictness.
 static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
-                                     AnalysisDeclContext &AC) {
+                                     AnalysisDeclContext &AC,
+                                     const CFGProfileEntry &Entry) {
   // A delegating constructor leaves member initialization to its target (paper
   // §5.1 trusts the constructor that runs first), so by the time the delegating
   // body runs the members are already initialized; analyzing its body would
@@ -2090,7 +2099,8 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
   // assigned a constructor-less base's members before this body runs).
   SmallVector<const FieldDecl *, 4> Members;
   llvm::DenseMap<const FieldDecl *, unsigned> Index;
-  collectTrackedUninitMembers(S, Ctor->getParent(), Members, Index);
+  collectTrackedUninitMembers(S, Ctor->getParent(), Members, Index,
+                              Entry.ExemptStdByte);
   if (Members.empty())
     return;
   const unsigned N = Members.size();
@@ -2220,7 +2230,8 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
   // their writes at their CFGInitializer elements.
   std::vector<SmallVector<const Expr *, 2>> Offending =
       runDefiniteAssignment(*cfg, AC, N, Events);
-  reportMemberReadsBeforeInit(S, AC, Offending, Members);
+  reportMemberReadsBeforeInit(S, AC, Offending, Members, Entry.Name,
+                              Entry.Rule, Entry.MemberReadDiagID);
 }
 
 // If E (stripped of parens and implicit casts, including the derived-to-base
@@ -2357,7 +2368,8 @@ static const DeclRefExpr *getLocalCopySourceRef(const VarDecl *V) {
 // backward goto across the declaration re-default-initializes the object, which
 // the gen-only dataflow cannot model -- a possible missed diagnostic, matching
 // the ctor-body pass's accepted imprecision level.
-static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC) {
+static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC,
+                                         const CFGProfileEntry &Entry) {
   CFG *cfg = AC.getCFG();
   if (!cfg)
     return;
@@ -2373,7 +2385,8 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC) {
   auto HarvestVar = [&](const VarDecl *V, const CXXRecordDecl *RD) {
     SmallVector<const FieldDecl *, 4> Members;
     FieldIdxScratch.clear();
-    collectTrackedUninitMembers(S, RD, Members, FieldIdxScratch);
+    collectTrackedUninitMembers(S, RD, Members, FieldIdxScratch,
+                                Entry.ExemptStdByte);
     if (Members.empty())
       return false;
     unsigned Begin = PairField.size();
@@ -2634,7 +2647,8 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC) {
   // parameter starts all-unassigned by design (above).
   std::vector<SmallVector<const Expr *, 2>> Offending =
       runDefiniteAssignment(*cfg, AC, N, Events);
-  reportMemberReadsBeforeInit(S, AC, Offending, PairField);
+  reportMemberReadsBeforeInit(S, AC, Offending, PairField, Entry.Name,
+                              Entry.Rule, Entry.MemberReadDiagID);
 }
 
 class UninitValsDiagReporter : public UninitVariablesHandler {
@@ -3917,18 +3931,24 @@ static void addNonLinearizedAlwaysAddClasses(AnalysisDeclContext &AC,
     AC.getCFGBuildOptions().setAlwaysAdd(Stmt::LambdaExprClass);
 }
 
-// std::init: the CFG-based std::init checks -- the constructor-body
-// read-before-init check and the local-aggregate member check (which runs
-// for every definition, constructors included: the two track disjoint
-// storage, this-members versus locals). Shared by the normal per-function
-// pass and the post-error rerun so both paths stay in step.
-static void runInitProfileCFGChecksIfEnforced(Sema &S, const Decl *D,
-                                              AnalysisDeclContext &AC) {
-  if (!S.Profiles().isProfileEnforced("std::init"))
-    return;
-  if (const auto *Ctor = dyn_cast<CXXConstructorDecl>(D))
-    checkInitProfileCtorBody(S, Ctor, AC);
-  checkInitProfileLocalMembers(S, AC);
+// The member read-before-init passes -- the constructor-body check and the
+// local-aggregate member check (which runs for every definition,
+// constructors included: the two track disjoint storage, this-members
+// versus locals) -- for every enforced CFGProfiles row that opts in via
+// MemberReadDiagID. The opt-in test is load-bearing: a run may enforce a
+// non-opted-in row (test::uninit_read) alongside std::init, and that row
+// must not execute the passes with a zero diagnostic ID. Shared by the
+// normal per-function pass and the post-error rerun so both paths stay in
+// step.
+static void runMemberReadCFGChecksIfEnforced(Sema &S, const Decl *D,
+                                             AnalysisDeclContext &AC) {
+  for (const CFGProfileEntry &E : CFGProfiles) {
+    if (!E.MemberReadDiagID || !S.Profiles().isProfileEnforced(E.Name))
+      continue;
+    if (const auto *Ctor = dyn_cast<CXXConstructorDecl>(D))
+      checkInitProfileCtorBody(S, Ctor, AC, E);
+    checkInitProfileLocalMembers(S, AC, E);
+  }
 }
 
 // Pattern-2 profiles (the CFGProfiles table) ride the uninitialized-
@@ -3951,7 +3971,7 @@ static void runUninitProfileAnalysisAfterError(Sema &S, const Decl *D) {
                                       stats);
     // Keep the read-before-init checks (constructor members and local
     // aggregates) alive after a TU error, for parity with the normal path.
-    runInitProfileCFGChecksIfEnforced(S, D, AC);
+    runMemberReadCFGChecksIfEnforced(S, D, AC);
   }
 }
 
@@ -4307,11 +4327,11 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
     }
   }
 
-  // std::init: diagnose a read of a [[uninit]] scalar member before it is
-  // assigned -- in the constructor body for the current object's members, in
-  // any body for a constructor-less aggregate local's -- reusing the CFG
-  // built above.
-  runInitProfileCFGChecksIfEnforced(S, D, AC);
+  // Diagnose a read of a [[uninit]] scalar member before it is assigned --
+  // in the constructor body for the current object's members, in any body
+  // for a constructor-less aggregate local's -- for each opted-in CFG
+  // profile row, reusing the CFG built above.
+  runMemberReadCFGChecksIfEnforced(S, D, AC);
 
   if (EnableLifetimeSafetyAnalysis) {
     if (AC.getCFG()) {

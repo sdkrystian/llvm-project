@@ -97,6 +97,15 @@ AST upward from the use site -- enclosing ``AttributedStmt``\ s,
 ``DeclStmt``-declared variables, and the lexical ``Decl`` chain -- for a
 matching ``[[profiles::suppress]]``.
 
+A ``CFGProfiles`` row may additionally opt into the member
+read-before-init passes (``checkInitProfileCtorBody`` and
+``checkInitProfileLocalMembers``) by setting ``MemberReadDiagID``.  The row
+threads the profile's *identity* -- name, rule, diagnostics, and the
+``std::byte`` exemption -- through the passes and their shared reporter,
+not its semantics: the tracked-member vocabulary the passes implement
+(``[[uninit]]`` scalar members of constructor-less aggregates) is
+``std::init``'s, so exactly one row may opt in today.
+
 
 Patterns 3 and 4: Class and Constructor Finalization
 ====================================================
@@ -250,7 +259,8 @@ patterns.  Its rules map to mechanisms as follows:
    * - ``uninit_read``
      - 2 and 1
      - ``CFGProfiles`` row for local variables;
-       ``checkInitProfileCtorBody`` and ``checkInitProfileLocalMembers``
+       ``checkInitProfileCtorBody`` and ``checkInitProfileLocalMembers``,
+       run for the same row through its ``MemberReadDiagID`` opt-in
        (definite-assignment dataflow over ``[[uninit]]`` members; the
        ctor-body pass's ``CallExpr`` arm turns a ``[[now_init]]`` call into a
        ``Gen`` bit for the current-object storage bound to the callee's
