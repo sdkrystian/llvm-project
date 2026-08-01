@@ -38,7 +38,14 @@ using namespace clang;
 
 #define DEBUG_LOGGING 0
 
-static bool recordIsNotEmpty(const RecordDecl *RD) {
+static bool
+recordIsNotEmptyImpl(const RecordDecl *RD,
+                     llvm::SmallPtrSetImpl<const RecordDecl *> &Visited) {
+  // An invalid recovery record can contain itself, directly or through a
+  // mutual cycle; treat a record already being visited as empty (either
+  // answer is fine for invalid code -- termination is what matters).
+  if (!Visited.insert(cast<RecordDecl>(RD->getCanonicalDecl())).second)
+    return false;
   // We consider a record decl to be empty if it contains only unnamed bit-
   // fields, zero-width fields, and fields of empty record type.
   for (const auto *FD : RD->fields()) {
@@ -49,10 +56,15 @@ static bool recordIsNotEmpty(const RecordDecl *RD) {
     // The only case remaining to check is for a field declaration of record
     // type and whether that record itself is empty.
     if (const auto *FieldRD = FD->getType()->getAsRecordDecl();
-        !FieldRD || recordIsNotEmpty(FieldRD))
+        !FieldRD || recordIsNotEmptyImpl(FieldRD, Visited))
       return true;
   }
   return false;
+}
+
+static bool recordIsNotEmpty(const RecordDecl *RD) {
+  llvm::SmallPtrSet<const RecordDecl *, 8> Visited;
+  return recordIsNotEmptyImpl(RD, Visited);
 }
 
 static bool isTrackedVar(const VarDecl *vd, const DeclContext *dc) {
