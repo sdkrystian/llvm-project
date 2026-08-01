@@ -2329,8 +2329,8 @@ void Parser::ParseMicrosoftIfExistsExternalDeclaration() {
 
 void Parser::ProhibitModuleAttributesExcept(const ParsedAttributesView &Attrs,
                                             ParsedAttr::Kind AllowedKind,
-                                            unsigned KeywordDiagID,
-                                            unsigned AttrDiagID) {
+                                            unsigned AttrDiagID,
+                                            unsigned KeywordDiagID) {
   for (const ParsedAttr &AL : Attrs) {
     if (AL.getKind() == AllowedKind)
       continue;
@@ -2426,8 +2426,8 @@ Parser::ParseModuleDecl(Sema::ModuleImportState &ImportState) {
   // Reject non-profile attributes on the module-declaration. Profile
   // attributes are handled by ActOnModuleDecl.
   ProhibitModuleAttributesExcept(Attrs, ParsedAttr::AT_ProfilesEnforce,
-                                 diag::err_keyword_not_module_attr,
-                                 diag::err_attribute_not_module_attr);
+                                 diag::err_attribute_not_module_attr,
+                                 diag::err_keyword_not_module_attr);
 
   if (ExpectAndConsumeSemi(diag::err_expected_semi_after_module_or_import,
                            tok::getKeywordSpelling(tok::kw_module)))
@@ -2486,8 +2486,8 @@ Decl *Parser::ParseModuleImport(SourceLocation AtLoc,
   // Reject non-profile attributes on the import-declaration. Profile
   // attributes are handled by ActOnModuleImportAttrs.
   ProhibitModuleAttributesExcept(Attrs, ParsedAttr::AT_ProfilesRequire,
-                                 diag::err_keyword_not_import_attr,
-                                 diag::err_attribute_not_import_attr);
+                                 diag::err_attribute_not_import_attr,
+                                 diag::err_keyword_not_import_attr);
 
   // Clang modules can inject token streams while loading, so a fatal loader
   // failure must stop parsing. C++20 named module imports are ordinary
