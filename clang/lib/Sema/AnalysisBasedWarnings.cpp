@@ -3195,6 +3195,14 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
   if (shouldSkipAnalysisForDecl(S, D))
     return;
 
+  // The enforced-CFG-profile query is the same at every use below within
+  // one invocation -- nothing in this function mutates the enforced set --
+  // so compute it once, after the early-out above (whose skip path makes no
+  // profile queries). Deliberately a local, not a member cache: a member
+  // would need an invalidation story for mid-TU enforcement arriving via a
+  // module or PCH load.
+  const bool CFGProfileEnforced = hasEnforcedCFGProfile();
+
   if (S.hasUncompilableErrorOccurred()) {
     // Flush out any possibly unreachable diagnostics.
     flushDiagnostics(S, fscope);
@@ -3203,7 +3211,7 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
     // disables them for all later functions. Run only that analysis, only for
     // an enforced profile, and only on a valid decl (so the CFG is buildable).
     // Other analyses keep the early-out.
-    if (hasEnforcedCFGProfile() && !D->isInvalidDecl() &&
+    if (CFGProfileEnforced && !D->isInvalidDecl() &&
         !Diags.hasFatalErrorOccurred())
       runUninitProfileAnalysisAfterError(S, D);
     return;
@@ -3295,7 +3303,7 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
     Analyzer.run(AC);
   }
 
-  if (hasEnforcedCFGProfile() ||
+  if (CFGProfileEnforced ||
       !Diags.isIgnored(diag::warn_uninit_var, D->getBeginLoc()) ||
       !Diags.isIgnored(diag::warn_sometimes_uninit_var, D->getBeginLoc()) ||
       !Diags.isIgnored(diag::warn_maybe_uninit_var, D->getBeginLoc()) ||
