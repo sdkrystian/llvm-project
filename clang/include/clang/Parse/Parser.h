@@ -2370,12 +2370,13 @@ private:
 
   /// Diagnose C++11 attributes on a module- or import-declaration, which
   /// accept none except the profile attribute \p AllowedKind (handled in
-  /// Sema). \p KeywordDiagID / \p AttrDiagID are the declaration's
-  /// keyword-attribute and standard-attribute diagnostics.
+  /// Sema). \p AttrDiagID / \p KeywordDiagID are the declaration's
+  /// standard-attribute and keyword-attribute diagnostics, in
+  /// ProhibitCXX11Attributes' order.
   void ProhibitModuleAttributesExcept(const ParsedAttributesView &Attrs,
                                       ParsedAttr::Kind AllowedKind,
-                                      unsigned KeywordDiagID,
-                                      unsigned AttrDiagID);
+                                      unsigned AttrDiagID,
+                                      unsigned KeywordDiagID);
 
   void MaybeParseCXX11Attributes(Declarator &D) {
     if (isAllowedCXX11AttributeSpecifier()) {
