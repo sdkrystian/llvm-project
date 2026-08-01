@@ -1278,26 +1278,49 @@ enum class AllocatorCalleeRole {
   ReturnsNothing,
 };
 
-// The known allocator and deallocator callees, keyed by builtin ID: the
-// source side (Role) says what the return value is -- the malloc and alloca
-// families return uninitialized memory, calloc returns zero-initialized
-// memory, realloc a preserved prefix plus an indeterminate tail -- and the
-// sink side (ReleasesStorage) says whether the callee releases the storage
-// its pointer argument denotes, making it [[now_uninit]]-equivalent at the
-// binding site (free, and realloc's pointer parameter). The builtin ID is
+// True for a direct declaration of replaceable global operator new /
+// operator new[]: raw allocation returning uninitialized memory like malloc
+// (a new-*expression* is the recognizers' CXXNewExpr arm instead). The
+// operator-name check excludes operator delete, and replaceability excludes
+// class-specific overloads, whose semantics belong to their class.
+static bool isReplaceableGlobalOperatorNew(const FunctionDecl *FD) {
+  OverloadedOperatorKind OO = FD->getDeclName().getCXXOverloadedOperator();
+  return (OO == OO_New || OO == OO_Array_New) &&
+         FD->isReplaceableGlobalAllocationFunction();
+}
+
+// True for replaceable global operator delete / operator delete[] -- sized
+// and nothrow forms included, class-specific and destroying overloads
+// excluded.
+static bool isReplaceableGlobalOperatorDelete(const FunctionDecl *FD) {
+  return FD->getDeclName().isAnyOperatorDelete() &&
+         FD->isReplaceableGlobalAllocationFunction();
+}
+
+// The known allocator and deallocator callees. A row is keyed by builtin ID
+// (the C allocation family) or, for the operator new/delete families, which
+// never carry a builtin ID, by a form predicate. The source side (Role) says
+// what the return value is -- the malloc/alloca/operator-new families return
+// uninitialized memory, calloc returns zero-initialized memory, realloc a
+// preserved prefix plus an indeterminate tail -- and the sink side
+// (ReleasesStorage) says whether the callee releases the storage its pointer
+// argument denotes, making it [[now_uninit]]-equivalent at the binding site
+// (free, realloc's pointer parameter, operator delete). A builtin ID is
 // absent under -fno-builtin / -ffreestanding (or on a non-matching
 // declaration), where an allocator falls back to the trusted default and a
 // release callee goes unrecognized -- a missed diagnostic or a missed
 // relaxation, never a false positive or a false acceptance elsewhere.
-// Future known callees go here; the raw ::operator new arm below and the
-// operator delete arm of isStorageReleaseCallee are name-keyed, not
-// builtin-keyed, and stay beside their users. (getBuiltinFunctionEffects in
+// Future known callees go here. (getBuiltinFunctionEffects in
 // SemaFunctionEffects.cpp groups almost exactly this set for the
 // `allocating` effect.)
 struct AllocatorCalleeEntry {
-  unsigned BuiltinID;
+  /// The Clang builtin ID this row matches; 0 for a form-keyed row.
+  unsigned BuiltinID = 0;
   AllocatorCalleeRole Role;
   bool ReleasesStorage = false;
+  /// The form predicate for callees with no builtin ID; null for
+  /// builtin-keyed rows.
+  bool (*Form)(const FunctionDecl *) = nullptr;
 };
 
 static constexpr AllocatorCalleeEntry AllocatorCallees[] = {
@@ -1324,39 +1347,39 @@ static constexpr AllocatorCalleeEntry AllocatorCallees[] = {
      /*ReleasesStorage=*/true},
     {Builtin::BI__builtin_free, AllocatorCalleeRole::ReturnsNothing,
      /*ReleasesStorage=*/true},
+    {/*BuiltinID=*/0, AllocatorCalleeRole::ReturnsUninitialized,
+     /*ReleasesStorage=*/false, isReplaceableGlobalOperatorNew},
+    {/*BuiltinID=*/0, AllocatorCalleeRole::ReturnsNothing,
+     /*ReleasesStorage=*/true, isReplaceableGlobalOperatorDelete},
 };
 
-static std::optional<AllocatorCalleeRole>
-getAllocatorCalleeRole(const FunctionDecl *FD) {
-  unsigned ID = FD->getBuiltinID();
-  if (ID == 0)
-    return std::nullopt;
+// The table row for \p FD, if any. Builtin rows are consulted first; no
+// collision is possible -- plain operator new/delete never carry the
+// table's builtin IDs, and __builtin_operator_new is not an operator name
+// -- so the order is cosmetic.
+static const AllocatorCalleeEntry *
+findAllocatorCallee(const FunctionDecl *FD) {
+  if (unsigned ID = FD->getBuiltinID())
+    for (const AllocatorCalleeEntry &Entry : AllocatorCallees)
+      if (Entry.BuiltinID == ID)
+        return &Entry;
   for (const AllocatorCalleeEntry &Entry : AllocatorCallees)
-    if (Entry.BuiltinID == ID)
-      return Entry.Role;
-  return std::nullopt;
+    if (Entry.Form && Entry.Form(FD))
+      return &Entry;
+  return nullptr;
 }
 
 // A callee that releases the storage its pointer argument denotes: the
-// table's ReleasesStorage rows, plus replaceable global operator delete /
-// operator delete[] -- sized and nothrow forms included, class-specific and
-// destroying overloads excluded (isReplaceableGlobalAllocationFunction).
-// Releasing storage leaves it as uninitialized as ending the object's
-// lifetime does, so the binding sites treat such a callee's pointer
-// parameter like a [[now_uninit]] one -- except for the double-destroy
-// check: destroy_at(p); free(p); is correct, because ending an object's
-// lifetime and releasing its storage are different operations.
+// table's ReleasesStorage rows (free, realloc's pointer parameter,
+// replaceable global operator delete / operator delete[]). Releasing
+// storage leaves it as uninitialized as ending the object's lifetime does,
+// so the binding sites treat such a callee's pointer parameter like a
+// [[now_uninit]] one -- except for the double-destroy check:
+// destroy_at(p); free(p); is correct, because ending an object's lifetime
+// and releasing its storage are different operations.
 static bool isStorageReleaseCallee(const FunctionDecl *FD) {
-  if (FD->getDeclName().isAnyOperatorDelete() &&
-      FD->isReplaceableGlobalAllocationFunction())
-    return true;
-  unsigned ID = FD->getBuiltinID();
-  if (ID == 0)
-    return false;
-  for (const AllocatorCalleeEntry &Entry : AllocatorCallees)
-    if (Entry.BuiltinID == ID)
-      return Entry.ReleasesStorage;
-  return false;
+  const AllocatorCalleeEntry *Entry = findAllocatorCallee(FD);
+  return Entry && Entry->ReleasesStorage;
 }
 
 // A call to a [[ref_to_uninit]]-returning function yields uninitialized
@@ -1372,16 +1395,8 @@ static UninitStorage classifyRefToUninitCallee(const CallExpr *CE,
   if (!FD)
     return UninitStorage::Unknown;
   bool RefersToUninit = FD->hasAttr<RefToUninitAttr>();
-  // A direct call to a replaceable global allocation function -- raw
-  // ::operator new / ::operator new[] -- returns uninitialized memory like
-  // malloc (a new-*expression* is the recognizers' CXXNewExpr arm instead).
-  // The operator check excludes operator delete, and replaceability excludes
-  // class-specific overloads, whose semantics belong to their class.
-  if (FD->getDeclName().getCXXOverloadedOperator() == OO_New ||
-      FD->getDeclName().getCXXOverloadedOperator() == OO_Array_New)
-    RefersToUninit |= FD->isReplaceableGlobalAllocationFunction();
-  if (std::optional<AllocatorCalleeRole> Role = getAllocatorCalleeRole(FD)) {
-    switch (*Role) {
+  if (const AllocatorCalleeEntry *Entry = findAllocatorCallee(FD)) {
+    switch (Entry->Role) {
     case AllocatorCalleeRole::ReturnsUninitialized:
       RefersToUninit = true;
       break;
