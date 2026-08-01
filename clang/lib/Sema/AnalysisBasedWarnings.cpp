@@ -1850,9 +1850,12 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
   // member-initializer reads such as `X() : o(m) {}` are checked exactly like
   // body reads). A written initializer's own member becomes assigned at its
   // CFGInitializer element below, so declaration order decides what an
-  // initializer may read. Not covered: an NSDMI's subexpressions
-  // (CXXDefaultInitExpr is not expanded into the CFG), so a read of a tracked
-  // member inside another member's default initializer stays undetected.
+  // initializer may read. Not covered: an NSDMI's subexpressions. They *are*
+  // in the CFG (AddCXXDefaultInitExprInCtors expands the CXXDefaultInitExpr
+  // an unwritten initializer runs), but this filter deliberately keeps them
+  // out, so a read of a tracked member inside another member's default
+  // initializer stays undetected; lifting that gap means whitelisting the
+  // CXXDefaultInitExpr subtrees here, not changing CFG build options.
   llvm::SmallPtrSet<const Stmt *, 32> BodyStmts;
   {
     SmallVector<const Stmt *, 32> Stack;
