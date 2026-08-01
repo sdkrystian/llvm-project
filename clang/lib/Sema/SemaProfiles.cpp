@@ -2709,6 +2709,15 @@ void runStdInitCtorUninitMemberCallback(Sema &S, CXXConstructorDecl *Ctor) {
   if (!Ctor->isUserProvided())
     return;
 
+  // An explicitly defaulted copy or move constructor (out-of-line
+  // '= default'; the uniform pattern-4 dispatch sends every defaulted
+  // definition here) initializes every member member-wise while *writing*
+  // no initializer -- exempt, or the written-initializer rule below would
+  // false-positive on it. The defaulted *default* constructor stays: its
+  // members get exactly the non-written initializers this rule checks.
+  if (Ctor->isExplicitlyDefaulted() && !Ctor->isDefaultConstructor())
+    return;
+
   // A union's members are mutually exclusive; a constructor initializes at most
   // one, so the "every member" rule does not apply (paper §6.5). Whether the
   // active member is set is a constructor-body flow question, deferred.

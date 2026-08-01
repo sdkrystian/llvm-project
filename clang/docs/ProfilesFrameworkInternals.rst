@@ -123,11 +123,16 @@ dispatcher and one per-pass table shape:
 
 The class hook runs from the single function every class-completion path
 funnels through (parsing, template instantiation, lambda completion); the
-constructor hook runs from the two functions every constructor's
-member-initializer list funnels through, including instantiation.  The
-dispatchers filter out dependent entities (the hooks re-fire on each
-instantiation), invalid ones, lambdas (pattern 3), and delegating
-constructors (pattern 4).  Each callback gates its diagnostics on the
+constructor hook runs from the three functions every user-provided
+constructor definition funnels through -- ``ActOnMemInitializers``,
+``ActOnDefaultCtorInitializers``, and ``SetDeclDefaulted`` (an out-of-line
+``= default``) -- including instantiation.  The dispatchers filter out
+dependent entities (the hooks re-fire on each instantiation), invalid ones,
+lambdas (pattern 3), and delegating constructors (pattern 4); a filter that
+is one profile's policy rather than the pattern's contract (``std::init``
+exempting defaulted copy/move constructors, which initialize member-wise
+while writing no initializer) lives in that profile's callback, so the
+dispatchers stay uniform.  Each callback gates its diagnostics on the
 decl-aware ``shouldEmitProfileViolation`` overload, which walks the finalized
 declaration and its lexical parents for a suppression.
 

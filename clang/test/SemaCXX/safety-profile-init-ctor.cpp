@@ -207,16 +207,22 @@ void use_defaulted_before_definition() {
 }
 DefaultedAfterUse::DefaultedAfterUse() = default; // expected-error {{constructor does not initialize member 'x' under profile 'std::init'}}
 
-// An out-of-line defaulted *copy* (or move) constructor is equally
-// user-provided, but it initializes every member while *writing* no
-// initializer; it must never reach the written-initializer checks.
+// An out-of-line defaulted *copy* or *move* constructor is equally
+// user-provided -- the finalization dispatch sends every defaulted
+// definition through, uniformly -- but it initializes every member
+// member-wise while *writing* no initializer, so the std::init callback
+// filters it out itself; the written-initializer rule must never fire on
+// it.
 struct OutOfLineDefaultedCopy {
   int x;
   OutOfLineDefaultedCopy() : x(0) {}
   OutOfLineDefaultedCopy(const OutOfLineDefaultedCopy &);
+  OutOfLineDefaultedCopy(OutOfLineDefaultedCopy &&);
 };
 OutOfLineDefaultedCopy::OutOfLineDefaultedCopy(
-    const OutOfLineDefaultedCopy &) = default; // OK: not a default constructor
+    const OutOfLineDefaultedCopy &) = default; // OK: filtered by the callback
+OutOfLineDefaultedCopy::OutOfLineDefaultedCopy(
+    OutOfLineDefaultedCopy &&) = default; // OK: filtered by the callback
 
 // A class-template member: the pattern's defaulted definition is dependent
 // and defers; each instantiation is checked at the point its definition is
