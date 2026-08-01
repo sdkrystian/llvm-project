@@ -498,8 +498,15 @@ public:
     return getPropertyDataBuffer().SetterId;
   }
 
+private:
+  /// Raw custom-data installer, private so only the typed setters below can
+  /// attach a payload. The invariant is only half structural:
+  /// getCustomData<T> stays public (the generic read is shared with any
+  /// other custom-data user), so the setters guarantee what was installed,
+  /// not how it is read back.
   void setCustomData(void *Data) { CustomData = Data; }
 
+public:
   template <typename T> T &getCustomData() {
     assert(CustomData && "No custom data set");
     return *static_cast<T *>(CustomData);
@@ -526,6 +533,24 @@ public:
     assert(getKind() == AT_ProfilesRequire &&
            "not a profiles::require attribute");
     return getCustomData<detail::ProfileRequireArgs>();
+  }
+
+  void setProfileEnforceArgs(detail::ProfileEnforceArgs *Args) {
+    assert(getKind() == AT_ProfilesEnforce &&
+           "not a profiles::enforce attribute");
+    setCustomData(Args);
+  }
+
+  void setProfileSuppressArgs(detail::ProfileSuppressArgs *Args) {
+    assert(getKind() == AT_ProfilesSuppress &&
+           "not a profiles::suppress attribute");
+    setCustomData(Args);
+  }
+
+  void setProfileRequireArgs(detail::ProfileRequireArgs *Args) {
+    assert(getKind() == AT_ProfilesRequire &&
+           "not a profiles::require attribute");
+    setCustomData(Args);
   }
 
   /// Set the macro identifier info object that this parsed attribute was
