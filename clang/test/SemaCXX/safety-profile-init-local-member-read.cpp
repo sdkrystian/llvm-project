@@ -588,3 +588,79 @@ int test_copy_escape() {
   take_ref(b);
   return b.m; // OK: escaped
 }
+
+// The destruction mirror of escape crediting: a [[now_uninit]] call kills
+// the assigned bit of the tracked storage bound to its pointer/reference
+// parameters -- destruction makes the storage uninitialized again
+// ("Lifetimes", p4222r2.md:922-927) -- as a real dataflow fact, so a
+// destroy on any considered-executed path spoils a read at the join
+// ("Static analysis", p4222r2.md:306-312).
+struct DestroyAgg {
+  int m [[uninit]];  // expected-note 5 {{member 'm' declared here}}
+  int sm [[uninit]]; // expected-note {{member 'sm' declared here}}
+};
+template <class T> [[now_uninit]] void destroy_at(T *);
+[[now_uninit]] void wipe_whole(DestroyAgg &);
+
+int test_destroy_then_read() {
+  DestroyAgg a;
+  a.m = 1;
+  destroy_at(&a.m);
+  return a.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+}
+
+int test_destroy_under_branch(bool c) {
+  DestroyAgg a;
+  a.m = 1;
+  if (c)
+    destroy_at(&a.m);
+  return a.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+}
+
+int test_destroy_then_reassign() {
+  DestroyAgg a;
+  a.m = 1;
+  destroy_at(&a.m);
+  a.m = 2;
+  return a.m; // OK: reassigned after the destroy
+}
+
+// Sibling leniency: the destroy call's base DeclRefExpr is still a
+// non-benign escape of `a`, whose whole-range credit precedes the call
+// element in block order -- the destroyed member nets to killed while its
+// siblings keep the escape credit (the locals' documented leniency; the
+// ctor-body pass has no such credit).
+int test_destroy_sibling_keeps_escape_credit() {
+  DestroyAgg a;
+  a.m = 1;
+  a.sm = 1;
+  destroy_at(&a.m);
+  return a.sm; // OK: the sibling keeps the escape credit
+}
+
+// Passing the whole object destroys every tracked member.
+int test_destroy_whole_object() {
+  DestroyAgg a;
+  a.m = 1;
+  a.sm = 1;
+  destroy_at(&a);
+  return a.m // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+         + a.sm; // expected-error {{member 'sm' is read before initialization under profile 'std::init'}}
+}
+
+int test_destroy_whole_object_by_reference() {
+  DestroyAgg a;
+  a.m = 1;
+  wipe_whole(a);
+  return a.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+}
+
+// A copy after a destroy projects the killed bit (paper §5.2: a copy
+// inherits the source's state, not initialization).
+int test_copy_after_destroy() {
+  DestroyAgg a;
+  a.m = 1;
+  destroy_at(&a.m);
+  DestroyAgg b = a;
+  return b.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+}

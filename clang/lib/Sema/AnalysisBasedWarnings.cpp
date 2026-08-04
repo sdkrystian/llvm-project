@@ -2713,6 +2713,52 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC,
                   {DefAssignEventKind::Write, Idx, V->getInit()});
           }
         }
+      } else if (const auto *CE = dyn_cast<CallExpr>(St)) {
+        // A [[now_uninit]] callee destroys the storage bound to each of its
+        // pointer/reference parameters: a tracked member passed as `&x.m` /
+        // `x.m` is killed, and a whole tracked object passed as `&x` / `x`
+        // has every tracked member killed. The argument's base DeclRefExpr
+        // stays a non-benign escape whose whole-range Write precedes this
+        // call element in block order (a DeclRefExpr element precedes its
+        // consuming call element), so under the escape leniency the
+        // siblings keep the escape credit while the destroyed member nets
+        // to killed. Storage-release callees (free) are deliberately not
+        // kills: a release ends no object's lifetime, and the allocator
+        // trust split stays out of this file. (CXXOperatorCallExpr is-a
+        // CallExpr: keep this the chain's only CallExpr arm.)
+        const FunctionDecl *Callee = CE->getDirectCallee();
+        if (!Callee || !Callee->hasAttr<NowUninitAttr>())
+          continue;
+        unsigned ArgOffset = 0;
+        if (isa<CXXOperatorCallExpr>(CE))
+          if (const auto *MD = dyn_cast<CXXMethodDecl>(Callee);
+              MD && !MD->isExplicitObjectMemberFunction())
+            ArgOffset = 1;
+        for (unsigned PI = 0, NP = Callee->getNumParams(); PI != NP; ++PI) {
+          if (PI + ArgOffset >= CE->getNumArgs())
+            break;
+          QualType PT = Callee->getParamDecl(PI)->getType();
+          if (!PT->isPointerType() && !PT->isReferenceType())
+            continue;
+          const Expr *G = nullptr;
+          peelLifecycleArgument(CE->getArg(PI + ArgOffset), G);
+          TrackedAccess TA = LookupPair(G);
+          if (TA.K == TrackedAccess::TrackedMember) {
+            BlockEvents.push_back({DefAssignEventKind::Kill, TA.Idx, CE});
+            continue;
+          }
+          const auto *DRE = dyn_cast<DeclRefExpr>(G->IgnoreParenImpCasts());
+          if (!DRE)
+            continue;
+          const auto *V = dyn_cast<VarDecl>(DRE->getDecl());
+          if (!V)
+            continue;
+          auto It = VarRange.find(V);
+          if (It == VarRange.end())
+            continue;
+          for (unsigned Idx = It->second.first; Idx != It->second.second; ++Idx)
+            BlockEvents.push_back({DefAssignEventKind::Kill, Idx, CE});
+        }
       }
     }
   }

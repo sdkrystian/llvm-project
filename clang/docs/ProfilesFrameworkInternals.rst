@@ -270,7 +270,9 @@ patterns.  Its rules map to mechanisms as follows:
        ctor-body pass's ``CallExpr`` arm turns a ``[[now_init]]`` call into a
        ``Gen`` bit for the current-object storage bound to the callee's
        marked parameters (P4222R2 §6.2) and a ``[[now_uninit]]`` call into
-       a ``Kill`` that clears the assigned bit again; a "destroyed here"
+       a ``Kill`` that clears the assigned bit again; the local-member
+       pass's ``CallExpr`` arm kills the same way, while its escape credit
+       already subsumes ``[[now_init]]``.  A "destroyed here"
        note on the read is deferred -- a kill witness would have to be
        carried per bit through the meet and both engine replays, roughly
        doubling the engine state and touching the enqueue-skip invariant);

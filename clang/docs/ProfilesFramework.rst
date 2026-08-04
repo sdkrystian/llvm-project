@@ -846,11 +846,11 @@ those entries never cause a rejection.
   lifecycle start (including double construction, via the reverse-direction
   binding rule) and a ``[[now_uninit]]``-annotated ``destroy_at`` the end
   (double destruction, use-after-destroy where the destroyed storage is
-  *bound*, and -- in the ctor-body dataflow -- a member read after the
+  *bound*, and -- in both member dataflow passes -- a member read after the
   destroy, which kills the member's assigned bit.  A direct named read of a
-  plain ``[[uninit]]`` *local* after a destroy stays with the flow passes,
-  which treat the call as an escape, so it is a missed diagnostic; the
-  local-member pass shares that leniency).  Writes through
+  plain ``[[uninit]]`` *local* after a destroy stays with the flow-based
+  local-variable analysis, which treats the call as an escape in every
+  mode, so it is a missed diagnostic).  Writes through
   ``[[ref_to_uninit]]`` are still not verified.
 - The raw storage-release callees (``free``, ``realloc``, replaceable
   global ``operator delete``) accept storage that was never constructed:
