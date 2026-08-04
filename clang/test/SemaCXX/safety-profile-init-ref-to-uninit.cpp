@@ -1591,6 +1591,30 @@ void test_member_store_never_credits(Inner *ptr [[ref_to_uninit]]) {
   (void)y;
 }
 
+// Whole-pointee assignment of a CLASS pointee never reaches the built-in
+// assignment funnel: it resolves to the member operator=, whose implicit
+// object parameter binds the uninitialized pointee -- the object-argument
+// rule's rejection, for the element form too. The sanctioned class-pointee
+// initialization is construct_at.
+void test_class_pointee_assignment(Pair *p [[ref_to_uninit]]) {
+  *p = Pair{1, 2}; // expected-error {{calling member function 'operator=' binds its implicit object parameter to uninitialized memory under profile 'std::init'}}
+}
+void test_class_element_assignment(Pair *p [[ref_to_uninit]]) {
+  p[2] = Pair{1, 2}; // expected-error {{calling member function 'operator=' binds its implicit object parameter to uninitialized memory under profile 'std::init'}}
+}
+// An explicit-object (deducing-this) operator= declares its object as
+// parameter 0, so the same shape is rejected by the parameter-binding
+// funnel instead: the unmarked `this EPair &self` parameter must not bind
+// uninitialized memory.
+struct EPair {
+  int x;
+  int y;
+  EPair &operator=(this EPair &self, const EPair &o);
+};
+void test_explicit_object_assignment(EPair *p [[ref_to_uninit]]) {
+  *p = EPair{1, 2}; // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
 // Per-object whole-member store credit (paper §4.2: "After initialization,
 // the object is no longer [[uninit]]"; §6: ordinary assignment initializes a
 // built-in): `a.m = 5` credits exactly the (base object, member) pair, so a
