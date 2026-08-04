@@ -310,7 +310,10 @@ patterns.  Its rules map to mechanisms as follows:
        one
    * - ``uninit_write``
      - 1
-     - ``checkInitProfileSubobjectWrite``
+     - ``checkInitProfileSubobjectWrite`` (its store preset trusts
+       ``[[ref_to_uninit]]`` at the top level only: the member arm of the
+       glvalue recognizer clears the trust, so subobject writes below the
+       marker classify uninitialized)
 
 Two helpers are shared across the rules.  ``refersToUninitializedMemory``
 classifies an expression as referring to initialized, uninitialized, or

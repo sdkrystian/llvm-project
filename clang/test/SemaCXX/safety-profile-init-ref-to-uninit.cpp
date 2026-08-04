@@ -1165,7 +1165,9 @@ void test_read_negatives(int *p [[ref_to_uninit]], int &r [[ref_to_uninit]],
   *p = 5;                          // OK: write, not a read (and it credits
                                    // p's pointee, so it stays after the
                                    // marked bindings above)
-  ptr->m = 5;                      // OK: write, not a read
+  // A subobject write is not a read either -- the error below is
+  // uninit_write's (the piecemeal ban), not uninit_read's.
+  ptr->m = 5;                      // expected-error {{writing a member of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
   int *q [[ref_to_uninit]] = base; // OK: reads the pointer value, not through it
   (void)ap; (void)q; (void)r2;
 }
@@ -1415,7 +1417,8 @@ void test_compound_read_through(int *p [[ref_to_uninit]], int *q,
   *p += 1;     // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
   p[i] -= 1;   // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
   r *= 2;      // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
-  ptr->m |= 1; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  ptr->m |= 1; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}} \
+               // expected-error {{writing a member of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
   ++*p2;       // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
   (*p3)--;     // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
   ++r2;        // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
@@ -1580,10 +1583,10 @@ void test_member_pointer_never_credited(WithMarkedPtrField w) {
 }
 
 // A member store through a marked class-typed pointer is a subobject store:
-// trusted as a write (paper §4.5) but never crediting, so the member read
-// after it still fails.
+// rejected by uninit_write (the piecemeal ban; whole-object construct_at is
+// the remedy) and never crediting, so the member read after it still fails.
 void test_member_store_never_credits(Inner *ptr [[ref_to_uninit]]) {
-  ptr->m = 5;
+  ptr->m = 5; // expected-error {{writing a member of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
   int y = ptr->m; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
   (void)y;
 }

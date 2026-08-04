@@ -244,7 +244,10 @@ Rule                        Diagnoses
                             ``[[uninit]]``.
 ``uninit_read``             A read of an uninitialized object, or of an
                             ``[[uninit]]`` object before it is assigned.
-``uninit_write``            A write to a subobject of an ``[[uninit]]`` object.
+``uninit_write``            A write to a proper subobject of uninitialized
+                            storage -- an ``[[uninit]]`` object, or storage
+                            reached through ``[[ref_to_uninit]]`` or a
+                            recognized allocator.
 ``ref_to_uninit``           A pointer or reference binding inconsistent with its
                             ``[[ref_to_uninit]]`` marking.
 ``double_destroy``          A ``[[now_uninit]]`` call on storage already
@@ -448,10 +451,21 @@ in parse order (see `Binding Pointers and References`_):
      v = 7;     // OK: the write initializes the whole entity
    }
 
-   void g(int *p [[ref_to_uninit]]) {
+   void g(int *p [[ref_to_uninit]], S *ps [[ref_to_uninit]]) {
      *p = 5;    // OK: a write through the marker is the pointee's
                 // initialization
+     ps->x = 1; // error: writing a member of uninitialized storage reached
+                // through a [[ref_to_uninit]] pointer (uninit_write)
    }
+
+Subobject writes below the marker are rejected like the named twin: a
+write below a member step initializes nothing (§5.4's piecemeal ban; §4.5
+makes only the whole scalar write an initialization), whether the storage
+is reached through a marked pointer, reference, member, or callee return,
+through a recognized allocator's raw result, or through a raw ``new``
+expression.  A class pointee's initialization is ``construct_at`` (its
+``[[ref_to_uninit]]`` parameter accepts the pointer) or, for a scalar
+pointee, the whole ``*p`` store.
 
 A compound assignment or increment/decrement of such a subobject also reads
 its old value, so the read diagnostic fires alongside this one.  Assigning a
@@ -838,6 +852,14 @@ those entries never cause a rejection.
   callee filled the storage -- the same strictness, and the same remedies,
   as the unmarked-direction binding after such a call: ``[[now_init]]`` on
   the callee or suppression.
+- Member-wise initialization of a class pointee through
+  ``[[ref_to_uninit]]`` is rejected even for trivially-copyable pointees
+  (``ptr->x = 5``): below a member step only whole-object ``construct_at``
+  could initialize, which is unmodeled.  The remedies are ``construct_at``,
+  a whole scalar write for a scalar pointee, or suppression.  Two corners
+  are suppress-only: a marked pointer *member*'s pointee is never
+  credited, and an element access (``ptr[i].x``) skips the store-credit
+  consult, so no prior fill legalizes either.
 
 **Missed diagnostics (never rejections):**
 
@@ -850,8 +872,7 @@ those entries never cause a rejection.
   destroy, which kills the member's assigned bit.  A direct named read of a
   plain ``[[uninit]]`` *local* after a destroy stays with the flow-based
   local-variable analysis, which treats the call as an escape in every
-  mode, so it is a missed diagnostic).  Writes through
-  ``[[ref_to_uninit]]`` are still not verified.
+  mode, so it is a missed diagnostic).
 - The raw storage-release callees (``free``, ``realloc``, replaceable
   global ``operator delete``) accept storage that was never constructed:
   that is ``free``'s contract, not a gap -- only a ``[[now_uninit]]``
@@ -876,6 +897,19 @@ those entries never cause a rejection.
   error.  ``_aligned_free`` and ``reallocarray`` carry no Clang builtin ID
   and are likewise unrecognized; declaring such a function
   ``[[now_uninit]]`` is the workaround.
+- An element write through the marker (``p[3] = 0``) is accepted and never
+  credited -- a gap against the paper's random-access ban ("Static
+  analysis", p4222r2.md:314-316; "Guarantees", p4222r2.md:1987-1989); no
+  read is legalized by it.  The asymmetry with ``[[uninit]] int a[2];
+  a[0] = 1;`` -- rejected under the same paper rule -- follows the paper's
+  own span example ("Lifetimes", p4222r2.md:947-961), which accepts the
+  constant-index element initialization and flags only reliance on the
+  partial state.  The strict alternative -- clearing the marker trust in
+  the subscript arm too -- would remove the asymmetry at the cost of
+  turning every typed raw-buffer fill loop through a marked pointer into a
+  hard error, with range algorithms, ``construct_at``, or suppression as
+  the only remedies (``std::byte`` buffers excepted, p4222r2.md:929-931
+  and :1166-1167).
 - A ``new`` expression whose result is not bound to anything (``new int;``)
   is not checked.
 - A call through a function pointer cannot see parameter markers on the

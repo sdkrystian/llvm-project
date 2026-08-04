@@ -43,9 +43,14 @@ struct CtorBody {
 void test_member_store(bool c) {
   Pair s [[uninit]];
   s.x = 1;     // expected-error {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
-  (&s)->x = 1; // expected-error {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
+  // The arrow and conditional-operator spellings fall off the dot-member
+  // chain, so the diagnostic's phrasing approximation picks the plain
+  // "uninitialized storage" wording -- the same approximation the read
+  // diagnostic documents for `(&s)->x` -- and the write is rejected all
+  // the same.
+  (&s)->x = 1; // expected-error {{writing a member of uninitialized storage does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
   Pair t [[uninit]];
-  (c ? s : t).x = 1; // expected-error {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
+  (c ? s : t).x = 1; // expected-error {{writing a member of uninitialized storage does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
 
   WithMarkedMember b [[uninit]];
   b.m = 1; // expected-error {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
@@ -119,24 +124,102 @@ void test_compound_and_incdec_stores() {
              // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
 }
 
-// Writes through a [[ref_to_uninit]] pointer or reference: for a built-in
-// type the write is the pointee's initialization (paper §4.5), so they are
+// Writes through a [[ref_to_uninit]] pointer or reference: a whole-pointee
+// scalar write is the pointee's initialization (paper §4.5), so it is
 // legal -- and a whole-`*p` store credits the pointee as initialized in
-// parse order, so the compound assignment below may read the value it wrote.
-// An element store (p[3]) neither credits nor invalidates (§5.4/§5.5). A
-// compound assignment through a still-uncredited marker reads uninitialized
-// memory (full coverage in safety-profile-init-ref-to-uninit.cpp).
+// parse order, so the compound assignment below may read the value it
+// wrote. A write to a proper *subobject* below the marker initializes
+// nothing (§5.4's piecemeal ban; only whole-object construct_at could) and
+// is rejected like the named [[uninit]] twin above. An element store
+// (p[3]) is accepted and never credited -- a documented gap against the
+// paper's random-access ban (see Limitations). A compound assignment
+// through a still-uncredited marker reads uninitialized memory (full
+// coverage in safety-profile-init-ref-to-uninit.cpp).
 [[ref_to_uninit]] int &get_uninit_ref();
 void test_write_through_ref_to_uninit(int *p [[ref_to_uninit]],
                                       int &r [[ref_to_uninit]],
                                       Pair *ptr [[ref_to_uninit]]) {
   *p = 5;              // OK (and credits p's pointee)
-  p[3] = 0;            // OK (no credit, no invalidation)
+  p[3] = 0;            // OK (no credit, no invalidation): the element-write gap
   *p += 1;             // OK: the whole-*p store above credited the pointee
   r = 5;               // OK
-  ptr->x = 5;          // OK
-  get_uninit_ref() = 5; // OK
+  ptr->x = 5;          // expected-error {{writing a member of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
+  get_uninit_ref() = 5; // OK: whole-referent scalar store
 }
+
+// Every route to a subobject below the marker is the same rejection:
+// deref-then-dot, an explicit cast, a nested aggregate path, a marked
+// reference base, a marked callee's returned referent, and a compound
+// assignment (whose old-value read fires alongside).
+struct InnerAgg { int f; };
+struct PairAgg { InnerAgg agg; int x; };
+[[ref_to_uninit]] Pair &get_pair_ref();
+void test_subobject_write_shapes(Pair *ptr [[ref_to_uninit]],
+                                 Pair &pr [[ref_to_uninit]],
+                                 PairAgg *pa [[ref_to_uninit]]) {
+  (*ptr).x = 5;         // expected-error {{writing a member of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
+  ((Pair *)ptr)->x = 5; // expected-error {{writing a member of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
+  pa->agg.f = 5;        // expected-error {{writing a member of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
+  pr.x = 5;             // expected-error {{writing a member of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
+  get_pair_ref().x = 5; // expected-error {{writing a member of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
+  ptr->x += 1;          // expected-error {{writing a member of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}} \
+                        // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// Member-writing raw allocator memory before any construction is the same
+// piecemeal initialization of uninitialized storage, with no marker in
+// source: the phrase drops the marker. A raw new-expression's member write
+// already errored before this rule; its phrase (previously the wrong
+// "'[[uninit]]' object" wording) is pinned here.
+typedef __SIZE_TYPE__ size_t;
+extern "C" void *malloc(size_t);
+void test_allocator_member_write() {
+  ((Pair *)malloc(sizeof(Pair)))->x = 5; // expected-error {{writing a member of uninitialized storage does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
+  (new Pair)->x = 5;                     // expected-error {{writing a member of uninitialized storage does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
+}
+
+// The whole-pointee credit route stays open: after a [[now_init]] fill the
+// pointee is initialized and member writes are ordinary stores.
+[[now_init]] void fill_pair(Pair *p [[ref_to_uninit]]);
+void test_fill_then_member_write(Pair *ptr [[ref_to_uninit]]) {
+  fill_pair(ptr);
+  ptr->x = 5; // OK: the callee initialized the whole pointee
+}
+
+// Two suppress-only corners: a marked pointer MEMBER's pointee is never
+// credited, and an element access skips the credit consult, so even a
+// prior fill legalizes neither -- suppression is the remedy.
+struct Holder { Pair *p [[ref_to_uninit]]; };
+void test_member_pointer_write_suppress_only(Holder h) {
+  h.p->x = 5; // expected-error {{writing a member of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  [[profiles::suppress(std::init, rule: "uninit_write")]]
+  h.p->x = 6; // OK: suppressed
+}
+void test_element_member_write_suppress_only(Pair *ptr [[ref_to_uninit]],
+                                             int i) {
+  fill_pair(ptr);
+  ptr[i].x = 5; // expected-error {{writing a member of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  [[profiles::suppress(std::init, rule: "uninit_write")]]
+  ptr[i].x = 6; // OK: suppressed
+}
+
+// Inside a [[now_init]] callee's own body the marked parameter is the same
+// recognizer input: the piecemeal write is rejected there too -- verbatim
+// the paper's uninitialized_fill discipline ("Existing support for
+// uninitialized", p4222r2.md:1223-1226): writing through the marker goes
+// through construct_at, whole scalar stores, or suppression.
+[[now_init]] void fill_pair_body(Pair *p [[ref_to_uninit]]) {
+  p->x = 1; // expected-error {{writing a member of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
+}
+
+// A dependent store target defers to instantiation, like the named twin.
+template <class T>
+void template_marked_member_write(T *ptr [[ref_to_uninit]]) {
+  ptr->x = 5; // expected-error {{writing a member of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
+}
+template void template_marked_member_write<Pair>(Pair *); // expected-note {{in instantiation of function template specialization 'template_marked_member_write<Pair>' requested here}}
 
 // std::byte may be left uninitialized and manipulated freely (paper §4.5).
 void test_byte_exempt() {

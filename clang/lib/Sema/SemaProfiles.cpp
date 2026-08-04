@@ -1063,10 +1063,12 @@ enum class UninitStorage { Initialized, Uninitialized, Unknown };
 //
 // TrustRefToUninit: [[ref_to_uninit]] markers are ignored -- the storage
 // reached through a marked pointer/reference (or returned by a marked
-// function) classifies as Unknown rather than Uninitialized. Stores use this:
-// a scalar write through the marker is the pointee's initialization (paper
-// §4.5), and verifying class-type writes (construct_at) is a deferred slice,
-// so a store through the marker must be neither banned nor endorsed.
+// function) classifies as Unknown rather than Uninitialized. Stores use
+// this, and only at the top level: a scalar write through the marker is
+// the whole pointee's initialization (paper §4.5), so it must be neither
+// banned nor endorsed -- while below a member step only whole-object
+// construct_at could initialize, which is unmodeled, so the member arm
+// clears the trust and the marker counts again (§5.4's piecemeal ban).
 // SubscriptBase: the classification runs below an element access (p[i]),
 // where pointee store credit must not apply: element-wise state is
 // untrackable by design (paper §5.4/§5.5 ban random access through the
@@ -1097,6 +1099,11 @@ struct UninitAccessOpts {
   UninitAccessOpts withSubscriptBase() const {
     UninitAccessOpts O = *this;
     O.SubscriptBase = true;
+    return O;
+  }
+  UninitAccessOpts withoutMarkerTrust() const {
+    UninitAccessOpts O = *this;
+    O.TrustRefToUninit = false;
     return O;
   }
   UninitAccessOpts withCredit(const SemaProfiles *SP) const {
@@ -1689,6 +1696,11 @@ static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
     // initialization of an [[uninit]] object is itself banned (paper §5.4;
     // only whole-object construct_at re-initializes, which is uniformly
     // unmodeled) -- so below the top level the marker counts for every access.
+    // The base recursion clears the marker trust for the same reason: the
+    // write preset trusts the marker only at the top level, where a scalar
+    // write is the whole pointee's initialization (§4.5) -- below a member
+    // step the write initializes nothing, so [[ref_to_uninit]] markers,
+    // marked callees, and the allocator tail all count again.
     //
     // Parse-order member store credit: after `a.m = 5` / `this->m = 5`, the
     // marked member of that *specific* base object counts as initialized
@@ -1711,9 +1723,11 @@ static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
     if (DeclDenotesUninit(MD))
       return UninitStorage::Uninitialized;
     return ME->isArrow() ? pointerRefersToUninitStorage(
-                               Ctx, ME->getBase(), Opts.withoutTopLevelDrop())
+                               Ctx, ME->getBase(),
+                               Opts.withoutTopLevelDrop().withoutMarkerTrust())
                          : glvalueDenotesUninitStorage(
-                               Ctx, ME->getBase(), Opts.withoutTopLevelDrop());
+                               Ctx, ME->getBase(),
+                               Opts.withoutTopLevelDrop().withoutMarkerTrust());
   }
   // A call to a [[ref_to_uninit]]-returning reference function: the referent
   // it returns is uninitialized.
@@ -2295,6 +2309,41 @@ static bool isMemberChainOfUninitObject(const Expr *E) {
   return DRE && DRE->getDecl()->hasAttr<UninitAttr>();
 }
 
+// The write diagnostic's remaining provenance split: uninitialized storage
+// reached through a [[ref_to_uninit]] entity (a marked pointer, reference,
+// member, or callee return) versus storage with no marker in source (an
+// allocator result, a raw new-expression). Approximate but sufficient for
+// phrasing, like isMemberChainOfUninitObject above: walk the store target's
+// chain; the marker wording applies iff a marked entity appears anywhere
+// along it.
+static bool uninitWriteChainSeesMarker(const Expr *E) {
+  while (true) {
+    E = E->IgnoreParenCasts();
+    if (const auto *ME = dyn_cast<MemberExpr>(E)) {
+      if (ME->getMemberDecl()->hasAttr<RefToUninitAttr>())
+        return true;
+      E = ME->getBase();
+      continue;
+    }
+    if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(E)) {
+      E = ASE->getBase();
+      continue;
+    }
+    if (const auto *UO = dyn_cast<UnaryOperator>(E);
+        UO && UO->getOpcode() == UO_Deref) {
+      E = UO->getSubExpr();
+      continue;
+    }
+    if (const auto *CE = dyn_cast<CallExpr>(E)) {
+      const FunctionDecl *FD = CE->getDirectCallee();
+      return FD && FD->hasAttr<RefToUninitAttr>();
+    }
+    if (const auto *DRE = dyn_cast<DeclRefExpr>(E))
+      return DRE->getDecl()->hasAttr<RefToUninitAttr>();
+    return false;
+  }
+}
+
 void SemaProfiles::checkInitProfileReadThrough(SourceLocation Loc,
                                                const Expr *Glvalue,
                                                QualType ValueType) {
@@ -2351,8 +2400,16 @@ void SemaProfiles::checkInitProfileSubobjectWrite(SourceLocation Loc,
                                   UninitWriteAccess.withCredit(this)) !=
       UninitStorage::Uninitialized)
     return;
+  // The provenance phrase: a member chain of a named [[uninit]] object
+  // renders exactly as before the marked/allocator arms existed (arm 0);
+  // isMemberChainOfUninitObject alone cannot key the split -- it is false
+  // for allocator and new-expression provenance, which needs arm 2's
+  // marker-free wording.
   Diag(Loc, diag::err_init_uninit_subobject_write)
-      << "std::init" << !isa<MemberExpr>(LHS->IgnoreParenImpCasts());
+      << "std::init" << !isa<MemberExpr>(LHS->IgnoreParenImpCasts())
+      << (isMemberChainOfUninitObject(LHS)
+              ? 0
+              : (uninitWriteChainSeesMarker(LHS) ? 1 : 2));
 }
 
 void SemaProfiles::checkInitProfilePointerAssignment(Expr *LHS, Expr *RHS,
