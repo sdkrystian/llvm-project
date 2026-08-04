@@ -652,8 +652,11 @@ itself an access to raw memory, rejected as rule ``destroy_uninit``
 fires only on affirmatively uninitialized storage (a conditional store
 suppresses, and unknown storage is accepted), a storage-release callee
 keeps any-state acceptance (``free`` takes storage that may never have
-been constructed; see `Limitations`_), and a reinitializer (below) is
-exempt.  Never accepted is storage a
+been constructed; see `Limitations`_), a reinitializer (below) is
+exempt, and so is any parameter that itself carries
+``[[ref_to_uninit]]``: the marker declares that the parameter accepts
+uninitialized storage -- the annotation spelling for an unrecognized
+release function.  Never accepted is storage a
 ``[[now_uninit]]`` call already destroyed.  That is a double destruction
 (rule ``double_destroy``), definite by construction: only an unconditional
 same-function destroy records the destroyed state, and any store or
@@ -890,13 +893,18 @@ those entries never cause a rejection.
   the first governs reads, the second call-site acceptance, and both err
   away from false positives.  A reinitializer's exemption from ``destroy_uninit`` is
   call-wide, so its *unmarked* destroy-only pointer parameters -- whose
-  storage the paper requires live -- are exempt too.
+  storage the paper requires live -- are exempt too; a parameter that
+  itself carries ``[[ref_to_uninit]]`` is exempt per parameter (the
+  release-workaround spelling below).
 - ``__builtin_operator_delete`` binds its operand with no parameter
   declaration in sight, so the storage-release relaxation cannot recognize
   it: passing ``[[ref_to_uninit]]`` storage keeps the unmarked-direction
   error.  ``_aligned_free`` and ``reallocarray`` carry no Clang builtin ID
   and are likewise unrecognized; declaring such a function
-  ``[[now_uninit]]`` is the workaround.
+  ``[[now_uninit]]``, with its pointer parameter marked
+  ``[[ref_to_uninit]]``, is the workaround -- the parameter marker keeps
+  ``destroy_uninit`` from rejecting the release of a buffer that was
+  never written (a release function's contract, unlike a destroy's).
 - An element write through the marker (``p[3] = 0``) is accepted and never
   credited -- a gap against the paper's random-access ban ("Static
   analysis", p4222r2.md:314-316; "Guarantees", p4222r2.md:1987-1989); no

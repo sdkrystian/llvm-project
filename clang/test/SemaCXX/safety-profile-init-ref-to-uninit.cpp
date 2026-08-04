@@ -2052,6 +2052,23 @@ void test_destroy_after_now_init_fill() {
   nu_wipe(&u); // OK: the [[now_init]] callee initialized the storage
 }
 
+// A destroy-role callee may declare a parameter [[ref_to_uninit]]: the
+// marker is the author's contract that the parameter takes
+// possibly-uninitialized storage -- the annotation spelling for an
+// unrecognized storage-release function (see Limitations) -- so
+// destroy_uninit yields to it. Per parameter, unlike the reinitializer's
+// call-wide exemption: a sibling unmarked parameter still fires.
+[[now_uninit]] void nu_release(int *p [[ref_to_uninit]]);
+[[now_uninit]] void nu_release2(int *p [[ref_to_uninit]], int *q);
+void test_marked_param_destroy_exempt() {
+  int u [[uninit]];
+  nu_release(&u); // OK: the marked parameter accepts uninitialized storage
+}
+void test_marked_param_exemption_is_per_parameter() {
+  int u [[uninit]], v [[uninit]];
+  nu_release2(&u, &v); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+}
+
 // A conditional store earns Maybe credit, which suppresses: the destroy is
 // accepted although one path destroys never-stored storage -- a missed
 // diagnostic relative to the paper's "for acceptance all alternatives must

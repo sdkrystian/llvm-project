@@ -1883,7 +1883,14 @@ void SemaProfiles::checkInitProfileRefToUninitBinding(SourceLocation Loc,
     // uninitialized sources (destroy-then-construct on fresh storage is
     // its purpose), and the exemption also covers its unmarked
     // destroy-only pointer parameters, whose storage the paper requires
-    // live -- a missed diagnostic, not a rule. The branch below keys on
+    // live -- a missed diagnostic, not a rule. A parameter that itself
+    // carries [[ref_to_uninit]] is exempt per parameter, whatever the
+    // callee's other attributes: the marker is the author's declaration
+    // that the parameter takes possibly-uninitialized storage -- the
+    // annotation spelling for an unrecognized storage-release function
+    // (the Limitations workaround for _aligned_free and kin), whose
+    // contract a destroy-of-uninitialized rejection would break for
+    // never-written buffers. The branch below keys on
     // the STATE, not on diagnostic emission: destroyed storage
     // re-classifies affirmatively Uninitialized (destruction withdrew its
     // credit), so a suppressed double destroy must stay silent rather
@@ -1898,7 +1905,8 @@ void SemaProfiles::checkInitProfileRefToUninitBinding(SourceLocation Loc,
       if (shouldEmitProfileViolation("std::init", "double_destroy", Loc, D))
         Diag(Loc, diag::err_init_double_destroy) << "std::init";
     } else if (Roles.DestroysPointerParams &&
-               !Roles.InitializesRefToUninitParams && Checkable &&
+               !Roles.InitializesRefToUninitParams &&
+               !(Target && Target->hasAttr<RefToUninitAttr>()) && Checkable &&
                shouldEmitProfileViolation("std::init", "destroy_uninit", Loc,
                                           D) &&
                classifyUninitSource(getASTContext(), Src, T->isReferenceType(),

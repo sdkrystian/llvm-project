@@ -232,6 +232,22 @@ void test_destroy_calloc_result() {
   destroy_at((int *)calloc(1, 4)); // OK: zero-initialized
 }
 
+// The workaround for an ID-less deallocator (see Limitations): declare it
+// [[now_uninit]] with the pointer parameter marked [[ref_to_uninit]]. The
+// destroy role relaxes the binding and withdraws credit; the parameter
+// marker exempts it from destroy_uninit, so releasing a never-written
+// buffer -- a release function's contract -- stays legal in every run,
+// including the RAII-member shape, whose pointee no store can credit.
+[[now_uninit]] void my_aligned_free(void *p [[ref_to_uninit]]);
+void test_annotated_release_never_written() {
+  my_aligned_free(malloc(16)); // OK: releasing a never-written buffer
+}
+struct RAIIAnnotated {
+  int *p [[ref_to_uninit]];
+  RAIIAnnotated() : p((int *)malloc(16)) {}
+  ~RAIIAnnotated() { my_aligned_free(p); } // OK: any state, like free(p)
+};
+
 // A class-specific operator delete is not replaceable; its semantics belong
 // to its class, so its parameter stays the ordinary unmarked target.
 struct PoolDeallocated {
