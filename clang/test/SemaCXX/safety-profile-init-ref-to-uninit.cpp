@@ -2037,6 +2037,13 @@ void test_destroy_marked_no_store(int *p [[ref_to_uninit]]) {
   nu_wipe(p); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
+// The by-reference parameter dispatches the glvalue recognizer: a fresh
+// referent is rejected like the pointer form.
+void test_destroy_by_reference_never_stored() {
+  int u [[uninit]];
+  nu_wipe_ref(u); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+}
+
 // The escape-strictness shape: a plain callee taking the marked parameter
 // earns no credit (only [[now_init]] does), so the destroy after it is
 // rejected even if the callee did fill the storage -- the same strictness
