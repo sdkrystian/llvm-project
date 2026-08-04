@@ -1925,9 +1925,10 @@ void test_construct_at_bridge() {
 // uninitialized again. Re-construction becomes legal, binding the storage
 // to an unmarked target is the ordinary unmarked-direction violation, and
 // a second destruction is the dedicated double_destroy violation: the
-// callee's own parameters accept storage in any live state (initialized,
-// or never constructed -- the raw-release shape; see Limitations), but
-// never storage already destroyed.
+// callee's own parameters take initialized (or credited) storage --
+// destroying storage that is still or again uninitialized is the
+// dedicated destroy_uninit violation, while raw-release callees (free)
+// keep any-state acceptance (see Limitations).
 template <class T>
 [[now_uninit]] void destroy_at(T *p);
 [[now_uninit]] void nu_wipe(int *p);
@@ -1951,13 +1952,16 @@ void test_double_destroy() {
   nu_wipe(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
 }
 
-// Destroying storage that was never initialized is accepted: [[now_uninit]]
-// also covers raw-release callees (free), whose operand may never have been
-// constructed. Recovering this diagnostic needs the lifetime-end and
-// storage-release roles split apart (see Limitations).
+// Destroying storage that was never initialized is rejected: destruction
+// makes an object uninitialized, so a first destroy of never-constructed
+// storage is as much an access to raw memory as a second one ("Lifetimes",
+// p4222r2.md:922-927 -- "it is an error to uninitialize an object twice").
+// Raw-release callees (free) keep any-state acceptance: taking storage
+// that may never have been constructed is their contract (see
+// Limitations).
 void test_destroy_never_initialized() {
   int u [[uninit]];
-  nu_wipe(&u); // OK (accepted since the parameter takes any live state)
+  nu_wipe(&u); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
   int *r [[ref_to_uninit]] = &u; // OK: still uninitialized
   (void)r;
 }
@@ -1986,14 +1990,102 @@ void test_double_destroy_member() {
 }
 
 // Reseating a marked pointer retires its pointee's destroyed state with the
-// rest of the pointee facts: they described the old pointee.
+// rest of the pointee facts: they described the old pointee. The proof is
+// mutual exclusivity: the destroy after the reseat fires destroy_uninit
+// (the new pointee is uncredited marked storage), not double_destroy.
 void test_reseat_clears_destroyed(int *p [[ref_to_uninit]],
                                   int *q [[ref_to_uninit]]) {
   *p = 5;
   nu_wipe(p);
   p = q;
-  nu_wipe(p); // OK: this is the new pointee's first destroy
+  nu_wipe(p); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
 }
+
+// Destroying through a marked pointer with no prior store is rejected: the
+// marker asserts an uninitialized pointee at entry. A deliberate
+// strictness -- if a helper filled the pointee, mark the helper
+// [[now_init]], store through the marker first, or suppress (see
+// Limitations).
+void test_destroy_marked_no_store(int *p [[ref_to_uninit]]) {
+  nu_wipe(p); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+}
+
+// The escape-strictness shape: a plain callee taking the marked parameter
+// earns no credit (only [[now_init]] does), so the destroy after it is
+// rejected even if the callee did fill the storage -- the same strictness
+// and remedies as test_plain_callee_no_credit above.
+void test_destroy_after_plain_fill() {
+  int u [[uninit]];
+  plain_fill(&u);
+  nu_wipe(&u); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+}
+void test_destroy_after_now_init_fill() {
+  int u [[uninit]];
+  now_init_fill(&u);
+  nu_wipe(&u); // OK: the [[now_init]] callee initialized the storage
+}
+
+// A conditional store earns Maybe credit, which suppresses: the destroy is
+// accepted although one path destroys never-stored storage -- a missed
+// diagnostic relative to the paper's "for acceptance all alternatives must
+// provide the desired solution" ("Guarantees", p4222r2.md:1982-1985), the
+// usual parse-order conservatism.
+void test_conditional_store_then_destroy(bool c) {
+  int u [[uninit]];
+  if (c)
+    u = 5;
+  nu_wipe(&u); // OK: Maybe credit suppresses
+}
+
+// destroy_uninit and double_destroy are mutually exclusive by state: on
+// never-stored storage the first destroy fires destroy_uninit -- and still
+// records the destroyed state -- so the second fires double_destroy.
+void test_destroy_uninit_then_double_destroy() {
+  int u [[uninit]];
+  nu_wipe(&u); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+  nu_wipe(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+}
+
+// Each rule suppresses under its own name...
+void test_suppress_destroy_uninit() {
+  int u [[uninit]];
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  [[profiles::suppress(std::init, rule: "destroy_uninit")]]
+  nu_wipe(&u); // OK: suppressed
+}
+// ...and a suppressed double destroy yields silence, not a swapped
+// destroy_uninit error: the branch keys on the state (destroyed), not on
+// whether the double_destroy diagnostic was emitted.
+void test_suppress_double_destroy_stays_silent() {
+  int u [[uninit]];
+  u = 1;
+  nu_wipe(&u); // OK: destroying initialized storage
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  [[profiles::suppress(std::init, rule: "double_destroy")]]
+  nu_wipe(&u); // OK: suppressed, and no destroy_uninit in its place
+}
+
+// A dependent source defers to instantiation, exactly like the sibling
+// binding checks.
+template <class T>
+void template_destroy_dependent() {
+  T u [[uninit]];
+  nu_wipe(&u); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+}
+template void template_destroy_dependent<int>(); // expected-note {{in instantiation of function template specialization 'template_destroy_dependent<int>' requested here}}
+
+// Ctor-body twins: member credit is a parse-order fact, so a destroy of a
+// never-assigned [[uninit]] member fires while an assigned one is clean.
+struct DestroyInCtor {
+  int m [[uninit]];
+  DestroyInCtor() {
+    nu_wipe(&m); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+  }
+  DestroyInCtor(int) {
+    m = 1;
+    nu_wipe(&m); // OK: parse-order member credit
+  }
+};
 
 // A decayed-array argument credits the [[uninit]] array whole, exactly the
 // storage the dedicated acceptance arm already binds (§6's
@@ -2158,7 +2250,10 @@ void test_conditional_destroy(bool c) {
 
 // A callee carrying both markers is a reinitializer: it destroys and then
 // constructs its argument's storage, so the net post-call state is
-// initialized (withdrawal is recorded before credit).
+// initialized (withdrawal is recorded before credit). Fresh never-stored
+// storage is its canonical input -- destroy-then-construct legalizes it --
+// so a reinitializer is exempt from destroy_uninit (the two calls below
+// on fresh storage are the exemption's canaries).
 [[now_init]] [[now_uninit]] void nu_reinit(int *p [[ref_to_uninit]]);
 void test_reinit_nets_initialized() {
   int u [[uninit]];
@@ -2194,6 +2289,17 @@ void test_reinit_on_destroyed() {
   u = 5;
   nu_wipe(&u);
   nu_reinit(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+}
+
+// The reinitializer exemption is call-wide: a dual-attributed callee's
+// *unmarked* destroy-only pointer parameters -- whose storage the paper
+// requires live -- are exempt from destroy_uninit too. A missed
+// diagnostic, not a rule (see Limitations); the marked parameter is what
+// positively legalizes fresh storage.
+[[now_init]] [[now_uninit]] void nu_reinit2(int *p [[ref_to_uninit]], int *q);
+void test_reinit_exemption_is_call_wide() {
+  int u [[uninit]], v [[uninit]];
+  nu_reinit2(&u, &v); // OK: &v (never stored, unmarked parameter) is exempt
 }
 
 // The reverse direction applies through the assignment funnel too: a

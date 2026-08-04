@@ -194,18 +194,23 @@ void test_destroy_then_free(int *p [[ref_to_uninit]]) {
   free(p); // OK: not a double destroy
 }
 
-// The reverse order is fine too: a release withdraws the credit but records
-// no destroyed state -- there is no object left for [[now_uninit]] to
-// destroy "again", and post-release use is the invalidation profile's rule.
+// The reverse order is the destroy_uninit violation on a marked pointer: a
+// release records no destroyed state -- there is no object left for
+// [[now_uninit]] to destroy "again" -- but a trusted release withdraws the
+// pointee's credit, so the storage classifies uninitialized again and the
+// destroy fires on it. In the nobuiltin runs the untrusted free withdraws
+// nothing (the documented missed-diagnostic direction), while the
+// delete-expression withdraws by form in every mode.
 void test_free_then_destroy(int *p [[ref_to_uninit]]) {
   *p = 5;
   free(p);
-  destroy_at(p); // OK: released, not destroyed
+  destroy_at(p); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 void test_delete_then_destroy(int *p [[ref_to_uninit]]) {
   *p = 5;
   delete p;
-  destroy_at(p); // OK: the delete-expression agrees with operator delete
+  destroy_at(p); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}} \
+                 // nobuiltin-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 // A genuine double destroy -- two [[now_uninit]] calls -- still fires, in
 // every profile-enforcing run (attribute-keyed, no builtin ID involved).
@@ -214,6 +219,17 @@ void test_destroy_then_destroy(int *p [[ref_to_uninit]]) {
   destroy_at(p);
   destroy_at(p); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}} \
                  // nobuiltin-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+}
+
+// Destroying a trusted allocator's raw result is destroying storage where
+// no object was ever constructed; calloc's zero-initialized result is
+// initialized memory and stays accepted. In the nobuiltin runs the
+// untrusted malloc classifies as Unknown, which never fires.
+void test_destroy_malloc_result() {
+  destroy_at((int *)malloc(4)); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+}
+void test_destroy_calloc_result() {
+  destroy_at((int *)calloc(1, 4)); // OK: zero-initialized
 }
 
 // A class-specific operator delete is not replaceable; its semantics belong

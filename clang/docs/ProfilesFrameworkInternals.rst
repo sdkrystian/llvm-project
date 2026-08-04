@@ -295,6 +295,13 @@ patterns.  Its rules map to mechanisms as follows:
      - ``checkInitProfileRefToUninit`` behind per-site wrappers (variable
        and member initialization, call arguments, returns, throws,
        new-initializers, captures, object arguments)
+   * - ``double_destroy``, ``destroy_uninit``
+     - 1
+     - the destroy arm of ``checkInitProfileRefToUninitBinding`` (the
+       parameter-binding funnel): ``storageIsDestroyed`` answers the
+       destroyed state, and ``classifyUninitSource`` -- run exactly as for
+       an unmarked binding target (``Maybe`` credit) -- the uninitialized
+       one
    * - ``uninit_write``
      - 1
      - ``checkInitProfileSubobjectWrite``

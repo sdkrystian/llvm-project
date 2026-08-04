@@ -1845,25 +1845,53 @@ void SemaProfiles::checkInitProfileRefToUninitBinding(SourceLocation Loc,
     // constructed; see the Limitations note), and initialized storage is
     // precisely what a dual-attributed reinitializer's destroy half exists
     // for. Acceptance never diagnoses, so it reads the union of the
-    // release bits -- an untrusted name-only free still relaxes. The one
-    // state a [[now_uninit]] callee must not take is storage *already*
-    // destroyed: a second destruction is P4222R2 §1's double-destroy
-    // error, and the destroyed state is definite by construction, so it
-    // may fire a diagnostic. That applies to a reinitializer too -- its
-    // destroy half is invalid on destroyed storage; construct_at (a plain
-    // [[now_init]] function with a marked parameter, whose binding check
-    // below is untouched) is the sanctioned recovery path. A
-    // storage-release callee is exempt -- double_destroy keys on the
-    // destroy role alone: destroy_at(p); free(p); is correct, ending an
-    // object's lifetime and releasing its storage are different
-    // operations. An instantiation-dependent source defers exactly like
+    // release bits -- an untrusted name-only free still relaxes. Two
+    // states a [[now_uninit]] callee must not take, though. Storage
+    // *already destroyed*: a second destruction is P4222R2 §1's
+    // double-destroy error, and the destroyed state is definite by
+    // construction, so it may fire a diagnostic -- that applies to a
+    // reinitializer too, whose destroy half is invalid on destroyed
+    // storage; construct_at (a plain [[now_init]] function with a marked
+    // parameter, whose binding check below is untouched) is the
+    // sanctioned recovery path. And storage still (or again)
+    // *uninitialized*: destruction makes an object uninitialized, so a
+    // first destroy of never-constructed storage is as much an access to
+    // raw memory as a second one ("Lifetimes", p4222r2.md:922-927 -- "it
+    // is an error to uninitialize an object twice"). The argument is
+    // classified exactly like an unmarked binding target
+    // (affirmative-Uninitialized with Maybe credit), so Unknown never
+    // fires and a conditional store suppresses. Both checks key on the
+    // destroy role alone -- a storage-release callee is exempt from both:
+    // destroy_at(p); free(p); is correct (different operations, correctly
+    // ordered), and free takes never-constructed storage by contract. A
+    // reinitializer (dual [[now_init]] [[now_uninit]]) is exempt from
+    // destroy_uninit call-wide: its marked parameter positively legalizes
+    // uninitialized sources (destroy-then-construct on fresh storage is
+    // its purpose), and the exemption also covers its unmarked
+    // destroy-only pointer parameters, whose storage the paper requires
+    // live -- a missed diagnostic, not a rule. The branch below keys on
+    // the STATE, not on diagnostic emission: destroyed storage
+    // re-classifies affirmatively Uninitialized (destruction withdrew its
+    // credit), so a suppressed double destroy must stay silent rather
+    // than fall through to a swapped destroy_uninit error. An
+    // instantiation-dependent source defers exactly like
     // checkInitProfileRefToUninit's.
-    if (Roles.DestroysPointerParams && Src &&
-        !isa<RecoveryExpr>(Src->IgnoreParens()) &&
-        (D || !Src->isInstantiationDependent()) &&
-        shouldEmitProfileViolation("std::init", "double_destroy", Loc, D) &&
-        storageIsDestroyed(T, Src))
-      Diag(Loc, diag::err_init_double_destroy) << "std::init";
+    bool Checkable = Src && !isa<RecoveryExpr>(Src->IgnoreParens()) &&
+                     (D || !Src->isInstantiationDependent());
+    bool Destroyed =
+        Checkable && Roles.DestroysPointerParams && storageIsDestroyed(T, Src);
+    if (Destroyed) {
+      if (shouldEmitProfileViolation("std::init", "double_destroy", Loc, D))
+        Diag(Loc, diag::err_init_double_destroy) << "std::init";
+    } else if (Roles.DestroysPointerParams &&
+               !Roles.InitializesRefToUninitParams && Checkable &&
+               shouldEmitProfileViolation("std::init", "destroy_uninit", Loc,
+                                          D) &&
+               classifyUninitSource(getASTContext(), Src, T->isReferenceType(),
+                                    UninitBindAccess.withCredit(
+                                        this, InitCreditStrength::Maybe)) ==
+                   UninitStorage::Uninitialized)
+      Diag(Loc, diag::err_init_destroy_uninit) << "std::init";
   } else {
     // A null Target is a binding site with no declaration to carry the
     // marker (a parameter of a call through a function pointer): always

@@ -58,6 +58,7 @@ _RULES = [
                            "binds a reference to uninitialized memory",
                            "binds its implicit object parameter")),
     ("double_destroy", _has("is destroyed again")),
+    ("destroy_uninit", _has("uninitialized storage is destroyed")),
     ("pointer_marker", _has("'[[uninit]]' cannot be applied to a pointer")),
     ("static_marker", _has("'[[uninit]]' cannot be applied to variable",
                            "storage duration")),

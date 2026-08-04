@@ -14461,4 +14461,7 @@ def err_init_member_call_on_uninit : ProfileRuleError<
 def err_init_double_destroy : ProfileRuleError<
   "storage already destroyed by a '[[now_uninit]]' function is destroyed "
   "again under profile '%0'">;
+def err_init_destroy_uninit : ProfileRuleError<
+  "uninitialized storage is destroyed by a '[[now_uninit]]' function under "
+  "profile '%0'">;
 } // end of sema component.

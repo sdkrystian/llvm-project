@@ -249,6 +249,8 @@ Rule                        Diagnoses
                             ``[[ref_to_uninit]]`` marking.
 ``double_destroy``          A ``[[now_uninit]]`` call on storage already
                             destroyed.
+``destroy_uninit``          A ``[[now_uninit]]`` call on storage that is
+                            (still or again) uninitialized.
 ``ctor_uninit_member``      A constructor that leaves a member or base subobject
                             uninitialized.
 ``static_runtime_init``     A non-local variable with a runtime initializer.
@@ -628,17 +630,24 @@ call -- under an ``if``, a loop, or any of the constructs listed above --
 may or may not have destroyed the storage, so it withdraws only the
 credit's firing strength (a following marked binding is no longer forced,
 while an unmarked binding stays accepted) and records no destroyed state.
-The parameters themselves accept storage in any live state: initialized
-memory (the ordinary destructor-like case, and exactly what a
-reinitializer's destroy half takes), or storage never constructed at all
-(the raw-release shape; see `Limitations`_) -- but never storage a
+The parameters themselves take storage that is initialized, or at least
+credited by an earlier store: destruction makes an object uninitialized
+(§1), so destroying storage that is still -- or again -- uninitialized is
+itself an access to raw memory, rejected as rule ``destroy_uninit``
+(§4.4: it is an error to uninitialize an object twice).  The rejection
+fires only on affirmatively uninitialized storage (a conditional store
+suppresses, and unknown storage is accepted), a storage-release callee
+keeps any-state acceptance (``free`` takes storage that may never have
+been constructed; see `Limitations`_), and a reinitializer (below) is
+exempt.  Never accepted is storage a
 ``[[now_uninit]]`` call already destroyed.  That is a double destruction
 (rule ``double_destroy``), definite by construction: only an unconditional
 same-function destroy records the destroyed state, and any store or
 ``[[now_init]]`` call retires it.  Declare ``destroy_at`` as
 ``template<class T> [[now_uninit]] void destroy_at(T* p);`` and the
 construct/destroy/construct cycle
-is legal, a second destruction is rejected, and binding the destroyed
+is legal, a second destruction is rejected, a destroy of never-constructed
+storage is rejected too, and binding the destroyed
 storage to an ordinary pointer or reference is rejected as the
 unmarked-direction violation.  A function may
 carry both attributes -- a reinitializer that destroys and then
@@ -658,10 +667,13 @@ credit, so a read through a marked pointer after ``free(p)`` is diagnosed
 again.  A release records no *destroyed* state, though: releasing storage
 ends no object's lifetime, so both orders relative to a ``[[now_uninit]]``
 call sit outside ``double_destroy``'s scope -- ``destroy_at(p); free(p);``
-is correct (different operations, correctly ordered), and ``free(p);
-destroy_at(p);`` is not flagged either (post-release use is the
-invalidation profile's rule; only a second ``[[now_uninit]]`` destroy of
-the same storage fires).  The ``delete`` and ``delete[]`` *expressions*
+is correct (different operations, correctly ordered).  The reverse order,
+``free(p); destroy_at(p);`` on a *marked* pointer, is the
+``destroy_uninit`` violation: the release withdrew the pointee's credit,
+so the storage is uninitialized again when the destroy takes it.  Through
+an unmarked pointer the release changes no classification -- post-release
+use stays the invalidation profile's concern -- and only a second
+``[[now_uninit]]`` destroy of the same storage fires ``double_destroy``.  The ``delete`` and ``delete[]`` *expressions*
 perform the same credit withdrawal, likewise recording no destroyed state
 -- with no diagnostic on the operand, matching their historical silence --
 so ``delete q;`` and ``::operator delete(q);`` agree on everything that
@@ -809,6 +821,17 @@ those entries never cause a rejection.
   rejected although no executable path reads uninitialized memory --
   the shape ``-Wuninitialized`` reports as only "may be uninitialized"
   is a hard error under the profile.
+- Destroying through a ``[[ref_to_uninit]]`` pointer that was never stored
+  through is rejected by ``destroy_uninit``: the marker asserts an
+  uninitialized pointee at entry.  If a helper filled the pointee first,
+  mark the helper ``[[now_init]]``, store through the marker before the
+  destroy, or suppress.
+- Passing ``&u`` to a ``[[ref_to_uninit]]`` parameter of an *ordinary*
+  function earns no credit (see the constructor-body bullet above), so a
+  later ``destroy_at(&u)`` is rejected by ``destroy_uninit`` even if the
+  callee filled the storage -- the same strictness, and the same remedies,
+  as the unmarked-direction binding after such a call: ``[[now_init]]`` on
+  the callee or suppression.
 
 **Missed diagnostics (never rejections):**
 
@@ -821,13 +844,19 @@ those entries never cause a rejection.
   which treat the call as an escape, so it is a missed diagnostic; a destroy
   inside a constructor body earns no kill bit in the ctor-body dataflow
   either).  Writes through ``[[ref_to_uninit]]`` are still not verified.
-- ``[[now_uninit]]`` covers both "ends an object's lifetime"
-  (``destroy_at``) and "releases raw storage" (``free``), so destroying
-  storage that was never initialized is accepted: ``int u [[uninit]];
-  destroy_at(&u);`` is not diagnosed.  Splitting the two roles apart is the
-  follow-up that recovers this diagnostic -- a storage-release callee would
-  then stop being ``[[now_uninit]]``-equivalent -- while double destruction
-  and use-after-destroy are retained either way.
+- The raw storage-release callees (``free``, ``realloc``, replaceable
+  global ``operator delete``) accept storage that was never constructed:
+  that is ``free``'s contract, not a gap -- only a ``[[now_uninit]]``
+  destroy proper is rejected on uninitialized storage (rule
+  ``destroy_uninit``).  A destroy of *unknown* storage stays accepted (the
+  rule fires only on an affirmative classification), and so does a destroy
+  after a merely *conditional* store: the ``Maybe`` credit suppresses -- a
+  missed diagnostic relative to the paper's "for acceptance all
+  alternatives must provide the desired solution" ("Guarantees",
+  p4222r2.md:1982-1985), the same conservatism the parse-order credit uses
+  elsewhere.  A reinitializer's exemption from ``destroy_uninit`` is
+  call-wide, so its *unmarked* destroy-only pointer parameters -- whose
+  storage the paper requires live -- are exempt too.
 - ``__builtin_operator_delete`` binds its operand with no parameter
   declaration in sight, so the storage-release relaxation cannot recognize
   it: passing ``[[ref_to_uninit]]`` storage keeps the unmarked-direction
