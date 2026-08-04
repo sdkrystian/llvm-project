@@ -790,7 +790,10 @@ those entries never cause a rejection.
   callee's ``[[ref_to_uninit]]`` parameters (``&m``, ``m``, or ``this``
   itself, which credits every tracked member), as a genuine dataflow fact,
   so a ``[[now_init]]`` call on one branch still does not satisfy a read at
-  the join (§1.2).  Taking the member's address, binding a reference to it,
+  the join (§1.2).  A ``[[now_uninit]]`` call is the credit's destruction
+  twin: a real kill bit for the same storage shapes, so a destroy on one
+  branch already spoils a read at the join, even though the destroy may
+  not have run.  Taking the member's address, binding a reference to it,
   calling a member function, letting ``this`` escape, or passing ``&m`` to a
   ``[[ref_to_uninit]]`` parameter of an *ordinary* function earns no credit,
   so a later read of the member is rejected: the paper rejects complex
@@ -820,7 +823,10 @@ those entries never cause a rejection.
   correlated conditions (``if (c) x = 1; ... if (c) use(x);``) the read is
   rejected although no executable path reads uninitialized memory --
   the shape ``-Wuninitialized`` reports as only "may be uninitialized"
-  is a hard error under the profile.
+  is a hard error under the profile.  Destroys over-flag the same way:
+  with correlated conditions (``if (c) destroy_at(&m); ... if (!c)
+  use(m);``) the member read is rejected although no executable path
+  reads destroyed memory.
 - Destroying through a ``[[ref_to_uninit]]`` pointer that was never stored
   through is rejected by ``destroy_uninit``: the marker asserts an
   uninitialized pointee at entry.  If a helper filled the pointee first,
@@ -839,11 +845,13 @@ those entries never cause a rejection.
   a ``[[now_init]]``-annotated ``construct_at`` declaration checks the
   lifecycle start (including double construction, via the reverse-direction
   binding rule) and a ``[[now_uninit]]``-annotated ``destroy_at`` the end
-  (double destruction, and use-after-destroy where the destroyed storage is
-  *bound* -- a direct named read after a destroy stays with the flow passes,
-  which treat the call as an escape, so it is a missed diagnostic; a destroy
-  inside a constructor body earns no kill bit in the ctor-body dataflow
-  either).  Writes through ``[[ref_to_uninit]]`` are still not verified.
+  (double destruction, use-after-destroy where the destroyed storage is
+  *bound*, and -- in the ctor-body dataflow -- a member read after the
+  destroy, which kills the member's assigned bit.  A direct named read of a
+  plain ``[[uninit]]`` *local* after a destroy stays with the flow passes,
+  which treat the call as an escape, so it is a missed diagnostic; the
+  local-member pass shares that leniency).  Writes through
+  ``[[ref_to_uninit]]`` are still not verified.
 - The raw storage-release callees (``free``, ``realloc``, replaceable
   global ``operator delete``) accept storage that was never constructed:
   that is ``free``'s contract, not a gap -- only a ``[[now_uninit]]``
@@ -854,7 +862,12 @@ those entries never cause a rejection.
   missed diagnostic relative to the paper's "for acceptance all
   alternatives must provide the desired solution" ("Guarantees",
   p4222r2.md:1982-1985), the same conservatism the parse-order credit uses
-  elsewhere.  A reinitializer's exemption from ``destroy_uninit`` is
+  elsewhere.  The asymmetry with the member dataflow is deliberate: the
+  dataflow joins pessimistically (a destroy on any considered-executed
+  branch clears the assigned bit, "Static analysis", p4222r2.md:306-312),
+  while parse-order credit is optimistic (a conditional store suppresses);
+  the first governs reads, the second call-site acceptance, and both err
+  away from false positives.  A reinitializer's exemption from ``destroy_uninit`` is
   call-wide, so its *unmarked* destroy-only pointer parameters -- whose
   storage the paper requires live -- are exempt too.
 - ``__builtin_operator_delete`` binds its operand with no parameter

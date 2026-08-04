@@ -269,7 +269,11 @@ patterns.  Its rules map to mechanisms as follows:
        (definite-assignment dataflow over ``[[uninit]]`` members; the
        ctor-body pass's ``CallExpr`` arm turns a ``[[now_init]]`` call into a
        ``Gen`` bit for the current-object storage bound to the callee's
-       marked parameters, P4222R2 §6.2);
+       marked parameters (P4222R2 §6.2) and a ``[[now_uninit]]`` call into
+       a ``Kill`` that clears the assigned bit again; a "destroyed here"
+       note on the read is deferred -- a kill witness would have to be
+       carried per bit through the meet and both engine replays, roughly
+       doubling the engine state and touching the enqueue-skip invariant);
        ``checkInitProfileReadThrough`` at the lvalue-to-rvalue chokepoint,
        plus compound-assignment and increment/decrement hooks
    * - ``uninit_decl``

@@ -1801,8 +1801,10 @@ static void collectTrackedUninitMembers(
 // an assignment is a Write that marks it assigned after the RHS is
 // evaluated; a compound assignment or built-in ++/-- both reads and then
 // writes it; a Copy makes entity Idx's state the source entity SrcIdx's at
-// that point (the local pass's tracked-copy transfer).
-enum class DefAssignEventKind { Read, Write, ReadWrite, Copy };
+// that point (the local pass's tracked-copy transfer); a Kill clears the
+// assigned bit -- destruction makes the storage uninitialized again
+// ("Lifetimes", p4222r2.md:922-927) -- and never reports by itself.
+enum class DefAssignEventKind { Read, Write, ReadWrite, Copy, Kill };
 struct DefAssignEvent {
   DefAssignEventKind Kind;
   unsigned Idx;
@@ -1838,6 +1840,9 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       else
         State.reset(Ev.Idx);
       break;
+    case DefAssignEventKind::Kill:
+      State.reset(Ev.Idx);
+      break;
     }
   }
 }
@@ -1846,15 +1851,19 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
 // nothing is assigned at function entry; a block's entry is the
 // intersection over its predecessors' exits (an entity is definitely
 // assigned at a point only if assigned on every incoming path, the paper's
-// all-branches rule, §1.2/§1.3); a block's transfer is the event replay
+// all-branches rule, §1.2/§1.3) -- so a Kill on any incoming path clears
+// the bit at the join: destruction is may-kill under the same rule.
+// A block's transfer is the event replay
 // above -- the same replay the reporting pass uses, and a caller-supplied
 // transfer is deliberately not offered: a new event kind is added here,
 // once, instead of re-opening the fixpoint/replay divergence class.
 // Unprocessed (unreachable) predecessors keep the all-assigned top, so
 // unreachable code is never flagged. The transfer is monotone *as a
 // function* (a larger input state yields a larger output state:
-// Read/Write/ReadWrite only set bits, and Copy projects the source bit),
-// not set-only -- Copy can clear a bit -- so termination follows from every
+// Read/Write/ReadWrite only set bits, Copy projects the source bit, and
+// Kill is a constant function of its bit -- constants are monotone),
+// not set-only -- Copy and Kill can clear a bit -- so termination follows
+// from every
 // block's exit only ever descending from the all-assigned top in the finite
 // lattice. Returns, per tracked entity, the reads at program points where
 // the entity is not definitely assigned.
@@ -1869,6 +1878,7 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC, unsigned NumTracked,
   const CFGBlock &CFGEntry = cfg.getEntry();
   ForwardDataflowWorklist Worklist(cfg, AC);
   Worklist.enqueueBlock(&CFGEntry);
+  llvm::BitVector Visited(NumBlocks, false);
   while (const CFGBlock *B = Worklist.dequeue()) {
     llvm::BitVector In(NumTracked, true);
     if (B == &CFGEntry) {
@@ -1888,26 +1898,40 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC, unsigned NumTracked,
     }
     EntryState[B->getBlockID()] = In;
     applyDefAssignEvents(Events[B->getBlockID()], In, /*Offending=*/nullptr);
-    // Enqueue-skip subtlety: ExitState starts at the all-assigned top, so a
-    // block whose computed exit *equals* top enqueues no successors -- and a
-    // successor all of whose predecessors keep top exits may never be
-    // dequeued at all. That is sound only because such a successor's
-    // EntryState also stays top -- exactly the meet of its all-top
-    // predecessor exits -- and the reporting replay below walks every block
-    // from EntryState, dequeued or not. Lowering the initial ExitState,
-    // seeding EntryState differently, or replaying only dequeued blocks
-    // would each break the others' assumption; change them together or not
-    // at all.
-    if (In != ExitState[B->getBlockID()]) {
+    // Enqueue-skip subtlety: ExitState starts at the all-assigned top, and a
+    // block whose computed exit *equals* its stored exit enqueues no
+    // successors. Before Kill existed every transfer mapped top to top
+    // (Read/Write/ReadWrite set bits; Copy projects a bit that is set at
+    // top), so a block reached only through all-top exits genuinely had a
+    // top exit and skipping it forever was sound. Kill breaks that
+    // property -- a kill block entered at top exits *below* top -- so a
+    // reachable block's first visit must propagate even when its computed
+    // exit equals the stored top (the Visited disjunct below) -- which also
+    // makes Visited mean exactly "reachable from the entry". Unreachable
+    // blocks are still never enqueued (only successors of dequeued blocks
+    // are), so they keep the all-assigned top: an unreachable destroy
+    // spoils no reachable join. The reporting replay below walks only the
+    // visited blocks: walking the unreachable ones from top used to be a
+    // harmless no-op (no transfer could drop below top), but a Kill
+    // followed by a read inside one would now flag unreachable code.
+    // Lowering the initial ExitState, seeding EntryState differently,
+    // or replaying unvisited blocks would each break the others'
+    // assumption; change them together or not at all.
+    bool FirstVisit = !Visited[B->getBlockID()];
+    Visited[B->getBlockID()] = true;
+    if (FirstVisit || In != ExitState[B->getBlockID()]) {
       ExitState[B->getBlockID()] = In;
       Worklist.enqueueSuccessors(B);
     }
   }
 
-  // Replay each block from its fixpoint entry state and collect reads of an
-  // entity that is not yet definitely assigned at that point.
+  // Replay each visited (reachable) block from its fixpoint entry state and
+  // collect reads of an entity that is not yet definitely assigned at that
+  // point.
   std::vector<SmallVector<const Expr *, 2>> Offending(NumTracked);
   for (const CFGBlock *B : cfg) {
+    if (!Visited[B->getBlockID()])
+      continue;
     llvm::BitVector Assigned = EntryState[B->getBlockID()];
     applyDefAssignEvents(Events[B->getBlockID()], Assigned, &Offending);
   }
@@ -1943,23 +1967,58 @@ static void reportMemberReadsBeforeInit(
   }
 }
 
-// A call to a [[now_init]] function initializes the storage bound to each
-// of its [[ref_to_uninit]] parameters (P4222R2 §6.2) -- the paper's
-// sanctioned exception to the ctor-body pass's strict assignment-only
-// crediting. A current-object member passed as `&m` / `m` becomes assigned
-// at the call element (its argument-subexpression events, e.g. a read of
-// another member, precede it in the block); passing `this` / `*this` itself
-// to a marked parameter hands the callee the whole object to initialize, so
-// every tracked member is assigned. This is a real Gen bit in the dataflow,
-// not parse-order credit: a [[now_init]] call under a branch still does not
-// satisfy a read at the join (§1.2's all-branches rule). A plain (non-
-// [[now_init]]) callee earns nothing.
-static void appendNowInitCallEvents(
+// Peel a lifecycle call's argument down to the expression that names the
+// storage: parens and implicit casts, explicit pointer/reference casts
+// (mirroring the parse-time recognizers -- §4.3: a cast marked pointer is
+// itself marked), and, through \p Glvalue, a top-level `&`. Returns the
+// peeled argument (`&m`, `m`, `this`); Glvalue is the same expression with
+// the `&` stripped (`m`), the shape getCurrentObjectMember and the local
+// pass's lookups take.
+static const Expr *peelLifecycleArgument(const Expr *Arg,
+                                         const Expr *&Glvalue) {
+  Arg = Arg->IgnoreParenImpCasts();
+  while (const auto *Cast = dyn_cast<ExplicitCastExpr>(Arg)) {
+    const Expr *Sub = Cast->getSubExpr();
+    if (!Sub->getType()->isPointerType() && !Sub->isGLValue())
+      break;
+    Arg = Sub->IgnoreParenImpCasts();
+  }
+  Glvalue = Arg;
+  if (const auto *AddrOf = dyn_cast<UnaryOperator>(Arg);
+      AddrOf && AddrOf->getOpcode() == UO_AddrOf)
+    Glvalue = AddrOf->getSubExpr();
+  return Arg;
+}
+
+// A call to a lifecycle-annotated function changes the assignment state of
+// the current-object storage bound to its parameters, as real dataflow
+// facts, not parse-order credit -- §1.2's all-branches rule governs both
+// directions. A [[now_uninit]] callee destroys the storage bound to each
+// pointer/reference parameter (no marker key: the attribute's contract
+// covers every such argument), so a member passed as `&m` / `m` -- or
+// every tracked member when `this` / `*this` itself is passed -- has its
+// assigned bit killed: destruction makes the storage uninitialized again
+// ("Lifetimes", p4222r2.md:922-927), and a destroy under a branch already
+// spoils a read at the join (may-kill). A [[now_init]] callee initializes
+// the storage bound to each of its [[ref_to_uninit]] parameters (P4222R2
+// §6.2) -- the paper's sanctioned exception to the ctor-body pass's strict
+// assignment-only crediting. A current-object member passed as `&m` / `m`
+// becomes assigned at the call element (its argument-subexpression events,
+// e.g. a read of another member, precede it in the block); passing `this`
+// / `*this` itself to a marked parameter hands the callee the whole object
+// to initialize, so every tracked member is assigned. Kill events are
+// appended before Write events -- append order is replay order -- so a
+// dual-attributed reinitializer nets to assigned. Storage-release callees
+// (free) are deliberately not kills: a release ends no object's lifetime,
+// and the trusted/by-name allocator split stays out of this file. A plain
+// callee earns nothing.
+static void appendLifecycleCallEvents(
     const CallExpr *CE, unsigned NumMembers,
     const llvm::DenseMap<const FieldDecl *, unsigned> &Index,
     SmallVectorImpl<DefAssignEvent> &BlockEvents) {
   const FunctionDecl *Callee = CE->getDirectCallee();
-  if (!Callee || !Callee->hasAttr<NowInitAttr>())
+  if (!Callee ||
+      (!Callee->hasAttr<NowInitAttr>() && !Callee->hasAttr<NowUninitAttr>()))
     return;
   // Zip declared parameters with arguments. A member operator called
   // through CXXOperatorCallExpr receives the object as argument 0
@@ -1972,24 +2031,35 @@ static void appendNowInitCallEvents(
     if (const auto *MD = dyn_cast<CXXMethodDecl>(Callee);
         MD && !MD->isExplicitObjectMemberFunction())
       ArgOffset = 1;
+  if (Callee->hasAttr<NowUninitAttr>()) {
+    for (unsigned PI = 0, NP = Callee->getNumParams(); PI != NP; ++PI) {
+      if (PI + ArgOffset >= CE->getNumArgs())
+        break;
+      QualType PT = Callee->getParamDecl(PI)->getType();
+      if (!PT->isPointerType() && !PT->isReferenceType())
+        continue;
+      const Expr *G = nullptr;
+      const Expr *Arg = peelLifecycleArgument(CE->getArg(PI + ArgOffset), G);
+      if (const FieldDecl *F = getCurrentObjectMember(G)) {
+        auto It = Index.find(F);
+        if (It == Index.end())
+          continue;
+        BlockEvents.push_back({DefAssignEventKind::Kill, It->second, CE});
+      } else if (isCurrentObjectBase(Arg)) {
+        for (unsigned Idx = 0; Idx != NumMembers; ++Idx)
+          BlockEvents.push_back({DefAssignEventKind::Kill, Idx, CE});
+      }
+    }
+  }
+  if (!Callee->hasAttr<NowInitAttr>())
+    return;
   for (unsigned PI = 0, NP = Callee->getNumParams(); PI != NP; ++PI) {
     if (PI + ArgOffset >= CE->getNumArgs())
       break;
     if (!Callee->getParamDecl(PI)->hasAttr<RefToUninitAttr>())
       continue;
-    const Expr *Arg = CE->getArg(PI + ArgOffset)->IgnoreParenImpCasts();
-    // Peel explicit pointer/reference casts, mirroring the parse-time
-    // recognizers (§4.3: a cast marked pointer is itself marked).
-    while (const auto *Cast = dyn_cast<ExplicitCastExpr>(Arg)) {
-      const Expr *Sub = Cast->getSubExpr();
-      if (!Sub->getType()->isPointerType() && !Sub->isGLValue())
-        break;
-      Arg = Sub->IgnoreParenImpCasts();
-    }
-    const Expr *G = Arg;
-    if (const auto *AddrOf = dyn_cast<UnaryOperator>(Arg);
-        AddrOf && AddrOf->getOpcode() == UO_AddrOf)
-      G = AddrOf->getSubExpr();
+    const Expr *G = nullptr;
+    const Expr *Arg = peelLifecycleArgument(CE->getArg(PI + ArgOffset), G);
     if (const FieldDecl *F = getCurrentObjectMember(G)) {
       auto It = Index.find(F);
       if (It == Index.end())
@@ -2219,7 +2289,7 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
           continue;
         BlockEvents.push_back({DefAssignEventKind::ReadWrite, It->second, UO});
       } else if (const auto *CE = dyn_cast<CallExpr>(St)) {
-        appendNowInitCallEvents(CE, N, Index, BlockEvents);
+        appendLifecycleCallEvents(CE, N, Index, BlockEvents);
       } else if (const auto *LE = dyn_cast<LambdaExpr>(St)) {
         appendThisCaptureLambdaReadEvents(LE, Index, BlockEvents);
       }

@@ -518,6 +518,170 @@ struct NowInitInMemInit {
   }
 };
 
+// The destruction mirror: a call to a [[now_uninit]] function kills the
+// assigned bit of the current-object storage bound to each of its pointer
+// or reference parameters -- destruction makes the storage uninitialized
+// again ("Lifetimes", p4222r2.md:922-927) -- so a later read needs a fresh
+// assignment. Like the [[now_init]] credit, the kill is a real dataflow
+// fact: under "consider all branches of a run-time conditional statement
+// executed" ("Static analysis", p4222r2.md:306-312) a destroy on ANY path
+// to a read spoils the join (may-kill). Every case below assigns `m = 1;`
+// first so the parse-time destroy_uninit rule stays silent and the
+// diagnostics shown come from the dataflow alone (the call-site rule is
+// safety-profile-init-ref-to-uninit.cpp's).
+template <class T> [[now_uninit]] void destroy_at(T *);
+[[now_uninit]] void wipe_ref(int &);
+[[now_init]] [[now_uninit]] void reinit(int *p [[ref_to_uninit]]);
+
+struct DestroyThenRead {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  DestroyThenRead() {
+    m = 1;
+    destroy_at(&m);
+    int x = m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    (void)x;
+  }
+};
+
+struct DestroyThenReassign {
+  int m [[uninit]];
+  DestroyThenReassign() {
+    m = 1;
+    destroy_at(&m);
+    m = 2;
+    int x = m; // OK: reassigned after the destroy
+    (void)x;
+  }
+};
+
+// A dual-attributed reinitializer nets to assigned: its Kill events are
+// appended before its Write events (append order is replay order), so
+// destroy-then-construct leaves the member readable.
+struct DestroyThenReinit {
+  int m [[uninit]];
+  DestroyThenReinit() {
+    m = 1;
+    reinit(&m);
+    int x = m; // OK: the reinitializer's net state is initialized
+    (void)x;
+  }
+};
+
+// May-kill: a destroy under one branch already spoils the read at the join
+// ("Static analysis", p4222r2.md:306-312, applied to destruction).
+struct DestroyUnderBranch {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  DestroyUnderBranch(bool b) {
+    m = 1;
+    if (b)
+      destroy_at(&m);
+    int x = m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    (void)x;
+  }
+};
+
+// The intersection meet: reassigning on the other branch does not satisfy
+// the destroying path.
+struct DestroyOneBranchReassignOther {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  DestroyOneBranchReassignOther(bool b) {
+    m = 1;
+    if (b)
+      destroy_at(&m);
+    else
+      m = 2;
+    int x = m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    (void)x;
+  }
+};
+
+struct DestroyBothBranches {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  DestroyBothBranches(bool b) {
+    m = 1;
+    if (b)
+      destroy_at(&m);
+    else
+      destroy_at(&m);
+    int x = m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    (void)x;
+  }
+};
+
+// A by-reference [[now_uninit]] parameter destroys its referent.
+struct DestroyByReference {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  DestroyByReference() {
+    m = 1;
+    wipe_ref(m);
+    int x = m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    (void)x;
+  }
+};
+
+// The argument peel matches the credit loop's: an explicit cast around &m
+// still kills.
+struct DestroyThroughCast {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  DestroyThroughCast() {
+    m = 1;
+    destroy_at((int *)&m);
+    int x = m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    (void)x;
+  }
+};
+
+// Passing `this` to a [[now_uninit]] parameter hands the whole object over
+// for destruction: every tracked member is killed -- the mirror of
+// now_init_object's whole-object credit.
+struct WipeWholeObject;
+[[now_uninit]] void wipe_all(WipeWholeObject *);
+struct WipeWholeObject {
+  int a [[uninit]]; // expected-note {{member 'a' declared here}}
+  int b [[uninit]]; // expected-note {{member 'b' declared here}}
+  WipeWholeObject() {
+    a = 1;
+    b = 2;
+    wipe_all(this);
+    int x = a; // expected-error {{member 'a' is read before initialization under profile 'std::init'}}
+    int y = b; // expected-error {{member 'b' is read before initialization under profile 'std::init'}}
+    (void)x; (void)y;
+  }
+};
+
+// Documentation-only pin: on a NEVER-assigned member the read error fires
+// with or without the kill bit, and the destroy line itself is the
+// parse-time destroy_uninit violation -- the kill's regression power comes
+// exclusively from the `m = 1;`-prefixed cases above.
+struct DestroyNeverAssigned {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  DestroyNeverAssigned() {
+    destroy_at(&m); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+    int x = m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    (void)x;
+  }
+};
+
+// A destroy in unreachable code spoils no reachable join, and a
+// destroy-then-read inside the unreachable code is not flagged: the
+// dataflow never visits unreachable blocks (they keep the all-assigned
+// top), on the linearized axis too.
+struct DestroyUnreachable {
+  int m [[uninit]];
+  DestroyUnreachable() {
+    m = 1;
+    if (false) { // (no -Wunreachable-code expectation: the file's earlier
+                 // errors put this function on the post-error path, which
+                 // suppresses the plain warning in every run)
+      destroy_at(&m);
+      int x = m; // OK: unreachable code is never flagged
+      (void)x;
+    }
+    int y = m; // OK: the unreachable destroy spoils nothing
+    (void)y;
+  }
+};
+
 // [[uninit]] members inherited from a non-virtual base with no user-provided
 // constructor are tracked like the class's own: nothing can have assigned
 // them before the derived body runs. A base with a user-provided constructor
