@@ -220,8 +220,12 @@ Two cases have an *unknown* dominion and are skipped rather than guessed at
 module fragment (the exported set does not cover it), and a previous
 declaration from the same module family (the exported set under-approximates
 the interface TU's dominion, which the current unit inherits anyway).  A
-textual or PCH previous declaration shares the current TU's dominion and is
-not checked; implicit template instantiations are exempt.
+previous declaration owned by a module-map module (a Clang header module,
+``-fmodules``) is not checked at all: that is textual inclusion wearing an
+AST file, not a separate TU in the standard's model, so it has no dominion of
+its own -- header units, which are real TUs with recorded designators, stay
+checked.  A textual or PCH previous declaration shares the current TU's
+dominion and is not checked; implicit template instantiations are exempt.
 
 
 Test Profiles
