@@ -2179,6 +2179,25 @@ void SemaProfiles::recordInitProfilePointerAliasEscape(QualType T,
                                /*EndsLifetime=*/false);
 }
 
+void SemaProfiles::recordInitProfilePointerAliasEscape(const ValueDecl *Var) {
+  // The by-reference-capture flavor: the closure holds a mutable alias of
+  // the marked pointer object and can reseat it, exactly like `T **pp = &p`
+  // above -- withdraw the Definite firing basis, keep the suppressing Maybe
+  // credit. A const-qualified pointer cannot be reseated (mirror the Expr
+  // flavor's mutable-alias gate), and only a creditable local/parameter
+  // pointer has credit to withdraw.
+  const auto *VD = dyn_cast_or_null<VarDecl>(Var);
+  if (!VD || !VD->hasLocalStorage() || !VD->getType()->isPointerType() ||
+      VD->getType().isConstQualified() || !VD->hasAttr<RefToUninitAttr>())
+    return;
+  // The recorders' shared gate: an escape in a never-executed context
+  // escapes nothing.
+  if (inNeverExecutedContext())
+    return;
+  StoreCredit.destroyPointee(VD, InitCreditStrength::Maybe,
+                             /*EndsLifetime=*/false);
+}
+
 SemaProfiles::LifetimeAnnotatedStorage
 SemaProfiles::resolveLifetimeAnnotatedStorage(QualType T,
                                               const Expr *Src) const {
@@ -2352,6 +2371,13 @@ void SemaProfiles::checkInitProfileRefCapture(SourceLocation Loc,
                                               const ValueDecl *Var) {
   if (!getLangOpts().Profiles)
     return;
+  // A by-reference capture of a mutable marked *pointer* escapes it to the
+  // closure, which can reseat it -- withdraw the Definite pointee credit
+  // like `T **pp = &p` would (the overload's own gates limit this to that
+  // shape). Recorded before the diagnostic early-returns below: a marked
+  // non-reference pointer is not this check's to diagnose and returns early,
+  // but its escape must still be recorded (recorders never gate).
+  recordInitProfilePointerAliasEscape(Var);
   // Mirrors the glvalue recognizer's named-entity arm: the captured variable
   // denotes uninitialized storage if it is [[uninit]], or if it is a
   // [[ref_to_uninit]] reference (the capture binds to its referent) -- in

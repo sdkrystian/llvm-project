@@ -412,4 +412,8 @@ same rules: an unconditional same-function destroy withdraws credit of both
 strengths, while a merely-possible one withdraws only the ``Definite``
 claim -- it may have destroyed the storage, so no credit-fired diagnostic
 may rely on it, but the ``Maybe`` credit survives and the lenient direction
-gains no new errors.
+gains no new errors.  A mutable alias escape of a marked pointer object --
+``T **pp = &p;``, a ``T *&`` binding, or a lambda capturing ``p`` by
+reference -- withdraws the same way at ``Definite`` strength only: whoever
+holds the alias can reseat the pointer, so its pointee credit can no longer
+fire a diagnostic, but the suppressing ``Maybe`` credit survives.

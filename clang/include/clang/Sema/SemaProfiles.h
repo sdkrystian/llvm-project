@@ -521,6 +521,15 @@ public:
   /// not recognized (missed withdrawals, toward missed diagnostics only).
   void recordInitProfilePointerAliasEscape(QualType T, const Expr *Src);
 
+  /// The by-reference-capture flavor of the alias escape: a lambda capturing
+  /// a mutable marked pointer by reference holds the same reseating power as
+  /// a `T **pp = &p;` alias, so the Definite pointee credit is withdrawn the
+  /// same way (Maybe survives). \p Var is the captured variable; anything
+  /// but a mutable local [[ref_to_uninit]] pointer withdraws nothing. Called
+  /// from checkInitProfileRefCapture for every by-reference capture, before
+  /// its diagnostic early-returns (recorders never gate on enforcement).
+  void recordInitProfilePointerAliasEscape(const ValueDecl *Var);
+
   /// The tracked storage a lifetime-annotated callee's argument denotes, as
   /// resolved by resolveLifetimeAnnotatedStorage: the whole [[uninit]]
   /// entity (Whole), the storage behind a marked pointer or reference

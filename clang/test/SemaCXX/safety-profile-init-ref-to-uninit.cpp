@@ -1705,6 +1705,39 @@ void test_alias_escape_declaration_form(int *p [[ref_to_uninit]]) {
   (void)pp; (void)m;
 }
 
+// A lambda capturing the marked pointer by reference holds the same mutable
+// alias as `pp = &p` above and withdraws the same way: the Definite firing
+// basis goes, the suppressing Maybe credit survives.
+void test_alias_escape_by_ref_capture(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  auto c = [&p] {};
+  int *m [[ref_to_uninit]] = p; // OK: the closure may have reseated p
+  int *u2 = p;                  // OK: the Maybe credit still suppresses
+  (void)c; (void)m; (void)u2;
+}
+void test_alias_escape_by_ref_capture_default(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  auto c = [&] { (void)p; };
+  int *m [[ref_to_uninit]] = p; // OK: the closure may have reseated p
+  (void)c; (void)m;
+}
+// A const-qualified pointer cannot be reseated: no withdrawal (mirror of
+// test_const_alias_does_not_withdraw).
+void test_const_capture_does_not_withdraw(int *const cp [[ref_to_uninit]]) {
+  *cp = 5;
+  auto c = [&cp] {};
+  int *m [[ref_to_uninit]] = cp; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)c; (void)m;
+}
+// A by-ref capture of a marked *reference* is unchanged: references cannot
+// be reseated, so the referent's Definite credit survives the capture.
+void test_marked_reference_capture_keeps_credit(int &r [[ref_to_uninit]]) {
+  r = 5;
+  auto c = [&r] { (void)r; };
+  int *m [[ref_to_uninit]] = &r; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)c; (void)m;
+}
+
 // The *pointee* credit map keys on local VarDecls, so a [[ref_to_uninit]]
 // *member* pointer is never credited: a read through it keeps failing even
 // after a store through the exact same lvalue. The per-object *whole-member*
