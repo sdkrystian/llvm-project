@@ -149,6 +149,30 @@ void test_conditional_reference(bool c) {
   (void)r1; (void)r2; (void)r3; (void)r4;
 }
 
+// The GNU `a ?: b` form classifies like the equivalent plain conditional:
+// the common operand doubles as the true arm. Named pointers keep the
+// conditions free of always-true address-of warnings; an unmarked pointer
+// parameter is a trusted Initialized source, a marked one Uninitialized.
+void test_gnu_conditional_pointer(int *q, int *q2, int *up [[ref_to_uninit]]) {
+  int *p1 = up ?: q;                   // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  int *p2 [[ref_to_uninit]] = up ?: q; // OK: the common arm may be uninitialized
+  int *p3 [[ref_to_uninit]] = q ?: q2; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int *p4 = q ?: q2;                   // OK
+  int *p5 = q ?: &g_uninit;            // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)p1; (void)p2; (void)p3; (void)p4; (void)p5;
+}
+
+// A read through a GNU conditional over pointers fires like the plain form;
+// a write through either conditional stays the top-level marker trust's
+// (parity, both silent).
+void test_gnu_conditional_read_write(int *q, int *p [[ref_to_uninit]], bool c) {
+  int y1 = *(c ? q : p); // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  int y2 = *(q ?: p);    // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  *(c ? q : p) = 1;      // OK: top-level marker trust (write initializes the pointee)
+  *(q ?: p) = 1;         // OK: same, GNU spelling
+  (void)y1; (void)y2;
+}
+
 void test_comma_pointer() {
   int *p1 = (h(), &g_uninit);                    // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   int *p2 [[ref_to_uninit]] = (h(), &g_uninit);  // OK
@@ -2518,6 +2542,13 @@ void test_conditional_store_ternary(bool c) {
   int *ru [[ref_to_uninit]] = &u; // OK: the ?-arm is conditional
   int *rv [[ref_to_uninit]] = &v; // OK: the :-arm is conditional
   (void)ru; (void)rv;
+}
+void test_conditional_store_gnu_ternary(int c) {
+  int u [[uninit]];
+  (void)(c ?: (u = 5));
+  int *r [[ref_to_uninit]] = &u; // OK: the :-arm is conditional (Maybe credit)
+  int *q = &u;                   // OK: the Maybe credit still suppresses
+  (void)r; (void)q;
 }
 void test_lambda_body_store_conditional() {
   int u [[uninit]];

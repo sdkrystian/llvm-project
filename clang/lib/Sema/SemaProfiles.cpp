@@ -1342,6 +1342,12 @@ classifyUninitPassThrough(const Expr *E, UninitStorage EmptyListState,
   if (const auto *CO = dyn_cast<ConditionalOperator>(E))
     return combineArms(Recurse(CO->getTrueExpr()),
                        Recurse(CO->getFalseExpr()));
+  // The GNU `a ?: b` form: the true arm is the condition itself. getCommon()
+  // is the *written* operand -- recursing into it (rather than getTrueExpr(),
+  // which is an OpaqueValueExpr) keeps the recognizers free of OVE handling.
+  if (const auto *BCO = dyn_cast<BinaryConditionalOperator>(E))
+    return combineArms(Recurse(BCO->getCommon()),
+                       Recurse(BCO->getFalseExpr()));
   if (const auto *BO = dyn_cast<BinaryOperator>(E); BO && BO->isCommaOp())
     return Recurse(BO->getRHS());
   return std::nullopt;
