@@ -20,6 +20,7 @@
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
 #include "clang/Sema/ParsedTemplate.h"
 #include "clang/Sema/Scope.h"
+#include "clang/Sema/SemaProfiles.h"
 using namespace clang;
 
 unsigned Parser::ReenterTemplateScopes(MultiParseScope &S, Decl *D) {
@@ -197,6 +198,11 @@ Parser::DeclGroupPtrTy Parser::ParseDeclarationAfterTemplate(
   DS.SetRangeStart(DeclSpecAttrs.Range.getBegin());
   DS.SetRangeEnd(DeclSpecAttrs.Range.getEnd());
   DS.takeAttributesAppendingingFrom(DeclSpecAttrs);
+
+  // The declaration's prefix-attribute suppress scope: pushed before the
+  // decl-specifier-seq so a class or enum defined there -- its NSDMIs and
+  // late-parsed member bodies included -- is within the dominion.
+  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, DeclAttrs);
 
   ParseDeclarationSpecifiers(DS, TemplateInfo, AS,
                              getDeclSpecContextFromDeclaratorContext(Context));
