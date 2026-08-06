@@ -174,6 +174,17 @@ covers the trigger's tokens, not the pattern's, and the positional match
 above keeps it from suppressing checks inside a synchronously instantiated
 body, NSDMI, default argument, or marker re-check.
 
+The post-parse violation gate used by the CFG passes consults two
+complementary sources: an AST walk (the analyzed function's enclosing
+statements via the ``ParentMap``, then its lexical declaration chain), which
+covers only the function's own interior, and the live parse-time stack, which
+covers enclosing constructs still mid-parse.  The latter matters because a
+function can be analyzed before its enclosing construct finishes parsing -- a
+local class's method body runs its CFG passes at the end of the method, while
+the ``ProfileSuppressScope`` of the statement the class is declared in is
+still live.  The stack consult is dominion-checked as above, so an unrelated
+live scope never matches.
+
 
 Modules and Serialization
 =========================

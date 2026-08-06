@@ -108,7 +108,11 @@ public:
   /// The post-parse counterpart of the parse-time stack: walk the AST upward
   /// from \p S -- enclosing statement nodes via the ParentMap, then the
   /// analyzed declaration's lexical chain -- for a matching suppression,
-  /// via the shared walks in clang/AST/Profiles.h.
+  /// via the shared walks in clang/AST/Profiles.h. This walk sees only the
+  /// analyzed function's own interior; suppression from an enclosing
+  /// construct still mid-parse (e.g. the suppressed statement a local class
+  /// is declared in) lives on the parse-time stack, so the Stmt/AC gate in
+  /// shouldEmitProfileViolation consults both.
   bool isProfileSuppressed(StringRef ProfileName, StringRef RuleName,
                            const Stmt *S, AnalysisDeclContext &AC) const;
 
