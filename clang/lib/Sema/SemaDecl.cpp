@@ -5976,6 +5976,10 @@ Decl *Sema::BuildAnonymousStructOrUnion(Scope *S, DeclSpec &DS,
     // trivial in almost all cases, except if a union member has an in-class
     // initializer:
     //   union { int n = 0; };
+    // This runs before setImplicit() below, and that ordering is
+    // load-bearing: std::init's uninit_decl check (reached through
+    // ActOnUninitializedDecl) skips implicit variables, but a block-scope
+    // anonymous union is a user-written declaration that must stay checked.
     ActOnUninitializedDecl(Anon);
   }
   Anon->setImplicit();

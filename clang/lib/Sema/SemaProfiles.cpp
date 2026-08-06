@@ -823,6 +823,17 @@ void SemaProfiles::checkInitProfileUninitDecl(const VarDecl *Var) {
   // type walk.
   if (!isProfileEnforced(Profile))
     return;
+  // A synthesized variable is no user declaration: the user can neither
+  // initialize it nor mark it [[uninit]] (a coroutine's __promise, an OpenMP
+  // private/reduction/linear copy). Same policy as -Wuninitialized's
+  // isTrackedVar. Every user-visible uninitialized shape stays checked:
+  // range-for variables and init-captures always carry initializers,
+  // structured bindings are not implicit, and the block-scope anonymous
+  // union VarDecl is checked *before* BuildAnonymousStructOrUnion calls
+  // setImplicit() -- that ordering is load-bearing (see the matching comment
+  // there).
+  if (Var->isImplicit())
+    return;
   if (Var->isInvalidDecl() || Var->getStorageDuration() != SD_Automatic ||
       Var->hasAttr<UninitAttr>())
     return;
