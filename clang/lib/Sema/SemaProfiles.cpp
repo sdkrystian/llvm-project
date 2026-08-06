@@ -166,6 +166,14 @@ void SemaProfiles::checkRedeclarationProfileCompatibility(
   // designators -- stay checked.
   if (M->isModuleMapModule())
     return;
+  // The system-header exemption stopgap covers the previous declaration's
+  // dominion too: a header unit built from a system header has no recorded
+  // designators, and redeclaring or specializing its entities must not draw
+  // the error while every other check exempts that code. Flag-gated by
+  // construction: -fno-profiles-exempt-system-headers restores spec-exact
+  // checking.
+  if (isProfileExemptSystemHeaderLoc(Old->getLocation()))
+    return;
   // A declaration in an explicit global-module-fragment precedes the module
   // declaration, so the module's exported enforcements do not cover it, and
   // its TU's empty-declaration enforcements are not serialized into the BMI.

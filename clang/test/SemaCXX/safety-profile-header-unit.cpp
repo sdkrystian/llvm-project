@@ -29,6 +29,14 @@
 // across a header unit, in both directions.
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -Wno-experimental-header-units -fsyntax-only %t/redecl_forward.cpp -fmodule-file=%t/enforced.pcm -verify
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -Wno-experimental-header-units -fsyntax-only %t/redecl_reverse.cpp -fmodule-file=%t/plain.pcm -verify
+//
+// A header unit built from a *system* header is exempt from the
+// redeclaration check under the system-header stopgap;
+// -fno-profiles-exempt-system-headers restores spec-exact checking. The
+// user-header runs above keep the non-exempt coverage.
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -emit-header-unit -isystem %t -xc++-system-header sys_plain.h -o %t/sys_plain.pcm
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -isystem %t -Wno-experimental-header-units -fsyntax-only %t/redecl_system_default.cpp -fmodule-file=%t/sys_plain.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fno-profiles-exempt-system-headers -isystem %t -Wno-experimental-header-units -fsyntax-only %t/redecl_system_strict.cpp -fmodule-file=%t/sys_plain.pcm -verify
 
 //--- enforced.h
 [[profiles::enforce(test::type_cast)]];
@@ -81,3 +89,20 @@ void hu_api(int); // expected-error {{redeclaration of 'hu_api' is not in the do
 import "plain.h";
 void plain_api(int); // expected-error {{'plain_api' was previously declared in module}}
 // expected-note@plain.h:* {{previous declaration is here}}
+
+//--- sys_plain.h
+void sys_api(int);
+
+//--- redecl_system_default.cpp
+// The previous declaration sits in a system header (the header unit's main
+// file carries the system characteristic), so the check is exempt.
+// expected-no-diagnostics
+[[profiles::enforce(test::type_cast)]];
+import <sys_plain.h>;
+void sys_api(int);
+
+//--- redecl_system_strict.cpp
+[[profiles::enforce(test::type_cast)]];
+import <sys_plain.h>;
+void sys_api(int); // expected-error {{'sys_api' was previously declared in module}}
+// expected-note@sys_plain.h:* {{previous declaration is here}}
