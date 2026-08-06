@@ -309,8 +309,12 @@ patterns.  Its rules map to mechanisms as follows:
      - attribute handler (enforcement-gated)
      - ``checkInitProfileMarkerPlacement``
    * - ``ctor_uninit_member``
-     - 4
-     - ``ConstructorFinalizationProfiles`` row
+     - 4; 3 for inherited constructors
+     - ``ConstructorFinalizationProfiles`` row for user-provided
+       constructors; ``runStdInitInheritedCtorUninitMemberCallback`` (a
+       second ``std::init`` ``ClassFinalizationProfiles`` row) checks the
+       members and non-nominated bases an inherited constructor leaves
+       uninitialized, once per class at the ``using``-declaration
    * - ``ref_to_uninit``
      - 1
      - ``checkInitProfileRefToUninit`` behind per-site wrappers (variable

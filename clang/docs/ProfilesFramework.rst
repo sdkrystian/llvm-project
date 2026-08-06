@@ -748,6 +748,25 @@ members has nothing to initialize.  A delegating constructor is exempt --
 its target initializes the members -- and so is a union's own constructor,
 whose members are mutually exclusive (§5.6).
 
+An *inherited* constructor (``using B::B;``) initializes only the base it
+is inherited from ([class.inhctor.init]); the inheriting class's own
+members and its other bases get default member initializers or
+default-initialization -- for every inherited signature alike.  So a class
+that inherits constructors is checked once, at the ``using``-declaration:
+every member must have a default member initializer or an ``[[uninit]]``
+marker (rule ``ctor_uninit_member``, the same obligation as for a written
+constructor), and every direct non-virtual base other than the nominated
+one must not be left indeterminate.  A ``using``-declaration whose every
+inherited constructor is deleted imposes no obligation:
+
+.. code-block:: c++
+
+   struct B { B(int); };
+   struct D : B {
+     using B::B;  // error: inherited constructor does not initialize 'm'
+     int m;       //   (give 'm' a default member initializer or [[uninit]])
+   };
+
 A default constructor explicitly defaulted *after* its first declaration
 (``struct S { int d; S(); }; S::S() = default;``) is user-provided
 ([class.default.ctor]), so the class is trusted at every use exactly like

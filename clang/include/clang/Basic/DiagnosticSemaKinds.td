@@ -14442,6 +14442,15 @@ def err_init_ctor_uninit_base : ProfileRuleError<
   "constructor does not initialize base class %1 under profile '%0'">;
 def note_init_uninit_base_here : Note<
   "base class %0 declared here">;
+def err_init_inherited_ctor_uninit_member : ProfileRuleError<
+  "constructor inherited from %1 does not initialize member %2 under "
+  "profile '%0'">;
+def err_init_inherited_ctor_uninit_anon_union : ProfileRuleError<
+  "constructor inherited from %1 does not initialize any member of the "
+  "anonymous union under profile '%0'">;
+def err_init_inherited_ctor_uninit_base : ProfileRuleError<
+  "constructor inherited from %1 does not initialize base class %2 under "
+  "profile '%0'">;
 def err_init_ref_to_uninit_requires_uninit : ProfileRuleError<
   "%select{pointer|reference}1 marked '[[ref_to_uninit]]' must refer to "
   "uninitialized memory under profile '%0'">;

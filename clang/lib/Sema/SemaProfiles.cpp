@@ -2904,16 +2904,23 @@ static bool anyLeafFieldWritten(
   return false;
 }
 
-// The per-field walk of the ctor_uninit_member callback: check every
-// checkable field of \p RD against \p Written, recursing into anonymous
-// struct members -- their leaves initialize exactly like direct members of
-// the constructor's class (a written initializer for one is an *indirect*
-// member-initializer, which the Written collection already resolved to the
-// leaf FieldDecl via getAnyMember, and NSDMIs and [[uninit]] markers sit on
-// the leaves), so the same per-field logic and diagnostic apply to them.
-static void diagnoseCtorUninitFields(
-    Sema &S, const CXXConstructorDecl *Ctor, const CXXRecordDecl *RD,
-    const llvm::SmallPtrSetImpl<const FieldDecl *> &Written) {
+// The shared per-field walk of the ctor_uninit_member checks (the
+// user-provided-constructor callback and the inherited-constructor class
+// callback): visit every checkable field of \p RD left without an
+// initializer against \p Written, recursing into anonymous struct members --
+// their leaves initialize exactly like direct members of the walked class (a
+// written initializer for one is an *indirect* member-initializer, which the
+// Written collection already resolved to the leaf FieldDecl via getAnyMember,
+// and NSDMIs and [[uninit]] markers sit on the leaves), so the same per-field
+// logic applies to them. \p DiagnoseField is invoked for an uninitialized
+// named field and \p DiagnoseAnonUnion for an anonymous union none of whose
+// leaves is written or NSDMI-activated; both callbacks gate (suppression /
+// deferral) and emit.
+template <typename FieldFn, typename AnonUnionFn>
+static void forEachCtorUninitField(
+    Sema &S, const CXXRecordDecl *RD,
+    const llvm::SmallPtrSetImpl<const FieldDecl *> &Written,
+    FieldFn DiagnoseField, AnonUnionFn DiagnoseAnonUnion) {
   for (const FieldDecl *F : RD->fields()) {
     if (F->isUnnamedBitField())
       continue;
@@ -2929,19 +2936,14 @@ static void diagnoseCtorUninitFields(
       // the active member) needs nothing. A leaf [[uninit]] marker is not
       // consulted: union_marker already rejects markers on union members.
       if (AnonRD->isUnion()) {
-        if (anyLeafFieldWritten(AnonRD->getDefinition(), Written) ||
-            !S.Profiles().defaultInitLeavesScalarIndeterminate(
+        if (!anyLeafFieldWritten(AnonRD->getDefinition(), Written) &&
+            S.Profiles().defaultInitLeavesScalarIndeterminate(
                 F->getType(), /*HonorUninitMarkers=*/true))
-          continue;
-        if (!S.Profiles().shouldEmitProfileViolation(
-                "std::init", "ctor_uninit_member", Ctor->getLocation(), Ctor))
-          continue;
-        S.Diag(Ctor->getLocation(), diag::err_init_ctor_uninit_anon_union)
-            << "std::init";
-        S.Diag(F->getLocation(), diag::note_init_uninit_anon_union_here);
+          DiagnoseAnonUnion(F);
         continue;
       }
-      diagnoseCtorUninitFields(S, Ctor, AnonRD->getDefinition(), Written);
+      forEachCtorUninitField(S, AnonRD->getDefinition(), Written,
+                             DiagnoseField, DiagnoseAnonUnion);
       continue;
     }
     // Other unnamed fields are skipped; a named bit-field is checked like
@@ -2956,14 +2958,36 @@ static void diagnoseCtorUninitFields(
     if (!S.Profiles().defaultInitLeavesScalarIndeterminate(
             F->getType(), /*HonorUninitMarkers=*/true))
       continue;
-    if (!S.Profiles().shouldEmitProfileViolation(
-            "std::init", "ctor_uninit_member", Ctor->getLocation(), Ctor))
-      continue;
-    S.Diag(Ctor->getLocation(), diag::err_init_ctor_uninit_member)
-        << "std::init" << F->getDeclName();
-    S.Diag(F->getLocation(), diag::note_init_uninit_member_here)
-        << F->getDeclName();
+    DiagnoseField(F);
   }
+}
+
+// The per-field walk of the ctor_uninit_member constructor callback:
+// diagnoses at the constructor, gated per field on the Decl-aware violation
+// gate (suppression on the constructor or a lexical parent; deferral on
+// templated patterns).
+static void diagnoseCtorUninitFields(
+    Sema &S, const CXXConstructorDecl *Ctor, const CXXRecordDecl *RD,
+    const llvm::SmallPtrSetImpl<const FieldDecl *> &Written) {
+  forEachCtorUninitField(
+      S, RD, Written,
+      [&](const FieldDecl *F) {
+        if (!S.Profiles().shouldEmitProfileViolation(
+                "std::init", "ctor_uninit_member", Ctor->getLocation(), Ctor))
+          return;
+        S.Diag(Ctor->getLocation(), diag::err_init_ctor_uninit_member)
+            << "std::init" << F->getDeclName();
+        S.Diag(F->getLocation(), diag::note_init_uninit_member_here)
+            << F->getDeclName();
+      },
+      [&](const FieldDecl *F) {
+        if (!S.Profiles().shouldEmitProfileViolation(
+                "std::init", "ctor_uninit_member", Ctor->getLocation(), Ctor))
+          return;
+        S.Diag(Ctor->getLocation(), diag::err_init_ctor_uninit_anon_union)
+            << "std::init";
+        S.Diag(F->getLocation(), diag::note_init_uninit_anon_union_here);
+      });
 }
 
 void runStdInitCtorUninitMemberCallback(Sema &S, CXXConstructorDecl *Ctor) {
@@ -3035,6 +3059,123 @@ void runStdInitCtorUninitMemberCallback(Sema &S, CXXConstructorDecl *Ctor) {
   }
 }
 
+void runStdInitInheritedCtorUninitMemberCallback(Sema &S, CXXRecordDecl *RD) {
+  // Paper §6.1's obligation applied to inheriting constructors
+  // ([class.inhctor.init]): an inherited constructor initializes only the
+  // nominated base; the inheriting class's own members and its other bases
+  // get NSDMI-or-default-initialization -- invariantly, for every inherited
+  // signature. uninit_decl cannot catch a defaulted-argument use (`D d(1)`
+  // has an initializer) and the constructor-finalization callback skips the
+  // synthesized constructors (!isUserProvided), so the obligation is checked
+  // here, once per class at finalization, attributed to the
+  // using-declaration -- not at lazy constructor synthesis, which is
+  // use-dependent, duplicates per inherited signature, and attributes far
+  // from the defect. The rule name stays ctor_uninit_member: it is the same
+  // obligation, so suppression targeting stays uniform.
+  //
+  // Inheriting-constructor introducers in lexical order, each with its
+  // nominated base and whether any target constructor is usable (a group
+  // whose every target is deleted inherits nothing callable and imposes no
+  // obligation).
+  struct InheritedCtorGroup {
+    const UsingDecl *Introducer;
+    const CXXRecordDecl *NominatedBase;
+    bool AnyUsable;
+  };
+  llvm::SmallVector<InheritedCtorGroup, 2> Groups;
+  for (const Decl *D : RD->decls()) {
+    const auto *Shadow = dyn_cast<ConstructorUsingShadowDecl>(D);
+    if (!Shadow || Shadow->isInvalidDecl())
+      continue;
+    const auto *Introducer = dyn_cast<UsingDecl>(Shadow->getIntroducer());
+    if (!Introducer)
+      continue;
+    InheritedCtorGroup *G = nullptr;
+    for (InheritedCtorGroup &Existing : Groups)
+      if (Existing.Introducer == Introducer)
+        G = &Existing;
+    if (!G) {
+      Groups.push_back({Introducer, Shadow->getNominatedBaseClass(), false});
+      G = &Groups.back();
+    }
+    const NamedDecl *Target = Shadow->getTargetDecl();
+    if (const auto *FTD = dyn_cast<FunctionTemplateDecl>(Target))
+      Target = FTD->getTemplatedDecl();
+    // A base copy/move constructor never acts as an inherited constructor
+    // ([over.match.funcs.general]p8 excludes it from every candidate set),
+    // so it cannot make the group usable -- otherwise the base's implicit
+    // copy constructor would defeat the all-deleted skip below.
+    if (const auto *CD = dyn_cast<CXXConstructorDecl>(Target);
+        CD && !CD->isDeleted() && !CD->isCopyOrMoveConstructor())
+      G->AnyUsable = true;
+  }
+  llvm::erase_if(Groups, [](const InheritedCtorGroup &G) {
+    return !G.AnyUsable;
+  });
+  if (Groups.empty())
+    return;
+
+  // MEMBERS once per class -- the obligation is identical for every
+  // introducer and signature -- anchored at the lexically first introducer.
+  // The shared walk runs with an empty written-set: an inherited constructor
+  // writes no member-initializers. The Decl-aware gate on the introducer
+  // honors suppression on it or the enclosing class and defers on templated
+  // patterns (this class callback re-fires on instantiation).
+  {
+    const UsingDecl *First = Groups.front().Introducer;
+    const CXXRecordDecl *FirstBase = Groups.front().NominatedBase;
+    SourceLocation FirstLoc = First->getLocation();
+    llvm::SmallPtrSet<const FieldDecl *, 1> NoneWritten;
+    forEachCtorUninitField(
+        S, RD, NoneWritten,
+        [&](const FieldDecl *F) {
+          if (!S.Profiles().shouldEmitProfileViolation(
+                  "std::init", "ctor_uninit_member", FirstLoc, First))
+            return;
+          S.Diag(FirstLoc, diag::err_init_inherited_ctor_uninit_member)
+              << "std::init" << FirstBase << F->getDeclName();
+          S.Diag(F->getLocation(), diag::note_init_uninit_member_here)
+              << F->getDeclName();
+        },
+        [&](const FieldDecl *F) {
+          if (!S.Profiles().shouldEmitProfileViolation(
+                  "std::init", "ctor_uninit_member", FirstLoc, First))
+            return;
+          S.Diag(FirstLoc, diag::err_init_inherited_ctor_uninit_anon_union)
+              << "std::init" << FirstBase;
+          S.Diag(F->getLocation(), diag::note_init_uninit_anon_union_here);
+        });
+  }
+
+  // BASES per introducer: the inherited constructor initializes exactly its
+  // nominated base, so every *other* direct non-virtual base whose
+  // default-initialization is indeterminate is left that way (mirror of the
+  // constructor callback's base loop; virtual bases stay deferred as the
+  // most-derived constructor's responsibility).
+  for (const InheritedCtorGroup &G : Groups) {
+    for (const CXXBaseSpecifier &Base : RD->bases()) {
+      if (Base.isVirtual())
+        continue;
+      const CXXRecordDecl *BaseRD = Base.getType()->getAsCXXRecordDecl();
+      if (BaseRD && G.NominatedBase &&
+          BaseRD->getCanonicalDecl() == G.NominatedBase->getCanonicalDecl())
+        continue;
+      if (!S.Profiles().defaultInitLeavesScalarIndeterminate(
+              Base.getType(), /*HonorUninitMarkers=*/true))
+        continue;
+      if (!S.Profiles().shouldEmitProfileViolation(
+              "std::init", "ctor_uninit_member", G.Introducer->getLocation(),
+              G.Introducer))
+        continue;
+      S.Diag(G.Introducer->getLocation(),
+             diag::err_init_inherited_ctor_uninit_base)
+          << "std::init" << G.NominatedBase << Base.getType();
+      S.Diag(Base.getBeginLoc(), diag::note_init_uninit_base_here)
+          << Base.getType();
+    }
+  }
+}
+
 void runStdInitUninitFieldMarkerCallback(Sema &S, CXXRecordDecl *RD) {
   // std::init / uninit_with_initializer, field flavor (paper §4.2 rule 2,
   // §5.3): [[uninit]] on a data member claims default-initialization leaves
@@ -3083,10 +3224,12 @@ void runStdInitUninitFieldMarkerCallback(Sema &S, CXXRecordDecl *RD) {
   }
 }
 
-// Class-finalization opt-in table (pattern 3).
+// Class-finalization opt-in table (pattern 3). The dispatcher runs every
+// matching row, so a profile may have several.
 constexpr FinalizationProfile<CXXRecordDecl> ClassFinalizationProfiles[] = {
     {"test::class_final", &runTestClassFinalCallback},
     {"std::init", &runStdInitUninitFieldMarkerCallback},
+    {"std::init", &runStdInitInheritedCtorUninitMemberCallback},
 };
 
 // Constructor-finalization opt-in table (pattern 4).
