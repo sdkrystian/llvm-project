@@ -35,6 +35,18 @@ struct BodyAssignment {
   BodyAssignment() { x = 0; } // expected-error {{constructor does not initialize member 'x' under profile 'std::init'}}
 };
 
+// A vector member is an element pack of scalars, indeterminate after
+// default-initialization like the scalars themselves.
+typedef int v4 __attribute__((vector_size(16)));
+struct VectorMember {
+  v4 v; // expected-note {{member 'v' declared here}}
+  VectorMember() {} // expected-error {{constructor does not initialize member 'v' under profile 'std::init'}}
+};
+struct VectorMemberInit {
+  v4 v;
+  VectorMemberInit() : v{} {}
+};
+
 struct NestedAggregate {
   Inner m; // expected-note {{member 'm' declared here}}
   NestedAggregate() {} // expected-error {{constructor does not initialize member 'm' under profile 'std::init'}}

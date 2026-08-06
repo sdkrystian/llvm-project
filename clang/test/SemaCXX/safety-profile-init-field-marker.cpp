@@ -161,6 +161,14 @@ struct MemberVacuousKinds {
   std::byte b [[uninit]];  // OK: std::byte may stay uninitialized (paper §4)
 };
 
+// A vector member really is left uninitialized by default-initialization
+// (the indeterminacy walk counts vector types like scalars), so the marker
+// is a genuine acknowledgement.
+typedef int v4 __attribute__((vector_size(16)));
+struct MemberVectorMarked {
+  v4 v [[uninit]]; // OK
+};
+
 // An NSDMI'd marked member is the NSDMI flavor's to diagnose -- exactly one
 // diagnostic, no field-flavor double (hasInClassInitializer is style-based,
 // so the skip holds even while the NSDMI is late-parse-pending).

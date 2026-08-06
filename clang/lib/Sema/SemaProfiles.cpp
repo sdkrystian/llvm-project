@@ -578,13 +578,24 @@ static bool defaultInitLeavesScalarIndeterminateImpl(
         Ctx, AT->getElementType(), HonorUninitMarkers, Visited, UntrustRoot);
   if (T->isReferenceType())
     return false;
+  // An atomic object's state is its value type's: recurse (handles
+  // _Atomic(struct) too, and _Atomic(std::byte) stays exempt through the
+  // recursion). Same root, like the array arm.
+  if (const auto *AT = T->getAs<AtomicType>())
+    return defaultInitLeavesScalarIndeterminateImpl(
+        Ctx, AT->getValueType(), HonorUninitMarkers, Visited, UntrustRoot);
   const auto *RD = T->getAsCXXRecordDecl();
   if (!RD)
     // Scalars, pointers, and enums are left indeterminate by default-init,
     // except std::byte, which the profile permits to be uninitialized
     // (paper §4), so a std::byte subobject does not make a record
-    // indeterminate.
-    return T->isScalarType() && !T->isStdByteType();
+    // indeterminate. Vector and matrix types are element packs of such
+    // scalars and are equally indeterminate (precedent: -Wuninitialized's
+    // isTrackedVar tracks scalar + vector). Sizeless (SVE/RVV) types are
+    // deliberately not handled: they cannot be members or array elements,
+    // and a bare local is caught by uninit_decl's no-initializer arm.
+    return (T->isScalarType() || T->isVectorType() || T->isMatrixType()) &&
+           !T->isStdByteType();
   if (RD->isInvalidDecl())
     return false;
   // A union's members are mutually exclusive, so the per-member walk below does

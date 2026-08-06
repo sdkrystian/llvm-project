@@ -924,6 +924,17 @@ void test_new_class() {
   (void)c1; (void)c2; (void)a1; (void)a2; (void)b1; (void)b2;
 }
 
+// A record whose only member is a vector is indeterminate after default-init
+// (the walk counts vector members like scalar ones), so a raw new of it is a
+// source of uninitialized memory.
+typedef int nv4 __attribute__((vector_size(16)));
+struct NewVecAgg { nv4 v; };
+void test_new_vector_member() {
+  NewVecAgg *q [[ref_to_uninit]] = new NewVecAgg; // OK
+  NewVecAgg *r = new NewVecAgg;                    // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)q; (void)r;
+}
+
 struct NewInFields {
   int *p1 [[ref_to_uninit]] = new int; // OK
   int *p2 = new int;                    // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}

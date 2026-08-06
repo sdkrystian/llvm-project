@@ -90,6 +90,11 @@ std::byte g_byte_marked [[uninit]];           // expected-error {{'[[uninit]]' c
 // object is still zero-initialized, so the marker fires.
 Trivial g_agg_marked [[uninit]];              // expected-error {{'[[uninit]]' cannot be applied to variable 'g_agg_marked' with static storage duration under profile 'std::init'; it is zero-initialized}}
 
+// A vector's default-init is vacuous like a scalar's (the indeterminacy walk
+// counts vector types like scalars), so a static one draws static_marker.
+typedef int v4 __attribute__((vector_size(16)));
+v4 g_vec_marked [[uninit]];                   // expected-error {{'[[uninit]]' cannot be applied to variable 'g_vec_marked' with static storage duration under profile 'std::init'; it is zero-initialized}}
+
 // A static pointer / union is owned by pointer_marker / union_marker (they fire
 // regardless of storage duration), not static_marker -- exactly one diagnostic.
 union U { int x; float y; };

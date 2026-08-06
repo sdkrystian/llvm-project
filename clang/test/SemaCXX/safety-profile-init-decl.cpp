@@ -1,5 +1,5 @@
-// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -std=c++23 %s
-// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 %s
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fenable-matrix -std=c++23 %s
+// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -fenable-matrix -std=c++23 %s
 
 // no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
 [[profiles::enforce(std::init)]];
@@ -96,6 +96,29 @@ void test_class_trivial() {
   // safety-profile-init-aggregate.cpp.)
   Trivial t; // expected-error {{variable 't' must be initialized or marked '[[uninit]]' under profile 'std::init'}}
   (void)t;
+}
+
+// Vector, matrix, and atomic members are element packs (or wrappers) of
+// scalars, equally indeterminate after default-initialization; the walk
+// counts them like the scalars themselves (precedent: -Wuninitialized
+// tracks scalar + vector). _Complex is scalar already and pinned here.
+// _Atomic recurses through to its value type, so _Atomic(std::byte) keeps
+// the std::byte exemption.
+typedef int v4 __attribute__((vector_size(16)));
+typedef float m2 __attribute__((matrix_type(2, 2)));
+struct WithVec { v4 v; };
+struct WithMat { m2 m; };
+struct WithAtomic { _Atomic(int) a; };
+struct WithAtomicByte { _Atomic(std::byte) b; };
+struct WithComplex { _Complex double c; };
+void test_element_pack_members() {
+  WithVec v;        // expected-error {{variable 'v' must be initialized or marked '[[uninit]]' under profile 'std::init'}}
+  WithVec va [[uninit]];
+  WithMat m;        // expected-error {{variable 'm' must be initialized or marked '[[uninit]]' under profile 'std::init'}}
+  WithAtomic a;     // expected-error {{variable 'a' must be initialized or marked '[[uninit]]' under profile 'std::init'}}
+  WithAtomicByte b; // OK: the exemption survives the atomic recursion
+  WithComplex c;    // expected-error {{variable 'c' must be initialized or marked '[[uninit]]' under profile 'std::init'}}
+  (void)v; (void)va; (void)m; (void)a; (void)b; (void)c;
 }
 
 // An out-of-line '= default' definition keeps the default constructor
