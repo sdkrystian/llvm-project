@@ -2828,6 +2828,11 @@ Parser::DeclGroupPtrTy Parser::ParseCXXClassMemberDeclaration(
        TemplateInfo.Kind == ParsedTemplateKind::ExplicitSpecialization);
   SuppressAccessChecks diagsFromTag(*this, IsTemplateSpecOrInst);
 
+  // The member declaration's prefix-attribute suppress scope: pushed before
+  // the decl-specifier-seq so a class or enum defined there -- its NSDMIs and
+  // late-parsed member bodies included -- is within the dominion.
+  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, DeclAttrs);
+
   ParseDeclarationSpecifiers(DS, TemplateInfo, AS, DeclSpecContext::DSC_class,
                              &CommonLateParsedAttrs);
 

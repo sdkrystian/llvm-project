@@ -1968,6 +1968,14 @@ Parser::DeclGroupPtrTy Parser::ParseSimpleDeclaration(
   ParsingDeclSpec DS(*this);
   DS.takeAttributesAppendingingFrom(DeclSpecAttrs);
 
+  // The declaration's prefix-attribute suppress scope: pushed before the
+  // decl-specifier-seq so a class or enum defined there -- its NSDMIs and
+  // late-parsed member bodies included -- is within the dominion. At block
+  // scope the statement guard (ParseStatementOrDeclaration) has already
+  // pushed the same attributes; the duplicate entries are harmless, matching
+  // is any-entry.
+  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, DeclAttrs);
+
   ParsedTemplateInfo TemplateInfo;
   DeclSpecContext DSContext = getDeclSpecContextFromDeclaratorContext(Context);
   ParseDeclarationSpecifiers(DS, TemplateInfo, AS_none, DSContext);
@@ -2164,7 +2172,10 @@ Parser::DeclGroupPtrTy Parser::ParseDeclGroup(ParsingDeclSpec &DS,
   ParsedAttributes LocalAttrs(AttrFactory);
   LocalAttrs.takeAllPrependingFrom(Attrs);
 
-  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, LocalAttrs);
+  // No ProfileSuppressScope here: the declaration's prefix-attribute scope is
+  // pushed by the callers, before the decl-specifier-seq is parsed, so a
+  // suppression's dominion covers a class or enum defined in the
+  // decl-specifier-seq (P3589R2 s2.4p3: the whole declaration's tokens).
 
   ParsingDeclarator D(*this, DS, LocalAttrs, Context);
   if (TemplateInfo.TemplateParams)
