@@ -206,6 +206,21 @@ void test_element_read_of_uninit_array() {
   int y = a[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
   (void)y;
 }
+
+// A non-field member is not a subobject of the object: a static data member
+// is zero-initialized static storage, and an enumerator has no storage at
+// all. Reading either through an [[uninit]] object is fine.
+struct WithStatics {
+  static int sm;
+  enum { E = 1 };
+  int x;
+};
+void test_static_member_read_of_uninit_object() {
+  WithStatics s [[uninit]];
+  int a = s.sm; // OK: static storage, not a subobject
+  int b = s.E;  // OK: an enumerator has no storage
+  (void)a; (void)b;
+}
 #endif
 
 #ifdef DEMOTE

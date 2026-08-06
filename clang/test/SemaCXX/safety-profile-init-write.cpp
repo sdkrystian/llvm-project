@@ -59,6 +59,18 @@ void test_member_store(bool c) {
   u.x = 1; // OK: 'u' is not marked; its diagnostic is uninit_decl's, at the declaration
 }
 
+// A static data member is not a subobject of the object -- it is separate,
+// zero-initialized static storage -- so writing it through an [[uninit]]
+// object initializes nothing of the object and is no delayed initialization.
+struct WithStatic {
+  static int sm;
+  int x;
+};
+void test_static_member_store() {
+  WithStatic s [[uninit]];
+  s.sm = 1; // OK: static storage, not a subobject
+}
+
 // A marked *member* below the top level bans the store the same way, on a
 // named object or on the current object -- a class-type member has no legal
 // piecemeal path (only whole-object construct_at, which is unmodeled).

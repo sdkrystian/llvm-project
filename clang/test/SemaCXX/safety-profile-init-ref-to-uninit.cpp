@@ -1209,6 +1209,33 @@ void test_member_read_negatives() {
   (void)p; (void)q;
 }
 
+// A non-field member reached through an [[uninit]] object is not a subobject
+// of it: a static data member is zero-initialized static storage, so its
+// address is initialized memory regardless of the base object's state -- an
+// unmarked binding is fine and a marked one is rejected, exactly as if the
+// member were named via the class (`&S::sm` parity). A marked static
+// *reference* member still classifies by its own marker (its referent is the
+// uninitialized memory), and copying a marked static *pointer* member is an
+// ordinary marked-pointer copy.
+struct WithStaticMembers {
+  static int sm;
+  [[ref_to_uninit]] static int &sr;
+  [[ref_to_uninit]] static int *sp;
+  int x;
+};
+void test_static_member_address_of_uninit_object() {
+  WithStaticMembers s [[uninit]];
+  int *p1 = &s.sm;                               // OK: static storage, not a subobject
+  int *p2 [[ref_to_uninit]] = &s.sm;             // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int *p3 = &WithStaticMembers::sm;              // OK: same classification as &s.sm
+  int *p4 [[ref_to_uninit]] = &WithStaticMembers::sm; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int *p5 [[ref_to_uninit]] = &s.sr;             // OK: the marked reference's referent is uninitialized
+  int *p6 = &s.sr;                               // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  int *p7 [[ref_to_uninit]] = s.sp;              // OK: copy of a marked pointer
+  int *p8 = s.sp;                                // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)p1; (void)p3; (void)p5; (void)p7;
+}
+
 void test_member_read_suppress() {
   Pair s [[uninit]];
   // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}

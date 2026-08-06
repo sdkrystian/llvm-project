@@ -1776,6 +1776,19 @@ static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
       return UninitStorage::Initialized;
     if (DeclDenotesUninit(MD))
       return UninitStorage::Uninitialized;
+    // Only a field (or an indirect field through an anonymous union/struct)
+    // is a subobject of the base; a non-field member -- a static data member,
+    // an enumerator, a member function -- names static storage (or no storage
+    // at all) whose state is independent of the base object, so it classifies
+    // exactly as the DeclRefExpr arm would classify the member itself:
+    // Initialized. The DeclDenotesUninit check above still runs first so a
+    // [[ref_to_uninit]]-marked static reference member classifies
+    // Uninitialized, and returning Initialized (not Unknown) preserves the
+    // marked-direction rejection of `int *mp [[ref_to_uninit]] = &s.sm;`
+    // (a static's zero-init is a language guarantee) and keeps `&S::sm` and
+    // `&s.sm` classifying alike.
+    if (!isa<FieldDecl, IndirectFieldDecl>(MD))
+      return UninitStorage::Initialized;
     return ME->isArrow() ? pointerRefersToUninitStorage(
                                Ctx, ME->getBase(),
                                Opts.withoutTopLevelDrop().withoutMarkerTrust())
@@ -2335,7 +2348,9 @@ void SemaProfiles::checkInitProfileObjectArgument(const Expr *Object,
 // member (e.g. the class-type member in this->agg.f) or bottoms out at a
 // named [[uninit]] declaration. An arrow access or a subscript on a pointer
 // reaches its object through a pointer, so the pointer wording applies from
-// there on.
+// there on. The walk need not distinguish field from non-field members: the
+// semantic recognizer classifies a non-field member access Initialized, so no
+// such chain ever reaches this phrasing helper.
 static bool isMemberChainOfUninitObject(const Expr *E) {
   E = E->IgnoreParenImpCasts();
   while (true) {
@@ -2377,7 +2392,8 @@ static bool isMemberChainOfUninitObject(const Expr *E) {
 // allocator result, a raw new-expression). Approximate but sufficient for
 // phrasing, like isMemberChainOfUninitObject above: walk the store target's
 // chain; the marker wording applies iff a marked entity appears anywhere
-// along it.
+// along it. As there, non-field members need no special handling: the
+// semantic recognizer never fires on a chain through one.
 static bool uninitWriteChainSeesMarker(const Expr *E) {
   while (true) {
     E = E->IgnoreParenCasts();
