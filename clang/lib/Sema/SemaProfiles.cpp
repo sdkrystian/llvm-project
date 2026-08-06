@@ -45,6 +45,31 @@ bool SemaProfiles::isProfileEnforced(StringRef ProfileName) const {
   return getProfileEnforcement(ProfileName) != nullptr;
 }
 
+bool SemaProfiles::isProfileEnforcedAt(StringRef ProfileName,
+                                       SourceLocation Loc) const {
+  if (!isProfileEnforced(ProfileName))
+    return false;
+  // P3589R2 [decl.attr.enforce]p4: the enforcement's dominion starts after
+  // the attribute, so a violation located before it -- global-module-fragment
+  // tokens ahead of the module declaration -- is outside it. Fail open on an
+  // invalid location on either side (isBeforeInTranslationUnit rejects
+  // invalid locations): a PCH restore records no location and must mean
+  // "whole TU" (a PCH is this TU's textual prefix), and synthesized code
+  // keeps plain-enforcement behavior. Locations are compared by *expansion*
+  // location, deliberately unlike the suppression comparator's raw token
+  // order (see isProfileSuppressed): enforcement dominion is TU-scale, so a
+  // macro defined in the GMF but *invoked* in the purview stays enforced --
+  // its invocation tokens are purview tokens -- while GMF pattern tokens are
+  // skipped.
+  const ProfileEnforcement *E = getProfileEnforcement(ProfileName);
+  const SourceManager &SM = getASTContext().getSourceManager();
+  if (Loc.isValid() && E->EnforceLoc.isValid() &&
+      SM.isBeforeInTranslationUnit(SM.getExpansionLoc(Loc),
+                                   SM.getExpansionLoc(E->EnforceLoc)))
+    return false;
+  return true;
+}
+
 const SemaProfiles::ProfileEnforcement *
 SemaProfiles::getProfileEnforcement(StringRef ProfileName) const {
   for (const auto &E : EnforcedProfiles)
@@ -297,7 +322,7 @@ bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
                                               StringRef RuleName,
                                               SourceLocation Loc,
                                               const Decl *D) {
-  if (!isProfileEnforced(ProfileName))
+  if (!isProfileEnforcedAt(ProfileName, Loc))
     return false;
   if (isExemptSystemHeaderLoc(getASTContext(), getLangOpts(), Loc))
     return false;
@@ -355,10 +380,10 @@ bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
                                               StringRef RuleName,
                                               const Stmt *UseStmt,
                                               AnalysisDeclContext &AC) const {
-  if (!isProfileEnforced(ProfileName))
-    return false;
   SourceLocation Loc =
       UseStmt ? UseStmt->getBeginLoc() : AC.getDecl()->getLocation();
+  if (!isProfileEnforcedAt(ProfileName, Loc))
+    return false;
   if (isExemptSystemHeaderLoc(getASTContext(), getLangOpts(), Loc))
     return false;
   if (isProfileSuppressed(ProfileName, RuleName, UseStmt, AC))

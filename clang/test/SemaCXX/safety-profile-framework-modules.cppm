@@ -46,6 +46,9 @@
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -emit-module-interface %t/redecl_gmf_mod.cppm -o %t/redecl_gmf_mod.pcm -verify
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/redecl_gmf_skip.cpp -fmodule-file=RedeclGmfMod=%t/redecl_gmf_mod.pcm -verify
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/redecl_impl_extra.cpp -fmodule-file=RedeclMod=%t/redecl_mod.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/gmf_dominion.cppm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -emit-module-interface %t/gmf_dominion_iface.cppm -o %t/gmf_dominion_iface.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/gmf_dominion_impl.cpp -fmodule-file=GmfDomMod=%t/gmf_dominion_iface.pcm -verify
 
 // ===================================================================
 // Module with enforced profiles
@@ -443,3 +446,54 @@ void redecl_gmf_api(int);
 // expected-no-diagnostics
 module RedeclMod [[profiles::enforce(test::other)]];
 extern "C++" void redecl_api(int);
+
+//--- gmf_dominion.cppm
+// P3589R2 [decl.attr.enforce]p4: the enforcement's dominion starts after the
+// attribute, so global-module-fragment tokens precede it. A GMF template
+// instantiated from the purview keeps its pattern's locations and is not
+// diagnosed -- for a CFG rule and a class-finalization rule alike -- while
+// the identical constructs written in the purview fire. A macro *defined* in
+// the GMF but *invoked* in the purview fires too: enforcement dominion is
+// compared by expansion location, and the invocation tokens are purview
+// tokens (contrast the suppression comparator's raw token order).
+module;
+template<class T> void gmf_uninit() { int x; (void)(x + 1); }
+template<class T> struct GmfClass { T m; };
+#define GMF_BAD_BODY { int z; (void)(z + 1); }
+export module GmfDom [[profiles::enforce(test::uninit_read, test::class_final)]];
+
+export void use_gmf() { gmf_uninit<int>(); }
+export GmfClass<int> gc;
+
+template<class T> void pv_uninit() {
+  int x; // expected-note {{variable 'x' is declared here}}
+  (void)(x + 1); // expected-error {{variable 'x' is read before initialization under profile 'test::uninit_read'}}
+}
+export void use_pv() { pv_uninit<int>(); } // expected-note {{in instantiation of function template specialization 'pv_uninit<int>' requested here}}
+
+export struct PvClass { int m; } pc; // expected-error {{test profile fired on completion of class 'PvClass' under profile 'test::class_final'}}
+
+// expected-error@+2 {{variable 'z' is read before initialization under profile 'test::uninit_read'}}
+// expected-note@+1 {{variable 'z' is declared here}}
+export void use_macro() GMF_BAD_BODY
+
+//--- gmf_dominion_iface.cppm
+// expected-no-diagnostics
+export module GmfDomMod [[profiles::enforce(test::uninit_read)]];
+export int gmf_dom_marker();
+
+//--- gmf_dominion_impl.cpp
+// An implementation unit inherits the interface's enforcement with this
+// unit's module declaration as the dominion start, so its own GMF is exempt
+// too -- the safe reading of the [decl.attr.enforce]p4 ambiguity (a skip is a
+// missed diagnostic, never a wrong one).
+module;
+template<class T> void impl_gmf_uninit() { int x; (void)(x + 1); }
+module GmfDomMod;
+void impl_use() { impl_gmf_uninit<int>(); }
+
+template<class T> void impl_pv_uninit() {
+  int x; // expected-note {{variable 'x' is declared here}}
+  (void)(x + 1); // expected-error {{variable 'x' is read before initialization under profile 'test::uninit_read'}}
+}
+void impl_use2() { impl_pv_uninit<int>(); } // expected-note {{in instantiation of function template specialization 'impl_pv_uninit<int>' requested here}}
