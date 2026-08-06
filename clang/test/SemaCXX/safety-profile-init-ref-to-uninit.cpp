@@ -108,6 +108,47 @@ void test_reference_casts() {
   (void)cr1; (void)cr2; (void)cr3; (void)gr1; (void)gr2; (void)p;
 }
 
+// A conversion-requiring reference binding materializes a *new* temporary
+// initialized from the source's value: the reference binds initialized
+// storage, so no ref_to_uninit binding diagnostic applies -- the value load
+// from the [[uninit]] source is the flow-based read pass's (which fires
+// below). A same-type binding builds no temporary and keeps its rejection.
+void take_long(long l);
+void test_temporary_binding_is_initialized() {
+  int u [[uninit]]; // expected-note {{variable 'u' is declared here}}
+  const long &r = u; // expected-error {{variable 'u' is read before initialization under profile 'std::init'}}
+  (void)r;
+}
+void test_temporary_by_value_flavor() {
+  int u [[uninit]]; // expected-note {{variable 'u' is declared here}}
+  take_long(u); // expected-error {{variable 'u' is read before initialization under profile 'std::init'}}
+}
+void test_same_type_binding_still_fires() {
+  int u [[uninit]];
+  const int &r2 = u; // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)r2;
+}
+// The marked direction is symmetric: a marked reference bound to a fresh
+// temporary refers to *initialized* memory and is rejected.
+struct TempAgg { int m; };
+void test_marked_binding_to_temporary_rejected() {
+  int u [[uninit]]; // expected-note {{variable 'u' is declared here}}
+  long &&rr [[ref_to_uninit]] = u; // expected-error {{reference marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}} \
+                                   // expected-error {{variable 'u' is read before initialization under profile 'std::init'}}
+  TempAgg &&sr [[ref_to_uninit]] = TempAgg(); // expected-error {{reference marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)rr; (void)sr;
+}
+// A *pointer-typed* temporary is the deliberate exception: its value refers
+// to the same storage the source did, so the qualification-conversion
+// binding shapes classify by the pointee, exactly as without the temporary.
+void test_pointer_temporary_binding(int *q) {
+  const int *const &rp1 = q;                         // OK: unmarked value, unmarked target
+  const int *const &rp2 [[ref_to_uninit]] = q;       // expected-error {{reference marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  const int *const &rp3 = allocate(1);               // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  const int *const &rp4 [[ref_to_uninit]] = allocate(1); // OK: marked value, marked target
+  (void)rp1; (void)rp2; (void)rp3; (void)rp4;
+}
+
 // Pass-through sources are transparent to their operand: a single-element
 // braced initializer is looked through to its element, a conditional is
 // uninitialized if either arm is, and a comma yields its right operand.

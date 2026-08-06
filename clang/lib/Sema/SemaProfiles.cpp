@@ -18,6 +18,7 @@
 #include "clang/AST/Attr.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/ExprCXX.h"
+#include "clang/AST/IgnoreExpr.h"
 #include "clang/AST/ParentMap.h"
 #include "clang/AST/Profiles.h"
 #include "clang/Analysis/AnalysisDeclContext.h"
@@ -1708,12 +1709,38 @@ pointerRefersToUninitStorage(ASTContext &Ctx, const Expr *E,
   return UninitStorage::Unknown;
 }
 
+// IgnoreParenImpCasts, except it stops at a MaterializeTemporaryExpr
+// (IgnoreParenImpCasts strips MTEs -- see the FIXME in IgnoreExpr.h). The
+// glvalue recognizer must see the MTE: the materialized temporary is its own
+// object, whose state is independent of the expression it was converted from.
+static const Expr *ignoreParenImpCastsKeepMTE(const Expr *E) {
+  return IgnoreExprNodes(E, IgnoreParensSingleStep, [](Expr *Node) {
+    if (isa<MaterializeTemporaryExpr>(Node))
+      return Node;
+    return IgnoreImplicitCastsExtraSingleStep(Node);
+  });
+}
+
 // \p E is a glvalue. Classifies whether it denotes uninitialized storage.
 static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
                                                  UninitAccessOpts Opts) {
   if (!E)
     return UninitStorage::Unknown;
-  E = E->IgnoreParenImpCasts();
+  E = ignoreParenImpCastsKeepMTE(E);
+
+  // A materialized temporary is a fresh object initialized from its
+  // subexpression's *value*: whatever storage that value was loaded from, the
+  // temporary itself is initialized (e.g. `const long &r = u;` binds a new
+  // long temporary, not `u`). A *pointer-typed* temporary is the exception:
+  // its value still refers to the same storage, so an unmarked copy of a
+  // marked pointer value (`const int *const &rp = alloc();`) must keep
+  // classifying by the pointee -- recurse as if the MTE were stripped, the
+  // pre-MTE-arm status quo.
+  if (const auto *MTE = dyn_cast<MaterializeTemporaryExpr>(E)) {
+    if (MTE->getType()->isPointerType())
+      return glvalueDenotesUninitStorage(Ctx, MTE->getSubExpr(), Opts);
+    return UninitStorage::Initialized;
+  }
 
   if (auto PassThrough = classifyUninitPassThrough(
           E, /*EmptyListState=*/UninitStorage::Unknown,
