@@ -1,5 +1,5 @@
-// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fenable-matrix -std=c++23 %s
-// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -fenable-matrix -std=c++23 %s
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fenable-matrix -fblocks -std=c++23 %s
+// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -fenable-matrix -fblocks -std=c++23 %s
 
 // no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
 [[profiles::enforce(std::init)]];
@@ -56,6 +56,24 @@ void test_pointer_array() {
 
 struct PtrArrayMember {
   [[uninit]] int* a[2]; // expected-error {{'[[uninit]]' cannot be applied to a pointer under profile 'std::init'; initialize the pointer (for example to 'nullptr')}}
+};
+
+// Member pointers and block pointers hold addresses (or offsets) like object
+// pointers and must never be uninitialized either (paper section 4.1); the
+// marker is banned on them -- and on arrays of them -- with the same wording.
+struct MPClass { int m; void f(); };
+void test_member_and_block_pointers() {
+  int MPClass::*pm [[uninit]];       // expected-error {{'[[uninit]]' cannot be applied to a pointer under profile 'std::init'; initialize the pointer (for example to 'nullptr')}}
+  void (MPClass::*pmf [[uninit]])(); // expected-error {{'[[uninit]]' cannot be applied to a pointer under profile 'std::init'; initialize the pointer (for example to 'nullptr')}}
+  void (^bp [[uninit]])();           // expected-error {{'[[uninit]]' cannot be applied to a pointer under profile 'std::init'; initialize the pointer (for example to 'nullptr')}}
+  [[uninit]] int MPClass::*pma[2];   // expected-error {{'[[uninit]]' cannot be applied to a pointer under profile 'std::init'; initialize the pointer (for example to 'nullptr')}}
+  [[uninit]] void (^bpa[2])();       // expected-error {{'[[uninit]]' cannot be applied to a pointer under profile 'std::init'; initialize the pointer (for example to 'nullptr')}}
+  (void)pm; (void)pmf; (void)bp; (void)pma; (void)bpa;
+}
+
+struct MemberPointerMember {
+  int MPClass::*pm [[uninit]];     // expected-error {{'[[uninit]]' cannot be applied to a pointer under profile 'std::init'; initialize the pointer (for example to 'nullptr')}}
+  [[uninit]] void (^ba[2])();      // expected-error {{'[[uninit]]' cannot be applied to a pointer under profile 'std::init'; initialize the pointer (for example to 'nullptr')}}
 };
 
 void test_pointer_array_marker_suppressed() {

@@ -187,6 +187,11 @@ struct MemberUnionOnly {
 struct MemberPointerOnly {
   int *p [[uninit]]; // expected-error {{'[[uninit]]' cannot be applied to a pointer under profile 'std::init'; initialize the pointer (for example to 'nullptr')}}
 };
+// A member-pointer-typed member is pointer_marker's the same way (paper
+// section 4.1) -- one diagnostic, no field-flavor pile-on.
+struct MemberMemberPointerOnly {
+  int MemberPointerOnly::*pm [[uninit]]; // expected-error {{'[[uninit]]' cannot be applied to a pointer under profile 'std::init'; initialize the pointer (for example to 'nullptr')}}
+};
 
 // A member type with a deleted (or absent) default constructor can never be
 // left default-initialized, so the marker is unsatisfiable.

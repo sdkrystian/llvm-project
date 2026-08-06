@@ -106,6 +106,11 @@ static U g_union_marked [[uninit]];    // expected-error {{'[[uninit]]' cannot b
 [[uninit]] static int *g_ptr_arr_marked[2]; // expected-error {{'[[uninit]]' cannot be applied to a pointer under profile 'std::init'; initialize the pointer (for example to 'nullptr')}}
 [[uninit]] static U g_union_arr_marked[2];  // expected-error {{'[[uninit]]' cannot be applied to a variable of union type under profile 'std::init'}}
 
+// Member pointers are pointer_marker's too (paper section 4.1) -- exactly one
+// diagnostic at static storage duration, like the object pointer above.
+struct MPOwner { int m; };
+static int MPOwner::*g_mp_marked [[uninit]]; // expected-error {{'[[uninit]]' cannot be applied to a pointer under profile 'std::init'; initialize the pointer (for example to 'nullptr')}}
+
 // Unmarked statics / thread-locals are fine (zero-initialized, nothing to mark).
 int g_unmarked;
 static int g_static_unmarked;

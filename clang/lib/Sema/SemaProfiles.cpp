@@ -881,6 +881,19 @@ void SemaProfiles::checkInitProfileUninitDecl(const VarDecl *Var) {
   }
 }
 
+// The pointer-like types pointer_marker bans [[uninit]] on (paper §4.1:
+// pointers must never be uninitialized): object/function pointers, member
+// pointers, and block pointers. Deliberately not nullptr_t (reading one
+// produces null without touching storage). All three keyed sites --
+// pointer_marker itself, static_marker's skip, and the field-marker
+// callback's skip -- share this predicate so the exactly-one-diagnostic
+// invariants hold by construction. ObjC object pointers are a follow-on
+// (needs ObjC++ scaffolding).
+static bool isPointerMarkerBannedType(QualType T) {
+  return T->isPointerType() || T->isMemberPointerType() ||
+         T->isBlockPointerType();
+}
+
 void SemaProfiles::checkInitProfileStaticMarker(const VarDecl *Var) {
   // std::init / static_marker: a variable with static or thread storage
   // duration is zero-initialized by language rule (paper §3), so it is an
@@ -911,7 +924,7 @@ void SemaProfiles::checkInitProfileStaticMarker(const VarDecl *Var) {
   // is already rejected by union_marker / pointer_marker (regardless of
   // storage duration, and keyed on the same base element type), and they
   // retain the marker; do not pile a second diagnostic on top.
-  if (!BaseTy->isUnionType() && !BaseTy->isPointerType() &&
+  if (!BaseTy->isUnionType() && !isPointerMarkerBannedType(BaseTy) &&
       shouldEmitProfileViolation(Profile, "static_marker", Var->getLocation(),
                                  Var) &&
       isVacuousDefaultInit(*this, Var->getInit(), Var->getType())) {
@@ -1034,7 +1047,7 @@ void SemaProfiles::checkInitProfileMarkerPlacement(const Decl *D) {
       shouldEmitProfileViolation("std::init", "union_marker", Loc, D))
     Diag(Loc, diag::err_init_union_marker)
         << "std::init" << (UnionMember ? 1 : isa<FieldDecl>(D) ? 2 : 0);
-  else if (BaseTy->isPointerType() &&
+  else if (isPointerMarkerBannedType(BaseTy) &&
            shouldEmitProfileViolation("std::init", "pointer_marker", Loc, D))
     Diag(Loc, diag::err_init_uninit_pointer_marker) << "std::init";
 }
@@ -3022,7 +3035,7 @@ void runStdInitUninitFieldMarkerCallback(Sema &S, CXXRecordDecl *RD) {
     // not pile a second diagnostic on top. Load-bearing for union members: a
     // union with a non-trivial member has a deleted -- hence non-trivial --
     // default constructor and would otherwise draw both.
-    if (BaseTy->isUnionType() || BaseTy->isPointerType())
+    if (BaseTy->isUnionType() || isPointerMarkerBannedType(BaseTy))
       continue;
     // std::byte may be left uninitialized (paper §4), mirroring
     // checkInitProfileUninitDecl.
