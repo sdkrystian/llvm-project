@@ -854,11 +854,19 @@ void SemaProfiles::checkInitProfileUninitDecl(const VarDecl *Var) {
                                              /*HonorUninitMarkers=*/true)))) {
     // A union variable cannot carry [[uninit]] (union_marker bans it),
     // so it must be initialized; use a message that does not suggest the
-    // marker as a remedy.
+    // marker as a remedy. An *anonymous* union's variable has no name and
+    // its declaration admits no attribute or initializer syntax at all
+    // (this check runs before BuildAnonymousStructOrUnion's setImplicit();
+    // see the load-bearing-ordering comments there and above), so name the
+    // one real remedy: an NSDMI on a member activates that variant, and the
+    // anonymous-variant handling then counts the union as initialized.
     bool IsUnion = BaseTy->isUnionType();
-    Diag(Var->getLocation(),
-         IsUnion ? diag::err_init_uninit_union : diag::err_init_uninit_decl)
-        << Profile << Var->getDeclName();
+    if (IsUnion && !Var->getDeclName())
+      Diag(Var->getLocation(), diag::err_init_uninit_anon_union) << Profile;
+    else
+      Diag(Var->getLocation(),
+           IsUnion ? diag::err_init_uninit_union : diag::err_init_uninit_decl)
+          << Profile << Var->getDeclName();
   }
 }
 

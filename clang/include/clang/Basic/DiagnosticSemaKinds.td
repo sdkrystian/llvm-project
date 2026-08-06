@@ -14391,6 +14391,9 @@ def err_init_uninit_decl : ProfileRuleError<
   "profile '%0'">;
 def err_init_uninit_union : ProfileRuleError<
   "variable %1 of union type must be initialized under profile '%0'">;
+def err_init_uninit_anon_union : ProfileRuleError<
+  "anonymous union must be initialized under profile '%0'; give one member "
+  "a default member initializer">;
 def err_init_static_runtime_init : ProfileRuleError<
   "non-local variable %1 requires constant initialization under "
   "profile '%0'">;

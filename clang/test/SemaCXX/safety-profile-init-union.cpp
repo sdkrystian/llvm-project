@@ -70,6 +70,37 @@ void test_uninit_union_suppressed() {
   (void)a;
 }
 
+// A block-scope *anonymous* union is checked through its unnamed variable
+// (before that variable is marked implicit; the ordering comment sits at
+// both ends). No attribute or initializer can be written on the declaration,
+// so the diagnostic names the one real remedy: a default member initializer,
+// which activates that variant. Static storage is zero-initialized and
+// exempt, and suppression on the enclosing construct works as everywhere.
+void test_anonymous_union() {
+  union { int n; float x; }; // expected-error {{anonymous union must be initialized under profile 'std::init'; give one member a default member initializer}}
+  n = 1;
+}
+void test_anonymous_union_nsdmi() {
+  union { int n = 0; float x; }; // OK: the NSDMI activates the 'n' variant
+  n = 1;
+}
+void test_anonymous_union_static() {
+  static union { int n; float x; }; // OK: zero-initialized static storage
+  n = 1;
+}
+// no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+[[profiles::suppress(std::init)]] void test_anonymous_union_fn_suppressed() {
+  union { int n; float x; }; // OK: suppressed by the enclosing function
+  n = 1;
+}
+void test_anonymous_union_stmt_suppressed() {
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  [[profiles::suppress(std::init)]] {
+    union { int n; float x; }; // OK: suppressed
+    n = 1;
+  }
+}
+
 // A union whose only members are unnamed bit-fields has nothing that
 // default-initialization could leave indeterminate -- unnamed bit-fields are
 // not members and no in-language initializer exists for them -- but an
