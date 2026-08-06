@@ -69,6 +69,15 @@ public:
 
   bool isProfileEnforced(StringRef ProfileName) const;
 
+  /// Like isProfileEnforced, but additionally false when \p Loc lies before
+  /// the enforcement's dominion (P3589R2 [decl.attr.enforce]p4: the dominion
+  /// starts after the attribute), so a violation located in the global module
+  /// fragment is not diagnosed. Fails open on invalid locations. Used by the
+  /// per-violation emission gates; the pass-dispatch gates keep the name-only
+  /// query ("enforced anywhere in the TU" is the right dispatch question --
+  /// per-violation filtering happens at emission).
+  bool isProfileEnforcedAt(StringRef ProfileName, SourceLocation Loc) const;
+
   /// True if any entry of \p Entries names an enforced profile. \p Entries is
   /// any profile opt-in table whose elements expose a \c Name member; shared
   /// by the post-parse dispatch gates (the CFG analysis pass guard and the
