@@ -1506,6 +1506,16 @@ void Parser::ParseLateTemplatedFuncDef(LateParsedTemplate &LPT) {
 
   Actions.ActOnStartOfFunctionDef(getCurScope(), FunD);
 
+  // Re-establish the suppress scopes for the function's own
+  // [[profiles::suppress]] attributes and (WalkLexicalParents) its enclosing
+  // classes' and namespaces' -- everything has unwound at end of TU and
+  // ReenterTemplateScopes restores no suppress state. The entry's end stays
+  // invalid (getCompletedConstructEnd bails on isLateTemplateParsed), so the
+  // scope's lifetime bounds the dominion: exactly this re-lex, covering both
+  // the mem-initializers and the body.
+  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(
+      Actions, FunD, /*WalkLexicalParents=*/true);
+
   if (Tok.is(tok::kw_try)) {
     ParseFunctionTryBlock(LPT.D, FnScope);
   } else {
