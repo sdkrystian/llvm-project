@@ -30,6 +30,18 @@ inline void sys_fn() {
   (void)x;
 }
 
+// A CFG-based rule (member read before initialization) must track the
+// parse-time rule above: system-header decls skip the analysis-based warning
+// pipeline entirely, so the profile-only CFG pass has to run for them exactly
+// when the exemption flag is off.
+struct SysCtor {
+  int m [[uninit]]; // strict-note {{member 'm' declared here}}
+  SysCtor() {
+    int y = m; // strict-error {{member 'm' is read before initialization under profile 'std::init'}}
+    (void)y;
+  }
+};
+
 //--- main.cpp
 [[profiles::enforce(std::init)]];
 #include "user.h"

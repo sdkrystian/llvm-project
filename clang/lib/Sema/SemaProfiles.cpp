@@ -283,6 +283,10 @@ static bool isExemptSystemHeaderLoc(const ASTContext &Ctx,
          Ctx.getSourceManager().isInSystemHeader(Loc);
 }
 
+bool SemaProfiles::isProfileExemptSystemHeaderLoc(SourceLocation Loc) const {
+  return isExemptSystemHeaderLoc(getASTContext(), getLangOpts(), Loc);
+}
+
 bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
                                               StringRef RuleName,
                                               SourceLocation Loc) {
