@@ -348,6 +348,16 @@ bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
     return false;
   if (isProfileSuppressed(ProfileName, RuleName, UseStmt, AC))
     return false;
+  // The AST walk above covers only the analyzed function's own interior (its
+  // statements and its lexical declaration chain). A function can also be
+  // analyzed mid-parse of an enclosing construct -- a local class's method
+  // body runs its CFG passes at ActOnFinishFunctionBody, while the enclosing
+  // statement's ProfileSuppressScope is still live -- so consult the live
+  // stack too. The stack consult is dominion-checked against Loc, so an
+  // unrelated live scope (e.g. one covering a synchronously instantiated
+  // pattern declared elsewhere) never matches.
+  if (isProfileSuppressed(ProfileName, RuleName, Loc))
+    return false;
   return true;
 }
 
