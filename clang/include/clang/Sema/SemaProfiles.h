@@ -110,6 +110,14 @@ public:
   /// via the shared walks in clang/AST/Profiles.h.
   bool isProfileSuppressed(StringRef ProfileName, StringRef RuleName,
                            const Stmt *S, AnalysisDeclContext &AC) const;
+
+  /// True if \p Loc is exempt from profile enforcement under the temporary
+  /// system-header stopgap (on by default; disabled by
+  /// -fno-profiles-exempt-system-headers). Exposed for the analysis-based
+  /// entry points, which must not run the profile-only CFG pass on a
+  /// declaration the emission gates would exempt anyway.
+  bool isProfileExemptSystemHeaderLoc(SourceLocation Loc) const;
+
   bool shouldEmitProfileViolation(StringRef ProfileName, StringRef RuleName,
                                   SourceLocation Loc);
   bool shouldEmitProfileViolation(StringRef ProfileName, StringRef RuleName,
