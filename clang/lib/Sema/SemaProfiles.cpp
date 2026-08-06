@@ -164,6 +164,13 @@ void SemaProfiles::checkRedeclarationProfileCompatibility(
   Module *M = Old->getOwningModule();
   if (!M)
     return;
+  // A module-map module (a Clang header module, -fmodules) is textual
+  // inclusion wearing an AST file: in the standard's model its declarations
+  // belong to this TU, so it has no dominion of its own to compare against.
+  // Named modules and header units -- the real other-TU cases with recorded
+  // designators -- stay checked.
+  if (M->isModuleMapModule())
+    return;
   // A declaration in an explicit global-module-fragment precedes the module
   // declaration, so the module's exported enforcements do not cover it, and
   // its TU's empty-declaration enforcements are not serialized into the BMI.
