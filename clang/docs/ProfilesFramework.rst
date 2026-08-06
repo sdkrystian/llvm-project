@@ -524,7 +524,10 @@ and aggregate initialization, assignment, call arguments (including defaulted
 and variadic ones), ``return`` and ``throw`` statements (including returns
 inside lambdas and blocks -- a lambda's marker is written on its call
 operator, in the C++23 attribute position after the lambda-introducer:
-``[] [[ref_to_uninit]] () -> int* { ... }``), lambda captures, and
+``[] [[ref_to_uninit]] () -> int* { ... }``), lambda captures (by reference
+and by copy -- a closure field cannot carry the marker, so a by-copy capture
+of a marked pointer is rejected like any unmarked pointer copy; capture by
+reference, or store through the marker first, if the flow is intended), and
 the implicit object argument of a member call -- so calling a member function
 on an object recognized as uninitialized storage is rejected, and so is
 copying a class object out of one.  For the copy, the escape is the paper's

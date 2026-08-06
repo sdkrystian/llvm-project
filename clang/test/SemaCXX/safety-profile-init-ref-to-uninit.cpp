@@ -560,9 +560,11 @@ template void template_init_capture_bad<int>(); // expected-note {{in instantiat
 // A by-reference capture -- explicit or via a capture-default -- is the same
 // binding as an init-capture: a capture cannot carry [[ref_to_uninit]], so
 // capturing an [[uninit]] variable (or a [[ref_to_uninit]] reference) by
-// reference is always the unmarked-direction violation. A copy capture is not
-// a binding; it reads the variable in the enclosing function's CFG, which is
-// the flow-based uninit_read pass's territory.
+// reference is always the unmarked-direction violation. A copy capture of an
+// [[uninit]] *variable* reads it in the enclosing function's CFG, which stays
+// the flow-based uninit_read pass's territory; a copy capture of a marked
+// *pointer* is a pointer copy into a closure field and is checked below
+// (test_copy_captures).
 void test_ref_captures() {
   int x [[uninit]];
   int ok = 0;
@@ -614,6 +616,39 @@ void template_ref_capture_bad() {
   (void)c;
 }
 template void template_ref_capture_bad<int>(); // expected-note {{in instantiation of function template specialization 'template_ref_capture_bad<int>' requested here}}
+
+// A by-copy capture of a *pointer* copies its value into a closure field,
+// which can never carry [[ref_to_uninit]] (the introducer grammar has no
+// attribute position) -- copying a marked pointer into one is the
+// unmarked-direction rejection, exactly like `int *q = p;` on the same line.
+// Remedies: capture by reference, store through the marker first (credit
+// suppresses), or suppress.
+void test_copy_captures(int *p [[ref_to_uninit]]) {
+  auto c1 = [p] {};            // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  auto c2 = [=] { (void)p; };  // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  auto c3 = [&p] {};           // OK: by-ref capture of the (initialized) pointer object
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  [[profiles::suppress(std::init)]] {
+    auto c4 = [p] {}; // OK: suppressed
+    (void)c4;
+  }
+  (void)c1; (void)c2; (void)c3;
+}
+
+void test_copy_capture_after_store(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  auto c = [p] {}; // OK: the pointee store's Maybe credit suppresses
+  (void)c;
+}
+
+// A dependent-typed capture defers on the pattern and fires once, at
+// instantiation.
+template <typename T>
+void template_copy_capture_bad(T *p [[ref_to_uninit]]) {
+  auto c = [p] {}; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)c;
+}
+template void template_copy_capture_bad<int>(int *); // expected-note {{in instantiation of function template specialization 'template_copy_capture_bad<int>' requested here}}
 
 struct OpTag {};
 OpTag operator+(OpTag, int *p [[ref_to_uninit]]);
