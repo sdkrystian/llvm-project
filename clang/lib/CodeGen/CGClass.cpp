@@ -325,7 +325,7 @@ Address CodeGenFunction::GetAddressOfBaseClass(
   // If the static offset is zero and we don't have a virtual step,
   // just do a bitcast; null checks are unnecessary.
   if (NonVirtualOffset.isZero() && !VBase) {
-    if (sanitizePerformTypeCheck()) {
+    if (sanitizePerformTypeCheck() || profilePerformTypeCheck()) {
       SanitizerSet SkippedChecks;
       SkippedChecks.set(SanitizerKind::Null, !NullCheckValue);
       EmitTypeCheck(TCK_Upcast, Loc, Value.emitRawPointer(*this), DerivedTy,
@@ -349,7 +349,7 @@ Address CodeGenFunction::GetAddressOfBaseClass(
     EmitBlock(notNullBB);
   }
 
-  if (sanitizePerformTypeCheck()) {
+  if (sanitizePerformTypeCheck() || profilePerformTypeCheck()) {
     SanitizerSet SkippedChecks;
     SkippedChecks.set(SanitizerKind::Null, true);
     EmitTypeCheck(VBase ? TCK_UpcastToVirtualBase : TCK_Upcast, Loc,

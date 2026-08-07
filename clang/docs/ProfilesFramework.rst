@@ -1117,6 +1117,11 @@ This slice covers locally checkable cases of P4317 Appendix A.1:
        (promoted) left operand; before C++20, additionally a signed left
        shift moving a set bit out of the sign bit (from C++20 on that is
        defined, leaving the width arm only).
+   * - ``misaligned_access``
+     - ``{basic.align.object.alignment}``
+     - An access through a pointer not suitably aligned for its type (a
+       local whose storage is known to satisfy the alignment is not
+       checked).
 
 The many cases of P4317 that require whole-program bookkeeping or a
 support runtime (heap bounds, lifetime, type confusion) are out of scope

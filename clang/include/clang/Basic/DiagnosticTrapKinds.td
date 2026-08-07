@@ -39,5 +39,8 @@ def trap_profile_signed_overflow : Trap<
 def trap_profile_invalid_shift : Trap<
   "shift out of bounds under profile '%0'">;
 
+def trap_profile_misaligned_access : Trap<
+  "misaligned pointer access under profile '%0'">;
+
 }
 }

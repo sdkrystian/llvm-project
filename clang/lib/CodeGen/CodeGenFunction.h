@@ -3451,14 +3451,20 @@ public:
   /// Determine whether the pointer type check \p TCK requires a vptr check.
   static bool isVptrCheckRequired(TypeCheckKind TCK, QualType Ty);
 
-  /// Whether any type-checking sanitizers are enabled. If \c false,
-  /// calls to EmitTypeCheck can be skipped.
+  /// Whether any type-checking sanitizers are enabled. If \c false and
+  /// profilePerformTypeCheck is also \c false, calls to EmitTypeCheck can be
+  /// skipped.
   bool sanitizePerformTypeCheck() const;
+
+  /// Whether the std::core_ub profile's type-check rules (pattern 5) may
+  /// apply to the code being emitted, so EmitTypeCheck must run even with no
+  /// type-checking sanitizer enabled.
+  bool profilePerformTypeCheck() const;
 
   void EmitTypeCheck(TypeCheckKind TCK, SourceLocation Loc, LValue LV,
                      QualType Type, SanitizerSet SkippedChecks = SanitizerSet(),
                      llvm::Value *ArraySize = nullptr) {
-    if (!sanitizePerformTypeCheck())
+    if (!sanitizePerformTypeCheck() && !profilePerformTypeCheck())
       return;
     EmitTypeCheck(TCK, Loc, LV.emitRawPointer(*this), Type, LV.getAlignment(),
                   SkippedChecks, ArraySize);
@@ -3468,7 +3474,7 @@ public:
                      QualType Type, CharUnits Alignment = CharUnits::Zero(),
                      SanitizerSet SkippedChecks = SanitizerSet(),
                      llvm::Value *ArraySize = nullptr) {
-    if (!sanitizePerformTypeCheck())
+    if (!sanitizePerformTypeCheck() && !profilePerformTypeCheck())
       return;
     EmitTypeCheck(TCK, Loc, Addr.emitRawPointer(*this), Type, Alignment,
                   SkippedChecks, ArraySize);
