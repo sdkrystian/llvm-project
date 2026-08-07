@@ -2073,27 +2073,60 @@ static void appendLifecycleCallEvents(
 
 // The lambda body is a separate function and never appears in the enclosing
 // constructor's CFG, but a this-capturing lambda can read members the moment
-// it is created (it may be invoked immediately). Treat every member read in
-// its body -- and in nested lambda bodies, reached through children() -- as
-// a Read at the LambdaExpr's program point. Writes in the body earn no
-// assignment credit (the lambda may never run), consistent with the
-// intersection semantics; a lambda stored now and called only after the
-// member is assigned is still flagged (accepted imprecision). Capture
+// it is created (it may be invoked immediately). A `*this` capture
+// copy-constructs the whole object at creation, reading every member right
+// there: unless the class has a user-provided copy constructor (opaque and
+// trusted per the paper's §5.1 trust-the-constructor principle,
+// \p StarThisCopyTrusted -- consistent with this pass's other trust gates),
+// append one Read per tracked member at the LambdaExpr, and never
+// body-scan -- body accesses go to the *copy*, so attributing them to the
+// original would be wrong either way. A plain `this` capture instead reads
+// nothing at creation: treat every member read in its body -- and in nested
+// lambda bodies, reached through children() -- as a Read at the LambdaExpr's
+// program point, except that a nested lambda capturing `*this` gets the
+// whole-object reads at its own LambdaExpr (its creation runs when the outer
+// body does, which may be immediately) and is not descended into. Writes in
+// a body earn no assignment credit (the lambda may never run), consistent
+// with the intersection semantics; a lambda stored now and called only after
+// the member is assigned is still flagged (accepted imprecision). Capture
 // initializers are ordinary CFG elements, already handled by the caller's
 // other arms.
 static void appendThisCaptureLambdaReadEvents(
     const LambdaExpr *LE,
     const llvm::DenseMap<const FieldDecl *, unsigned> &Index,
-    SmallVectorImpl<DefAssignEvent> &BlockEvents) {
-  if (llvm::none_of(LE->captures(), [](const LambdaCapture &C) {
-        return C.capturesThis();
-      }))
+    bool StarThisCopyTrusted, SmallVectorImpl<DefAssignEvent> &BlockEvents) {
+  auto GetThisCaptureKind =
+      [](const LambdaExpr *L) -> std::optional<LambdaCaptureKind> {
+    for (const LambdaCapture &C : L->captures())
+      if (C.capturesThis())
+        return C.getCaptureKind();
+    return std::nullopt;
+  };
+  auto AppendWholeObjectReads = [&](const LambdaExpr *At) {
+    // Index's values are exactly 0..size()-1 (collectTrackedUninitMembers).
+    for (unsigned I = 0, N = Index.size(); I != N; ++I)
+      BlockEvents.push_back({DefAssignEventKind::Read, I, At});
+  };
+  std::optional<LambdaCaptureKind> Kind = GetThisCaptureKind(LE);
+  if (!Kind)
     return;
+  if (*Kind == LCK_StarThis) {
+    if (!StarThisCopyTrusted)
+      AppendWholeObjectReads(LE);
+    return;
+  }
   SmallVector<const Stmt *, 16> Stack(1, LE->getBody());
   while (!Stack.empty()) {
     const Stmt *Cur = Stack.pop_back_val();
     if (!Cur)
       continue;
+    if (const auto *NestedLE = dyn_cast<LambdaExpr>(Cur)) {
+      if (GetThisCaptureKind(NestedLE) == LCK_StarThis) {
+        if (!StarThisCopyTrusted)
+          AppendWholeObjectReads(NestedLE);
+        continue;
+      }
+    }
     const FieldDecl *F = nullptr;
     if (const auto *BodyICE = dyn_cast<ImplicitCastExpr>(Cur);
         BodyICE && BodyICE->getCastKind() == CK_LValueToRValue)
@@ -2173,6 +2206,15 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
   if (Members.empty())
     return;
   const unsigned N = Members.size();
+
+  // A `[*this]` capture copy-constructs the whole object; a user-provided
+  // copy constructor is opaque and trusted (paper §5.1's
+  // trust-the-constructor principle, like this pass's other trust gates),
+  // so the capture's whole-object reads are appended only without one.
+  const bool StarThisCopyTrusted =
+      llvm::any_of(Ctor->getParent()->ctors(), [](const CXXConstructorDecl *C) {
+        return C->isCopyConstructor() && C->isUserProvided();
+      });
 
   // Statements the pass may see: the constructor body plus each *written*
   // member/base initializer expression (the CFG is built with
@@ -2290,7 +2332,8 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
       } else if (const auto *CE = dyn_cast<CallExpr>(St)) {
         appendLifecycleCallEvents(CE, N, Index, BlockEvents);
       } else if (const auto *LE = dyn_cast<LambdaExpr>(St)) {
-        appendThisCaptureLambdaReadEvents(LE, Index, BlockEvents);
+        appendThisCaptureLambdaReadEvents(LE, Index, StarThisCopyTrusted,
+                                          BlockEvents);
       }
     }
   }

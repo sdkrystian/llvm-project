@@ -860,7 +860,11 @@ those entries never cause a rejection.
   its body count at the point the lambda is created, and writes there earn
   no credit (see `Reads of Uninitialized Objects`_): a lambda that is only
   ever run later, after the members are assigned, is rejected the same
-  way.
+  way.  A ``*this`` capture copy-constructs the whole object at the
+  lambda's creation, reading every member right there: it is rejected
+  before every tracked member is assigned -- unless the class has a
+  *user-provided* copy constructor, which is opaque and trusted (§5.1) --
+  and its body accesses go to the copy, not the original.
 - The flow-based read passes promote every use a path *may* reach
   uninitialized to the profile error, path-insensitively: with two
   correlated conditions (``if (c) x = 1; ... if (c) use(x);``) the read is

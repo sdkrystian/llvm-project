@@ -396,6 +396,66 @@ struct LambdaReadSuppressed {
   }
 };
 
+// A `*this` capture copy-constructs the whole object at the lambda's
+// creation, reading every member right there -- one read per tracked member
+// at the LambdaExpr, body reads not attributed to the original (they go to
+// the copy).
+struct LambdaStarThisReadsAll {
+  int a [[uninit]]; // expected-note {{member 'a' declared here}}
+  int b [[uninit]]; // expected-note {{member 'b' declared here}}
+  LambdaStarThisReadsAll() {
+    auto l = [*this] { return 0; }; // expected-error {{member 'a' is read before initialization under profile 'std::init'}} \
+                                    // expected-error {{member 'b' is read before initialization under profile 'std::init'}}
+    (void)l;
+  }
+};
+
+struct LambdaStarThisAfterAssign {
+  int m [[uninit]];
+  LambdaStarThisAfterAssign() {
+    m = 1;
+    auto l = [*this] { return 0; }; // OK: every tracked member assigned here
+    (void)l;
+  }
+};
+
+// The whole-object read fires at the lambda even when the body also uses the
+// member: the copy-construction is the read of the original.
+struct LambdaStarThisBodyUse {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  LambdaStarThisBodyUse() {
+    auto l = [*this] { return m; }; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    (void)l;
+  }
+};
+
+// A nested `*this` capture inside a `this` lambda's body copies the object
+// when the outer body runs -- which may be immediately -- so the
+// whole-object reads land at the nested LambdaExpr, and its body is not
+// descended into.
+struct LambdaStarThisNested {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  LambdaStarThisNested() {
+    auto l = [this] {
+      auto n = [*this] { return 0; }; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+      (void)n;
+    };
+    (void)l;
+  }
+};
+
+// A user-provided copy constructor is opaque and trusted (§5.1's
+// trust-the-constructor principle): its body may leave the members alone, so
+// the `*this` capture's copy earns no whole-object reads.
+struct LambdaStarThisTrustedCopy {
+  int m [[uninit]];
+  LambdaStarThisTrustedCopy(const LambdaStarThisTrustedCopy &);
+  LambdaStarThisTrustedCopy() {
+    auto l = [*this] { return 0; }; // OK: user-provided copy ctor trusted
+    (void)l;
+  }
+};
+
 // Strict crediting for plain escapes: inside a constructor body, nothing but
 // a whole-member assignment counts as initializing an [[uninit]] member.
 // Passing &m to a [[ref_to_uninit]] parameter of an ordinary function,
