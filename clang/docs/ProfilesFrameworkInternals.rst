@@ -261,8 +261,8 @@ in-tree pilot:
 
    if (Ops.Ty->isIntegerType() && Ops.mayHaveIntegerDivisionByZero())
      CGF.EmitProfileRuntimeCheck(
-         "test::arith", diag::trap_profile_zero_divide, Ops.E->getExprLoc(),
-         [&] {
+         "std::core_ub", diag::trap_profile_core_ub_zero_divide,
+         Ops.E->getExprLoc(), [&] {
            return Builder.CreateICmpNE(
                Ops.RHS, llvm::Constant::getNullValue(Ops.RHS->getType()));
          });
@@ -275,9 +275,13 @@ state its own unit recorded, and an NSDMI or default argument by its
 member's or parameter's dominion wherever it is emitted).  Only when the
 check is active does it invoke the builder for the predicate, so an inactive
 site emits no IR, and then emits a conditional branch to a trap block
-(``SanitizerHandler::ProfileViolation``).  Unevaluated operands and
-discarded statements are never emitted at all, so the Sema-side gates for
-those contexts need no CodeGen counterpart.
+(``SanitizerHandler::ProfileViolation``).  When several profiles ride one
+check -- the div/rem site carries both the ``std::core_ub`` and the
+``test::arith`` ``zero_divide`` calls -- each profile makes its own call:
+the predicate and trap are duplicated per enforced profile (redundant,
+never wrong), and each trap stays attributed to its profile.  Unevaluated
+operands and discarded statements are never emitted at all, so the
+Sema-side gates for those contexts need no CodeGen counterpart.
 
 Failure semantics are trap-only: ``llvm.ubsantrap`` with the handler's own
 immediate, no handler call, no runtime library.  That is forced rather than
@@ -529,3 +533,20 @@ The names ``test::other``, ``test::bounds``, ``test::new_profile``, and
 negative tests as "some other profile" stand-ins; adding a real profile under
 any of them would invalidate those tests.
 
+
+The std::core_ub Implementation Map
+===================================
+
+``std::core_ub`` (documented in :doc:`ProfilesFramework`) is all pattern 5:
+each rule is an ``EmitProfileRuntimeCheck`` call at the CodeGen site that
+emits the guarded operation.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 76
+
+   * - Rule
+     - Check site
+   * - ``zero_divide``
+     - ``ScalarExprEmitter::EmitDiv`` and ``EmitRem`` (shared with the
+       ``test::arith`` pilot as independent per-profile calls)
