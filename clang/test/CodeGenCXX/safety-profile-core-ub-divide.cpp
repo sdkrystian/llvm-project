@@ -99,27 +99,30 @@ int decl_suppressed(int a, int b) {
 }
 
 // Rule granularity: naming the violated rule suppresses; naming another rule
-// of the same profile does not.
-// CHECK-LABEL: define {{.*}} @_Z10rule_matchii(
+// of the same profile does not. Unsigned division, so zero_divide is the
+// only std::core_ub rule riding the operation (a signed division would also
+// carry the signed_overflow INT_MIN/-1 check).
+// CHECK-LABEL: define {{.*}} @_Z10rule_matchjj(
 // CHECK-NOT: llvm.ubsantrap
 // CHECK: ret i32
-int rule_match(int a, int b) {
+unsigned rule_match(unsigned a, unsigned b) {
   [[profiles::suppress(std::core_ub, rule: "zero_divide")]] return a / b;
 }
 
-// CHECK-LABEL: define {{.*}} @_Z13rule_mismatchii(
+// CHECK-LABEL: define {{.*}} @_Z13rule_mismatchjj(
 // CHECK: call void @llvm.ubsantrap(i8
-int rule_mismatch(int a, int b) {
+unsigned rule_mismatch(unsigned a, unsigned b) {
   [[profiles::suppress(std::core_ub, rule: "other_rule")]] return a / b;
 }
 
 // Suppressing only the pilot profile does not remove std::core_ub's check
 // (and vice versa: each per-profile call gates on its own suppression).
-// RIDER-LABEL: define {{.*}} @_Z16other_suppressedii(
+// Unsigned, so exactly one check -- std::core_ub's zero_divide -- remains.
+// RIDER-LABEL: define {{.*}} @_Z16other_suppressedjj(
 // RIDER: call void @llvm.ubsantrap(i8
 // RIDER-NOT: call void @llvm.ubsantrap(i8
 // RIDER: ret i32
-int other_suppressed(int a, int b) {
+unsigned other_suppressed(unsigned a, unsigned b) {
   [[profiles::suppress(test::arith)]] return a / b;
 }
 

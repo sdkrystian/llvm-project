@@ -44,5 +44,9 @@ def trap_profile_core_ub_zero_divide : Trap<
   "integer division or remainder by zero under profile '%0'">,
   Latent, InGroup<ProfileStdCoreUbZeroDivide>, ShowInSystemHeader;
 
+def trap_profile_signed_overflow : Trap<
+  "signed integer overflow under profile '%0'">,
+  Latent, InGroup<ProfileStdCoreUbSignedOverflow>, ShowInSystemHeader;
+
 }
 }
