@@ -2022,8 +2022,9 @@ def ProfileTestArith : DiagGroup<"profile-test-arith", [ProfileTestArithZeroDivi
 def ProfileStdCoreUbZeroDivide : DiagGroup<"profile-std-core-ub-zero-divide">;
 def ProfileStdCoreUbSignedOverflow : DiagGroup<"profile-std-core-ub-signed-overflow">;
 def ProfileStdCoreUbInvalidShift : DiagGroup<"profile-std-core-ub-invalid-shift">;
+def ProfileStdCoreUbMisalignedAccess : DiagGroup<"profile-std-core-ub-misaligned-access">;
 def ProfileStdCoreUb : DiagGroup<"profile-std-core-ub", [
-    ProfileStdCoreUbZeroDivide, ProfileStdCoreUbSignedOverflow, ProfileStdCoreUbInvalidShift]>;
+    ProfileStdCoreUbZeroDivide, ProfileStdCoreUbSignedOverflow, ProfileStdCoreUbInvalidShift, ProfileStdCoreUbMisalignedAccess]>;
 def Profiles : DiagGroup<"profiles", [ProfileTestTypeCast, ProfileTestUninitRead,
                                       ProfileTestCfgHooks, ProfileTestClassFinal,
                                       ProfileTestCtorFinal, ProfileTestArith,

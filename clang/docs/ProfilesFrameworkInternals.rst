@@ -559,3 +559,7 @@ emits the guarded operation.
    * - ``invalid_shift``
      - ``ScalarExprEmitter::EmitShl`` and ``EmitShr`` (exponent arm; the
        pre-C++20 signed base arm lives in ``EmitShl`` only)
+   * - ``misaligned_access``
+     - ``CodeGenFunction::EmitTypeCheck``, reached with no sanitizer on
+       through ``profilePerformTypeCheck`` (which also relaxes the
+       caller-side ``sanitizePerformTypeCheck`` gates)

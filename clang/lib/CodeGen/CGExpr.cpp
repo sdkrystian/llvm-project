@@ -37,6 +37,7 @@
 #include "clang/AST/StmtVisitor.h"
 #include "clang/Basic/Builtins.h"
 #include "clang/Basic/CodeGenOptions.h"
+#include "clang/Basic/DiagnosticTrap.h"
 #include "clang/Basic/Module.h"
 #include "clang/Basic/SourceManager.h"
 #include "llvm/ADT/STLExtras.h"
@@ -703,7 +704,8 @@ CodeGenFunction::EmitReferenceBindingToExpr(const Expr *E) {
   assert(LV.isSimple());
   llvm::Value *Value = LV.getPointer(*this);
 
-  if (sanitizePerformTypeCheck() && !E->getType()->isFunctionType()) {
+  if ((sanitizePerformTypeCheck() || profilePerformTypeCheck()) &&
+      !E->getType()->isFunctionType()) {
     // C++11 [dcl.ref]p5 (as amended by core issue 453):
     //   If a glvalue to which a reference is directly bound designates neither
     //   an existing object or function of an appropriate type nor a region of
@@ -754,12 +756,20 @@ bool CodeGenFunction::sanitizePerformTypeCheck() const {
          SanOpts.has(SanitizerKind::Vptr);
 }
 
+bool CodeGenFunction::profilePerformTypeCheck() const {
+  // Cheap enough to consult per access: isProfileEnforced is a small linear
+  // scan of the TU's enforced-profile set; the seam where a memoization
+  // could sit is documented in CGProfiles.cpp (EmitProfileRuntimeCheck).
+  return getLangOpts().Profiles &&
+         getContext().isProfileEnforced("std::core_ub");
+}
+
 void CodeGenFunction::EmitTypeCheck(TypeCheckKind TCK, SourceLocation Loc,
                                     llvm::Value *Ptr, QualType Ty,
                                     CharUnits Alignment,
                                     SanitizerSet SkippedChecks,
                                     llvm::Value *ArraySize) {
-  if (!sanitizePerformTypeCheck())
+  if (!sanitizePerformTypeCheck() && !profilePerformTypeCheck())
     return;
 
   // Don't check pointers outside the default address space. The null check
@@ -883,6 +893,31 @@ void CodeGenFunction::EmitTypeCheck(TypeCheckKind TCK, SourceLocation Loc,
           llvm::ConstantInt::get(Int8Ty, TCK)};
       EmitCheck(Checks, CheckHandler, StaticData, PtrAsInt ? PtrAsInt : Ptr);
     }
+  }
+
+  // After the sanitizer block, independent of sanitizer state (see
+  // ScalarExprEmitter::EmitDiv for the rationale): std::core_ub's
+  // misaligned_access rule (P4317 {basic.align.object.alignment}), with the
+  // same applicability facts as the sanitizer's alignment arm minus the
+  // sanitizer knobs -- the SkippedChecks entry and a suitably aligned alloca
+  // are static facts and do elide the check.
+  if (profilePerformTypeCheck() &&
+      !SkippedChecks.has(SanitizerKind::Alignment)) {
+    llvm::MaybeAlign ProfAlignVal = Alignment.getAsMaybeAlign();
+    if (!Ty->isIncompleteType() && !ProfAlignVal)
+      ProfAlignVal = CGM.getNaturalTypeAlignment(Ty, nullptr, nullptr,
+                                                 /*ForPointeeType=*/true)
+                         .getAsMaybeAlign();
+    if (ProfAlignVal && *ProfAlignVal > llvm::Align(1) &&
+        (!PtrToAlloca || PtrToAlloca->getAlign() < *ProfAlignVal))
+      EmitProfileRuntimeCheck(
+          "std::core_ub", diag::trap_profile_misaligned_access, Loc, [&] {
+            return Builder.CreateICmpEQ(
+                Builder.CreateAnd(Builder.CreatePtrToInt(Ptr, IntPtrTy),
+                                  llvm::ConstantInt::get(
+                                      IntPtrTy, ProfAlignVal->value() - 1)),
+                llvm::ConstantInt::get(IntPtrTy, 0));
+          });
   }
 
   // If possible, check that the vptr indicates that there is a subobject of
@@ -6317,7 +6352,7 @@ LValue CodeGenFunction::EmitCastLValue(const CastExpr *E) {
 
     // C++11 [expr.static.cast]p2: Behavior is undefined if a downcast is
     // performed and the object is not of the derived type.
-    if (sanitizePerformTypeCheck())
+    if (sanitizePerformTypeCheck() || profilePerformTypeCheck())
       EmitTypeCheck(TCK_DowncastReference, E->getExprLoc(), Derived,
                     E->getType());
 
