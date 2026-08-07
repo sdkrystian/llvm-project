@@ -961,3 +961,55 @@ struct [[profiles::suppress(std::init)]] SuppressedClass {
   int m [[uninit]];
   SuppressedClass() { int y = m; (void)y; }
 };
+
+// A union's own constructor is not flow-analyzed: its members are mutually
+// exclusive, so writing one gives the union its value and per-member
+// assigned bits would mismodel variant exclusivity (§5.6 -- whether the
+// active member is set is deferred, matching ctor_uninit_member's union
+// exemption). Reachable only with the union_marker rejections suppressed
+// (the [[uninit]] markers stay in the AST either way).
+// no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+union [[profiles::suppress(std::init, rule: "union_marker")]] UnionOwnCtor {
+  int a [[uninit]];
+  int b [[uninit]];
+  UnionOwnCtor() { a = 1; int y = b; (void)y; } // OK: not flow-analyzed
+};
+
+// An anonymous union inside a tracked class: the sibling [[uninit]] scalar
+// stays tracked and flagged, and touching a union leaf neither credits nor
+// reads it (the leaf is not a tracked member; ctor_uninit_member's
+// initialize-the-union obligation is a separate rule, suppressed here to
+// isolate the flow pass).
+struct AnonUnionSibling {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  union {
+    int u1;
+    float u2;
+  };
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  [[profiles::suppress(std::init, rule: "ctor_uninit_member")]]
+  AnonUnionSibling() {
+    u1 = 1;
+    int y = m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    (void)y;
+  }
+};
+
+// A named union member is never a tracked member of the enclosing class's
+// flow pass: reading its leaf draws no member-read error even though the
+// union was never assigned.
+union NamedInner {
+  int x;
+  float f;
+};
+struct NamedUnionMember {
+  int m [[uninit]];
+  NamedInner in;
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  [[profiles::suppress(std::init, rule: "ctor_uninit_member")]]
+  NamedUnionMember() {
+    m = 0;
+    int y = in.x; // OK: union members are not flow-tracked
+    (void)y;
+  }
+};

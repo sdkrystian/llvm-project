@@ -425,7 +425,10 @@ marked pointers and references (§4.3), not by-value slots -- and
 ``[[profiles::suppress]]`` is the remedy where the by-value flow is
 intended.  Members of an object initialized by a *user-provided*
 constructor are trusted (§5.1) and not flow-tracked; only the defining
-constructor itself is checked.
+constructor itself is checked.  A *union's* own constructor is not
+flow-analyzed at all: its members are mutually exclusive, so whether the
+active member is set is deferred (§5.6), matching ``ctor_uninit_member``'s
+union exemption.
 
 
 Writes to Subobjects of Uninitialized Objects

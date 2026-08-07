@@ -2192,6 +2192,16 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
   if (Ctor->isDelegatingConstructor())
     return;
 
+  // A union's members are mutually exclusive: writing one gives the union
+  // its value, so per-member assigned bits mismodel variant exclusivity
+  // (paper §5.6 -- delayed union-member initialization is banned, and
+  // whether the active member is set is deferred), exactly as the
+  // ctor_uninit_member finalization callback exempts a union's own
+  // constructor. Reachable only when the union_marker rejections are
+  // suppressed (the [[uninit]] markers stay in the AST either way).
+  if (Ctor->getParent()->isUnion())
+    return;
+
   CFG *cfg = AC.getCFG();
   if (!cfg)
     return;
