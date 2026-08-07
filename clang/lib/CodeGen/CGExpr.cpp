@@ -2237,14 +2237,24 @@ bool CodeGenFunction::EmitScalarRangeCheck(llvm::Value *Value, QualType Ty,
                                            SourceLocation Loc) {
   bool HasBoolCheck = SanOpts.has(SanitizerKind::Bool);
   bool HasEnumCheck = SanOpts.has(SanitizerKind::Enum);
-  if (!HasBoolCheck && !HasEnumCheck)
+  // std::core_ub's enum_out_of_range rule (P4317
+  // {expr.static.cast.enum.outside.range}) rides this site: an enum load is
+  // checked whenever the profile is enforced, with no sanitizer involved.
+  // The P4317 case is enum-specific, so bool loads stay profile-unchecked.
+  bool HasProfileEnumCheck = Ty->isEnumeralType() && profilePerformTypeCheck();
+  if (!HasBoolCheck && !HasEnumCheck && !HasProfileEnumCheck)
     return false;
 
   bool IsBool = (Ty->hasBooleanRepresentation() && !Ty->isVectorType()) ||
                 NSAPI(CGM.getContext()).isObjCBOOLType(Ty);
   bool NeedsBoolCheck = HasBoolCheck && IsBool;
   bool NeedsEnumCheck = HasEnumCheck && Ty->isEnumeralType();
-  if (!NeedsBoolCheck && !NeedsEnumCheck)
+  // The sanitizer's type ignorelist is a sanitizer knob: it turns the
+  // sanitizer check off but must not void the profile's.
+  if (NeedsEnumCheck &&
+      getContext().isTypeIgnoredBySanitizer(SanitizerKind::Enum, Ty))
+    NeedsEnumCheck = false;
+  if (!NeedsBoolCheck && !NeedsEnumCheck && !HasProfileEnumCheck)
     return false;
 
   // Single-bit booleans don't need to be checked. Special-case this to avoid
@@ -2254,35 +2264,46 @@ bool CodeGenFunction::EmitScalarRangeCheck(llvm::Value *Value, QualType Ty,
       cast<llvm::IntegerType>(Value->getType())->getBitWidth() == 1)
     return false;
 
-  if (NeedsEnumCheck &&
-      getContext().isTypeIgnoredBySanitizer(SanitizerKind::Enum, Ty))
-    return false;
-
   llvm::APInt Min, End;
   if (!getRangeForType(*this, Ty, Min, End, /*StrictEnums=*/true,
                        /*StrictBool=*/true, IsBool))
+    // No representable-range restriction -- e.g. an enum with a fixed
+    // underlying type, whose every value is valid: nothing to check, for
+    // the sanitizer or the profile.
     return true;
 
-  SanitizerKind::SanitizerOrdinal Kind =
-      NeedsEnumCheck ? SanitizerKind::SO_Enum : SanitizerKind::SO_Bool;
-
   auto &Ctx = getLLVMContext();
-  auto CheckHandler = SanitizerHandler::LoadInvalidValue;
-  SanitizerDebugLocation SanScope(this, {Kind}, CheckHandler);
-  llvm::Value *Check;
   --End;
-  if (!Min) {
-    Check = Builder.CreateICmpULE(Value, llvm::ConstantInt::get(Ctx, End));
-  } else {
+  auto BuildInRange = [&]() -> llvm::Value * {
+    if (!Min)
+      return Builder.CreateICmpULE(Value, llvm::ConstantInt::get(Ctx, End));
     llvm::Value *Upper =
         Builder.CreateICmpSLE(Value, llvm::ConstantInt::get(Ctx, End));
     llvm::Value *Lower =
         Builder.CreateICmpSGE(Value, llvm::ConstantInt::get(Ctx, Min));
-    Check = Builder.CreateAnd(Upper, Lower);
+    return Builder.CreateAnd(Upper, Lower);
+  };
+
+  if (NeedsBoolCheck || NeedsEnumCheck) {
+    SanitizerKind::SanitizerOrdinal Kind =
+        NeedsEnumCheck ? SanitizerKind::SO_Enum : SanitizerKind::SO_Bool;
+    auto CheckHandler = SanitizerHandler::LoadInvalidValue;
+    SanitizerDebugLocation SanScope(this, {Kind}, CheckHandler);
+    llvm::Value *Check = BuildInRange();
+    llvm::Constant *StaticArgs[] = {EmitCheckSourceLocation(Loc),
+                                    EmitCheckTypeDescriptor(Ty)};
+    EmitCheck(std::make_pair(Check, Kind), CheckHandler, StaticArgs, Value);
   }
-  llvm::Constant *StaticArgs[] = {EmitCheckSourceLocation(Loc),
-                                  EmitCheckTypeDescriptor(Ty)};
-  EmitCheck(std::make_pair(Check, Kind), CheckHandler, StaticArgs, Value);
+
+  // After the sanitizer block, independent of sanitizer state (see
+  // ScalarExprEmitter::EmitDiv): the profile's own instance of the same
+  // predicate. Returning true either way keeps maybeAttachRangeForLoad from
+  // attaching MD_range metadata that would let the optimizer delete the
+  // check.
+  if (HasProfileEnumCheck)
+    EmitProfileRuntimeCheck("std::core_ub",
+                            diag::trap_profile_enum_out_of_range, Loc,
+                            BuildInRange);
   return true;
 }
 
