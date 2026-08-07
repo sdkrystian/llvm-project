@@ -3381,9 +3381,9 @@ public:
   /// skipped.
   bool sanitizePerformTypeCheck() const;
 
-  /// Whether the std::core_ub profile's type-check rules (pattern 5) may
-  /// apply to the code being emitted, so EmitTypeCheck must run even with no
-  /// type-checking sanitizer enabled.
+  /// Whether the std::core_ub profile's runtime-checked rules (pattern 5)
+  /// may apply to the code being emitted, so EmitTypeCheck and
+  /// EmitBoundsCheck must run even with no corresponding sanitizer enabled.
   bool profilePerformTypeCheck() const;
 
   void EmitTypeCheck(TypeCheckKind TCK, SourceLocation Loc, LValue LV,
