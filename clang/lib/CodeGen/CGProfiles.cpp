@@ -19,17 +19,17 @@
 using namespace clang;
 using namespace clang::CodeGen;
 
-void CodeGenFunction::EmitProfileRuntimeCheck(
+bool CodeGenFunction::EmitProfileRuntimeCheck(
     StringRef Profile, unsigned TrapDiagID, SourceLocation Loc,
     llvm::function_ref<llvm::Value *()> BuildPassed) {
   if (!getLangOpts().Profiles)
-    return;
+    return false;
   // The positional gate keeps code before the enforcement --
   // global-module-fragment functions emitted after the purview is parsed, or
   // from a BMI -- outside the dominion, and honors a suppression wherever
   // the checked tokens are emitted from.
   if (!getContext().isProfileRuleActiveAt(TrapDiagID, Loc))
-    return;
+    return false;
   // The check fires: only now build the site's "no violation" predicate, so
   // an inactive site emits no IR at all.
   llvm::Value *Passed = BuildPassed();
@@ -49,4 +49,5 @@ void CodeGenFunction::EmitProfileRuntimeCheck(
   ApplyDebugLocation ADL(*this, Loc);
   EmitTrapCheck(Passed, SanitizerHandler::ProfileViolation, /*NoMerge=*/false,
                 &TR);
+  return true;
 }

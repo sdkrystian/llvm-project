@@ -2027,8 +2027,9 @@ def ProfileStdCoreUbNullDereference : DiagGroup<"profile-std-core-ub-null-derefe
 def ProfileStdCoreUbOutOfBounds : DiagGroup<"profile-std-core-ub-out-of-bounds">;
 def ProfileStdCoreUbFloatCastOverflow : DiagGroup<"profile-std-core-ub-float-cast-overflow">;
 def ProfileStdCoreUbEnumOutOfRange : DiagGroup<"profile-std-core-ub-enum-out-of-range">;
+def ProfileStdCoreUbMissingReturn : DiagGroup<"profile-std-core-ub-missing-return">;
 def ProfileStdCoreUb : DiagGroup<"profile-std-core-ub", [
-    ProfileStdCoreUbZeroDivide, ProfileStdCoreUbSignedOverflow, ProfileStdCoreUbInvalidShift, ProfileStdCoreUbMisalignedAccess, ProfileStdCoreUbNullDereference, ProfileStdCoreUbOutOfBounds, ProfileStdCoreUbFloatCastOverflow, ProfileStdCoreUbEnumOutOfRange]>;
+    ProfileStdCoreUbZeroDivide, ProfileStdCoreUbSignedOverflow, ProfileStdCoreUbInvalidShift, ProfileStdCoreUbMisalignedAccess, ProfileStdCoreUbNullDereference, ProfileStdCoreUbOutOfBounds, ProfileStdCoreUbFloatCastOverflow, ProfileStdCoreUbEnumOutOfRange, ProfileStdCoreUbMissingReturn]>;
 def Profiles : DiagGroup<"profiles", [ProfileTestTypeCast, ProfileTestUninitRead,
                                       ProfileTestCfgHooks, ProfileTestClassFinal,
                                       ProfileTestCtorFinal, ProfileTestArith,

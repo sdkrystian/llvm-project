@@ -72,5 +72,9 @@ def trap_profile_enum_out_of_range : Trap<
   "load of an out-of-range enumeration value under profile '%0'">,
   Latent, InGroup<ProfileStdCoreUbEnumOutOfRange>, ShowInSystemHeader;
 
+def trap_profile_missing_return : Trap<
+  "flowing off the end of a value-returning function under profile '%0'">,
+  Latent, InGroup<ProfileStdCoreUbMissingReturn>, ShowInSystemHeader;
+
 }
 }

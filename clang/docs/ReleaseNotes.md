@@ -120,8 +120,9 @@ latest release, please see the [Clang Web Site](https://clang.llvm.org) or the
   guards integer division and remainder by zero, signed integer overflow,
   invalid shifts, misaligned pointer accesses, null-pointer dereferences,
   out-of-bounds subscripts of statically sized arrays, float-to-integer
-  conversion overflow, and loads of out-of-range enumeration values. See
-  the C++ Profiles Framework documentation (`ProfilesFramework.rst`).
+  conversion overflow, loads of out-of-range enumeration values, and
+  flowing off the end of a value-returning function. See the C++ Profiles
+  Framework documentation (`ProfilesFramework.rst`).
 
 ### New Compiler Flags
 

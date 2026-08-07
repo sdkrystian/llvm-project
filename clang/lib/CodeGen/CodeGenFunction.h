@@ -634,8 +634,11 @@ public:
   /// debug location points at \p Loc and -- under the default Detailed
   /// -fsanitize-debug-trap-reasons mode, when debug info is emitted --
   /// carries \p TrapDiagID (a DiagnosticTrapKinds.td diagnostic) naming the
-  /// violated profile. No-op without -fprofiles.
-  void EmitProfileRuntimeCheck(StringRef Profile, unsigned TrapDiagID,
+  /// violated profile. No-op without -fprofiles. Returns true iff a check
+  /// was emitted, for the rare site whose subsequent emission depends on it
+  /// (std::core_ub's missing_return terminates the fall-off block only when
+  /// something made it unreachable).
+  bool EmitProfileRuntimeCheck(StringRef Profile, unsigned TrapDiagID,
                                SourceLocation Loc,
                                llvm::function_ref<llvm::Value *()> BuildPassed);
 
