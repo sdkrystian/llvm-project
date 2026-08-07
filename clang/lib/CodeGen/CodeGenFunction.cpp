@@ -33,6 +33,7 @@
 #include "clang/Basic/Builtins.h"
 #include "clang/Basic/CodeGenOptions.h"
 #include "clang/Basic/DiagnosticFrontend.h"
+#include "clang/Basic/DiagnosticTrap.h"
 #include "clang/Basic/TargetBuiltins.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/CodeGen/CGFunctionInfo.h"
@@ -1649,7 +1650,20 @@ void CodeGenFunction::GenerateCode(GlobalDecl GD, llvm::Function *Fn,
       if (CGM.getCodeGenOpts().OptimizationLevel == 0)
         EmitTrapCall(llvm::Intrinsic::trap);
     }
-    if (SanOpts.has(SanitizerKind::Return) || ShouldEmitUnreachable) {
+    // After the sanitizer arm, outside its scope (see
+    // ScalarExprEmitter::EmitDiv for the rationale): std::core_ub's
+    // missing_return rule (P4317 {stmt.return.flow.off}). Reaching this
+    // insertion point *is* the violation, so the check folds to an
+    // unconditional trap. Located at the function's declaration, so a
+    // system-header function is exempt, consistent with the compile-time
+    // rules. When only the profile fired, its trap is what makes the
+    // fall-off block unreachable -- but a silent call (suppressed, exempt,
+    // not enforced) must not terminate it.
+    bool ProfileFired = EmitProfileRuntimeCheck(
+        "std::core_ub", diag::trap_profile_missing_return, FD->getLocation(),
+        [&] { return Builder.getFalse(); });
+    if (SanOpts.has(SanitizerKind::Return) || ShouldEmitUnreachable ||
+        ProfileFired) {
       Builder.CreateUnreachable();
       Builder.ClearInsertionPoint();
     }
