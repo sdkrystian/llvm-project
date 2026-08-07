@@ -966,6 +966,11 @@ those entries never cause a rejection.
   strictness bullet above), so an *explicit* call passing an uninitialized
   copy into such a parameter is not detected -- reads of its marked members
   in the callee are trusted.
+- An *alias* of ``this`` in a constructor body -- a stored
+  ``T *self = this;``, an init-capture ``[p = this]``, ``&*this`` -- is
+  invisible to the constructor-body pass: reads through the alias are not
+  attributed to the members, and writes through it earn no credit (that
+  half is a strictness, never a false positive).
 - Virtual base subobjects are not checked by ``ctor_uninit_member`` (they are
   initialized by the most-derived class).
 - A read of a tracked member inside another member's default initializer is

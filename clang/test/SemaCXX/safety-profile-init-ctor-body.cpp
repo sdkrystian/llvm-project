@@ -456,6 +456,40 @@ struct LambdaStarThisTrustedCopy {
   }
 };
 
+// An *alias* of `this` -- an init-capture `[p = this]` (capturesThis() is
+// false for it), a stored `T *self = this`, `&*this` -- is invisible to the
+// pass: reads through the alias are not attributed to the members (a missed
+// diagnostic, pinned here), and writes through it earn no credit (the
+// strictness half -- a false-positive-free direction). See the Limitations
+// doc; a capture-only special case would cover a sliver of the alias class
+// and was rejected.
+struct AliasThisInitCapture {
+  int m [[uninit]];
+  AliasThisInitCapture() {
+    auto l = [p = this] { return p->m; }; // OK: known gap (aliased this)
+    (void)l;
+  }
+};
+
+struct AliasThisLocalRead {
+  int m [[uninit]];
+  AliasThisLocalRead() {
+    AliasThisLocalRead *self = this;
+    int y = self->m; // OK: known gap (aliased this)
+    (void)y;
+  }
+};
+
+struct AliasThisLocalWriteNoCredit {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  AliasThisLocalWriteNoCredit() {
+    AliasThisLocalWriteNoCredit *self = this;
+    self->m = 1;
+    int z = m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    (void)z;
+  }
+};
+
 // Strict crediting for plain escapes: inside a constructor body, nothing but
 // a whole-member assignment counts as initializing an [[uninit]] member.
 // Passing &m to a [[ref_to_uninit]] parameter of an ordinary function,
