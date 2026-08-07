@@ -192,6 +192,40 @@ int test_escape_placement_new() {
   return a.m; // OK: escaped
 }
 
+// A transparent reference cast denotes the same storage (paper §4.3), and
+// the pass peels exactly the casts the parse-order credit sees through: a
+// store through `(int &)a.m` is a recognized member write crediting exactly
+// `m` -- not a whole-object escape -- and a read through the cast is
+// detected. Taking the cast lvalue's address is still an unrecognized use of
+// the base, i.e. an escape crediting every member.
+struct CastAgg {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  int o [[uninit]]; // expected-note {{member 'o' declared here}}
+};
+int test_cast_store_credits_member() {
+  CastAgg a;
+  (int &)a.m = 1;
+  return a.m; // OK: assigned through the cast
+}
+
+int test_cast_store_credits_only_that_member() {
+  CastAgg a;
+  (int &)a.m = 1;
+  return a.o; // expected-error {{member 'o' is read before initialization under profile 'std::init'}}
+}
+
+int test_cast_read_detected() {
+  CastAgg a;
+  int y = (int &)a.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+  return y;
+}
+
+int test_cast_address_still_escapes() {
+  CastAgg a;
+  take_ptr(&(int &)a.m);
+  return a.o; // OK: escaped (whole-range credit)
+}
+
 // Reaching an *untracked* sibling of a scalar shape is not one of those
 // escapes: accessing `n` cannot give `sm` a value, so the tracked member stays
 // tracked across a sibling read, store, or increment.

@@ -2303,31 +2303,36 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
                               Entry.Rule, Entry.MemberReadDiagID);
 }
 
-// If E (stripped of parens and implicit casts, including the derived-to-base
-// cast of an inherited-member access) is a member access `V.m` on a directly
-// named variable, return the base DeclRefExpr and the field through \p F.
-// Anonymous-struct/union steps are peeled: `x.a` on an anonymous-aggregate
-// member is MemberExpr(MemberExpr(x, <anon>), a), and reaching `a` can no
-// more initialize x's other members than reaching a named sibling can, so
-// the leaf flows into the caller's classification unchanged (no tracked
-// member can live inside an anonymous record -- the harvest drops nameless
-// and non-scalar fields -- so a scalar leaf is an untracked sibling and any
+// If E (stripped of the transparent casts the parse-order credit sees
+// through -- parens, implicit casts including the derived-to-base cast of an
+// inherited-member access, and explicit glvalue/pointer casts like
+// `(int &)V.m`, which denote the same storage, §4.3) is a member access
+// `V.m` on a directly named variable, return the base DeclRefExpr and the
+// field through \p F. The peel applies at the member and base positions
+// alike, so a cast store credits exactly the accessed member (not a
+// whole-object escape) and a cast read is detected. Anonymous-struct/union
+// steps are peeled: `x.a` on an anonymous-aggregate member is
+// MemberExpr(MemberExpr(x, <anon>), a), and reaching `a` can no more
+// initialize x's other members than reaching a named sibling can, so the
+// leaf flows into the caller's classification unchanged (no tracked member
+// can live inside an anonymous record -- the harvest drops nameless and
+// non-scalar fields -- so a scalar leaf is an untracked sibling and any
 // other leaf stays a conservative escape). An arrow access or an access
 // through any other expression is not a tracked local's member.
 static const DeclRefExpr *getLocalMemberAccess(const Expr *E,
                                                const FieldDecl *&F) {
-  const auto *ME = dyn_cast<MemberExpr>(E->IgnoreParenImpCasts());
+  const auto *ME = dyn_cast<MemberExpr>(SemaProfiles::ignoreTransparentCasts(E));
   if (!ME || ME->isArrow())
     return nullptr;
   const auto *FD = dyn_cast<FieldDecl>(ME->getMemberDecl());
   if (!FD)
     return nullptr;
-  const Expr *Base = ME->getBase()->IgnoreParenImpCasts();
+  const Expr *Base = SemaProfiles::ignoreTransparentCasts(ME->getBase());
   while (const auto *BME = dyn_cast<MemberExpr>(Base)) {
     const auto *BFD = dyn_cast<FieldDecl>(BME->getMemberDecl());
     if (BME->isArrow() || !BFD || !BFD->isAnonymousStructOrUnion())
       break;
-    Base = BME->getBase()->IgnoreParenImpCasts();
+    Base = SemaProfiles::ignoreTransparentCasts(BME->getBase());
   }
   const auto *DRE = dyn_cast<DeclRefExpr>(Base);
   if (!DRE)
