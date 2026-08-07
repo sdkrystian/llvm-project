@@ -45,5 +45,8 @@ def trap_profile_misaligned_access : Trap<
 def trap_profile_null_dereference : Trap<
   "null pointer dereference under profile '%0'">;
 
+def trap_profile_out_of_bounds : Trap<
+  "array index out of bounds under profile '%0'">;
+
 }
 }

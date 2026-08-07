@@ -419,6 +419,12 @@ emits the guarded operation.
        through ``profilePerformTypeCheck`` (which also relaxes the
        caller-side ``sanitizePerformTypeCheck`` gates); the null rule skips
        the ``isNullPointerAllowed`` check kinds
+   * - ``out_of_bounds``
+     - ``CodeGenFunction::EmitBoundsCheck``, now self-gating on the
+       sanitizer or ``profilePerformTypeCheck`` (its subscript,
+       checked-lvalue, vector-subscript, and pointer-arithmetic callers
+       relaxed to match); the ``counted_by`` paths that call
+       ``EmitBoundsCheckImpl`` directly stay sanitizer-only
 
 
 The std::init Implementation Map

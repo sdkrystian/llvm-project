@@ -1128,6 +1128,12 @@ This slice covers locally checkable cases of P4317 Appendix A.1:
        member call.  Operations where a null pointer is legal (a pointer
        downcast, ``dynamic_cast``, ``typeid``) are not checked, nor is a
        pointer statically known to be non-null (a local's address).
+   * - ``out_of_bounds``
+     - ``{expr.add.out.of.bounds}``
+     - A subscript outside an array whose bound is known at the access --
+       below the bound for an access, at most one past the end for a mere
+       address -- and pointer arithmetic off such an array.  A constant
+       index statically inside a constant bound is not checked.
 
 The many cases of P4317 that require whole-program bookkeeping or a
 support runtime (heap bounds, lifetime, type confusion) are out of scope

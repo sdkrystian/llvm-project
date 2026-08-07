@@ -1340,16 +1340,61 @@ void CodeGenFunction::EmitBoundsCheck(const Expr *ArrayExpr,
                                       const Expr *ArrayExprBase,
                                       llvm::Value *IndexVal, QualType IndexType,
                                       bool Accessed) {
-  assert(SanOpts.has(SanitizerKind::ArrayBounds) &&
-         "should not be called unless adding bounds checks");
+  // Self-gating: callers funnel through whenever the array-bounds sanitizer
+  // or the std::core_ub profile may apply.
+  bool SanActive = SanOpts.has(SanitizerKind::ArrayBounds);
+  bool ProfileActive = profilePerformTypeCheck();
+  if (!SanActive && !ProfileActive)
+    return;
+
   const LangOptions::StrictFlexArraysLevelKind StrictFlexArraysLevel =
       getLangOpts().getStrictFlexArraysLevel();
   QualType ArrayExprBaseType;
   llvm::Value *BoundsVal = getArrayIndexingBound(
       *this, ArrayExprBase, ArrayExprBaseType, StrictFlexArraysLevel);
+  if (!BoundsVal)
+    return;
 
-  EmitBoundsCheckImpl(ArrayExpr, ArrayExprBaseType, IndexVal, IndexType,
-                      BoundsVal, getContext().getSizeType(), Accessed);
+  if (SanActive)
+    EmitBoundsCheckImpl(ArrayExpr, ArrayExprBaseType, IndexVal, IndexType,
+                        BoundsVal, getContext().getSizeType(), Accessed);
+
+  if (!ProfileActive)
+    return;
+
+  // After (and independent of) the sanitizer check: std::core_ub's
+  // out_of_bounds rule (P4317 {expr.add.out.of.bounds}), with
+  // EmitBoundsCheckImpl's predicate -- below the bound for an access, at
+  // most the bound for a mere past-the-end address -- over the same
+  // index/bound widening. A constant index statically inside a constant
+  // bound rules a violation out.
+  QualType BoundsType = getContext().getSizeType();
+  bool IndexSigned = IndexType->isSignedIntegerOrEnumerationType();
+  if (auto *CIdx = dyn_cast<llvm::ConstantInt>(IndexVal))
+    if (auto *CBound = dyn_cast<llvm::ConstantInt>(BoundsVal)) {
+      unsigned Width = std::max(CIdx->getValue().getBitWidth(),
+                                CBound->getValue().getBitWidth()) +
+                       1;
+      llvm::APInt Idx = IndexSigned ? CIdx->getValue().sext(Width)
+                                    : CIdx->getValue().zext(Width);
+      llvm::APInt Bound = CBound->getValue().zext(Width);
+      if (!Idx.isNegative() && (Accessed ? Idx.ult(Bound) : Idx.ule(Bound)))
+        return;
+    }
+  EmitProfileRuntimeCheck(
+      "std::core_ub", "out_of_bounds", diag::trap_profile_out_of_bounds,
+      ArrayExpr->getExprLoc(), [&] {
+        const ASTContext &Ctx = getContext();
+        llvm::Type *Ty = ConvertType(
+            Ctx.getTypeSize(IndexType) >= Ctx.getTypeSize(BoundsType)
+                ? IndexType
+                : BoundsType);
+        llvm::Value *IndexInst =
+            Builder.CreateIntCast(IndexVal, Ty, IndexSigned);
+        llvm::Value *BoundsInst = Builder.CreateIntCast(BoundsVal, Ty, false);
+        return Accessed ? Builder.CreateICmpULT(IndexInst, BoundsInst)
+                        : Builder.CreateICmpULE(IndexInst, BoundsInst);
+      });
 }
 
 void CodeGenFunction::EmitBoundsCheckImpl(const Expr *ArrayExpr,
@@ -1755,7 +1800,8 @@ bool CodeGenFunction::IsWrappedCXXThis(const Expr *Obj) {
 
 LValue CodeGenFunction::EmitCheckedLValue(const Expr *E, TypeCheckKind TCK) {
   LValue LV;
-  if (SanOpts.has(SanitizerKind::ArrayBounds) && isa<ArraySubscriptExpr>(E))
+  if ((SanOpts.has(SanitizerKind::ArrayBounds) || profilePerformTypeCheck()) &&
+      isa<ArraySubscriptExpr>(E))
     LV = EmitArraySubscriptExpr(cast<ArraySubscriptExpr>(E), /*Accessed*/true);
   else
     LV = EmitLValue(E);
@@ -5077,7 +5123,7 @@ LValue CodeGenFunction::EmitArraySubscriptExpr(const ArraySubscriptExpr *E,
     bool IdxSigned = IdxTy->isSignedIntegerOrEnumerationType();
     SignedIndices |= IdxSigned;
 
-    if (SanOpts.has(SanitizerKind::ArrayBounds))
+    if (SanOpts.has(SanitizerKind::ArrayBounds) || profilePerformTypeCheck())
       EmitBoundsCheck(E, E->getBase(), Idx, IdxTy, Accessed);
 
     // Extend or truncate the index type to 32 or 64-bits.
