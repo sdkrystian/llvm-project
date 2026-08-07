@@ -638,8 +638,11 @@ public:
   /// violated profile. No-op unless \p Profile is enforced by this unit or
   /// an imported module unit (ASTContext::isProfileEnforcedByAnyUnit): a
   /// diagnostic option previews a compile-time rule and never instruments
-  /// code.
-  void EmitProfileRuntimeCheck(StringRef Profile, unsigned TrapDiagID,
+  /// code. Returns true iff a check was emitted, for the rare site whose
+  /// subsequent emission depends on it (std::core_ub's missing_return
+  /// terminates the fall-off block only when something made it
+  /// unreachable).
+  bool EmitProfileRuntimeCheck(StringRef Profile, unsigned TrapDiagID,
                                SourceLocation Loc,
                                llvm::function_ref<llvm::Value *()> BuildPassed);
 
