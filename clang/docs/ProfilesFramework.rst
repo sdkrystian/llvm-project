@@ -34,9 +34,12 @@ Profile names are open-ended: standard (``std::``-prefixed),
 implementation-defined, and third-party profiles are all requested with the
 same syntax, and enforcing a profile the implementation does not know is not
 an error -- it simply has no rules to enforce.  Clang currently implements
-one real profile, an initial slice of the proposed ``std::init``
-initialization profile (see `The std::init Profile`_).  The
-feature is experimental: attribute spellings, rule names, and diagnostics may
+two real profiles: an initial slice of the proposed ``std::init``
+initialization profile (see `The std::init Profile`_), whose rules are
+checked at compile time, and an initial slice of the proposed
+``std::core_ub`` undefined-behavior profile (see `The std::core_ub
+Profile`_), whose rules are checked at run time.  The feature is
+experimental: attribute spellings, rule names, and diagnostics may
 change.
 
 
@@ -1022,10 +1025,11 @@ instrumentation like bound checking (§1.1, §2.2.2).  The framework supports
 such rules: enforcing the profile makes the compiler emit a runtime check
 into the generated code, and a failed check *traps* -- deterministically
 stopping the program (typically ``SIGILL``) before the guarded operation
-executes.  No real profile with runtime-checked rules ships yet; the
-in-tree pilot rule (``test::arith`` / ``zero_divide``, which traps on
-integer division or remainder by a runtime zero) exists to exercise the
-machinery and is inert outside the test suite.
+executes.  ``std::core_ub`` (see `The std::core_ub Profile`_) is the real
+profile built from such rules; the in-tree pilot rule (``test::arith`` /
+``zero_divide``, which traps on integer division or remainder by a runtime
+zero) additionally exists to exercise the machinery in the test suite and
+is inert outside it.
 
 Behavior of a runtime check:
 
@@ -1068,10 +1072,42 @@ Behavior of a runtime check:
   same rule: it is checked only if the *importing* TU enforces the profile,
   even when the module interface itself did.
 
-The pilot's zero-divisor check deliberately mirrors UBSan's blind spots:
-GCC vector-extension integer division, ``_Complex int`` division, and (in C
-only) compound assignment of a scalar by a ``_Complex`` operand are not
-checked.
+The zero-divisor checks (``std::core_ub``'s and the pilot's) deliberately
+mirror UBSan's blind spots: GCC vector-extension integer division,
+``_Complex int`` division, and (in C only) compound assignment of a scalar
+by a ``_Complex`` operand are not checked.
+
+
+The ``std::core_ub`` Profile
+============================
+
+``std::core_ub`` is an initial slice of the proposed profile from Vinnie
+Falco's "A Profile for Runtime-Checkable Core-Language Undefined Behavior:
+std::core_ub" (P4317; the case identifiers below, in braces, are from its
+Appendix A).  Its guarantee: **a checkable core-language operation whose
+precondition is violated traps rather than proceeding into undefined
+behavior**.  Unlike ``std::init``, it acts at run time: every rule is a
+runtime-checked rule with exactly the semantics of the previous section --
+the trap-only response, suppression of the whole profile or a single rule
+at any granularity `Suppressing Enforcement`_ describes, the system-header
+exemption, sanitizer independence, and per-TU enforcement.
+
+This slice covers locally checkable cases of P4317 Appendix A.1:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 34 44
+
+   * - Rule
+     - P4317 case
+     - Traps on
+   * - ``zero_divide``
+     - ``{expr.mul.div.by.zero}``
+     - Integer division or remainder by zero.
+
+The many cases of P4317 that require whole-program bookkeeping or a
+support runtime (heap bounds, lifetime, type confusion) are out of scope
+for this slice.
 
 
 Test Profiles

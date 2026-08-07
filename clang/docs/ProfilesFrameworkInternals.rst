@@ -171,7 +171,7 @@ in-tree example:
 
    if (Ops.Ty->isIntegerType() && Ops.mayHaveIntegerDivisionByZero())
      CGF.EmitProfileRuntimeCheck(
-         "test::arith", "zero_divide", diag::trap_profile_zero_divide,
+         "std::core_ub", "zero_divide", diag::trap_profile_zero_divide,
          Ops.E->getExprLoc(), [&] {
            return Builder.CreateICmpNE(
                Ops.RHS, llvm::Constant::getNullValue(Ops.RHS->getType()));
@@ -184,10 +184,13 @@ is not in an exempt system header, and that the rule is not suppressed for
 the code being emitted (the CodeGen suppression state above).  Only when the
 check is active does it invoke the builder for the predicate, so an inactive
 site emits no IR, and then emits a conditional branch to a trap block
-(``SanitizerHandler::ProfileViolation``).  Should several profiles ever ride
-one check, per-profile calls would duplicate the trap (redundant, never
-wrong); a grouped form emitting one trap with priority attribution is
-deferred until such a rider exists.  Unevaluated operands and discarded
+(``SanitizerHandler::ProfileViolation``).  When several profiles ride one
+check -- the div/rem site carries both the ``std::core_ub`` and the
+``test::arith`` ``zero_divide`` calls -- each profile makes its own call by
+design: the predicate and trap are duplicated per enforced profile
+(redundant, never wrong), and each trap stays attributed to its profile;
+a grouped form emitting one trap with priority attribution stays
+deferred.  Unevaluated operands and discarded
 statements are never emitted at all, so the Sema-side gates for those
 contexts need no CodeGen counterpart.
 
@@ -384,6 +387,24 @@ The names ``test::other``, ``test::bounds``, ``test::new_profile``, and
 ``test::not_enforced`` are deliberately *not* implemented and appear in
 negative tests as "some other profile" stand-ins; adding a real profile under
 any of them would invalidate those tests.
+
+
+The std::core_ub Implementation Map
+===================================
+
+``std::core_ub`` (documented in :doc:`ProfilesFramework`) is all pattern 5:
+each rule is an ``EmitProfileRuntimeCheck`` call at the CodeGen site that
+emits the guarded operation.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 76
+
+   * - Rule
+     - Check site
+   * - ``zero_divide``
+     - ``ScalarExprEmitter::EmitDiv`` and ``EmitRem`` (shared with the
+       ``test::arith`` pilot as independent per-profile calls)
 
 
 The std::init Implementation Map
