@@ -184,7 +184,10 @@ is not in an exempt system header, and that the rule is not suppressed for
 the code being emitted (the CodeGen suppression state above).  Only when the
 check is active does it invoke the builder for the predicate, so an inactive
 site emits no IR, and then emits a conditional branch to a trap block
-(``SanitizerHandler::ProfileViolation``).  When several profiles ride one
+(``SanitizerHandler::ProfileViolation``).  The call returns whether it
+emitted a check, for the rare site whose subsequent emission depends on it
+(``std::core_ub``'s ``missing_return`` terminates the fall-off block only
+when something made it unreachable).  When several profiles ride one
 check -- the div/rem site carries both the ``std::core_ub`` and the
 ``test::arith`` ``zero_divide`` calls -- each profile makes its own call by
 design: the predicate and trap are duplicated per enforced profile
@@ -433,6 +436,10 @@ emits the guarded operation.
      - ``CodeGenFunction::EmitScalarRangeCheck`` (which returns true for an
        enforced enum load so ``maybeAttachRangeForLoad`` never attaches
        ``MD_range`` metadata that would let the optimizer delete the check)
+   * - ``missing_return``
+     - ``CodeGenFunction::GenerateCode``'s fall-off path (an unconditional
+       trap: reaching the site is the violation; its emitted/silent result
+       decides whether the block gets an ``unreachable`` terminator)
 
 
 The std::init Implementation Map

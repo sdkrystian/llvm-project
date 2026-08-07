@@ -64,18 +64,18 @@ bool CodeGenFunction::isProfileSuppressionActive(StringRef Profile,
       Profile, Rule);
 }
 
-void CodeGenFunction::EmitProfileRuntimeCheck(
+bool CodeGenFunction::EmitProfileRuntimeCheck(
     StringRef Profile, StringRef Rule, unsigned TrapDiagID, SourceLocation Loc,
     llvm::function_ref<llvm::Value *()> BuildPassed) {
   if (!getLangOpts().Profiles)
-    return;
+    return false;
   // Enforcement first, so a TU that does not enforce the profile never pays
   // the suppression walk. This gate is also the seam where a memoization of
   // the scans could sit, should they ever matter.
   if (!getContext().isProfileEnforced(Profile) ||
       getContext().isProfileExemptSystemHeaderLoc(Loc) ||
       isProfileSuppressionActive(Profile, Rule))
-    return;
+    return false;
   // The check fires: only now build the site's "no violation" predicate, so
   // an inactive site emits no IR at all.
   llvm::Value *Passed = BuildPassed();
@@ -95,4 +95,5 @@ void CodeGenFunction::EmitProfileRuntimeCheck(
   ApplyDebugLocation ADL(*this, Loc);
   EmitTrapCheck(Passed, SanitizerHandler::ProfileViolation, /*NoMerge=*/false,
                 &TR);
+  return true;
 }

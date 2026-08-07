@@ -1146,6 +1146,9 @@ This slice covers locally checkable cases of P4317 Appendix A.1:
        representable range.  An enumeration with a fixed underlying type
        has no such restriction and is never checked; ``bool`` loads are
        not this rule's concern.
+   * - ``missing_return``
+     - ``{stmt.return.flow.off}``
+     - Flowing off the end of a value-returning function.
 
 The many cases of P4317 that require whole-program bookkeeping or a
 support runtime (heap bounds, lifetime, type confusion) are out of scope
