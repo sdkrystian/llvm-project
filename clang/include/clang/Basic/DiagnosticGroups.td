@@ -2040,8 +2040,9 @@ def ProfileStdCoreUbMisalignedAccess : ProfileRuleGroup<"std::core_ub", "misalig
 def ProfileStdCoreUbNullDereference : ProfileRuleGroup<"std::core_ub", "null_dereference">;
 def ProfileStdCoreUbOutOfBounds : ProfileRuleGroup<"std::core_ub", "out_of_bounds">;
 def ProfileStdCoreUbFloatCastOverflow : ProfileRuleGroup<"std::core_ub", "float_cast_overflow">;
+def ProfileStdCoreUbEnumOutOfRange : ProfileRuleGroup<"std::core_ub", "enum_out_of_range">;
 def ProfileStdCoreUb : ProfileGroup<"std::core_ub", [
-    ProfileStdCoreUbZeroDivide, ProfileStdCoreUbSignedOverflow, ProfileStdCoreUbInvalidShift, ProfileStdCoreUbMisalignedAccess, ProfileStdCoreUbNullDereference, ProfileStdCoreUbOutOfBounds, ProfileStdCoreUbFloatCastOverflow]>;
+    ProfileStdCoreUbZeroDivide, ProfileStdCoreUbSignedOverflow, ProfileStdCoreUbInvalidShift, ProfileStdCoreUbMisalignedAccess, ProfileStdCoreUbNullDereference, ProfileStdCoreUbOutOfBounds, ProfileStdCoreUbFloatCastOverflow, ProfileStdCoreUbEnumOutOfRange]>;
 def Profiles : DiagGroup<"profiles", [ProfileTestTypeCast, ProfileTestUninitRead,
                                       ProfileTestCfgHooks, ProfileTestClassFinal,
                                       ProfileTestCtorFinal, ProfileTestArith,
