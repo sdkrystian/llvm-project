@@ -113,6 +113,13 @@ latest release, please see the [Clang Web Site](https://clang.llvm.org) or the
 
 ### Non-comprehensive list of changes in this release
 
+- The experimental C++ Profiles framework (`-fprofiles`) gained an initial
+  slice of the `std::core_ub` profile (P4317): under
+  `[[profiles::enforce(std::core_ub)]]`, locally checkable core-language
+  undefined behavior traps at run time instead of executing. This release
+  guards integer division and remainder by zero. See the C++ Profiles
+  Framework documentation (`ProfilesFramework.rst`).
+
 ### New Compiler Flags
 
 ### Deprecated Compiler Flags
