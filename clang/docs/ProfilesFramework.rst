@@ -413,6 +413,12 @@ This slice covers locally checkable cases of P4317 Appendix A.1:
        below the bound for an access, at most one past the end for a mere
        address -- and pointer arithmetic off such an array.  A constant
        index statically inside a constant bound is not checked.
+   * - ``float_cast_overflow``
+     - ``{conv.fpint.*}``, ``{conv.double.out.of.range}``
+     - A floating-point value converted to an integer type that cannot
+       represent it after truncation toward zero (including ±Inf and NaN).
+       Conversions to a floating-point type are never checked: every
+       floating range is [-inf, +inf].
 
 The many cases of P4317 that require whole-program bookkeeping or a
 support runtime (heap bounds, lifetime, type confusion) are out of scope

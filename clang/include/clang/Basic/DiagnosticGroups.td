@@ -2025,8 +2025,9 @@ def ProfileStdCoreUbInvalidShift : DiagGroup<"profile-std-core-ub-invalid-shift"
 def ProfileStdCoreUbMisalignedAccess : DiagGroup<"profile-std-core-ub-misaligned-access">;
 def ProfileStdCoreUbNullDereference : DiagGroup<"profile-std-core-ub-null-dereference">;
 def ProfileStdCoreUbOutOfBounds : DiagGroup<"profile-std-core-ub-out-of-bounds">;
+def ProfileStdCoreUbFloatCastOverflow : DiagGroup<"profile-std-core-ub-float-cast-overflow">;
 def ProfileStdCoreUb : DiagGroup<"profile-std-core-ub", [
-    ProfileStdCoreUbZeroDivide, ProfileStdCoreUbSignedOverflow, ProfileStdCoreUbInvalidShift, ProfileStdCoreUbMisalignedAccess, ProfileStdCoreUbNullDereference, ProfileStdCoreUbOutOfBounds]>;
+    ProfileStdCoreUbZeroDivide, ProfileStdCoreUbSignedOverflow, ProfileStdCoreUbInvalidShift, ProfileStdCoreUbMisalignedAccess, ProfileStdCoreUbNullDereference, ProfileStdCoreUbOutOfBounds, ProfileStdCoreUbFloatCastOverflow]>;
 def Profiles : DiagGroup<"profiles", [ProfileTestTypeCast, ProfileTestUninitRead,
                                       ProfileTestCfgHooks, ProfileTestClassFinal,
                                       ProfileTestCtorFinal, ProfileTestArith,

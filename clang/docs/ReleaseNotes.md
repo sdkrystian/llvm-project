@@ -119,8 +119,9 @@ latest release, please see the [Clang Web Site](https://clang.llvm.org) or the
   undefined behavior traps at run time instead of executing. This release
   guards integer division and remainder by zero, signed integer overflow,
   invalid shifts, misaligned pointer accesses, null-pointer dereferences,
-  and out-of-bounds subscripts of statically sized arrays. See the C++
-  Profiles Framework documentation (`ProfilesFramework.rst`).
+  out-of-bounds subscripts of statically sized arrays, and float-to-integer
+  conversion overflow. See the C++ Profiles Framework documentation
+  (`ProfilesFramework.rst`).
 
 ### New Compiler Flags
 

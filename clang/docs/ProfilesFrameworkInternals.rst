@@ -571,3 +571,7 @@ emits the guarded operation.
        checked-lvalue, vector-subscript, and pointer-arithmetic callers
        relaxed to match); the ``counted_by`` paths that call
        ``EmitBoundsCheckImpl`` directly stay sanitizer-only
+   * - ``float_cast_overflow``
+     - ``ScalarExprEmitter::EmitScalarConversion``, sharing the range
+       predicate (``EmitFloatToIntConversionInRange``) with the sanitizer's
+       ``EmitFloatConversionCheck``
