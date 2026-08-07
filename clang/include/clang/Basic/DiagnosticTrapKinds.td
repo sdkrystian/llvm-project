@@ -36,5 +36,8 @@ def trap_profile_zero_divide : Trap<
 def trap_profile_signed_overflow : Trap<
   "signed integer overflow under profile '%0'">;
 
+def trap_profile_invalid_shift : Trap<
+  "shift out of bounds under profile '%0'">;
+
 }
 }

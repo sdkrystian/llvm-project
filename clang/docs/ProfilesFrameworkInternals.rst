@@ -411,6 +411,9 @@ emits the guarded operation.
        and ``EmitIncDecConsiderOverflowBehavior``; the INT_MIN/-1 division
        arm is ``EmitCoreUBDivRemOverflowCheck`` in ``EmitDiv`` and
        ``EmitRem``
+   * - ``invalid_shift``
+     - ``ScalarExprEmitter::EmitShl`` and ``EmitShr`` (exponent arm; the
+       pre-C++20 signed base arm lives in ``EmitShl`` only)
 
 
 The std::init Implementation Map
