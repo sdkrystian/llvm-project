@@ -64,5 +64,9 @@ def trap_profile_out_of_bounds : Trap<
   "array index out of bounds under profile '%0'">,
   Latent, InGroup<ProfileStdCoreUbOutOfBounds>, ShowInSystemHeader;
 
+def trap_profile_float_cast_overflow : Trap<
+  "floating-point to integer conversion overflow under profile '%0'">,
+  Latent, InGroup<ProfileStdCoreUbFloatCastOverflow>, ShowInSystemHeader;
+
 }
 }

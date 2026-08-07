@@ -386,6 +386,14 @@ public:
                                 Value *Src, QualType SrcType, QualType DstType,
                                 llvm::Type *DstTy, SourceLocation Loc);
 
+  /// Build the "in range" predicate of a floating-point to integer
+  /// conversion: true iff \p Src -- of \p SrcType, originally of
+  /// \p OrigSrcType before promotion out of __half -- truncates into
+  /// \p DstType without undefined behavior. Shared between the sanitizer
+  /// check and the std::core_ub profile check.
+  Value *EmitFloatToIntConversionInRange(Value *Src, QualType OrigSrcType,
+                                         QualType SrcType, QualType DstType);
+
   /// Known implicit conversion check kinds.
   /// This is used for bitfield conversion checks as well.
   /// Keep in sync with the enum of the same name in ubsan_handlers.h
@@ -1064,20 +1072,13 @@ Value *ScalarExprEmitter::EmitConversionToBool(Value *Src, QualType SrcType) {
   return EmitPointerToBoolConversion(Src, SrcType);
 }
 
-void ScalarExprEmitter::EmitFloatConversionCheck(
-    Value *OrigSrc, QualType OrigSrcType, Value *Src, QualType SrcType,
-    QualType DstType, llvm::Type *DstTy, SourceLocation Loc) {
-  assert(SrcType->isFloatingType() && "not a conversion from floating point");
-  if (!isa<llvm::IntegerType>(DstTy))
-    return;
-
-  auto CheckOrdinal = SanitizerKind::SO_FloatCastOverflow;
-  auto CheckHandler = SanitizerHandler::FloatCastOverflow;
-  SanitizerDebugLocation SanScope(&CGF, {CheckOrdinal}, CheckHandler);
+Value *ScalarExprEmitter::EmitFloatToIntConversionInRange(Value *Src,
+                                                          QualType OrigSrcType,
+                                                          QualType SrcType,
+                                                          QualType DstType) {
   using llvm::APFloat;
   using llvm::APSInt;
 
-  llvm::Value *Check = nullptr;
   const llvm::fltSemantics &SrcSema =
     CGF.getContext().getFloatTypeSemantics(OrigSrcType);
 
@@ -1125,7 +1126,22 @@ void ScalarExprEmitter::EmitFloatConversionCheck(
     Builder.CreateFCmpOGT(Src, llvm::ConstantFP::get(VMContext, MinSrc));
   llvm::Value *LE =
     Builder.CreateFCmpOLT(Src, llvm::ConstantFP::get(VMContext, MaxSrc));
-  Check = Builder.CreateAnd(GE, LE);
+  return Builder.CreateAnd(GE, LE);
+}
+
+void ScalarExprEmitter::EmitFloatConversionCheck(
+    Value *OrigSrc, QualType OrigSrcType, Value *Src, QualType SrcType,
+    QualType DstType, llvm::Type *DstTy, SourceLocation Loc) {
+  assert(SrcType->isFloatingType() && "not a conversion from floating point");
+  if (!isa<llvm::IntegerType>(DstTy))
+    return;
+
+  auto CheckOrdinal = SanitizerKind::SO_FloatCastOverflow;
+  auto CheckHandler = SanitizerHandler::FloatCastOverflow;
+  SanitizerDebugLocation SanScope(&CGF, {CheckOrdinal}, CheckHandler);
+
+  llvm::Value *Check =
+      EmitFloatToIntConversionInRange(Src, OrigSrcType, SrcType, DstType);
 
   llvm::Constant *StaticArgs[] = {CGF.EmitCheckSourceLocation(Loc),
                                   CGF.EmitCheckTypeDescriptor(OrigSrcType),
@@ -1812,6 +1828,20 @@ Value *ScalarExprEmitter::EmitScalarConversion(Value *Src, QualType SrcType,
       OrigSrcType->isFloatingType())
     EmitFloatConversionCheck(OrigSrc, OrigSrcType, Src, SrcType, DstType, DstTy,
                              Loc);
+
+  // After the sanitizer check, independent of sanitizer state (see EmitDiv):
+  // std::core_ub's float_cast_overflow rule (P4317 {conv.fpint.*} /
+  // {conv.double.out.of.range}) -- a floating-point value converted to an
+  // integer type must fit after truncation toward zero. Same applicability
+  // as the sanitizer site: floating source and integral destination (a
+  // conversion to a floating-point destination cannot overflow, every
+  // floating range being [-inf, +inf]; bool conversions never reach here).
+  if (OrigSrcType->isFloatingType() && isa<llvm::IntegerType>(DstTy))
+    CGF.EmitProfileRuntimeCheck(
+        "std::core_ub", diag::trap_profile_float_cast_overflow, Loc, [&] {
+          return EmitFloatToIntConversionInRange(Src, OrigSrcType, SrcType,
+                                                 DstType);
+        });
 
   // Cast to half from float if half isn't a native type. When __fp16 isn't
   // native, arithmetic is evaluated as float.
