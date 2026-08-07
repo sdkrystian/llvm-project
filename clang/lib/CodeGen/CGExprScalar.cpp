@@ -2198,7 +2198,8 @@ Value *ScalarExprEmitter::VisitArraySubscriptExpr(ArraySubscriptExpr *E) {
   Value *Idx  = Visit(E->getIdx());
   QualType IdxTy = E->getIdx()->getType();
 
-  if (CGF.SanOpts.has(SanitizerKind::ArrayBounds))
+  if (CGF.SanOpts.has(SanitizerKind::ArrayBounds) ||
+      CGF.profilePerformTypeCheck())
     CGF.EmitBoundsCheck(E, E->getBase(), Idx, IdxTy, /*Accessed*/true);
 
   Value *Ret = Builder.CreateExtractElement(Base, Idx, "vecext");
@@ -4686,7 +4687,7 @@ llvm::Value *CodeGenFunction::EmitPointerArithmetic(
   if (isSubtraction)
     index = Builder.CreateNeg(index, "idx.neg");
 
-  if (SanOpts.has(SanitizerKind::ArrayBounds))
+  if (SanOpts.has(SanitizerKind::ArrayBounds) || profilePerformTypeCheck())
     EmitBoundsCheck(BO, pointerOperand, index, indexOperand->getType(),
                     /*Accessed*/ false);
 
