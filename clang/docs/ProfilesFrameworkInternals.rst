@@ -414,10 +414,11 @@ emits the guarded operation.
    * - ``invalid_shift``
      - ``ScalarExprEmitter::EmitShl`` and ``EmitShr`` (exponent arm; the
        pre-C++20 signed base arm lives in ``EmitShl`` only)
-   * - ``misaligned_access``
+   * - ``misaligned_access``, ``null_dereference``
      - ``CodeGenFunction::EmitTypeCheck``, reached with no sanitizer on
        through ``profilePerformTypeCheck`` (which also relaxes the
-       caller-side ``sanitizePerformTypeCheck`` gates)
+       caller-side ``sanitizePerformTypeCheck`` gates); the null rule skips
+       the ``isNullPointerAllowed`` check kinds
 
 
 The std::init Implementation Map

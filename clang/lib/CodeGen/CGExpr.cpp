@@ -896,30 +896,47 @@ void CodeGenFunction::EmitTypeCheck(TypeCheckKind TCK, SourceLocation Loc,
   }
 
   // After the sanitizer block, independent of sanitizer state (see
-  // ScalarExprEmitter::EmitDiv for the rationale): std::core_ub's
-  // misaligned_access rule (P4317 {basic.align.object.alignment}), with the
-  // same applicability facts as the sanitizer's alignment arm minus the
-  // sanitizer knobs -- the SkippedChecks entry and a suitably aligned alloca
-  // are static facts and do elide the check.
-  if (profilePerformTypeCheck() &&
-      !SkippedChecks.has(SanitizerKind::Alignment)) {
-    llvm::MaybeAlign ProfAlignVal = Alignment.getAsMaybeAlign();
-    if (!Ty->isIncompleteType() && !ProfAlignVal)
-      ProfAlignVal = CGM.getNaturalTypeAlignment(Ty, nullptr, nullptr,
-                                                 /*ForPointeeType=*/true)
-                         .getAsMaybeAlign();
-    if (ProfAlignVal && *ProfAlignVal > llvm::Align(1) &&
-        (!PtrToAlloca || PtrToAlloca->getAlign() < *ProfAlignVal))
-      EmitProfileRuntimeCheck(
-          "std::core_ub", "misaligned_access",
-          diag::trap_profile_misaligned_access, Loc, [&] {
-            return Builder.CreateICmpEQ(
-                Builder.CreateAnd(
-                    Builder.CreatePtrToInt(Ptr, IntPtrTy),
-                    llvm::ConstantInt::get(IntPtrTy,
-                                           ProfAlignVal->value() - 1)),
-                llvm::ConstantInt::get(IntPtrTy, 0));
-          });
+  // ScalarExprEmitter::EmitDiv for the rationale): std::core_ub's type-check
+  // rules, with the same applicability facts as the corresponding sanitizer
+  // arms minus the sanitizer knobs -- SkippedChecks entries and alloca facts
+  // are static and do elide.
+  if (profilePerformTypeCheck()) {
+    // null_dereference (P4317 {expr.unary.dereference}), skipped for check
+    // kinds where a null pointer is legal. The sanitizer path's IsNonNull
+    // value may live inside its scope, so the predicate is built fresh in
+    // the lambda; a constant pointer folds without emitting IR, mirroring
+    // the sanitizer arm's IsGuaranteedNonNull refinement.
+    if (!IsGuaranteedNonNull && !isNullPointerAllowed(TCK)) {
+      if (auto *C = dyn_cast<llvm::Constant>(Ptr))
+        IsGuaranteedNonNull = Builder.CreateIsNotNull(C) ==
+                              llvm::ConstantInt::getTrue(getLLVMContext());
+      if (!IsGuaranteedNonNull)
+        EmitProfileRuntimeCheck(
+            "std::core_ub", "null_dereference",
+            diag::trap_profile_null_dereference, Loc,
+            [&] { return Builder.CreateIsNotNull(Ptr); });
+    }
+
+    // misaligned_access (P4317 {basic.align.object.alignment}).
+    if (!SkippedChecks.has(SanitizerKind::Alignment)) {
+      llvm::MaybeAlign ProfAlignVal = Alignment.getAsMaybeAlign();
+      if (!Ty->isIncompleteType() && !ProfAlignVal)
+        ProfAlignVal = CGM.getNaturalTypeAlignment(Ty, nullptr, nullptr,
+                                                   /*ForPointeeType=*/true)
+                           .getAsMaybeAlign();
+      if (ProfAlignVal && *ProfAlignVal > llvm::Align(1) &&
+          (!PtrToAlloca || PtrToAlloca->getAlign() < *ProfAlignVal))
+        EmitProfileRuntimeCheck(
+            "std::core_ub", "misaligned_access",
+            diag::trap_profile_misaligned_access, Loc, [&] {
+              return Builder.CreateICmpEQ(
+                  Builder.CreateAnd(
+                      Builder.CreatePtrToInt(Ptr, IntPtrTy),
+                      llvm::ConstantInt::get(IntPtrTy,
+                                             ProfAlignVal->value() - 1)),
+                  llvm::ConstantInt::get(IntPtrTy, 0));
+            });
+    }
   }
 
   // If possible, check that the vptr indicates that there is a subobject of
