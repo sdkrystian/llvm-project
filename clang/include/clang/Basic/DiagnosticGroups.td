@@ -2036,8 +2036,9 @@ def ProfileTestArith : ProfileGroup<"test::arith", [ProfileTestArithZeroDivide]>
 def ProfileStdCoreUbZeroDivide : ProfileRuleGroup<"std::core_ub", "zero_divide">;
 def ProfileStdCoreUbSignedOverflow : ProfileRuleGroup<"std::core_ub", "signed_overflow">;
 def ProfileStdCoreUbInvalidShift : ProfileRuleGroup<"std::core_ub", "invalid_shift">;
+def ProfileStdCoreUbMisalignedAccess : ProfileRuleGroup<"std::core_ub", "misaligned_access">;
 def ProfileStdCoreUb : ProfileGroup<"std::core_ub", [
-    ProfileStdCoreUbZeroDivide, ProfileStdCoreUbSignedOverflow, ProfileStdCoreUbInvalidShift]>;
+    ProfileStdCoreUbZeroDivide, ProfileStdCoreUbSignedOverflow, ProfileStdCoreUbInvalidShift, ProfileStdCoreUbMisalignedAccess]>;
 def Profiles : DiagGroup<"profiles", [ProfileTestTypeCast, ProfileTestUninitRead,
                                       ProfileTestCfgHooks, ProfileTestClassFinal,
                                       ProfileTestCtorFinal, ProfileTestArith,

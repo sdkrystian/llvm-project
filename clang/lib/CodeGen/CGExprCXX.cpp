@@ -367,7 +367,7 @@ RValue CodeGenFunction::EmitCXXMemberOrOperatorMemberCallExpr(
   }
 
   LValue This = getLValueForThis();
-  if (sanitizePerformTypeCheck())
+  if (sanitizePerformTypeCheck() || profilePerformTypeCheck())
     EmitTypeCheck(CodeGenFunction::TCK_MemberCall, CallLoc,
                   This.emitRawPointer(*this),
                   C.getCanonicalTagType(CalleeDecl->getParent()),
@@ -1706,7 +1706,7 @@ llvm::Value *CodeGenFunction::EmitCXXNewExpr(const CXXNewExpr *E) {
   // interesting initializer will be running sanitizers on the initialization.
   bool nullCheck = E->shouldNullCheckAllocation() &&
                    (!allocType.isPODType(getContext()) || E->hasInitializer() ||
-                    sanitizePerformTypeCheck());
+                    sanitizePerformTypeCheck() || profilePerformTypeCheck());
 
   llvm::BasicBlock *nullCheckBB = nullptr;
   llvm::BasicBlock *contBB = nullptr;
