@@ -401,6 +401,12 @@ This slice covers locally checkable cases of P4317 Appendix A.1:
      - An access through a pointer not suitably aligned for its type (a
        local whose storage is known to satisfy the alignment is not
        checked).
+   * - ``null_dereference``
+     - ``{expr.unary.dereference}``
+     - An access through a null pointer -- dereference, member access,
+       member call.  Operations where a null pointer is legal (a pointer
+       downcast, ``dynamic_cast``, ``typeid``) are not checked, nor is a
+       pointer statically known to be non-null (a local's address).
 
 The many cases of P4317 that require whole-program bookkeeping or a
 support runtime (heap bounds, lifetime, type confusion) are out of scope
