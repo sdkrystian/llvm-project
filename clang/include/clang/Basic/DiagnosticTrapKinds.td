@@ -33,5 +33,8 @@ let CategoryName = "C++ Profiles" in {
 def trap_profile_zero_divide : Trap<
   "integer division or remainder by zero under profile '%0'">;
 
+def trap_profile_signed_overflow : Trap<
+  "signed integer overflow under profile '%0'">;
+
 }
 }

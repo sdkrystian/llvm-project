@@ -830,6 +830,7 @@ public:
 
   // Binary Operators.
   Value *EmitMul(const BinOpInfo &Ops) {
+    EmitCoreUBSignedOverflowCheck(Ops, llvm::Intrinsic::smul_with_overflow);
     if (Ops.Ty->isSignedIntegerOrEnumerationType() ||
         Ops.Ty->isUnsignedIntegerType()) {
       const bool isSigned = Ops.Ty->isSignedIntegerOrEnumerationType();
@@ -885,6 +886,13 @@ public:
   /// Create a binary op that checks for overflow.
   /// Currently only supports +, - and *.
   Value *EmitOverflowCheckedBinOp(const BinOpInfo &Ops);
+
+  /// The std::core_ub signed_overflow profile checks (framework pattern 5):
+  /// the additive/multiplicative form for +, -, * and ++/-- (\p IID is the
+  /// llvm.s{add,sub,mul}.with.overflow intrinsic matching the operation),
+  /// and the INT_MIN/-1 form for integer / and %.
+  void EmitCoreUBSignedOverflowCheck(const BinOpInfo &Ops, unsigned IID);
+  void EmitCoreUBDivRemOverflowCheck(const BinOpInfo &Ops);
 
   // Check for undefined division and modulus behaviors.
   void EmitUndefinedBehaviorIntegerDivAndRemCheck(const BinOpInfo &Ops,
@@ -3278,6 +3286,16 @@ llvm::Value *ScalarExprEmitter::EmitIncDecConsiderOverflowBehavior(
       llvm::ConstantInt::get(InVal->getType(), IsInc ? 1 : -1, !IsInc);
   StringRef Name = IsInc ? "inc" : "dec";
   QualType Ty = E->getType();
+
+  // ++/-- emits its own add here rather than funneling through
+  // EmitAdd/EmitSub, so the std::core_ub signed_overflow check rides here
+  // too; a promoted-width operand elides it through canOverflow.
+  EmitCoreUBSignedOverflowCheck(
+      createBinOpInfoFromIncDec(E, InVal, IsInc,
+                                E->getFPFeaturesInEffect(CGF.getLangOpts())),
+      IsInc ? llvm::Intrinsic::sadd_with_overflow
+            : llvm::Intrinsic::ssub_with_overflow);
+
   const bool isSigned = Ty->isSignedIntegerOrEnumerationType();
   const bool hasSan =
       isSigned ? CGF.SanOpts.has(SanitizerKind::SignedIntegerOverflow)
@@ -4335,6 +4353,7 @@ Value *ScalarExprEmitter::EmitDiv(const BinOpInfo &Ops) {
                                 diag::trap_profile_zero_divide,
                                 Ops.E->getExprLoc(), NonZeroDivisor);
   }
+  EmitCoreUBDivRemOverflowCheck(Ops);
 
   if (Ops.Ty->isConstantMatrixType()) {
     llvm::MatrixBuilder MB(Builder);
@@ -4398,6 +4417,7 @@ Value *ScalarExprEmitter::EmitRem(const BinOpInfo &Ops) {
                                 diag::trap_profile_zero_divide,
                                 Ops.E->getExprLoc(), NonZeroDivisor);
   }
+  EmitCoreUBDivRemOverflowCheck(Ops);
 
   if (Ops.Ty->hasUnsignedIntegerRepresentation())
     return Builder.CreateURem(Ops.LHS, Ops.RHS, "rem");
@@ -4406,6 +4426,61 @@ Value *ScalarExprEmitter::EmitRem(const BinOpInfo &Ops) {
     return Builder.CreateFRem(Ops.LHS, Ops.RHS, "rem");
 
   return Builder.CreateSRem(Ops.LHS, Ops.RHS, "rem");
+}
+
+void ScalarExprEmitter::EmitCoreUBSignedOverflowCheck(const BinOpInfo &Ops,
+                                                      unsigned IID) {
+  // std::core_ub's signed_overflow rule (P4317
+  // {expr.mul.representable.type.result}), emitted before the arithmetic and
+  // outside EmitOverflowCheckedBinOp's sanitizer scope, independently of
+  // sanitizer state (see EmitDiv). Silent when the dialect defines signed
+  // overflow (-fwrapv; CanElideOverflowCheck covers per-type wrapping) and
+  // when constant or widened operands statically rule an overflow out.
+  if (!Ops.Ty->isSignedIntegerOrEnumerationType() ||
+      CGF.getLangOpts().isSignedOverflowDefined() ||
+      CanElideOverflowCheck(CGF.getContext(), Ops))
+    return;
+  CGF.EmitProfileRuntimeCheck(
+      "std::core_ub", "signed_overflow", diag::trap_profile_signed_overflow,
+      Ops.E->getExprLoc(), [&] {
+        llvm::Function *Intrinsic =
+            CGF.CGM.getIntrinsic(IID, Ops.LHS->getType());
+        llvm::Value *ResultAndOverflow =
+            Builder.CreateCall(Intrinsic, {Ops.LHS, Ops.RHS});
+        return Builder.CreateNot(
+            Builder.CreateExtractValue(ResultAndOverflow, 1));
+      });
+}
+
+void ScalarExprEmitter::EmitCoreUBDivRemOverflowCheck(const BinOpInfo &Ops) {
+  // The INT_MIN / -1 (and INT_MIN % -1) arm of integer division under
+  // std::core_ub's signed_overflow rule. Division overflow is undefined even
+  // under -fwrapv, which defines wrapping for +, -, and * only, so unlike
+  // EmitCoreUBSignedOverflowCheck this is not gated on
+  // isSignedOverflowDefined. Beyond the sanitizer's widened-operand and
+  // constant-pair facts, a single constant operand that cannot hit its half
+  // of the INT_MIN/-1 pair statically rules the overflow out.
+  if (!Ops.Ty->isIntegerType() || !Ops.Ty->hasSignedIntegerRepresentation() ||
+      IsWidenedIntegerOp(CGF.getContext(),
+                         cast<BinaryOperator>(Ops.E)->getLHS()) ||
+      !Ops.mayHaveIntegerOverflow())
+    return;
+  if (auto *CI = dyn_cast<llvm::ConstantInt>(Ops.RHS))
+    if (!CI->getValue().isAllOnes())
+      return;
+  if (auto *CI = dyn_cast<llvm::ConstantInt>(Ops.LHS))
+    if (!CI->getValue().isMinSignedValue())
+      return;
+  CGF.EmitProfileRuntimeCheck(
+      "std::core_ub", "signed_overflow", diag::trap_profile_signed_overflow,
+      Ops.E->getExprLoc(), [&] {
+        llvm::IntegerType *Ty = cast<llvm::IntegerType>(Ops.LHS->getType());
+        llvm::Value *IntMin =
+            Builder.getInt(llvm::APInt::getSignedMinValue(Ty->getBitWidth()));
+        llvm::Value *NegOne = llvm::Constant::getAllOnesValue(Ty);
+        return Builder.CreateOr(Builder.CreateICmpNE(Ops.LHS, IntMin),
+                                Builder.CreateICmpNE(Ops.RHS, NegOne));
+      });
 }
 
 Value *ScalarExprEmitter::EmitOverflowCheckedBinOp(const BinOpInfo &Ops) {
@@ -4801,6 +4876,8 @@ Value *ScalarExprEmitter::EmitAdd(const BinOpInfo &op) {
       op.RHS->getType()->isPointerTy())
     return emitPointerArithmetic(CGF, op, CodeGenFunction::NotSubtraction);
 
+  EmitCoreUBSignedOverflowCheck(op, llvm::Intrinsic::sadd_with_overflow);
+
   if (op.Ty->isSignedIntegerOrEnumerationType() ||
       op.Ty->isUnsignedIntegerType()) {
     const bool isSigned = op.Ty->isSignedIntegerOrEnumerationType();
@@ -4961,6 +5038,9 @@ Value *ScalarExprEmitter::EmitFixedPointBinOp(const BinOpInfo &op) {
 Value *ScalarExprEmitter::EmitSub(const BinOpInfo &op) {
   // The LHS is always a pointer if either side is.
   if (!op.LHS->getType()->isPointerTy()) {
+    // Unary minus lowers through here as 0 - x, so it is covered too.
+    EmitCoreUBSignedOverflowCheck(op, llvm::Intrinsic::ssub_with_overflow);
+
     if (op.Ty->isSignedIntegerOrEnumerationType() ||
         op.Ty->isUnsignedIntegerType()) {
       const bool isSigned = op.Ty->isSignedIntegerOrEnumerationType();
