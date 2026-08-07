@@ -37,5 +37,12 @@ def trap_profile_zero_divide : Trap<
   "integer division or remainder by zero under profile '%0'">,
   Latent, InGroup<ProfileTestArithZeroDivide>, ShowInSystemHeader;
 
+// std::core_ub's zero_divide rule rides the same division and remainder check
+// sites as the test::arith pilot with a trap diagnostic of its own, since a
+// diagnostic belongs to one rule group.
+def trap_profile_core_ub_zero_divide : Trap<
+  "integer division or remainder by zero under profile '%0'">,
+  Latent, InGroup<ProfileStdCoreUbZeroDivide>, ShowInSystemHeader;
+
 }
 }

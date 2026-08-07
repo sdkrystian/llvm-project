@@ -2033,6 +2033,10 @@ def ProfileTestClassFinal : ProfileGroup<"test::class_final">;
 def ProfileTestCtorFinal : ProfileGroup<"test::ctor_final">;
 def ProfileTestArithZeroDivide : ProfileRuleGroup<"test::arith", "zero_divide">;
 def ProfileTestArith : ProfileGroup<"test::arith", [ProfileTestArithZeroDivide]>;
+def ProfileStdCoreUbZeroDivide : ProfileRuleGroup<"std::core_ub", "zero_divide">;
+def ProfileStdCoreUb : ProfileGroup<"std::core_ub", [
+    ProfileStdCoreUbZeroDivide]>;
 def Profiles : DiagGroup<"profiles", [ProfileTestTypeCast, ProfileTestUninitRead,
                                       ProfileTestCfgHooks, ProfileTestClassFinal,
-                                      ProfileTestCtorFinal, ProfileTestArith]>;
+                                      ProfileTestCtorFinal, ProfileTestArith,
+                                      ProfileStdCoreUb]>;
