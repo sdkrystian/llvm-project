@@ -51,5 +51,8 @@ def trap_profile_out_of_bounds : Trap<
 def trap_profile_float_cast_overflow : Trap<
   "floating-point to integer conversion overflow under profile '%0'">;
 
+def trap_profile_enum_out_of_range : Trap<
+  "load of an out-of-range enumeration value under profile '%0'">;
+
 }
 }

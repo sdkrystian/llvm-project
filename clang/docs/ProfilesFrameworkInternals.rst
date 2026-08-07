@@ -429,6 +429,10 @@ emits the guarded operation.
      - ``ScalarExprEmitter::EmitScalarConversion``, sharing the range
        predicate (``EmitFloatToIntConversionInRange``) with the sanitizer's
        ``EmitFloatConversionCheck``
+   * - ``enum_out_of_range``
+     - ``CodeGenFunction::EmitScalarRangeCheck`` (which returns true for an
+       enforced enum load so ``maybeAttachRangeForLoad`` never attaches
+       ``MD_range`` metadata that would let the optimizer delete the check)
 
 
 The std::init Implementation Map
