@@ -2489,6 +2489,16 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC,
     for (const ParmVarDecl *P : EnclosingFD->parameters()) {
       if (P->isInvalidDecl() || P->hasAttr<UninitAttr>())
         continue;
+      // A parameter with a default argument is not tracked: a defaulted
+      // call initializes the parameter object directly (guaranteed elision
+      // -- no copy), falsifying the tracked-from-unassigned premise. The
+      // shape of the default is irrelevant (no default-argument spelling is
+      // a vacuous default-init), so the mere presence gates -- also
+      // avoiding getDefaultArg() on unparsed/uninstantiated defaults. An
+      // explicit call passing an uninitialized copy into a defaulted
+      // parameter is a missed diagnostic (see the Limitations doc).
+      if (P->hasDefaultArg())
+        continue;
       if (const CXXRecordDecl *RD = getTrackableSlotClass(P->getType()))
         HarvestVar(P, RD);
     }

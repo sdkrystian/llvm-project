@@ -435,6 +435,33 @@ int test_reference_parameter_untracked(Agg &r) {
   return r.m; // OK
 }
 
+// A by-value parameter with a default argument is not tracked: a defaulted
+// call initializes the parameter object directly (guaranteed elision -- no
+// copy), falsifying the tracked-from-unassigned premise. The default's
+// shape is irrelevant (no default-argument spelling is a vacuous
+// default-init), so a copy-shaped default is untracked too -- and an
+// *explicit* call passing an uninitialized copy is a missed diagnostic by
+// policy, like every copy from an untracked source.
+int test_defaulted_parameter_untracked(Agg a = {}) {
+  return a.m; // OK: not tracked
+}
+
+int test_defaulted_const_parameter_untracked(const Agg a = {}) {
+  return a.m; // OK: not tracked
+}
+
+Agg default_source;
+int test_defaulted_copy_parameter_untracked(Agg a = default_source) {
+  return a.m; // OK: not tracked (copies from untracked sources are untracked)
+}
+
+// A local copy of a defaulted parameter chains from an untracked source and
+// stays untracked.
+int test_copy_of_defaulted_parameter_untracked(Agg a = {}) {
+  Agg d = a;
+  return d.m; // OK: not tracked
+}
+
 // A local that is itself [[uninit]]-marked is the parse-time rules'
 // territory: the read-through check owns its subobject reads, and exactly one
 // diagnostic fires.

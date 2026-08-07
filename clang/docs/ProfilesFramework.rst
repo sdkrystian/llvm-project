@@ -851,9 +851,11 @@ those entries never cause a rejection.
   argument, so its marked members are tracked from an unassigned start: a
   read before a local assignment (or an escape of the parameter) is
   rejected even if the caller assigned the member first (see `Reads of
-  Uninitialized Objects`_).  A *const* by-value parameter cannot be
-  assigned locally at all, so no code change can satisfy the analysis --
-  suppression is the only remedy there.
+  Uninitialized Objects`_) -- unless the parameter declares a default
+  argument: a defaulted call initializes the parameter object directly
+  (guaranteed elision -- no copy), so such parameters are not tracked.  A
+  *const* by-value parameter cannot be assigned locally at all, so no code
+  change can satisfy the analysis -- suppression is the only remedy there.
 - A ``this``-capturing lambda might run immediately, so member reads in
   its body count at the point the lambda is created, and writes there earn
   no credit (see `Reads of Uninitialized Objects`_): a lambda that is only
@@ -956,6 +958,10 @@ those entries never cause a rejection.
   trusted (a missed diagnostic, never a false positive).  Copies of tracked
   locals and by-value parameters *are* tracked (see `Reads of Uninitialized
   Objects`_).
+- A by-value parameter with a default argument is not tracked (see the
+  strictness bullet above), so an *explicit* call passing an uninitialized
+  copy into such a parameter is not detected -- reads of its marked members
+  in the callee are trusted.
 - Virtual base subobjects are not checked by ``ctor_uninit_member`` (they are
   initialized by the most-derived class).
 - A read of a tracked member inside another member's default initializer is
