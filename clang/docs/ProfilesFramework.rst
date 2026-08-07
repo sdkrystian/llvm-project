@@ -390,6 +390,12 @@ This slice covers locally checkable cases of P4317 Appendix A.1:
        multiplicative forms are silent when the dialect defines signed
        overflow (``-fwrapv``); division overflow is undefined even there and
        stays checked.
+   * - ``invalid_shift``
+     - ``{expr.shift.neg.and.width}``
+     - A shift by a negative amount or by at least the width of the
+       (promoted) left operand; before C++20, additionally a signed left
+       shift moving a set bit out of the sign bit (from C++20 on that is
+       defined, leaving the width arm only).
 
 The many cases of P4317 that require whole-program bookkeeping or a
 support runtime (heap bounds, lifetime, type confusion) are out of scope

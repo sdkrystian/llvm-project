@@ -48,5 +48,9 @@ def trap_profile_signed_overflow : Trap<
   "signed integer overflow under profile '%0'">,
   Latent, InGroup<ProfileStdCoreUbSignedOverflow>, ShowInSystemHeader;
 
+def trap_profile_invalid_shift : Trap<
+  "shift out of bounds under profile '%0'">,
+  Latent, InGroup<ProfileStdCoreUbInvalidShift>, ShowInSystemHeader;
+
 }
 }

@@ -117,8 +117,8 @@ latest release, please see the [Clang Web Site](https://clang.llvm.org) or the
   slice of the `std::core_ub` profile (P4317): under
   `[[profiles::enforce(std::core_ub)]]`, locally checkable core-language
   undefined behavior traps at run time instead of executing. This release
-  guards integer division and remainder by zero and signed integer
-  overflow. See the C++ Profiles Framework documentation
+  guards integer division and remainder by zero, signed integer overflow,
+  and invalid shifts. See the C++ Profiles Framework documentation
   (`ProfilesFramework.rst`).
 
 ### New Compiler Flags

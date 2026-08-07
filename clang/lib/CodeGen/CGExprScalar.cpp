@@ -5264,6 +5264,69 @@ Value *ScalarExprEmitter::EmitShl(const BinOpInfo &Ops) {
     EmitBinOpCheck(Checks, Ops);
   }
 
+  // After the sanitizer block, independent of sanitizer state (see EmitDiv):
+  // std::core_ub's invalid_shift rule (P4317 {expr.shift.neg.and.width}).
+  // The exponent must be within the promoted LHS width; before C++20 a
+  // signed left shift additionally must not shift set bits out of the sign
+  // bit -- from C++20 on that base loss is defined, leaving the exponent arm
+  // only. Skipped for OpenCL/HLSL, where the shift amount was just masked
+  // into range, and for vector shifts, like the sanitizer. A constant
+  // in-range exponent statically rules a violation out when no base arm
+  // applies.
+  if (!CGF.getLangOpts().OpenCL && !CGF.getLangOpts().HLSL &&
+      isa<llvm::IntegerType>(Ops.LHS->getType())) {
+    bool CheckBase = Ops.Ty->hasSignedIntegerRepresentation() &&
+                     !CGF.getLangOpts().isSignedOverflowDefined() &&
+                     !CGF.getLangOpts().CPlusPlus20;
+    auto *CI = dyn_cast<llvm::ConstantInt>(Ops.RHS);
+    bool ConstantInRange =
+        CI && CI->getValue().ult(
+                  cast<llvm::IntegerType>(Ops.LHS->getType())->getBitWidth());
+    if (CheckBase || !ConstantInRange)
+      CGF.EmitProfileRuntimeCheck(
+          "std::core_ub", diag::trap_profile_invalid_shift, Ops.E->getExprLoc(),
+          [&]() -> llvm::Value * {
+            bool RHSIsSigned = Ops.rhsHasSignedIntegerRepresentation();
+            llvm::Value *WidthMinusOne =
+                GetMaximumShiftAmount(Ops.LHS, Ops.RHS, RHSIsSigned);
+            llvm::Value *ValidExponent =
+                Builder.CreateICmpULE(Ops.RHS, WidthMinusOne);
+            if (!CheckBase)
+              return ValidExponent;
+            // Mirror the sanitizer's branchy structure: the bits-shifted-off
+            // computation is defined only under a valid exponent.
+            llvm::BasicBlock *Orig = Builder.GetInsertBlock();
+            llvm::BasicBlock *Cont = CGF.createBasicBlock("shl.prof.cont");
+            llvm::BasicBlock *CheckShiftBase =
+                CGF.createBasicBlock("shl.prof.check");
+            Builder.CreateCondBr(ValidExponent, CheckShiftBase, Cont);
+            CGF.EmitBlock(CheckShiftBase);
+            llvm::Value *PromotedWidthMinusOne =
+                (RHS == Ops.RHS)
+                    ? WidthMinusOne
+                    : GetMaximumShiftAmount(Ops.LHS, RHS, RHSIsSigned);
+            llvm::Value *BitsShiftedOff = Builder.CreateLShr(
+                Ops.LHS,
+                Builder.CreateSub(PromotedWidthMinusOne, RHS, "shl.prof.zeros",
+                                  /*NUW*/ true, /*NSW*/ true),
+                "shl.prof.bits");
+            // Under C++11-through-17 rules, shifting a 1 bit into the sign
+            // bit is OK, but shifting a 1 bit out of it is not (profiles are
+            // C++-only, so the C99 form is moot).
+            BitsShiftedOff = Builder.CreateLShr(
+                BitsShiftedOff,
+                llvm::ConstantInt::get(BitsShiftedOff->getType(), 1));
+            llvm::Value *ValidBase = Builder.CreateICmpEQ(
+                BitsShiftedOff,
+                llvm::ConstantInt::get(BitsShiftedOff->getType(), 0));
+            CGF.EmitBlock(Cont);
+            llvm::PHINode *Passed = Builder.CreatePHI(Builder.getInt1Ty(), 2);
+            Passed->addIncoming(Builder.getFalse(), Orig);
+            Passed->addIncoming(ValidBase, CheckShiftBase);
+            return Passed;
+          });
+  }
+
   return Builder.CreateShl(Ops.LHS, RHS, "shl");
 }
 
@@ -5289,6 +5352,24 @@ Value *ScalarExprEmitter::EmitShr(const BinOpInfo &Ops) {
     llvm::Value *Valid = Builder.CreateICmpULE(
         Ops.RHS, GetMaximumShiftAmount(Ops.LHS, Ops.RHS, RHSIsSigned));
     EmitBinOpCheck(std::make_pair(Valid, SanitizerKind::SO_ShiftExponent), Ops);
+  }
+
+  // std::core_ub invalid_shift, exponent arm only -- a right shift has no
+  // base-loss case (see EmitShl). A constant in-range exponent statically
+  // rules a violation out.
+  if (!CGF.getLangOpts().OpenCL && !CGF.getLangOpts().HLSL &&
+      isa<llvm::IntegerType>(Ops.LHS->getType())) {
+    auto *CI = dyn_cast<llvm::ConstantInt>(Ops.RHS);
+    if (!CI || !CI->getValue().ult(
+                   cast<llvm::IntegerType>(Ops.LHS->getType())->getBitWidth()))
+      CGF.EmitProfileRuntimeCheck(
+          "std::core_ub", diag::trap_profile_invalid_shift, Ops.E->getExprLoc(),
+          [&] {
+            return Builder.CreateICmpULE(
+                Ops.RHS,
+                GetMaximumShiftAmount(Ops.LHS, Ops.RHS,
+                                      Ops.rhsHasSignedIntegerRepresentation()));
+          });
   }
 
   if (Ops.Ty->hasUnsignedIntegerRepresentation())
