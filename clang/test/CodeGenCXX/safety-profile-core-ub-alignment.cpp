@@ -59,10 +59,14 @@ int local_ok() {
   return *&x;
 }
 
+// A char access needs no alignment check at all; the null_dereference rule
+// riding the same access is suppressed so its trap does not obscure that.
 // CHECK-LABEL: define {{.*}} @_Z9load_charPc(
 // CHECK-NOT: llvm.ubsantrap
 // CHECK: ret i8
-char load_char(char *p) { return *p; }
+char load_char(char *p) {
+  [[profiles::suppress(std::core_ub, rule: "null_dereference")]] return *p;
+}
 
 // Suppression at function granularity.
 // CHECK-LABEL: define {{.*}} @_Z13fn_suppressedPv(
@@ -72,10 +76,11 @@ char load_char(char *p) { return *p; }
   return *static_cast<int *>(p);
 }
 
-// Rule granularity: naming the violated rule suppresses; naming another rule
-// of the same profile does not.
+// Rule granularity: naming the violated rule suppresses -- the alignment
+// mask disappears while the null_dereference rule riding the same access
+// keeps its own check -- and naming another rule does not.
 // CHECK-LABEL: define {{.*}} @_Z10rule_matchPv(
-// CHECK-NOT: llvm.ubsantrap
+// CHECK-NOT: and i64
 // CHECK: ret i32
 int rule_match(void *p) {
   [[profiles::suppress(std::core_ub, rule: "misaligned_access")]] return *
@@ -83,6 +88,7 @@ int rule_match(void *p) {
 }
 
 // CHECK-LABEL: define {{.*}} @_Z13rule_mismatchPv(
+// CHECK: and i64
 // CHECK: call void @llvm.ubsantrap(i8
 int rule_mismatch(void *p) {
   [[profiles::suppress(std::core_ub, rule: "other_rule")]] return *
