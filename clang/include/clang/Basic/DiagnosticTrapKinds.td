@@ -52,5 +52,9 @@ def trap_profile_invalid_shift : Trap<
   "shift out of bounds under profile '%0'">,
   Latent, InGroup<ProfileStdCoreUbInvalidShift>, ShowInSystemHeader;
 
+def trap_profile_misaligned_access : Trap<
+  "misaligned pointer access under profile '%0'">,
+  Latent, InGroup<ProfileStdCoreUbMisalignedAccess>, ShowInSystemHeader;
+
 }
 }
