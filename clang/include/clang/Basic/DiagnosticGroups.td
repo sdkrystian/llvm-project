@@ -2020,8 +2020,9 @@ def ProfileTestCtorFinal : DiagGroup<"profile-test-ctor-final">;
 def ProfileTestArithZeroDivide : DiagGroup<"profile-test-arith-zero-divide">;
 def ProfileTestArith : DiagGroup<"profile-test-arith", [ProfileTestArithZeroDivide]>;
 def ProfileStdCoreUbZeroDivide : DiagGroup<"profile-std-core-ub-zero-divide">;
+def ProfileStdCoreUbSignedOverflow : DiagGroup<"profile-std-core-ub-signed-overflow">;
 def ProfileStdCoreUb : DiagGroup<"profile-std-core-ub", [
-    ProfileStdCoreUbZeroDivide]>;
+    ProfileStdCoreUbZeroDivide, ProfileStdCoreUbSignedOverflow]>;
 def Profiles : DiagGroup<"profiles", [ProfileTestTypeCast, ProfileTestUninitRead,
                                       ProfileTestCfgHooks, ProfileTestClassFinal,
                                       ProfileTestCtorFinal, ProfileTestArith,

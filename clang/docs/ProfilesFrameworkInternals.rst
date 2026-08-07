@@ -550,3 +550,9 @@ emits the guarded operation.
    * - ``zero_divide``
      - ``ScalarExprEmitter::EmitDiv`` and ``EmitRem`` (shared with the
        ``test::arith`` pilot as independent per-profile calls)
+   * - ``signed_overflow``
+     - ``ScalarExprEmitter::EmitCoreUBSignedOverflowCheck``, called from
+       ``EmitAdd``, ``EmitSub`` (unary minus lowers through it), ``EmitMul``,
+       and ``EmitIncDecConsiderOverflowBehavior``; the INT_MIN/-1 division
+       arm is ``EmitCoreUBDivRemOverflowCheck`` in ``EmitDiv`` and
+       ``EmitRem``

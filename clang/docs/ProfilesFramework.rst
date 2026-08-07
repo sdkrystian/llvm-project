@@ -383,6 +383,13 @@ This slice covers locally checkable cases of P4317 Appendix A.1:
    * - ``zero_divide``
      - ``{expr.mul.div.by.zero}``
      - Integer division or remainder by zero.
+   * - ``signed_overflow``
+     - ``{expr.mul.representable.type.result}``
+     - Signed ``+``, ``-``, ``*``, ``++``/``--``, and unary ``-`` overflow,
+       and ``INT_MIN`` divided (or remaindered) by ``-1``.  The additive and
+       multiplicative forms are silent when the dialect defines signed
+       overflow (``-fwrapv``); division overflow is undefined even there and
+       stays checked.
 
 The many cases of P4317 that require whole-program bookkeeping or a
 support runtime (heap bounds, lifetime, type confusion) are out of scope
