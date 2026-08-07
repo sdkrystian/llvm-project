@@ -259,6 +259,17 @@ public:
   /// [[uninit]] markers only off a directly named entity.
   static const ValueDecl *getDirectlyNamedDecl(const Expr *E);
 
+  /// Strip what the std::init recognizers see through on the way to a named
+  /// entity: parens, implicit casts, and explicit casts whose operand is a
+  /// pointer or glvalue (paper §4.3: a cast of a marked pointer is itself
+  /// marked; a reference cast denotes the same storage). Value casts like
+  /// `(int)m` are not stripped -- they produce a new value, not the same
+  /// storage. Shared by the parse-order store recorders, the
+  /// lifetime-annotated-argument resolver, and the CFG member passes in
+  /// AnalysisBasedWarnings.cpp, so recognition, crediting, and flow tracking
+  /// see through exactly the same casts.
+  static const Expr *ignoreTransparentCasts(const Expr *E);
+
   /// std::init / ref_to_uninit (paper §5): true only if \p E is affirmatively
   /// recognized as referring to (for a pointer source) or, when
   /// \p IsReference, denoting (for a glvalue source) uninitialized storage.

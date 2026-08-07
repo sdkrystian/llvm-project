@@ -1335,10 +1335,11 @@ const Decl *SemaProfiles::resolveMemberStoreBase(const MemberExpr *ME) const {
 // reference cast denotes the same storage). Implicit casts are re-stripped
 // after every explicit-cast peel -- a cast's operand may itself be
 // parenthesized or implicitly converted -- so a single leading
-// IgnoreParenImpCasts is not equivalent. Shared by the store recorders and
-// the lifetime-annotated-argument resolver, so crediting sees through
+// IgnoreParenImpCasts is not equivalent. Shared by the store recorders, the
+// lifetime-annotated-argument resolver, and the CFG member passes
+// (AnalysisBasedWarnings.cpp), so crediting and flow tracking see through
 // exactly the casts recognition does.
-static const Expr *ignoreTransparentCasts(const Expr *E) {
+const Expr *SemaProfiles::ignoreTransparentCasts(const Expr *E) {
   E = E->IgnoreParenImpCasts();
   while (const auto *CE = dyn_cast<ExplicitCastExpr>(E)) {
     const Expr *Sub = CE->getSubExpr();
@@ -1357,7 +1358,8 @@ static const Expr *ignoreTransparentCasts(const Expr *E) {
 // store-recording deref arm and the [[now_init]] argument shapes.
 static const VarDecl *getCreditableMarkedPointer(const Expr *E) {
   const auto *VD = dyn_cast_or_null<VarDecl>(
-      SemaProfiles::getDirectlyNamedDecl(ignoreTransparentCasts(E)));
+      SemaProfiles::getDirectlyNamedDecl(
+          SemaProfiles::ignoreTransparentCasts(E)));
   if (VD && VD->hasLocalStorage() && VD->getType()->isPointerType() &&
       VD->hasAttr<RefToUninitAttr>())
     return VD;

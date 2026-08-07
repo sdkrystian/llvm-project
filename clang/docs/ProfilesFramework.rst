@@ -824,7 +824,9 @@ those entries never cause a rejection.
 **Deliberate strictnesses (may reject correct code):**
 
 - Inside a constructor body, only a plain assignment to an ``[[uninit]]``
-  member or a call to a ``[[now_init]]`` function (§6.2) counts as its
+  member (including through a transparent reference cast such as
+  ``(int &)m = 1`` -- the same casts the parse-order credit sees through)
+  or a call to a ``[[now_init]]`` function (§6.2) counts as its
   initialization -- the latter for the current-object storage bound to the
   callee's ``[[ref_to_uninit]]`` parameters (``&m``, ``m``, or ``this``
   itself, which credits every tracked member), as a genuine dataflow fact,

@@ -1717,22 +1717,28 @@ constexpr CFGProfileEntry CFGProfiles[] = {
 };
 
 // True if E denotes the current object: `this` (the implicit/explicit pointer
-// of an arrow access) or `*this` (the object lvalue of a dot access).
+// of an arrow access) or `*this` (the object lvalue of a dot access), seen
+// through the transparent casts the parse-order credit sees through
+// (`(Base &)*this`, `(Base *)this`).
 static bool isCurrentObjectBase(const Expr *E) {
-  E = E->IgnoreParenImpCasts();
+  E = SemaProfiles::ignoreTransparentCasts(E);
   if (isa<CXXThisExpr>(E))
     return true;
   const auto *UO = dyn_cast<UnaryOperator>(E);
   return UO && UO->getOpcode() == UO_Deref &&
-         isa<CXXThisExpr>(UO->getSubExpr()->IgnoreParenImpCasts());
+         isa<CXXThisExpr>(
+             SemaProfiles::ignoreTransparentCasts(UO->getSubExpr()));
 }
 
 // If E names a non-static data member of the current object (`this->m`, the
 // implicit `m`, or the equivalent `(*this).m`), return that field; otherwise
 // null. Access through any other object (e.g. `other.m`) is not the current
-// object's member.
+// object's member. Transparent casts are peeled at both the member and base
+// positions -- `(int &)m` denotes the same storage as `m` (paper §4.3), and
+// the parse-order credit already sees through them -- so a store through a
+// reference cast credits and a read through one is detected.
 static const FieldDecl *getCurrentObjectMember(const Expr *E) {
-  const auto *ME = dyn_cast<MemberExpr>(E->IgnoreParenImpCasts());
+  const auto *ME = dyn_cast<MemberExpr>(SemaProfiles::ignoreTransparentCasts(E));
   if (!ME || !isCurrentObjectBase(ME->getBase()))
     return nullptr;
   return dyn_cast<FieldDecl>(ME->getMemberDecl());
@@ -1968,21 +1974,14 @@ static void reportMemberReadsBeforeInit(
 }
 
 // Peel a lifecycle call's argument down to the expression that names the
-// storage: parens and implicit casts, explicit pointer/reference casts
-// (mirroring the parse-time recognizers -- §4.3: a cast marked pointer is
-// itself marked), and, through \p Glvalue, a top-level `&`. Returns the
-// peeled argument (`&m`, `m`, `this`); Glvalue is the same expression with
-// the `&` stripped (`m`), the shape getCurrentObjectMember and the local
-// pass's lookups take.
+// storage: the transparent casts the parse-time recognizers see through
+// (§4.3: a cast marked pointer is itself marked), and, through \p Glvalue,
+// a top-level `&`. Returns the peeled argument (`&m`, `m`, `this`); Glvalue
+// is the same expression with the `&` stripped (`m`), the shape
+// getCurrentObjectMember and the local pass's lookups take.
 static const Expr *peelLifecycleArgument(const Expr *Arg,
                                          const Expr *&Glvalue) {
-  Arg = Arg->IgnoreParenImpCasts();
-  while (const auto *Cast = dyn_cast<ExplicitCastExpr>(Arg)) {
-    const Expr *Sub = Cast->getSubExpr();
-    if (!Sub->getType()->isPointerType() && !Sub->isGLValue())
-      break;
-    Arg = Sub->IgnoreParenImpCasts();
-  }
+  Arg = SemaProfiles::ignoreTransparentCasts(Arg);
   Glvalue = Arg;
   if (const auto *AddrOf = dyn_cast<UnaryOperator>(Arg);
       AddrOf && AddrOf->getOpcode() == UO_AddrOf)

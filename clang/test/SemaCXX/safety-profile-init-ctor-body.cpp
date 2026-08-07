@@ -154,6 +154,58 @@ struct IncSuppressedStmt {
   }
 };
 
+// A transparent reference cast denotes the same storage (paper §4.3), and the
+// pass peels exactly the casts the parse-order credit sees through: a store
+// through the cast credits the member, a read through it is detected. A value
+// cast like (int)m is not transparent -- its operand read is the ordinary
+// lvalue-to-rvalue arm's business, unchanged.
+struct CastStoreThenRead {
+  int m [[uninit]];
+  CastStoreThenRead() { (int &)m = 1; int y = m; (void)y; }
+};
+
+struct CastStoreStaticCast {
+  int m [[uninit]];
+  CastStoreStaticCast() { static_cast<int &>(m) = 1; int y = m; (void)y; }
+};
+
+struct CastStoreReinterpretCast {
+  int m [[uninit]];
+  CastStoreReinterpretCast() {
+    reinterpret_cast<int &>(m) = 1;
+    int y = m;
+    (void)y;
+  }
+};
+
+struct CastCompoundAssignReads {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  CastCompoundAssignReads() { (int &)m += 1; } // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+};
+
+struct CastRead {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  CastRead() { int y = (int &)m; (void)y; } // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+};
+
+struct ValueCastRead {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  ValueCastRead() { int y = (int)m; (void)y; } // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+};
+
+// A derived-to-base reference cast of *this is still the current object, so a
+// store through it credits the tracked inherited member.
+struct CastBase {
+  int bm [[uninit]]; // expected-note {{member 'bm' declared here}}
+};
+struct CastDerivedStore : CastBase {
+  CastDerivedStore() { ((CastBase &)*this).bm = 1; int y = bm; (void)y; }
+};
+
+struct CastDerivedRead : CastBase {
+  CastDerivedRead() { int y = ((CastBase &)*this).bm; (void)y; } // expected-error {{member 'bm' is read before initialization under profile 'std::init'}}
+};
+
 struct OneBranchThenRead {
   int m [[uninit]]; // expected-note {{member 'm' declared here}}
   OneBranchThenRead(bool b) {
