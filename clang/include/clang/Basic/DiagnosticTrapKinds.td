@@ -56,5 +56,9 @@ def trap_profile_misaligned_access : Trap<
   "misaligned pointer access under profile '%0'">,
   Latent, InGroup<ProfileStdCoreUbMisalignedAccess>, ShowInSystemHeader;
 
+def trap_profile_null_dereference : Trap<
+  "null pointer dereference under profile '%0'">,
+  Latent, InGroup<ProfileStdCoreUbNullDereference>, ShowInSystemHeader;
+
 }
 }
