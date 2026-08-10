@@ -52,12 +52,8 @@ public:
     SourceLocation Begin;
     /// End location of the construct, recorded only when the construct was
     /// fully parsed at push time; invalid otherwise, leaving the dominion's
-    /// end bounded by the ProfileSuppressScope's lifetime. That fallback is
-    /// exact for a construct still being parsed -- its later tokens do not
-    /// exist yet, and instantiation of a not-yet-defined template is
-    /// deferred past the scope's death -- while a completed construct's
-    /// recorded end keeps a live scope from covering a pattern first
-    /// declared after it.
+    /// end bounded by the ProfileSuppressScope's lifetime (exact mid-parse;
+    /// see ProfilesFrameworkInternals.rst, "Suppression Dominion Mechanics").
     SourceLocation End;
   };
   SmallVector<ProfileSuppressEntry, 4> ProfileSuppressStack;
@@ -70,9 +66,8 @@ public:
   /// the enforcement's dominion (P3589R2 [decl.attr.enforce]p4: the dominion
   /// starts after the attribute), so a violation located in the global module
   /// fragment is not diagnosed. Fails open on invalid locations. Used by the
-  /// per-violation emission gates; the pass-dispatch gates keep the name-only
-  /// query ("enforced anywhere in the TU" is the right dispatch question --
-  /// per-violation filtering happens at emission).
+  /// per-violation emission gates; the pass-dispatch gates use the name-only
+  /// query.
   bool isProfileEnforcedAt(StringRef ProfileName, SourceLocation Loc) const;
 
   /// True if any entry of \p Entries names an enforced profile. \p Entries is
@@ -106,23 +101,15 @@ public:
                                                          StringRef RuleName);
 
   /// True if a live parse-time suppress entry for \p ProfileName /
-  /// \p RuleName covers \p Loc. An entry matches only tokens within its
-  /// construct's recorded range (its dominion, P3589R2 s2.4p3); when the
-  /// construct was still being parsed at push time no end is recorded and
-  /// the owning ProfileSuppressScope's lifetime bounds the dominion's end.
-  /// Tokens from outside the construct -- e.g. a template pattern
-  /// instantiated synchronously while the scope is live, wherever it is
-  /// declared -- are not suppressed.
+  /// \p RuleName covers \p Loc, i.e. \p Loc falls within the entry's
+  /// dominion (see ProfilesFrameworkInternals.rst, "Suppression Dominion
+  /// Mechanics").
   bool isProfileSuppressed(StringRef ProfileName, StringRef RuleName,
                            SourceLocation Loc) const;
   /// The post-parse counterpart of the parse-time stack: walk the AST upward
   /// from \p S -- enclosing statement nodes via the ParentMap, then the
   /// analyzed declaration's lexical chain -- for a matching suppression,
-  /// via the shared walks in clang/AST/Profiles.h. This walk sees only the
-  /// analyzed function's own interior; suppression from an enclosing
-  /// construct still mid-parse (e.g. the suppressed statement a local class
-  /// is declared in) lives on the parse-time stack, so the Stmt/AC gate in
-  /// shouldEmitProfileViolation consults both.
+  /// via the shared walks in clang/AST/Profiles.h.
   bool isProfileSuppressed(StringRef ProfileName, StringRef RuleName,
                            const Stmt *S, AnalysisDeclContext &AC) const;
 

@@ -265,19 +265,12 @@ bool SemaProfiles::isProfileSuppressed(StringRef ProfileName,
     if (!profiles::suppressionMatches(E.ProfileName, E.RuleName, ProfileName,
                                       RuleName))
       continue;
-    // The entry's dominion is its construct's token range (P3589R2 s2.4p3):
-    // a violation before the recorded begin -- e.g. in a template pattern
-    // instantiated synchronously while the scope is live -- is outside it,
-    // as is one past the recorded end -- e.g. in a pattern first declared
-    // *after* the suppressed construct. The end is recorded only for a
-    // construct fully parsed at push time; when it is invalid the scope's
-    // lifetime bounds the dominion, which is exact mid-parse (later tokens
-    // are unparsed and instantiation of undefined templates is deferred).
-    // Fail open on an invalid location on either side
+    // Dominion check; see ProfilesFrameworkInternals.rst, "Suppression
+    // Dominion Mechanics". Fail open on an invalid location on either side
     // (isBeforeInTranslationUnit rejects invalid locations), preserving
-    // plain-liveness behavior for synthesized code. Locations are compared
-    // in raw TU token order: expansion-loc normalization would collapse all
-    // tokens of one macro expansion onto the invocation and over-suppress.
+    // plain-liveness behavior for synthesized code. Compare raw TU token
+    // order: expansion-loc normalization would collapse a macro expansion's
+    // tokens onto the invocation and over-suppress.
     if (Loc.isInvalid() || E.Begin.isInvalid() ||
         (!SM.isBeforeInTranslationUnit(Loc, E.Begin) &&
          (E.End.isInvalid() || !SM.isBeforeInTranslationUnit(E.End, Loc))))
@@ -315,17 +308,10 @@ bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
     return false;
   if (getASTContext().isProfileExemptSystemHeaderLoc(Loc))
     return false;
-  // Honor [[profiles::suppress]] from the parse-time stack and, when a Decl is
-  // available, from the declaration and its lexical parents. The latter does
-  // not depend on a parse-time scope still being active, so finalization checks
-  // that run after the parse scope is torn down still respect suppression.
-  //
-  // The stack consult is dominion-checked against Loc: a check that fires
-  // while an unrelated construct's ProfileSuppressScope is live -- a
-  // synchronously instantiated pattern, or a class finalized as a side effect
-  // of one -- matches only entries whose construct's tokens cover Loc
-  // (P3589R2 s2.4p3), so no explicit finalization or instantiation guard is
-  // needed here.
+  // Honor [[profiles::suppress]] from the parse-time stack (dominion-checked;
+  // see ProfilesFrameworkInternals.rst) and, when a Decl is available, from
+  // the declaration and its lexical parents -- the latter survives the parse
+  // scope's teardown, so finalization checks still respect suppression.
   if (isProfileSuppressed(ProfileName, RuleName, Loc) ||
       profiles::isSuppressedFor(D, ProfileName, RuleName))
     return false;
@@ -367,14 +353,10 @@ bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
     return false;
   if (isProfileSuppressed(ProfileName, RuleName, UseStmt, AC))
     return false;
-  // The AST walk above covers only the analyzed function's own interior (its
-  // statements and its lexical declaration chain). A function can also be
-  // analyzed mid-parse of an enclosing construct -- a local class's method
-  // body runs its CFG passes at ActOnFinishFunctionBody, while the enclosing
-  // statement's ProfileSuppressScope is still live -- so consult the live
-  // stack too. The stack consult is dominion-checked against Loc, so an
-  // unrelated live scope (e.g. one covering a synchronously instantiated
-  // pattern declared elsewhere) never matches.
+  // A function can be analyzed while an enclosing construct is still
+  // mid-parse (e.g. a local class's method body), so consult the live
+  // parse-time stack too; the consult is dominion-checked, so an unrelated
+  // live scope never matches (see ProfilesFrameworkInternals.rst).
   if (isProfileSuppressed(ProfileName, RuleName, Loc))
     return false;
   return true;
@@ -558,12 +540,6 @@ void dispatchFinalizationProfiles(Sema &S, Node *D,
                                   const FinalizationProfile<Node> (&Table)[N]) {
   if (!S.Profiles().anyProfileEnforced(Table))
     return;
-  // Finalization can run nested in an unrelated instantiation whose
-  // [[profiles::suppress]] scope is still on the parse-time stack. No guard
-  // is needed: the stack consult is dominion-checked against the entry's
-  // recorded construct range, so such an entry matches only if its
-  // construct's tokens cover the finalized declaration -- including when the
-  // finalized pattern is first declared after the suppressed construct.
   for (const auto &E : Table)
     if (S.Profiles().isProfileEnforced(E.Name))
       E.Callback(S, D);
