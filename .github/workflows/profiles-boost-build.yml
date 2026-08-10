@@ -1,0 +1,270 @@
+name: Profiles Boost Build
+
+# Compiles Boost with the std::init profile enforced, using a clang built by
+# profiles-release.yml, and publishes the raw compiler log for inspection.
+#
+# Dispatched manually. By default it takes clang from the profiles-init-latest
+# rolling prerelease; pass clang_run_id to take it from a specific Profiles
+# Release run instead.
+
+on:
+  workflow_dispatch:
+    inputs:
+      clang_run_id:
+        description: "Profiles Release run id to take the clang artifact from (empty = the profiles-init-latest release)"
+        required: false
+        default: ""
+      boost_ref:
+        description: "Boost superproject git ref (branch or tag)"
+        required: false
+        default: "master"
+      math_shards:
+        description: "Number of parallel b2 drivers for the Boost.Math test phase (more = more cores used; total -j stays ~nproc)"
+        required: false
+        default: "64"
+      math_budget_minutes:
+        description: "Soft time budget for the Boost.Math phase only; on expiry it stops b2, publishes partial results, and still SUCCEEDS (job stays green). Math finishes fast or never, so this can be small."
+        required: false
+        default: "90"
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  CLANG_ARTIFACT: clang-profiles-init-linux-x86_64
+
+jobs:
+  build-boost:
+    name: Build Boost (std::init enforced)
+    # ubuntu-24.04 for a newer libstdc++ (cleaner c++23).
+    # runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64]
+    # Hard backstop only. The build step enforces its own (much smaller) soft
+    # budget on the math phase and exits 0, so this should never fire; it just
+    # prevents a runaway if that watchdog itself breaks. Keep it above the soft
+    # budget (math_budget_minutes) + phase 1.
+    timeout-minutes: 240
+    steps:
+      - name: Checkout profiles branch (helpers)
+        uses: actions/checkout@v4
+
+      - name: Install a recent libstdc++
+        run: sudo apt-get update && sudo apt-get install -y g++-14
+
+      - name: Download clang (from a Profiles Release run)
+        if: inputs.clang_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.CLANG_ARTIFACT }}
+          path: clang-dl
+          run-id: ${{ inputs.clang_run_id }}
+          github-token: ${{ github.token }}
+
+      # The tag is explicit because the rolling releases are prereleases, and a
+      # tagless gh release download resolves the latest non-prerelease -- which
+      # would serve a dated profiles-framework clang from before the branch split.
+      - name: Download clang (rolling prerelease)
+        if: inputs.clang_run_id == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p clang-dl
+          gh release download profiles-init-latest --repo "${{ github.repository }}" \
+            --pattern "$CLANG_ARTIFACT.tar.gz" --dir clang-dl
+
+      - name: Unpack clang
+        run: |
+          mkdir -p "$RUNNER_TEMP/clang"
+          tar xzf "clang-dl/$CLANG_ARTIFACT.tar.gz" -C "$RUNNER_TEMP/clang"
+          "$RUNNER_TEMP/clang/bin/clang++" --version
+          echo "PROFILES_CLANGXX=$RUNNER_TEMP/clang/bin/clang++" >> "$GITHUB_ENV"
+          echo "PROFILES_PRELUDE=$GITHUB_WORKSPACE/clang/utils/profiles-boost/prelude.hpp" >> "$GITHUB_ENV"
+          mkdir -p "$GITHUB_WORKSPACE/crash"
+          echo "PROFILES_CRASH_DIR=$GITHUB_WORKSPACE/crash" >> "$GITHUB_ENV"
+
+      - name: Clone Boost
+        run: |
+          git clone --depth 1 --recursive --shallow-submodules \
+            --branch "${{ inputs.boost_ref || 'master' }}" \
+            https://github.com/boostorg/boost boost
+
+      - name: Bootstrap Boost.Build
+        working-directory: boost
+        run: |
+          ./bootstrap.sh
+          ./b2 headers
+
+      - name: Build Boost with std::init enforced
+        working-directory: boost
+        run: |
+          ws="$GITHUB_WORKSPACE"
+          log="$ws/boost-profiles.log"
+          rm -f "$ws"/part-*.log "$log" "$log.tmp"
+
+          b2flags=(
+            --user-config="$ws/clang/utils/profiles-boost/user-config.jam"
+            toolset=clang-profiles
+            cxxstd=23
+            testing.execute=off
+          )
+          nproc_n=$(nproc)
+
+          # --- Why this is split -------------------------------------------------
+          # The bottleneck is the SINGLE-THREADED b2 driver: with the whole
+          # libs/*/test graph in one process it pegs one core doing dependency
+          # scanning/binding + serializing every compile's (very verbose) output,
+          # while the actual compiles sit blocked (we observed procs_running=0 -- the
+          # driver couldn't even feed -j3). More cores can't help one b2, and a
+          # bigger inner -j doesn't either; the lever that helps is MORE b2 DRIVERS.
+          # Boost.Math is the pathological tail (autodiff/special-function *compile*
+          # tests), so we fan it out across many b2 drivers (math_shards), each over
+          # a disjoint chunk of Math targets in its own --build-dir (so concurrent
+          # drivers can't race on shared config-check/library targets). Everything
+          # else builds first in one wide b2. Total concurrency stays ~nproc: the
+          # inner -j shrinks as the shard count grows (inner = nproc / shards).
+          #
+          # Output is streamed live to the Actions log: phase 1 via `tee`, the
+          # parallel Math phase via `tail -f` on the per-chunk part files (a single
+          # b2 can't stream to the console and write its own file without interleave
+          # corruption, so each writes a file and we mirror them).
+
+          # --- Incremental result collector -------------------------------------
+          # Previously boost-profiles.log was assembled only on the final line, so a
+          # timeout left it EMPTY and the whole (multi-hour) run produced nothing.
+          # Instead, merge the per-shard part files into the deliverable continuously
+          # (atomic rename), so whenever the job stops -- success OR timeout -- the
+          # log holds everything finished so far and the summarize/upload steps
+          # (if: always()) have real data to work with.
+          merge_now() { cat "$ws"/part-*.log > "$log.tmp" 2>/dev/null && mv "$log.tmp" "$log" || true; }
+          collector() { while :; do merge_now; sleep 20; done; }
+          collector & collectorpid=$!
+
+          # --- Soft time budget (self-imposed, so GitHub never *cancels* us) -----
+          # A GitHub timeout-minutes expiry CANCELS the job, which shows as a gray
+          # "Cancelled" run even though every other step succeeded. Instead we
+          # enforce our OWN deadline here: on expiry the watchdog stops b2 and we
+          # exit 0, so the step and the job stay GREEN and summarize/upload run
+          # normally. The timeout is surfaced as a yellow ::warning:: annotation
+          # plus a job-summary note (a run that stopped with one straggler shard
+          # still captured ~all of the data -- that's a success, not a failure).
+          # Genuine failures in *other* steps still fail the job as usual.
+          #
+          # It is scoped to the MATH phase only: empirically math is all-or-nothing
+          # -- a shard either finishes within minutes or wedges forever (b2 pegged,
+          # zero new output) -- so there is nothing to gain by waiting. Phase 1 is
+          # fast and not subject to this stall, so it runs before the clock starts.
+          budget_min="${{ inputs.math_budget_minutes || '60' }}"
+          timedout="$ws/.build-timedout"; rm -f "$timedout"
+          watchdog() {
+            sleep "$(( budget_min * 60 ))"
+            : > "$timedout"
+            echo "::warning title=Math soft-timeout::Boost.Math hit the ${budget_min}-minute budget; stopping b2 and publishing partial results (job kept green)."
+            pkill -x b2 2>/dev/null || true
+          }
+          watchdogpid=""
+
+          tailpid=""
+          cleanup() { kill "$collectorpid" ${watchdogpid:+$watchdogpid} ${tailpid:+$tailpid} 2>/dev/null || true; }
+          trap cleanup EXIT
+
+          start=$(date +%s)
+
+          # 1) Everything except Math: one b2, full width. Also materializes the
+          #    shared config checks and compiled Boost libraries.
+          nonmath=()
+          for d in libs/*/test; do
+            [ "$d" = libs/math/test ] || nonmath+=("$d")
+          done
+          echo "== phase 1: non-math ($nproc_n-way) =="
+          ./b2 "${b2flags[@]}" -k -j"$nproc_n" "${nonmath[@]}" 2>&1 \
+            | tee "$ws/part-000-rest.log" || true
+
+          # Start the math-phase soft-timeout clock now (phase 1 is done).
+          watchdog & watchdogpid=$!
+
+          # 2) Enumerate Math test targets authoritatively from b2's own plan
+          #    (never from guessed source names), then build them in parallel.
+          #    Guarded by the soft-timeout flag (defensive; normally not yet set).
+          if [ ! -f "$timedout" ]; then
+          ./b2 "${b2flags[@]}" libs/math/test -n 2>/dev/null \
+            | grep -oP 'bin\.v2/libs/math/test/\K[^/]+(?=\.test)' \
+            | sort -u > "$ws/math-names.txt" || true
+          n_math=$(wc -l < "$ws/math-names.txt" 2>/dev/null || echo 0)
+          echo "== phase 2: math targets enumerated: $n_math =="
+
+          if [ "$n_math" -eq 0 ]; then
+            # Enumeration failed for some reason -> never lose coverage: build
+            # Math in a single b2 (correct, just not parallelized).
+            echo "== math enumeration empty; single-b2 fallback =="
+            ./b2 "${b2flags[@]}" -k -j"$nproc_n" libs/math/test 2>&1 \
+              | tee "$ws/part-math-fallback.log" || true
+          else
+            outer="${{ inputs.math_shards || '64' }}"
+            [ "$outer" -lt 1 ] 2>/dev/null && outer=1
+            [ "$outer" -gt "$n_math" ] && outer="$n_math"
+            inner=$(( nproc_n / outer )); [ "$inner" -lt 1 ] && inner=1
+            echo "== phase 2: math via $outer parallel b2 x -j$inner =="
+            split -d -a 4 -n "r/$outer" "$ws/math-names.txt" "$RUNNER_TEMP/mchunk_"
+            i=0; pids=()
+            for c in "$RUNNER_TEMP"/mchunk_*; do
+              ids=$(sed 's#^#libs/math/test//#' "$c" | tr '\n' ' ')
+              [ -z "${ids// /}" ] && continue
+              ./b2 "${b2flags[@]}" --build-dir="$RUNNER_TEMP/mbd_$i" \
+                -k -j"$inner" $ids > "$ws/part-math-$(printf '%04d' "$i").log" 2>&1 &
+              pids+=($!)
+              i=$((i + 1))
+            done
+            # Mirror all chunk logs to the Actions console in real time; the b2
+            # processes remain the source of truth for the merge.
+            tail -n +1 -f "$ws"/part-math-*.log & tailpid=$!
+            wait "${pids[@]}" 2>/dev/null || true
+            kill "$tailpid" 2>/dev/null || true; tailpid=""
+          fi
+          fi  # end soft-budget guard around the math phase
+
+          # 3) Final authoritative merge (the collector already refreshes the log
+          #    every 20s during the build; this captures the last bytes and covers
+          #    the happy, no-timeout path).
+          kill "$collectorpid" ${watchdogpid:+$watchdogpid} 2>/dev/null || true
+          merge_now
+          end=$(date +%s)
+          printf 'done in %ss; boost-profiles.log lines: %s (from %s part files)\n' \
+            "$((end - start))" "$(wc -l < "$log")" \
+            "$(ls "$ws"/part-*.log 2>/dev/null | wc -l)"
+
+          # Report a soft-timeout as a visible (yellow) note, but SUCCEED so the job
+          # stays green. Other steps' failures still fail the job normally.
+          if [ -f "$timedout" ]; then
+            {
+              echo "### :warning: Build stopped at the ${budget_min}-minute soft budget"
+              echo ""
+              echo "Boost.Math did not fully finish, but partial results were published"
+              echo "to \`boost-profiles.log\` ($(( end - start ))s elapsed). Treated as success on purpose."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Soft-timeout reached; published partial results and exiting 0 (green)."
+          fi
+          exit 0
+
+      - name: Summarize & visualize profile violations
+        if: always()
+        run: |
+          echo "_Boost ref: \`${{ inputs.boost_ref || 'master' }}\`_" >> "$GITHUB_STEP_SUMMARY"
+          python3 clang/utils/profiles-boost/summarize.py \
+            --log "$GITHUB_WORKSPACE/boost-profiles.log" \
+            --boost-root "$GITHUB_WORKSPACE/boost" \
+            --json "$GITHUB_WORKSPACE/summary.json" \
+            --html "$GITHUB_WORKSPACE/report.html" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload log, report and crash reproducers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boost-profiles-log
+          path: |
+            boost-profiles.log
+            summary.json
+            report.html
+            crash/
+          if-no-files-found: warn
