@@ -56,6 +56,8 @@ public:
     /// see ProfilesFrameworkInternals.rst, "Suppression Dominion Mechanics").
     SourceLocation End;
   };
+  /// The live parse-time suppress entries, innermost last; pushed and popped
+  /// by ProfileSuppressScope guards.
   SmallVector<ProfileSuppressEntry, 4> ProfileSuppressStack;
 
   /// Thin wrapper over ASTContext::isProfileEnforced (the enforcement state
@@ -88,10 +90,16 @@ public:
   /// profile (P3589R2 [decl.attr.enforce]p3).
   bool addProfileEnforcement(StringRef Name, StringRef Designator,
                              SourceLocation Loc);
+  /// Record every designator of a [[profiles::enforce]] attribute (also onto
+  /// \p Mod for a module interface), appending newly recorded names and
+  /// designators to \p NewNames / \p NewDesignators when given. Returns false
+  /// if the attribute has no arguments.
   bool processProfilesEnforceAttr(const ParsedAttr &AL, Module *Mod,
                                   SmallVectorImpl<StringRef> *NewNames,
                                   SmallVectorImpl<StringRef> *NewDesignators);
 
+  /// Build a ProfilesSuppressAttr from a parsed [[profiles::suppress]];
+  /// returns null if the attribute carries no profile name (parse error).
   ProfilesSuppressAttr *makeProfilesSuppressAttr(const ParsedAttr &AL);
 
   /// Create an implicit ProfilesSuppressAttr carrying just a profile and rule
@@ -120,13 +128,25 @@ public:
   /// declaration the emission gates would exempt anyway.
   bool isProfileExemptSystemHeaderLoc(SourceLocation Loc) const;
 
+  /// True if a violation of \p ProfileName / \p RuleName at \p Loc should be
+  /// diagnosed: the profile is enforced at \p Loc, \p Loc is not
+  /// system-header-exempt, the violation is not suppressed, and the context
+  /// is neither unevaluated nor a discarded statement.
   bool shouldEmitProfileViolation(StringRef ProfileName, StringRef RuleName,
                                   SourceLocation Loc);
+  /// As above, additionally honoring [[profiles::suppress]] on \p D and its
+  /// lexical parents and skipping templated entities (a rule fires on the
+  /// instantiation; see ProfilesFrameworkInternals.rst, "Pattern 1").
   bool shouldEmitProfileViolation(StringRef ProfileName, StringRef RuleName,
                                   SourceLocation Loc, const Decl *D);
+  /// The post-parse (CFG analysis) counterpart: suppression is looked up by
+  /// walking the AST upward from \p UseStmt and by consulting the still-live
+  /// parse-time stack.
   bool shouldEmitProfileViolation(StringRef ProfileName, StringRef RuleName,
                                   const Stmt *UseStmt,
                                   AnalysisDeclContext &AC) const;
+  /// Emit \p DiagID at \p Loc if shouldEmitProfileViolation passes; returns
+  /// true if the diagnostic was emitted.
   bool checkProfileViolation(StringRef ProfileName, StringRef RuleName,
                              SourceLocation Loc, unsigned DiagID);
 

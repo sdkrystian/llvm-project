@@ -79,8 +79,8 @@ bool SemaProfiles::addProfileEnforcement(StringRef Name, StringRef Designator,
   return true;
 }
 
-// Unzip profile arguments into the parallel key/value/kind arrays that
-// ProfilesSuppressAttr stores (Attr.td cannot hold structured arguments).
+/// Unzip profile arguments into the parallel key/value/kind arrays that
+/// ProfilesSuppressAttr stores (Attr.td cannot hold structured arguments).
 static void unzipProfileArguments(ArrayRef<profiles::ProfileArgument> Arguments,
                                   SmallVectorImpl<StringRef> &Keys,
                                   SmallVectorImpl<StringRef> &Values,
@@ -129,10 +129,11 @@ bool SemaProfiles::processProfilesEnforceAttr(
   return true;
 }
 
-// P3589R2 [decl.attr.enforce]p5: profiles are compatible if they are the same
-// -- by name; arguments configure a profile without changing its identity --
-// or proclaimed compatible by the implementation. "All standard profiles are
-// compatible with each other" is the one proclamation modeled here.
+/// P3589R2 [decl.attr.enforce]p5: profiles are compatible if they are the
+/// same -- by name; arguments configure a profile without changing its
+/// identity -- or proclaimed compatible by the implementation. "All standard
+/// profiles are compatible with each other" is the one proclamation modeled
+/// here.
 static bool areProfilesCompatible(StringRef A, StringRef B) {
   return A == B || (A.starts_with("std::") && B.starts_with("std::"));
 }
@@ -445,13 +446,13 @@ SemaProfiles::ProfileSuppressScope::~ProfileSuppressScope() {
 }
 
 namespace {
-// Row for the unified finalization dispatch shared by class-finalization
-// (pattern 3) and constructor-finalization (pattern 4): a profile name plus a
-// callback invoked once per finalized, non-dependent, non-invalid Node (a
-// CXXRecordDecl or a CXXConstructorDecl). Adding a new profile is a single row
-// in the matching table below plus a ProfileRuleError diagnostic in
-// DiagnosticSemaKinds.td and a callback that consults
-// SemaProfiles::shouldEmitProfileViolation before emitting.
+/// Row for the unified finalization dispatch shared by class-finalization
+/// (pattern 3) and constructor-finalization (pattern 4): a profile name plus
+/// a callback invoked once per finalized, non-dependent, non-invalid Node (a
+/// CXXRecordDecl or a CXXConstructorDecl). Adding a new profile is a single
+/// row in the matching table below plus a ProfileRuleError diagnostic in
+/// DiagnosticSemaKinds.td and a callback that consults
+/// SemaProfiles::shouldEmitProfileViolation before emitting.
 template <class Node> struct FinalizationProfile {
   StringRef Name;
   void (*Callback)(Sema &, Node *);

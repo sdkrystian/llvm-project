@@ -16,11 +16,14 @@
 
 namespace clang::profiles {
 
+/// How a profile argument was written: positionally, or as a key: value
+/// pair.
 enum class ProfileArgumentKind : unsigned {
   Positional = 0,
   Named = 1,
 };
 
+/// One argument of a profile-designator or [[profiles::suppress]] attribute.
 struct ProfileArgument {
   llvm::StringRef Key;
   llvm::StringRef Value;

@@ -1688,11 +1688,11 @@ struct SortDiagBySourceLocation {
 } // namespace clang
 
 namespace {
-// Profiles that opt into Clang's CFG-uninitialized-variables analysis. Each
-// entry pairs the profile name with the diagnostic to emit when an
-// uninitialized read is found and not suppressed at the use site. Adding a
-// new profile that wants to ride this analysis is a single row here plus a
-// ProfileRuleError diagnostic in DiagnosticSemaKinds.td.
+/// Profiles that opt into Clang's CFG-uninitialized-variables analysis. Each
+/// entry pairs the profile name with the diagnostic to emit when an
+/// uninitialized read is found and not suppressed at the use site. Adding a
+/// new profile that wants to ride this analysis is a single row here plus a
+/// ProfileRuleError diagnostic in DiagnosticSemaKinds.td.
 struct CFGProfileEntry {
   StringRef Name;
   StringRef Rule;
@@ -1705,10 +1705,10 @@ constexpr CFGProfileEntry CFGProfiles[] = {
 class UninitValsDiagReporter : public UninitVariablesHandler {
   Sema &S;
   AnalysisDeclContext &AC;
-  // When set, only the CFGProfiles diagnostics are emitted; the default
-  // -Wuninitialized reports (self-init and the sorted const-ref/ptr/use paths)
-  // are skipped. The post-error profile pass sets this so it cannot resurrect
-  // ordinary warnings that the first TU error is meant to suppress.
+  /// When set, only the CFGProfiles diagnostics are emitted; the default
+  /// -Wuninitialized reports are skipped. The post-error profile pass sets
+  /// this so it cannot resurrect ordinary warnings that the first TU error
+  /// is meant to suppress.
   bool ProfileOnly;
   typedef SmallVector<UninitUse, 2> UsesVec;
   typedef llvm::PointerIntPair<UsesVec *, 1, bool> MappedType;
@@ -2921,9 +2921,9 @@ void sema::AnalysisBasedWarnings::issueWarningsForRegisteredVarDecl(
       S, AC, std::make_pair(SecondRange.begin(), SecondRange.end()));
 }
 
-// Base CFG build options shared by the main per-function analysis pass
-// (IssueWarnings) and the post-error profile rerun below, so both see the
-// same CFG shape.
+/// Base CFG build options shared by the main per-function analysis pass
+/// (IssueWarnings) and the post-error profile rerun below, so both see the
+/// same CFG shape.
 static void configureBaseCFGBuildOptions(AnalysisDeclContext &AC) {
   // Don't generate EH edges for CallExprs as we'd like to avoid the n^2
   // explosion for destructors that can result and the compile time hit.
@@ -2937,8 +2937,8 @@ static void configureBaseCFGBuildOptions(AnalysisDeclContext &AC) {
   AC.getCFGBuildOptions().AddCXXDefaultInitExprInCtors = true;
 }
 
-// The always-add statement classes of the main pass's non-linearized CFG
-// configuration; shared with the post-error profile rerun.
+/// The always-add statement classes of the main pass's non-linearized CFG
+/// configuration; shared with the post-error profile rerun.
 static void addNonLinearizedAlwaysAddClasses(AnalysisDeclContext &AC) {
   AC.getCFGBuildOptions()
       .setAlwaysAdd(Stmt::BinaryOperatorClass)

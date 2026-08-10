@@ -3693,10 +3693,10 @@ ASTReader::ReadControlBlock(ModuleFile &F,
   }
 }
 
-/// Decode an enforced-profile blob record (P3589R2), the inverse of the
-/// ASTWriter encoding: Record[0] is the profile name length and the blob is
-/// the concatenated name + designator. Shared by the ENFORCED_PROFILES (PCH)
-/// and SUBMODULE_ENFORCED_PROFILES cases.
+/// Decode an enforced-profile blob record (P3589R2); the inverse of
+/// createEnforcedProfileAbbrev/emitEnforcedProfile in ASTWriter.cpp, which
+/// document the format. Shared by the ENFORCED_PROFILES (PCH) and
+/// SUBMODULE_ENFORCED_PROFILES cases.
 static profiles::EnforcedProfile readEnforcedProfile(ArrayRef<uint64_t> Record,
                                                      StringRef Blob) {
   unsigned NameLen = Record[0];

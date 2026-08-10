@@ -2332,6 +2332,8 @@ private:
                                  SourceLocation *EndLoc,
                                  IdentifierInfo *ScopeName,
                                  SourceLocation ScopeLoc);
+  /// A profile-designator parsed from a profiles:: attribute: the profile
+  /// name, the designator's canonical spelling, and its arguments.
   struct ParsedProfileDesignator {
     std::string Name;
     std::string Spelling;
@@ -2348,6 +2350,7 @@ private:
     };
     SmallVector<Argument, 4> Arguments;
   };
+  /// The parsed argument body of a [[profiles::suppress]] attribute.
   struct ParsedProfileSuppressArgs {
     std::string Name;
     std::string Justification;
@@ -2356,15 +2359,27 @@ private:
     SmallVector<ParsedProfileDesignator::Argument, 2> Arguments;
   };
 
+  /// Parse a possibly ::-qualified profile name. Returns true on error.
   bool ParseProfileName(std::string &Name);
+  /// Parse a profile-designator: a profile name optionally followed by a
+  /// parenthesized argument list. Returns true on error.
   bool ParseProfileDesignator(ParsedProfileDesignator &Designator);
+  /// Parse a comma-separated profile-designator-list. Returns true on error.
   bool ParseProfileDesignatorList(
       SmallVectorImpl<ParsedProfileDesignator> &Designators);
+  /// Parse a parenthesized list of positional and key: value profile
+  /// arguments. Returns true on error.
   bool ParseProfileArgumentList(
       SmallVectorImpl<ParsedProfileDesignator::Argument> &Args);
+  /// Parse the argument body of a [[profiles::suppress]] attribute. Returns
+  /// true on error.
   bool ParseProfileSuppressBody(ParsedProfileSuppressArgs &Args);
+  /// Capture the spelling of one balanced token, or of a bracketed token
+  /// sequence, that is not a bare comma. Returns true on error.
   bool ParseNonCommaBalancedToken(std::string &Spelling,
                                   SourceRange *Range = nullptr);
+  /// Capture the spelling of one non-operator-non-punctuator-token (P3589R2
+  /// [dcl.attr.profiles]). Returns true on error.
   bool ParseNonOperatorNonPunctuatorToken(std::string &Spelling,
                                           SourceRange *Range = nullptr);
 

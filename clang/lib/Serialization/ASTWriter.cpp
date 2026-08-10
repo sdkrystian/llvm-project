@@ -2983,6 +2983,8 @@ static unsigned createEnforcedProfileAbbrev(llvm::BitstreamWriter &Stream,
   return Stream.EmitAbbrev(std::move(Abbrev));
 }
 
+/// Emit one enforced-profile record with the abbrev built by
+/// createEnforcedProfileAbbrev.
 static void emitEnforcedProfile(llvm::BitstreamWriter &Stream,
                                 unsigned AbbrevID, unsigned RecordCode,
                                 const profiles::EnforcedProfile &EP) {
