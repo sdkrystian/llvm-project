@@ -100,12 +100,22 @@ profile's name.  ``test::uninit_read`` is the in-tree example:
        {"my::profile", /*Rule=*/"", diag::err_my_profile_rule},
    };
 
-The analysis's pass guard ORs in ``anyProfileEnforced(Table)`` so the pass
-runs for an enforced profile even when the corresponding warning is
-silenced, and the analysis's diagnostic reporter walks the table calling
+The analysis's diagnostic reporter walks the table calling
 ``shouldEmitProfileViolation(Name, Rule, Stmt, AnalysisDeclContext)`` per use
 site, emitting the entry's diagnostic (and skipping the default warning) when
 it returns true.
+
+Profile rules are errors, so the pass must also run where the warning
+pipeline is skipped.  ``AnalysisBasedWarnings::hasEnforcedCFGProfile()``
+gates those paths: after an uncompilable TU error, and when warnings are
+disabled for the declaration (``-w``, or a system-header declaration under
+``-fno-profiles-exempt-system-headers``), the per-function dispatch runs
+``runProfileOnlyCFGAnalysis`` instead of skipping -- the same analysis with
+the reporter in ``ProfileOnly`` mode, so an ordinary warning the error or
+flag is meant to silence cannot resurface.  ``Sema::ActOnFinishFunctionBody``
+likewise keeps dispatching per-function analysis after a TU error when such
+a profile is enforced; without this, the first error would disable the
+profile for every later function.
 
 That overload is the post-parse counterpart of the parse-time suppress
 stack: by the time the analysis runs the stack has unwound, so it walks the

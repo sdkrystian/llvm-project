@@ -17178,12 +17178,10 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body, bool IsInstantiation,
           (!hasUncompilableErrorOccurred() ||
            (!dcl->isInvalidDecl() &&
             AnalysisWarnings.hasEnforcedCFGProfile()))) {
-        // Normally analysis-based warnings only run for a valid body in an
-        // otherwise error-free TU. CFG-based profiles (e.g.
-        // test::uninit_read) must keep diagnosing later functions even after an
-        // earlier TU error, so still run the per-function pass for a valid body
-        // when such a profile is enforced; IssueWarnings restricts that
-        // post-error pass to profile diagnostics.
+        // CFG-based profile rules are errors and must keep diagnosing after
+        // an earlier TU error, so keep dispatching the per-function pass;
+        // IssueWarnings restricts it to profile diagnostics (see
+        // runProfileOnlyCFGAnalysis).
         ActivePolicy = &WP;
       }
 

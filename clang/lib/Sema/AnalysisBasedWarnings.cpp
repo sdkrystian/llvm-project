@@ -2950,13 +2950,13 @@ static void addNonLinearizedAlwaysAddClasses(AnalysisDeclContext &AC) {
       .setAlwaysAdd(Stmt::UnaryOperatorClass);
 }
 
-// Pattern-2 profiles (the CFGProfiles table) ride the uninitialized-
-// variables analysis, but profile rules emit errors, so they must run even
-// where IssueWarnings skips the warning pipeline: once the TU has an
-// uncompilable error, and when warnings are disabled for the declaration
-// (-w, or a system-header decl under -fno-profiles-exempt-system-headers).
-// Run just that analysis for a single function on those paths. Diagnostics
-// are restricted to the profile via the ProfileOnly reporter.
+/// Pattern-2 profiles (the CFGProfiles table) ride the uninitialized-
+/// variables analysis, but profile rules emit errors, so they must run even
+/// where IssueWarnings skips the warning pipeline: once the TU has an
+/// uncompilable error, and when warnings are disabled for the declaration
+/// (-w, or a system-header decl under -fno-profiles-exempt-system-headers).
+/// Run just that analysis for a single function on those paths. Diagnostics
+/// are restricted to the profile via the ProfileOnly reporter.
 static void runProfileOnlyCFGAnalysis(Sema &S, const Decl *D) {
   AnalysisDeclContext AC(/*Mgr=*/nullptr, D);
 
@@ -3195,11 +3195,8 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
 
   if (shouldSkipAnalysisForDecl(S, D)) {
     // The dependent-context skip is unconditional (handled at instantiation
-    // time). The other skip reasons -- ignored warnings (-w) and suppressed
-    // system-header warnings -- must not silence profile rules, which emit
-    // errors: run the profile-only CFG pass before returning, unless the
-    // declaration is exempt anyway under the system-header stopgap. Same
-    // valid-decl/no-fatal-error guards as the post-error rerun below.
+    // time); the -w and system-header skips must not silence profile rules,
+    // which are errors (see runProfileOnlyCFGAnalysis).
     if (!cast<DeclContext>(D)->isDependentContext() &&
         hasEnforcedCFGProfile() &&
         !S.Profiles().isProfileExemptSystemHeaderLoc(D->getLocation()) &&
@@ -3208,21 +3205,16 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
     return;
   }
 
-  // The enforced-CFG-profile query is the same at every use below within
-  // one invocation -- nothing in this function mutates the enforced set --
-  // so compute it once, after the early-out above. Deliberately a local, not
-  // a member cache: a member would need an invalidation story for mid-TU
-  // enforcement arriving via a module or PCH load.
+  // Queried at every use below; the enforced set cannot change within one
+  // invocation.
   const bool CFGProfileEnforced = hasEnforcedCFGProfile();
 
   if (S.hasUncompilableErrorOccurred()) {
     // Flush out any possibly unreachable diagnostics.
     flushDiagnostics(S, fscope);
-    // Pattern-2 profiles ride the uninitialized-variables analysis and must see
-    // every function even after an earlier TU error; otherwise the first error
-    // disables them for all later functions. Run only that analysis, only for
-    // an enforced profile, and only on a valid decl (so the CFG is buildable).
-    // Other analyses keep the early-out.
+    // Profile rules are errors: keep the CFG profile pass alive after a TU
+    // error, on a valid decl so the CFG is buildable (see
+    // runProfileOnlyCFGAnalysis). Other analyses keep the early-out.
     if (CFGProfileEnforced && !D->isInvalidDecl() &&
         !Diags.hasFatalErrorOccurred())
       runProfileOnlyCFGAnalysis(S, D);
