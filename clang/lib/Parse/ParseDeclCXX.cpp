@@ -5330,12 +5330,10 @@ bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
       !AttrName->isStr("require"))
     return false;
 
-  // Without -fprofiles the attributes are ignored (their LangOpts gate makes
-  // Sema emit warn_attribute_ignored), so behave like any ignored standard
-  // attribute: accept an arbitrary balanced-token argument clause -- or none
-  // -- without profile grammar checking. The attribute is still created, with
-  // default-constructed (empty) custom data, so the Sema warning path sees
-  // it; no consumer reads the custom data while the feature is off.
+  // Without -fprofiles, behave like any ignored standard attribute: accept an
+  // arbitrary balanced-token argument clause without profile grammar checking.
+  // The attribute is still created (with empty custom data no consumer reads)
+  // so Sema's warn_attribute_ignored path sees it.
   if (!getLangOpts().Profiles) {
     SourceLocation End = AttrNameLoc;
     if (Tok.is(tok::l_paren)) {
@@ -5382,10 +5380,8 @@ bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
     return true;
   };
 
-  // The typed payload cannot be installed until the ParsedAttr exists, and
-  // addNew cannot be hoisted ahead of the grammar (each error path bails via
-  // SkipToRParen and must create no attribute), so exactly one of these
-  // typed locals is set here and installed after addNew below.
+  // Error paths must create no attribute, so the payload is built first and
+  // installed after addNew below.
   ArrayRef<detail::ProfileDesignator> *Designators = nullptr;
   detail::ProfileSuppressArgs *SuppressArgs = nullptr;
   if (AttrName->isStr("suppress")) {

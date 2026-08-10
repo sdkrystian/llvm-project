@@ -1375,13 +1375,9 @@ Decl *Parser::ParseFunctionDefinition(ParsingDeclarator &D,
   D.getMutableDeclSpec().abort();
 
   // A [[profiles::suppress]] on the definition's declarator-id covers the
-  // whole definition -- mem-initializers and body included -- for the
-  // location-routed parse-time rules, like ParseLexedMethodDef's scope does
-  // for an inline member (Decl-routed rules consult the declaration
-  // directly and need no scope). No lexical-parent walk: this parse is in
-  // place, so any enclosing suppress scopes are already on the stack. The
-  // scope's own lifetime bounds the suppression exactly to this parse
-  // (getCompletedConstructEnd is invalid for a body-pending function).
+  // whole definition, mem-initializers and body included. No lexical-parent
+  // walk: this parse is in place, so any enclosing suppress scopes are
+  // already on the stack.
   SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(
       Actions, Res ? Res->getAsFunction() : nullptr);
 

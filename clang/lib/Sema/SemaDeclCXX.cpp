@@ -18828,17 +18828,11 @@ void Sema::SetDeclDefaulted(Decl *Dcl, SourceLocation DefaultLoc) {
     else
       DefineDefaultedFunction(*this, MD, DefaultLoc);
 
-    // C++ profiles: a constructor explicitly defaulted here -- after its
-    // first declaration -- is user-provided ([class.default.ctor]) yet
-    // never reaches the parsed-definition dispatch, so its
-    // constructor-finalization checks run here, where the class is complete
-    // and the definition just materialized has only non-written
-    // initializers. Every constructor kind dispatches uniformly; a callback
-    // that must not see a defaulted copy or move constructor (one whose
-    // written-initializer rule would false-positive on member-wise
-    // initialization that writes no initializer) filters for itself.
-    // In-class '= default' returned above and is never user-provided;
-    // implicit constructors do not pass through here at all.
+    // C++ profiles: a constructor explicitly defaulted after its first
+    // declaration is user-provided ([class.default.ctor]) yet never reaches
+    // the parsed-definition dispatch, so its constructor-finalization checks
+    // run here. In-class '= default' returned above; implicit constructors
+    // never pass through here.
     if (auto *Ctor = dyn_cast<CXXConstructorDecl>(MD))
       Profiles().checkProfileViolationsAtConstructorFinalization(Ctor);
   }

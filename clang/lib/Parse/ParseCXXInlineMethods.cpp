@@ -680,12 +680,10 @@ void Parser::ParseLexedMemberInitializer(LateParsedMemberInitializer &MI) {
   if (!MI.Field || MI.Field->isInvalidDecl())
     return;
 
-  // The suppression dominion of a member declaration includes its initializer
-  // tokens (P3589R2 s2.4p3). ParseCXXMemberInitializer pushes its own scope
-  // around the parse, but the checks run from
-  // ActOnFinishCXXInClassMemberInitializer (e.g. the read-through check, at
-  // the lvalue-to-rvalue conversion the initialization sequence performs)
-  // fire after that scope is gone, so cover the whole late-parse here.
+  // A member declaration's dominion includes its initializer tokens (P3589R2
+  // §2.4p3). ParseCXXMemberInitializer pushes its own scope around the parse,
+  // but checks run from ActOnFinishCXXInClassMemberInitializer fire after
+  // that scope is gone, so cover the whole late-parse here.
   SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(
       Actions, MI.Field, /*WalkLexicalParents=*/true);
 

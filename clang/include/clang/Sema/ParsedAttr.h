@@ -491,11 +491,8 @@ public:
   }
 
 private:
-  /// Raw custom-data installer, private so only the typed setters below can
-  /// attach a payload. The invariant is only half structural:
-  /// getCustomData<T> stays public (the generic read is shared with any
-  /// other custom-data user), so the setters guarantee what was installed,
-  /// not how it is read back.
+  /// Install the raw custom-data pointer. Private so only the typed setters
+  /// below can attach a payload.
   void setCustomData(void *Data) { CustomData = Data; }
 
 public:
@@ -795,7 +792,6 @@ public:
   }
 
   template <typename T> MutableArrayRef<T> allocateArray(unsigned N) {
-    // Pool-allocated objects are never destroyed, only deallocated wholesale.
     static_assert(std::is_trivially_destructible_v<T>);
     if (N == 0)
       return {};
