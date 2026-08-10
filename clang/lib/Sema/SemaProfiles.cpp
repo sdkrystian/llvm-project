@@ -473,28 +473,20 @@ void runTestCtorFinalCallback(Sema &S, CXXConstructorDecl *Ctor) {
       << "test::ctor_final" << Ctor->getParent();
 }
 
-// Class-finalization opt-in table (pattern 3).
 constexpr FinalizationProfile<CXXRecordDecl> ClassFinalizationProfiles[] = {
     {"test::class_final", &runTestClassFinalCallback},
 };
 
-// Constructor-finalization opt-in table (pattern 4).
 constexpr FinalizationProfile<CXXConstructorDecl>
     ConstructorFinalizationProfiles[] = {
         {"test::ctor_final", &runTestCtorFinalCallback},
 };
 
-// Run the enforced finalization-profile callbacks in Table for D. Merges the
-// former per-node dispatchers; the per-node filter (dependent, lambda,
-// delegating, ...) stays at each call site. Each callback passes D to the
-// Decl-aware SemaProfiles::shouldEmitProfileViolation, which honors
-// [[profiles::suppress]]
-// on D or a lexical parent, so the dispatcher needs no suppress scope of its
-// own. The table is taken by reference-to-array, not ArrayRef: deducing Node
-// from a C array against an ArrayRef<FinalizationProfile<Node>> parameter is
-// not
-// possible (no array-to-ArrayRef conversion happens during template argument
-// deduction).
+/// Run the enforced finalization-profile callbacks in \p Table for \p D; the
+/// per-node filter (dependent, lambda, delegating, ...) stays at each call
+/// site. Each callback consults the Decl-aware shouldEmitProfileViolation,
+/// which honors [[profiles::suppress]] on \p D or a lexical parent, so the
+/// dispatcher needs no suppress scope of its own.
 template <class Node, std::size_t N>
 void dispatchFinalizationProfiles(Sema &S, Node *D,
                                   const FinalizationProfile<Node> (&Table)[N]) {

@@ -461,7 +461,6 @@ Sema::ActOnModuleDecl(SourceLocation StartLoc, SourceLocation ModuleLoc,
   TU->setModuleOwnershipKind(Decl::ModuleOwnershipKind::ReachableWhenImported);
   TU->setLocalOwningModule(Mod);
 
-  // Process [[profiles::enforce]] on the module-declaration.
   {
     Module *ExportMod = (MDK == ModuleDeclKind::Interface ||
                          MDK == ModuleDeclKind::PartitionInterface)

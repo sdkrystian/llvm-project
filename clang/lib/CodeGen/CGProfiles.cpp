@@ -70,8 +70,7 @@ void CodeGenFunction::EmitProfileRuntimeCheck(
   if (!getLangOpts().Profiles)
     return;
   // Enforcement first, so a TU that does not enforce the profile never pays
-  // the suppression walk. This gate is also the seam where a memoization of
-  // the scans could sit, should they ever matter.
+  // the suppression walk.
   if (!getContext().isProfileEnforced(Profile) ||
       getContext().isProfileExemptSystemHeaderLoc(Loc) ||
       isProfileSuppressionActive(Profile, Rule))

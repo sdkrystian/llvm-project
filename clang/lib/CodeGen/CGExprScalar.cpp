@@ -4373,10 +4373,7 @@ Value *ScalarExprEmitter::EmitRem(const BinOpInfo &Ops) {
     EmitUndefinedBehaviorIntegerDivAndRemCheck(Ops, Zero, false);
   }
 
-  // After the sanitizer block: a SanitizerDebugLocation may not nest inside a
-  // live scope, and the profile check is independent of sanitizer state (see
-  // EmitDiv). Integer-only, like the sanitizer's zero-divisor check, and no
-  // dead check for a constant nonzero divisor.
+  // See the same check in EmitDiv.
   if (Ops.Ty->isIntegerType() && Ops.mayHaveIntegerDivisionByZero())
     CGF.EmitProfileRuntimeCheck(
         "test::arith", "zero_divide", diag::trap_profile_zero_divide,

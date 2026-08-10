@@ -832,8 +832,6 @@ void CodeGenFunction::EmitAttributedStmt(const AttributedStmt &S) {
   SaveAndRestore save_musttail(MustTailCall, musttail);
   SaveAndRestore save_flattenOrBranch(HLSLControlFlowAttr, flattenOrBranch);
   CGAtomicOptionsRAII AORAII(CGM, AA);
-  // Make the statement's [[profiles::suppress]] entries visible to profile
-  // check sites while the sub-statement is emitted.
   ProfileSuppressionScope ProfileScope(*this);
   ProfileScope.addFromStmt(&S);
   EmitStmt(S.getSubStmt(), S.getAttrs());
