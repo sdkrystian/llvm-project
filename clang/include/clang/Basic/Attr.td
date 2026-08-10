@@ -3567,11 +3567,11 @@ def ProfilesSuppress : DeclOrStmtAttr {
 
 def ProfilesRequire : Attr {
   let Spellings = [CXX11<"profiles", "require">];
+  // The designator strings already carry the canonicalized arguments, as
+  // for ProfilesEnforce; no per-argument arrays are stored here.
   let Args = [
-    StringArgument<"Designator">,
-    VariadicStringArgument<"DesignatorArgumentKeys">,
-    VariadicStringArgument<"DesignatorArgumentValues">,
-    VariadicUnsignedArgument<"DesignatorArgumentKinds">
+    VariadicStringArgument<"ProfileNames">,
+    VariadicStringArgument<"ProfileDesignators">
   ];
   let LangOpts = [Profiles];
   let HasCustomParsing = 1;

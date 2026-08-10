@@ -59,6 +59,10 @@ namespace ns {
 // ===================================================================
 [[profiles::require(test::type_cast)]]; // expected-error {{'profiles::require' attribute only allowed on module-import-declarations}}
 
+// The designator-list form parses; the placement error is still the only
+// complaint.
+[[profiles::require(test::type_cast, test::flow(strict: true))]]; // expected-error {{'profiles::require' attribute only allowed on module-import-declarations}}
+
 // ===================================================================
 // Suppress on declarations
 // ===================================================================

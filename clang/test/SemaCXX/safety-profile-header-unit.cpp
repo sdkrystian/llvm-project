@@ -17,6 +17,7 @@
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -Wno-experimental-header-units -fsyntax-only %t/import_no_leak.cpp -fmodule-file=%t/enforced.pcm -verify
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -Wno-experimental-header-units -fsyntax-only %t/import_args_ok.cpp -fmodule-file=%t/args.pcm -verify
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -Wno-experimental-header-units -fsyntax-only %t/import_args_fail.cpp -fmodule-file=%t/args.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -Wno-experimental-header-units -fsyntax-only %t/import_list_partial.cpp -fmodule-file=%t/enforced.pcm -verify
 //
 // The -fprofiles-test-profiles gate only controls whether test:: rules fire;
 // the designator is recorded and exported regardless (see the Test Profiles
@@ -74,6 +75,11 @@ import "args.h" [[profiles::require(vendor(fortify: 3))]];
 //--- import_args_fail.cpp
 // Require compares canonical designator spellings, arguments included.
 import "args.h" [[profiles::require(vendor(fortify: 2))]]; // expected-error {{required profile 'vendor(fortify : 2)' is not enforced by imported module}}
+
+//--- import_list_partial.cpp
+// A require designator-list on a header-unit import: only the missing
+// designator is diagnosed.
+import "enforced.h" [[profiles::require(test::type_cast, test::other)]]; // expected-error {{required profile 'test::other' is not enforced by imported module}}
 
 //--- redecl_forward.cpp
 // The header unit's TU enforced a profile; the redeclaring TU must enforce a

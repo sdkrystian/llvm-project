@@ -5110,6 +5110,18 @@ static ArrayRef<profiles::ProfileArgument> copyProfileArguments(
   return Args;
 }
 
+template <typename ProfileDesignators>
+static ArrayRef<detail::ProfileDesignator> copyProfileDesignators(
+    AttributePool &Pool, const ProfileDesignators &Parsed) {
+  auto Desigs = Pool.allocateArray<detail::ProfileDesignator>(Parsed.size());
+  for (unsigned I = 0; I < Parsed.size(); ++I) {
+    Desigs[I].Name = Pool.copyString(Parsed[I].Name);
+    Desigs[I].Spelling = Pool.copyString(Parsed[I].Spelling);
+    Desigs[I].Arguments = copyProfileArguments(Pool, Parsed[I].Arguments);
+  }
+  return Desigs;
+}
+
 bool Parser::ParseNonCommaBalancedToken(std::string &Spelling,
                                         SourceRange *Range) {
   SourceLocation StartLoc = Tok.getLocation();
@@ -5388,15 +5400,8 @@ bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
     if (ParseProfileDesignatorList(Parsed))
       return SkipToRParen();
 
-    auto Desigs = Pool.allocateArray<detail::ProfileDesignator>(Parsed.size());
-    for (unsigned I = 0; I < Parsed.size(); ++I) {
-      Desigs[I].Name = Pool.copyString(Parsed[I].Name);
-      Desigs[I].Spelling = Pool.copyString(Parsed[I].Spelling);
-      Desigs[I].Arguments = copyProfileArguments(Pool, Parsed[I].Arguments);
-    }
-
     auto *Args = Pool.make<detail::ProfileEnforceArgs>();
-    Args->Designators = Desigs;
+    Args->Designators = copyProfileDesignators(Pool, Parsed);
     EnforceArgs = Args;
   } else if (AttrName->isStr("suppress")) {
     ParsedProfileSuppressArgs Parsed;
@@ -5416,15 +5421,12 @@ bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
     Args->Arguments = copyProfileArguments(Pool, Parsed.Arguments);
     SuppressArgs = Args;
   } else {
-    ParsedProfileDesignator Parsed;
-    if (ParseProfileDesignator(Parsed))
+    SmallVector<ParsedProfileDesignator, 2> Parsed;
+    if (ParseProfileDesignatorList(Parsed))
       return SkipToRParen();
 
     auto *Args = Pool.make<detail::ProfileRequireArgs>();
-    Args->Designator.Name = Pool.copyString(Parsed.Name);
-    Args->Designator.Spelling = Pool.copyString(Parsed.Spelling);
-    Args->Designator.Arguments =
-        copyProfileArguments(Pool, Parsed.Arguments);
+    Args->Designators = copyProfileDesignators(Pool, Parsed);
     RequireArgs = Args;
   }
 

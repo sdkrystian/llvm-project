@@ -1655,15 +1655,22 @@ void Sema::ActOnModuleImportAttrs(Decl *D,
     }
 
     const auto &Args = AL.getProfileRequireArgs();
-    StringRef Desig = Args.Designator.Spelling;
+    if (Args.Designators.empty()) {
+      Diag(AL.getLoc(), diag::err_attribute_too_few_arguments) << AL << 1;
+      continue;
+    }
 
-    bool Found = llvm::any_of(
-        ImportedMod->EnforcedProfileDesignators,
-        [&](const Module::EnforcedProfile &EP) {
-          return EP.Designator == Desig;
-        });
+    for (const auto &D : Args.Designators) {
+      StringRef Desig = D.Spelling;
 
-    if (!Found)
-      Diag(AL.getLoc(), diag::err_profiles_require_not_enforced) << Desig;
+      bool Found = llvm::any_of(
+          ImportedMod->EnforcedProfileDesignators,
+          [&](const Module::EnforcedProfile &EP) {
+            return EP.Designator == Desig;
+          });
+
+      if (!Found)
+        Diag(AL.getLoc(), diag::err_profiles_require_not_enforced) << Desig;
+    }
   }
 }
