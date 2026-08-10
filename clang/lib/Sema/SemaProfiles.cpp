@@ -299,23 +299,11 @@ bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
   if (isProfileSuppressed(ProfileName, RuleName, Loc) ||
       profiles::isSuppressedFor(D, ProfileName, RuleName))
     return false;
-  // P3589R2 Section 1.1: "its static semantic effects are as-if applied only
-  // after translation phase 7. It is not possible for a profile to change the
-  // outcome of overload resolution or template instantiation, nor is it
-  // possible to 'SFINAE out' failure of a program to satisfy a profile
-  // requirement."
-  //
-  // A templated entity is not yet a phase-7 entity, so a profile rule must fire
-  // only on its instantiation -- where D is the instantiated, non-templated
-  // declaration -- not on the template pattern. Checking the pattern too would
-  // diagnose never-instantiated templates and double-fire (once when the
-  // pattern is parsed and again at each instantiation).
-  //
-  // A Decl-less expression check site whose Build* routine is re-run at
-  // instantiation must instead defer in a dependent context from its own
-  // wrapper, since no Decl is available here. The reinterpret_cast check
-  // passes D == nullptr and is not re-checked at instantiation, so it keeps
-  // running once at parse time (a separate gap).
+  // A templated entity is not a phase-7 entity (P3589R2 §1.1), so a profile
+  // rule fires only on the instantiation, never on the pattern (checking the
+  // pattern would diagnose never-instantiated templates and double-fire). A
+  // Decl-less expression check site must instead defer in a dependent context
+  // from its own wrapper; see ProfilesFrameworkInternals.rst, "Pattern 1".
   if (D && D->isTemplated())
     return false;
   if (SemaRef.isUnevaluatedContext())

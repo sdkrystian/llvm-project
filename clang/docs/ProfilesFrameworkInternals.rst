@@ -78,6 +78,13 @@ accepted duplication.  Under ``-fdelayed-template-parsing`` the body of a
 never-instantiated template is never parsed, so definition-time diagnosis of
 non-dependent violations does not occur in that mode.
 
+A ``Decl``-carrying check consults the shared gate, which skips templated
+entities so the rule fires on the instantiation only.  An expression-level
+check site passes no ``Decl``, so it must defer in a dependent context from
+its own wrapper.  The ``reinterpret_cast`` check does neither and is not
+re-run at instantiation: it fires once at parse time, pattern or not -- a
+known gap.
+
 
 Pattern 2: Post-Parse / CFG-Based
 =================================
