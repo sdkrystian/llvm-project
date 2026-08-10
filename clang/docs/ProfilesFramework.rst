@@ -21,8 +21,8 @@ of uninitialized memory.  Three attributes control it:
   for the translation unit.
 - ``[[profiles::suppress(...)]]`` locally exempts a declaration or statement
   from an enforced profile, or from a single rule of it.
-- ``[[profiles::require(...)]]`` on a module import verifies that the
-  imported module advertises a profile.
+- ``[[profiles::require(profile-designator-list)]]`` on a module import
+  verifies that the imported module advertises the named profiles.
 
 Profiles do not change the meaning of well-formed programs with no undefined
 behavior.  Their effects are conceptually applied only after translation
@@ -148,16 +148,19 @@ Profiles and Modules
 
 A module interface advertises the profiles it enforces through
 ``[[profiles::enforce]]`` on its module-declaration, and importers can insist
-on that advertisement with ``[[profiles::require]]``, which may appear only
-on a module-import-declaration:
+on that advertisement with
+``[[profiles::require(profile-designator-list)]]``, which may appear only on
+a module-import-declaration.  Every listed profile must be advertised; each
+one that is not is diagnosed individually:
 
 .. code-block:: c++
 
    // M.cppm
-   export module M [[profiles::enforce(std::safety)]];
+   export module M [[profiles::enforce(std::safety, vendor::hardened(fortify: 3))]];
 
    // user.cpp
    import M [[profiles::require(std::safety)]];  // OK: M enforces it
+   import M [[profiles::require(std::safety, vendor::hardened(fortify: 3))]];  // OK
    import N [[profiles::require(std::safety)]];  // error unless N does too
 
 ``[[profiles::require]]`` only verifies the advertisement; importing an

@@ -6661,11 +6661,13 @@ def ProfilesRequireDocs : Documentation {
   let Category = DocCatStmt;
   let Content = [{
 The ``[[profiles::require]]`` attribute on a module-import-declaration
-validates that the imported module enforces the specified profile (P3589R2).
+validates that the imported module enforces one or more C++ profiles
+(P3589R2). Each profile that is not enforced is diagnosed individually.
 
 .. code-block:: c++
 
   import MyModule [[profiles::require(std::type)]];
+  import MyModule [[profiles::require(std::type, vendor::hardened(fortify: 3))]];
   }];
 }
 

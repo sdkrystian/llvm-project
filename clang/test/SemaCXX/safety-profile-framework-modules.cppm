@@ -49,6 +49,11 @@
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/gmf_dominion.cppm -verify
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -emit-module-interface %t/gmf_dominion_iface.cppm -o %t/gmf_dominion_iface.pcm -verify
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/gmf_dominion_impl.cpp -fmodule-file=GmfDomMod=%t/gmf_dominion_iface.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -emit-module-interface %t/mod_multi.cppm -o %t/mod_multi.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fsyntax-only %t/require_list_ok.cpp -fmodule-file=MultiMod=%t/mod_multi.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fsyntax-only %t/require_list_partial.cpp -fmodule-file=MultiMod=%t/mod_multi.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fsyntax-only %t/require_list_none.cpp -fmodule-file=MultiMod=%t/mod_multi.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fsyntax-only %t/require_list_dup.cpp -fmodule-file=MultiMod=%t/mod_multi.pcm -verify
 
 // ===================================================================
 // Module with enforced profiles
@@ -85,6 +90,45 @@ import TestMod [[profiles::require(test::type_cast(strict: true))]]; // expected
 // expected-no-diagnostics
 import TestMod [[profiles::require(test::type_cast)]];
 import TestMod [[profiles::require(test::type_cast)]];
+
+// ===================================================================
+// Module enforcing multiple profiles, for the require designator-list
+// cases below.
+// ===================================================================
+//--- mod_multi.cppm
+// expected-no-diagnostics
+export module MultiMod [[profiles::enforce(test::type_cast, test::flow(strict: true))]];
+
+export void multi_func();
+
+// ===================================================================
+// Require with a designator-list: OK when every designator matches
+// ===================================================================
+//--- require_list_ok.cpp
+// expected-no-diagnostics
+import MultiMod [[profiles::require(test::type_cast, test::flow(strict: true))]];
+
+// ===================================================================
+// Require with a designator-list: only the missing designator is
+// diagnosed
+// ===================================================================
+//--- require_list_partial.cpp
+import MultiMod [[profiles::require(test::type_cast, test::not_enforced)]]; // expected-error {{required profile 'test::not_enforced' is not enforced by imported module}}
+
+// ===================================================================
+// Require with a designator-list: each missing designator gets its own
+// diagnostic
+// ===================================================================
+//--- require_list_none.cpp
+import MultiMod [[profiles::require(test::missing1, test::missing2)]]; // expected-error {{required profile 'test::missing1' is not enforced by imported module}} \
+                                                                       // expected-error {{required profile 'test::missing2' is not enforced by imported module}}
+
+// ===================================================================
+// Duplicate designator within one require list: OK
+// ===================================================================
+//--- require_list_dup.cpp
+// expected-no-diagnostics
+import MultiMod [[profiles::require(test::type_cast, test::type_cast)]];
 
 // ===================================================================
 // Interface-to-implementation propagation: the implementation unit
