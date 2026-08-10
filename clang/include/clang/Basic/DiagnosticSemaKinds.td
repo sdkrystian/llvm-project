@@ -14406,4 +14406,126 @@ def err_profile_cfg_hooks_uninit_read : ProfileRule<
 def err_profile_cfg_hooks_test : ProfileRule<
   "test profile fired on a lambda expression under profile '%0'",
   ProfileTestCfgHooksLambda>;
+def err_init_uninit_read : ProfileRule<
+  "variable %1 is read before initialization under profile '%0'",
+  ProfileStdInitUninitRead>;
+def err_init_member_read_before_init : ProfileRule<
+  "member %1 is read before initialization under profile '%0'",
+  ProfileStdInitUninitRead>;
+def err_init_uninit_decl : ProfileRule<
+  "variable %1 must be initialized or marked '[[uninit]]' under "
+  "profile '%0'",
+  ProfileStdInitUninitDecl>;
+def err_init_uninit_union : ProfileRule<
+  "variable %1 of union type must be initialized under profile '%0'",
+  ProfileStdInitUninitDecl>;
+def err_init_uninit_anon_union : ProfileRule<
+  "anonymous union must be initialized under profile '%0'; give one member "
+  "a default member initializer",
+  ProfileStdInitUninitDecl>;
+def err_init_static_runtime_init : ProfileRule<
+  "non-local variable %1 requires constant initialization under "
+  "profile '%0'",
+  ProfileStdInitStaticRuntimeInit>;
+def err_init_uninit_with_initializer : ProfileRule<
+  "%select{variable|member}2 %1 cannot be both '[[uninit]]' and have an "
+  "initializer under profile '%0'",
+  ProfileStdInitUninitWithInitializer>;
+def err_init_uninit_not_left_uninitialized : ProfileRule<
+  "%select{variable|member}3 %1 cannot be marked '[[uninit]]' under "
+  "profile '%0'; default-initialization of its type %2 does not leave it "
+  "uninitialized",
+  ProfileStdInitUninitWithInitializer>;
+def note_init_uninit_marker_type : Note<
+  "%select{default-initialization of %0 runs a constructor|"
+  "no subobject of %0 is left uninitialized|"
+  "%0 has no usable default constructor}1">;
+def err_uninit_attr_invalid_subject : Error<
+  "'uninit' attribute cannot be applied to %select{a reference|"
+  "a function parameter|a structured binding}0">;
+def err_ref_to_uninit_attr_invalid_type : Error<
+  "'ref_to_uninit' attribute only applies to pointers, references, and "
+  "functions returning them">;
+def err_now_init_attr_no_marked_parameter : Error<
+  "'now_init' attribute requires at least one parameter marked "
+  "'[[ref_to_uninit]]'">;
+def err_now_uninit_attr_no_pointer_parameter : Error<
+  "'now_uninit' attribute requires at least one parameter of pointer or "
+  "reference type">;
+def err_init_union_marker : ProfileRule<
+  "'[[uninit]]' cannot be applied to %select{a variable of union type|"
+  "a union member|a data member of union type}1 under profile '%0'",
+  ProfileStdInitUnionMarker>;
+def err_init_uninit_pointer_marker : ProfileRule<
+  "'[[uninit]]' cannot be applied to a pointer under profile '%0'; "
+  "initialize the pointer (for example to 'nullptr')",
+  ProfileStdInitPointerMarker>;
+def err_init_uninit_static_marker : ProfileRule<
+  "'[[uninit]]' cannot be applied to variable %1 with %select{static|thread}2 "
+  "storage duration under profile '%0'; it is zero-initialized",
+  ProfileStdInitStaticMarker>;
+def err_init_ctor_uninit_member : ProfileRule<
+  "constructor does not initialize member %1 under profile '%0'",
+  ProfileStdInitCtorUninitMember>;
+def err_init_ctor_uninit_anon_union : ProfileRule<
+  "constructor does not initialize any member of the anonymous union under "
+  "profile '%0'",
+  ProfileStdInitCtorUninitMember>;
+def note_init_uninit_member_here : Note<
+  "member %0 declared here">;
+def note_init_uninit_anon_union_here : Note<
+  "anonymous union declared here">;
+def err_init_ctor_uninit_base : ProfileRule<
+  "constructor does not initialize base class %1 under profile '%0'",
+  ProfileStdInitCtorUninitMember>;
+def note_init_uninit_base_here : Note<
+  "base class %0 declared here">;
+def err_init_inherited_ctor_uninit_member : ProfileRule<
+  "constructor inherited from %1 does not initialize member %2 under "
+  "profile '%0'",
+  ProfileStdInitCtorUninitMember>;
+def err_init_inherited_ctor_uninit_anon_union : ProfileRule<
+  "constructor inherited from %1 does not initialize any member of the "
+  "anonymous union under profile '%0'",
+  ProfileStdInitCtorUninitMember>;
+def err_init_inherited_ctor_uninit_base : ProfileRule<
+  "constructor inherited from %1 does not initialize base class %2 under "
+  "profile '%0'",
+  ProfileStdInitCtorUninitMember>;
+def err_init_ref_to_uninit_requires_uninit : ProfileRule<
+  "%select{pointer|reference}1 marked '[[ref_to_uninit]]' must refer to "
+  "uninitialized memory under profile '%0'",
+  ProfileStdInitRefToUninit>;
+def err_init_uninit_requires_ref_to_uninit : ProfileRule<
+  "%select{pointer|reference}1 to uninitialized memory must be marked "
+  "'[[ref_to_uninit]]' under profile '%0'",
+  ProfileStdInitRefToUninit>;
+def err_init_uninit_read_through : ProfileRule<
+  "read %select{through a '[[ref_to_uninit]]' pointer or reference|"
+  "of a subobject of an '[[uninit]]' object}1 accesses "
+  "uninitialized memory under profile '%0'",
+  ProfileStdInitUninitRead>;
+def err_init_uninit_subobject_write : ProfileRule<
+  "writing %select{a member|an element}1 of %select{an '[[uninit]]' object|"
+  "uninitialized storage reached through a '[[ref_to_uninit]]' pointer or "
+  "reference|uninitialized storage}2 does not initialize it under profile "
+  "'%0'; initialize the whole object%select{| ('construct_at()' for a class "
+  "object)| ('construct_at()' for a class object)}2",
+  ProfileStdInitUninitWrite>;
+def err_init_uninit_ref_capture : ProfileRule<
+  "capturing %1 by reference binds a reference to uninitialized memory "
+  "under profile '%0'",
+  ProfileStdInitRefToUninit>;
+def err_init_member_call_on_uninit : ProfileRule<
+  "calling member function %1 binds its implicit object parameter to "
+  "uninitialized memory under profile '%0'",
+  ProfileStdInitRefToUninit>;
+def err_init_double_destroy : ProfileRule<
+  "storage already destroyed by a '[[now_uninit]]' function is destroyed "
+  "again under profile '%0'",
+  ProfileStdInitDoubleDestroy>;
+def err_init_destroy_uninit : ProfileRule<
+  "uninitialized storage is destroyed by a '[[now_uninit]]' function under "
+  "profile '%0'",
+  ProfileStdInitDestroyUninit>;
 } // end of sema component.

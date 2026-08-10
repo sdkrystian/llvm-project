@@ -4259,6 +4259,20 @@ void Sema::ActOnFinishCXXInClassMemberInitializer(Decl *D,
   }
 
   FD->setInClassInitializer(InitExpr.get());
+
+  // Pass the field to the post-initialization profile checks so the Decl-aware
+  // shouldEmitProfileViolation overload resolves [[profiles::suppress]] from
+  // the field and its lexical parents. This does not depend on a parse-time
+  // suppress scope still being active (the late-parsed NSDMI finishes parsing
+  // before this finalization runs).
+  Profiles().checkInitProfileUninitWithInitializer(FD,
+                                                   FD->getInClassInitializer());
+
+  // std::init / ref_to_uninit (paper §5): a pointer or reference data member
+  // with a default member initializer must be bound consistently with its
+  // [[ref_to_uninit]] marking.
+  Profiles().checkInitProfileRefToUninitBinding(
+      FD->getLocation(), FD, FD->getType(), FD->getInClassInitializer(), FD);
 }
 
 /// Find the direct and/or virtual base specifiers that
@@ -4698,6 +4712,20 @@ Sema::BuildMemberInitializer(ValueDecl *Member, Expr *Init,
     } else {
       Init = MemberInit.get();
     }
+
+    // std::init / ref_to_uninit (paper §5): a pointer/reference member given a
+    // written member-initializer must be bound consistently with its marking.
+    // Pass the enclosing constructor as the Decl so a class-template pattern
+    // defers (via D->isTemplated()) and fires once at instantiation, where
+    // BuildMemberInitializer re-runs with the instantiated constructor as
+    // CurContext, matching ctor_uninit_member. A member of an anonymous
+    // struct/union arrives as an IndirectFieldDecl, which never carries the
+    // marker; the [[ref_to_uninit]] attribute lives on the underlying field.
+    const ValueDecl *MarkerTarget =
+        IndirectMember ? IndirectMember->getAnonField() : Member;
+    if (auto *Ctor = dyn_cast<CXXConstructorDecl>(CurContext))
+      Profiles().checkInitProfileRefToUninitBinding(
+          IdLoc, MarkerTarget, MarkerTarget->getType(), Init, Ctor);
   }
 
   if (DirectMember) {
@@ -18831,8 +18859,9 @@ void Sema::SetDeclDefaulted(Decl *Dcl, SourceLocation DefaultLoc) {
     // C++ profiles: a constructor explicitly defaulted after its first
     // declaration is user-provided ([class.default.ctor]) yet never reaches
     // the parsed-definition dispatch, so its constructor-finalization checks
-    // run here. In-class '= default' returned above; implicit constructors
-    // never pass through here.
+    // run here. A callback that must not see a defaulted copy or move
+    // constructor (std::init's) filters for itself. In-class '= default'
+    // returned above; implicit constructors never pass through here.
     if (auto *Ctor = dyn_cast<CXXConstructorDecl>(MD))
       Profiles().checkProfileViolationsAtConstructorFinalization(Ctor);
   }

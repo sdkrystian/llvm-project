@@ -16,6 +16,6 @@ void f(int);
 
 //--- main.cpp
 // expected-no-diagnostics
-[[profiles::enforce(std::safety)]];
+[[profiles::enforce(std::init)]];
 #include "foo.h"
 void f(int);

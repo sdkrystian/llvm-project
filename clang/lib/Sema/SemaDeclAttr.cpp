@@ -7220,6 +7220,103 @@ static void handleUninitializedAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   D->addAttr(::new (S.Context) UninitializedAttr(S.Context, AL));
 }
 
+static void handleUninitAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  // The SubjectList has already restricted D to a variable or non-static data
+  // member. Reject the subjects for which "leave uninitialized" is
+  // meaningless: a reference (must bind when declared), a function parameter
+  // (initialized by the caller), and a structured binding (requires an
+  // initializer). These are rejected regardless of -fprofiles, like any other
+  // ill-formed attribute placement.
+  enum InvalidSubject { Reference, Parameter, StructuredBinding };
+  std::optional<InvalidSubject> Invalid;
+  if (isa<ParmVarDecl>(D))
+    Invalid = Parameter;
+  else if (isa<DecompositionDecl>(D))
+    Invalid = StructuredBinding;
+
+  if (Invalid) {
+    S.Diag(AL.getLoc(), diag::err_uninit_attr_invalid_subject)
+        << static_cast<unsigned>(*Invalid);
+    AL.setInvalid();
+    return;
+  }
+
+  // A reference subject is rejected by the shared helper, which defers on a
+  // dependent type to the instantiation re-check in Sema::InstantiateAttrs.
+  if (S.Profiles().diagnoseInvalidUninitMarker(D, AL.getLoc())) {
+    AL.setInvalid();
+    return;
+  }
+
+  D->addAttr(::new (S.Context) UninitAttr(S.Context, AL));
+
+  // std::init / union_marker + pointer_marker (paper §4.1, §5.6). Shared with
+  // the template-instantiation re-check sites (VisitFieldDecl / VisitVarDecl),
+  // since this handler only runs on the pattern.
+  S.Profiles().checkInitProfileMarkerPlacement(D);
+}
+
+static void handleRefToUninitAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  // The SubjectList restricts D to a variable, non-static data member, or
+  // function. "Refers to uninitialized memory" is only meaningful for a
+  // pointer or reference to an object (for a function, its return value), so
+  // reject any other type. A function pointer or reference denotes a function,
+  // never uninitialized storage, so the marker could never be satisfied; reject
+  // it too (like a pointer-to-member, which is not a pointer type here). Like
+  // the [[uninit]] subject checks, this is not profile policy and so fires
+  // regardless of -fprofiles. A dependent subject defers to the instantiation
+  // re-check in Sema::InstantiateAttrs, once the substituted type is known.
+  if (S.Profiles().diagnoseInvalidRefToUninitMarker(D, AL.getLoc())) {
+    AL.setInvalid();
+    return;
+  }
+
+  D->addAttr(::new (S.Context) RefToUninitAttr(S.Context, AL));
+}
+
+static void handleNowInitAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  // The SubjectList restricts D to a function. The vacuity rule -- a
+  // [[now_init]] declaration needs at least one [[ref_to_uninit]] parameter
+  // (P4222R2 §6.2) -- is checked by SemaProfiles::checkNowInitVacuity, from
+  // ActOnFunctionDeclarator once CheckFunctionDeclaration has merged the
+  // parameters' attributes from any previous declaration: this handler runs
+  // before merging, so it would wrongly reject a redeclaration whose
+  // parameter marker lives on an earlier declaration.
+  D->addAttr(::new (S.Context) NowInitAttr(S.Context, AL));
+}
+
+static void handleNowUninitAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  // The SubjectList restricts D to a function. [[now_uninit]] asserts that
+  // the callee ends the lifetime of the storage bound to each of its
+  // pointer/reference parameters -- the recording P4222R2 §4.4 wishes for
+  // ("the object subjected to destroy_at() should be considered
+  // uninitialized, but there is no way of recording that in the code") --
+  // so a declaration with no such parameter would make it vacuous; reject
+  // it. Unlike [[now_init]], the parameters are unmarked (they receive
+  // initialized memory), so the vacuity check keys on their types: a
+  // pointer to an object or a reference. A function pointer or reference
+  // denotes a function, never destroyable storage (mirroring
+  // [[ref_to_uninit]]'s subject rule), and a dependent type may
+  // instantiate to anything, so it passes -- if it does not become a
+  // pointer or reference, the inherited attribute goes inert (the
+  // withdrawal arms only ever key on pointer/reference bindings). Like the
+  // other marker subject checks, this fires regardless of -fprofiles.
+  if (llvm::none_of(cast<FunctionDecl>(D)->parameters(),
+                    [](const ParmVarDecl *P) {
+                      QualType T = P->getType();
+                      return T->isDependentType() ||
+                             ((T->isPointerType() || T->isReferenceType()) &&
+                              !T->isFunctionPointerType() &&
+                              !T->isFunctionReferenceType());
+                    })) {
+    S.Diag(AL.getLoc(), diag::err_now_uninit_attr_no_pointer_parameter);
+    AL.setInvalid();
+    return;
+  }
+
+  D->addAttr(::new (S.Context) NowUninitAttr(S.Context, AL));
+}
+
 static void handleMIGServerRoutineAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   // Check that the return type is a `typedef int kern_return_t` or a typedef
   // around it, because otherwise MIG convention checks make no sense.
@@ -8487,6 +8584,22 @@ ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D, const ParsedAttr &AL,
 
   case ParsedAttr::AT_Uninitialized:
     handleUninitializedAttr(S, D, AL);
+    break;
+
+  case ParsedAttr::AT_Uninit:
+    handleUninitAttr(S, D, AL);
+    break;
+
+  case ParsedAttr::AT_RefToUninit:
+    handleRefToUninitAttr(S, D, AL);
+    break;
+
+  case ParsedAttr::AT_NowInit:
+    handleNowInitAttr(S, D, AL);
+    break;
+
+  case ParsedAttr::AT_NowUninit:
+    handleNowUninitAttr(S, D, AL);
     break;
 
   case ParsedAttr::AT_ObjCExternallyRetained:

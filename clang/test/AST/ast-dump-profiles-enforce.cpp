@@ -15,10 +15,10 @@
 // CHECK: EmptyDecl
 // CHECK-NEXT: ProfilesEnforceAttr {{.*}}>{{$}}
 
-[[profiles::enforce(std::safety, vendor(fortify: 3))]];
+[[profiles::enforce(std::init, vendor(fortify: 3))]];
 // CHECK: EmptyDecl
-// CHECK-NEXT: ProfilesEnforceAttr {{.*}} std::safety vendor std::safety vendor(fortify : 3){{$}}
+// CHECK-NEXT: ProfilesEnforceAttr {{.*}} std::init vendor std::init vendor(fortify : 3){{$}}
 
-[[profiles::enforce(std::safety)]];
+[[profiles::enforce(std::init)]];
 // CHECK: EmptyDecl
 // CHECK-NEXT: ProfilesEnforceAttr {{.*}}>{{$}}

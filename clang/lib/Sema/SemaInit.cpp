@@ -30,6 +30,7 @@
 #include "clang/Sema/Ownership.h"
 #include "clang/Sema/SemaHLSL.h"
 #include "clang/Sema/SemaObjC.h"
+#include "clang/Sema/SemaProfiles.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/FoldingSet.h"
@@ -1594,6 +1595,30 @@ void InitListChecker::CheckSubElementType(const InitializedEntity &Entity,
           if (Result.isInvalid())
             hadError = true;
 
+          // std::init / ref_to_uninit (paper §5): in C++ a pointer field
+          // initialized by an enclosing aggregate's init list is copy-
+          // initialized here (a scalar member never reaches CheckScalarType).
+          // Scoped to an aggregate subobject (a field, or an array / vector /
+          // complex element) so the enclosing variable/argument/return is left
+          // to its own site, which already handles a braced source via the
+          // recognizer. An element position has no declaration to carry the
+          // marker (Entity.getDecl() is null for the element kinds), so it is
+          // checked as an unmarked target -- like a variadic argument or a
+          // function-pointer parameter -- and the rules of paper §4.3 apply
+          // per pointer element. No Decl is passed: the init list can appear
+          // in a template independently of whether the aggregate is one, so
+          // checkInitProfileRefToUninit defers on an instantiation-dependent
+          // source and suppression comes from the parse-time stack. (A
+          // reference field is routed to CheckReferenceType above; an array
+          // of references is ill-formed.)
+          if (!Result.isInvalid() &&
+              (Entity.getKind() == InitializedEntity::EK_Member ||
+               Entity.getKind() == InitializedEntity::EK_ArrayElement ||
+               Entity.getKind() == InitializedEntity::EK_VectorElement ||
+               Entity.getKind() == InitializedEntity::EK_ComplexElement))
+            SemaRef.Profiles().checkInitProfileRefToUninitBinding(
+                expr->getExprLoc(), Entity.getDecl(), ElemType, expr);
+
           UpdateStructuredListElement(StructuredList, StructuredIndex,
                                       Result.getAs<Expr>());
         } else if (!Seq) {
@@ -1866,6 +1891,11 @@ void InitListChecker::CheckReferenceType(const InitializedEntity &Entity,
     return;
   }
 
+  // Capture the source element before 'expr' is overwritten by the
+  // PerformCopyInitialization result below; the ref_to_uninit recognizer needs
+  // the written source, not the bound reference.
+  const Expr *Src = expr;
+
   ExprResult Result;
   if (VerifyOnly) {
     if (SemaRef.CanPerformCopyInitialization(Entity,expr))
@@ -1885,6 +1915,20 @@ void InitListChecker::CheckReferenceType(const InitializedEntity &Entity,
   // FIXME: Why are we updating the syntactic init list?
   if (!VerifyOnly && expr)
     IList->setInit(Index, expr);
+
+  // std::init / ref_to_uninit (paper §5): a reference field bound by an
+  // enclosing aggregate's init list must be bound consistently with its
+  // marking. getParent() restricts this to a genuine aggregate subobject: a
+  // top-level reference member braced-init (a constructor member-initializer or
+  // an NSDMI) has a null parent and is checked at its own Decl-aware site, so
+  // the parent guard prevents a double diagnostic there. No Decl is passed: the
+  // init list can appear in a template independently of whether the aggregate
+  // is one, so checkInitProfileRefToUninit defers on an instantiation-dependent
+  // source and suppression comes from the parse-time stack.
+  if (!VerifyOnly && !Result.isInvalid() &&
+      Entity.getKind() == InitializedEntity::EK_Member && Entity.getParent())
+    SemaRef.Profiles().checkInitProfileRefToUninitBinding(
+        Src->getExprLoc(), Entity.getDecl(), DeclType, Src);
 
   UpdateStructuredListElement(StructuredList, StructuredIndex, expr);
   ++Index;
@@ -6036,6 +6080,17 @@ static void TryOrBuildParenListInitialization(
           E->getExprLoc(), /*isDirectInit=*/false, E);
       if (!HandleInitializedEntity(SubEntity, SubKind, E))
         return;
+
+      // std::init / ref_to_uninit (paper §5): a pointer element initialized
+      // from a C++20 parenthesized aggregate list is an element binding,
+      // checked exactly like the braced-list hook in CheckSubElementType. An
+      // element cannot carry the marker (null target: unmarked, paper §4.3).
+      // Only in the build phase, so the verify pass does not double-diagnose;
+      // the trailing value-initialized filler below has no source expression
+      // and stays unchecked (value-initialization is null, a non-source).
+      if (!VerifyOnly)
+        S.Profiles().checkInitProfileRefToUninitBinding(
+            E->getExprLoc(), /*Target=*/nullptr, AT->getElementType(), E);
     }
     //   ...and value-initialized for each k < i <= n;
     if (ArrayLength > Args.size() || Entity.isVariableLengthArrayNew()) {
@@ -6124,6 +6179,15 @@ static void TryOrBuildParenListInitialization(
             E->getExprLoc(), /*isDirectInit=*/false, E);
         if (!HandleInitializedEntity(SubEntity, SubKind, E))
           return;
+
+        // std::init / ref_to_uninit (paper §5): a pointer or reference field
+        // initialized from a C++20 parenthesized aggregate list is a member
+        // binding, checked exactly like the braced-list hooks in
+        // CheckSubElementType / CheckReferenceType. Only in the build phase,
+        // so the verify pass does not double-diagnose.
+        if (!VerifyOnly)
+          S.Profiles().checkInitProfileRefToUninitBinding(E->getExprLoc(), FD,
+                                                          FD->getType(), E);
 
         // Unions should have only one initializer expression, so we bail out
         // after processing the first field. If there are more initializers then
@@ -10166,6 +10230,22 @@ Sema::PerformCopyInitialization(const InitializedEntity &Entity,
 
   if (ShouldTrackCopy)
     CurrentParameterCopyTypes.pop_back();
+
+  // std::init / ref_to_uninit (paper §5): parameter copy-initialization is the
+  // funnel for call arguments from every call form -- GatherArgumentsForCall,
+  // overloaded operators, and calls to objects of class type -- so the binding
+  // check runs here, exactly once per argument. A type-only parameter entity
+  // (a call with no declared callee, e.g. through a function pointer) has no
+  // declaration that could carry [[ref_to_uninit]], so it is checked as an
+  // unmarked target (paper §7.2: passing uninitialized memory needs an
+  // appropriately declared callee). A default argument does not re-run
+  // copy-initialization at the call site; GatherArgumentsForCall checks those.
+  if (!Result.isInvalid() && Entity.isParameterKind()) {
+    const auto *Parm = dyn_cast_or_null<ParmVarDecl>(Entity.getDecl());
+    Profiles().checkInitProfileRefToUninitBinding(
+        InitE->getExprLoc(), Parm, Parm ? Parm->getType() : Entity.getType(),
+        InitE);
+  }
 
   return Result;
 }

@@ -35,6 +35,7 @@
 #include "clang/Sema/SemaCUDA.h"
 #include "clang/Sema/SemaInternal.h"
 #include "clang/Sema/SemaObjC.h"
+#include "clang/Sema/SemaProfiles.h"
 #include "clang/Sema/Template.h"
 #include "clang/Sema/TemplateDeduction.h"
 #include "llvm/ADT/DenseSet.h"
@@ -6346,6 +6347,12 @@ ExprResult Sema::PerformImplicitObjectArgumentInitialization(
            << ImplicitParamRecordType << FromRecordType
            << From->getSourceRange();
   }
+
+  // std::init / ref_to_uninit (paper §7.2): the implicit object parameter can
+  // never carry [[ref_to_uninit]], so a member call on an object recognized
+  // as uninitialized storage is the unmarked-direction violation.
+  if (getLangOpts().Profiles)
+    Profiles().checkInitProfileObjectArgument(From, Method);
 
   if (ICS.Standard.Second == ICK_Derived_To_Base) {
     ExprResult FromRes =
@@ -16853,6 +16860,10 @@ Sema::BuildCallToObjectOfClassType(Scope *S, Expr *Obj,
       ExprResult Arg = DefaultVariadicArgumentPromotion(
           Args[i], VariadicCallType::Method, nullptr);
       IsError |= Arg.isInvalid();
+      // std::init / ref_to_uninit (paper §5): a `...` parameter cannot carry
+      // the marker, so a pointer argument is checked as an unmarked target.
+      if (!Arg.isInvalid())
+        Profiles().checkInitProfileVariadicArgument(Arg.get());
       MethodArgs.push_back(Arg.get());
     }
   }

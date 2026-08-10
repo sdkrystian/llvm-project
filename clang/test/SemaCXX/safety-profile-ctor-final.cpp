@@ -40,7 +40,8 @@ DefaultedOutOfLine::DefaultedOutOfLine() = default; // expected-error {{test pro
 
 // The dispatch is uniform over constructor kinds: an out-of-line defaulted
 // copy or move constructor is equally user-provided and fires too (a
-// profile that must not see them filters in its own callback).
+// profile that must not see them -- std::init -- filters in its own
+// callback, safety-profile-init-ctor.cpp).
 struct DefaultedCopyOutOfLine {
   int x;
   DefaultedCopyOutOfLine();

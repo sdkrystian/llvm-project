@@ -61,6 +61,7 @@
 #include "clang/Sema/SemaObjC.h"
 #include "clang/Sema/SemaOpenCL.h"
 #include "clang/Sema/SemaOpenMP.h"
+#include "clang/Sema/SemaProfiles.h"
 #include "clang/Sema/SemaPseudoObject.h"
 #include "clang/Sema/Template.h"
 #include "llvm/ADT/STLExtras.h"
@@ -741,6 +742,13 @@ ExprResult Sema::DefaultLvalueConversion(Expr *E) {
 
   if (!BoundsSafetyCheckUseOfCountAttrPtr(Res.get()))
     return ExprError();
+
+  // std::init / uninit_read (paper §4.5): a read through a [[ref_to_uninit]]
+  // pointer or reference accesses uninitialized memory. This is the single
+  // lvalue-to-rvalue chokepoint that by-value reads (copy-init, by-value
+  // arguments, returns, operator operands) all funnel through.
+  if (getLangOpts().Profiles)
+    Profiles().checkInitProfileReadThrough(E->getExprLoc(), E, T);
 
   // C++ [conv.lval]p3:
   //   If T is cv std::nullptr_t, the result is a null pointer constant.
@@ -6352,6 +6360,17 @@ bool Sema::GatherArgumentsForCall(SourceLocation CallLoc, FunctionDecl *FDecl,
       Arg = ArgExpr.getAs<Expr>();
     }
 
+    // std::init / ref_to_uninit (paper §5): a pointer or reference argument
+    // must match the [[ref_to_uninit]] marking of its parameter. A real
+    // argument is checked once, by the shared hook in
+    // PerformCopyInitialization; a default argument does not re-run
+    // copy-initialization here, so check its underlying expression (the
+    // recognizers don't see through the CXXDefaultArgExpr wrapper).
+    if (Param && getLangOpts().Profiles)
+      if (const auto *DAE = dyn_cast<CXXDefaultArgExpr>(Arg))
+        Profiles().checkInitProfileRefToUninitBinding(
+            Arg->getExprLoc(), Param, Param->getType(), DAE->getExpr());
+
     // Check for array bounds violations for each argument to the call. This
     // check only triggers warnings when the argument isn't a more complex Expr
     // with its own checking, such as a BinaryOperator.
@@ -6381,6 +6400,11 @@ bool Sema::GatherArgumentsForCall(SourceLocation CallLoc, FunctionDecl *FDecl,
       for (Expr *A : Args.slice(ArgIx)) {
         ExprResult Arg = DefaultVariadicArgumentPromotion(A, CallType, FDecl);
         Invalid |= Arg.isInvalid();
+        // std::init / ref_to_uninit (paper §5): a `...` parameter cannot
+        // carry the marker, so a pointer argument is checked as an unmarked
+        // target.
+        if (!Arg.isInvalid())
+          Profiles().checkInitProfileVariadicArgument(Arg.get());
         AllArgs.push_back(Arg.get());
       }
     }
@@ -14528,6 +14552,15 @@ QualType Sema::CheckAssignmentOperands(Expr *LHSExpr, ExprResult &RHS,
   if (CheckForModifiableLvalue(LHSExpr, Loc, *this))
     return QualType();
 
+  // std::init / uninit_write (paper §5.4-§5.6): a scalar store to a subobject
+  // of a named [[uninit]] object is banned delayed initialization. This is
+  // the shared funnel for simple and every compound assignment, so the check
+  // fires exactly once per built-in assignment; class-typed operator= never
+  // reaches it.
+  if (getLangOpts().Profiles)
+    Profiles().checkInitProfileAssignmentOperands(
+        Opc, LHSExpr, /*IsCompound=*/!CompoundType.isNull(), Loc);
+
   QualType LHSType = LHSExpr->getType();
   QualType RHSType = CompoundType.isNull() ? RHS.get()->getType() :
                                              CompoundType;
@@ -14662,6 +14695,15 @@ QualType Sema::CheckAssignmentOperands(Expr *LHSExpr, ExprResult &RHS,
       ExprEvalContexts.back().VolatileAssignmentLHSs.push_back(LHSExpr);
     }
   }
+
+  // std::init: a completed built-in assignment is a store; record parse-order
+  // whole-entity store credit (paper §4.2/§4.5). Deliberately at the tail: a
+  // simple assignment's RHS lvalue-to-rvalue load is checked inside
+  // CheckSingleAssignmentConstraints above, so recording earlier would let
+  // `*p = *p;` credit itself and silently pass its own RHS read. Invalid
+  // assignments returned early and record nothing.
+  if (getLangOpts().Profiles)
+    Profiles().recordInitProfileStore(LHSExpr);
 
   // C11 6.5.16p3: The type of an assignment expression is the type of the
   // left operand would have after lvalue conversion.
@@ -15616,6 +15658,12 @@ ExprResult Sema::CreateBuiltinBinOp(SourceLocation OpLoc,
       DiagnoseSelfAssignment(*this, LHS.get(), RHS.get(), OpLoc, true);
       DiagnoseSelfMove(LHS.get(), RHS.get(), OpLoc);
 
+      // std::init / ref_to_uninit (paper §5): assigning a pointer must respect
+      // the [[ref_to_uninit]] marking of the assigned-to pointer.
+      if (getLangOpts().Profiles)
+        Profiles().checkInitProfilePointerAssignment(LHS.get(), RHS.get(),
+                                                     OpLoc);
+
       // Avoid copying a block to the heap if the block is assigned to a local
       // auto variable that is declared in the same scope as the block. This
       // optimization is unsafe if the local variable is declared in an outer
@@ -16298,6 +16346,13 @@ ExprResult Sema::CreateBuiltinUnaryOp(SourceLocation OpLoc,
                                          Opc == UO_PreInc || Opc == UO_PostInc,
                                          Opc == UO_PreInc || Opc == UO_PreDec);
       CanOverflow = isOverflowingIntegerType(Context, resultType);
+      // std::init / uninit_write (paper §5.4-§5.6): a built-in ++/-- stores to
+      // its operand like an assignment does to its LHS. Checked here rather
+      // than in CheckIncrementDecrementOperand, which self-recurses on
+      // placeholder operands and would fire twice; overloaded class ++/--
+      // never reaches CreateBuiltinUnaryOp.
+      if (getLangOpts().Profiles && !resultType.isNull())
+        Profiles().checkInitProfileIncDec(Input.get(), OpLoc);
       break;
     case UO_AddrOf:
       resultType = CheckAddressOfOperand(Input, OpLoc);

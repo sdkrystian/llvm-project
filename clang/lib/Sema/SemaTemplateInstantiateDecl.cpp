@@ -30,6 +30,7 @@
 #include "clang/Sema/SemaHLSL.h"
 #include "clang/Sema/SemaObjC.h"
 #include "clang/Sema/SemaOpenMP.h"
+#include "clang/Sema/SemaProfiles.h"
 #include "clang/Sema/SemaSwift.h"
 #include "clang/Sema/Template.h"
 #include "llvm/Support/SaveAndRestore.h"
@@ -870,6 +871,26 @@ void Sema::InstantiateAttrs(const MultiLevelTemplateArgumentList &TemplateArgs,
                             LocalInstantiationScope *OuterMostScope) {
   for (const auto *TmplAttr : Tmpl->attrs()) {
     if (!isRelevantAttr(*this, New, TmplAttr))
+      continue;
+
+    // The [[ref_to_uninit]] handler deferred type validation on a dependent
+    // subject; re-check against the substituted type and drop the marker when
+    // it is invalid (the diagnostic points at the pattern's attribute, with
+    // the instantiation note locating the culprit). In a SFINAE context
+    // (declaration substitution during deduction) the invalid marker is
+    // dropped silently: the marker must not affect overload resolution, and a
+    // dropped marker is inert -- the ref_to_uninit rule never consults a
+    // marker on a non-pointer/reference entity.
+    if (isa<RefToUninitAttr>(TmplAttr) &&
+        Profiles().diagnoseInvalidRefToUninitMarker(
+            New, TmplAttr->getLocation(), /*Diagnose=*/!isSFINAEContext()))
+      continue;
+
+    // Likewise for [[uninit]]: the handler deferred the reference-type
+    // rejection on a dependent subject.
+    if (isa<UninitAttr>(TmplAttr) &&
+        Profiles().diagnoseInvalidUninitMarker(New, TmplAttr->getLocation(),
+                                               /*Diagnose=*/!isSFINAEContext()))
       continue;
 
     // FIXME: This should be generalized to more than just the AlignedAttr.
@@ -1828,6 +1849,12 @@ Decl *TemplateDeclInstantiator::VisitVarDecl(VarDecl *D,
   if (Invalid)
     Var->setInvalidDecl();
 
+  // std::init / pointer_marker + union_marker: like the field case, re-check
+  // the instantiated variable now that its type is known (the parse-time
+  // handler deferred on the template pattern).
+  if (!Var->isInvalidDecl())
+    SemaRef.Profiles().checkInitProfileMarkerPlacement(Var);
+
   return Var;
 }
 
@@ -1911,6 +1938,12 @@ Decl *TemplateDeclInstantiator::VisitFieldDecl(FieldDecl *D) {
   Field->setImplicit(D->isImplicit());
   Field->setAccess(D->getAccess());
   Owner->addDecl(Field);
+
+  // std::init / pointer_marker + union_marker: the parse-time handler deferred
+  // on the (dependent) template member; re-check now that the substituted type
+  // is known.
+  if (!Field->isInvalidDecl())
+    SemaRef.Profiles().checkInitProfileMarkerPlacement(Field);
 
   return Field;
 }
