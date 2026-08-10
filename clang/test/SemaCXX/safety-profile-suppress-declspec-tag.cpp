@@ -74,8 +74,8 @@ struct Outer {
   } inner;
 };
 
-// Block scope parity: the statement guard already covered this; the
-// declaration guard now pushes the same attributes again (harmless).
+// Block scope: the statement and declaration guards both push the same
+// attributes; the duplicate entries are harmless.
 void block_scope() {
   // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
   [[profiles::suppress(test::type_cast)]] struct BS {
@@ -90,8 +90,7 @@ void block_scope() {
   (void)bs_after;
 }
 
-// A function template's prefix suppression still covers its body after the
-// scope's move from ParseDeclGroup into ParseDeclarationAfterTemplate.
+// A function template's prefix suppression covers its body.
 template <class T>
 // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
 [[profiles::suppress(test::type_cast)]] int *tf() {
