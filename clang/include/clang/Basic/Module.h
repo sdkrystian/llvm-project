@@ -658,8 +658,9 @@ public:
   /// module depends.
   llvm::SmallVector<ModuleRef, 2> Imports;
 
-  /// Profile enforcements on this module's declaration (P3589R2).
   using EnforcedProfile = profiles::EnforcedProfile;
+  /// The profiles enforced on this module's declaration (P3589R2), with the
+  /// designator spellings that enforced them.
   SmallVector<EnforcedProfile, 0> EnforcedProfileDesignators;
 
   /// The set of top-level modules that affected the compilation of this module,

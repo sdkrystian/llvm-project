@@ -466,11 +466,10 @@ reverse_children::reverse_children(Stmt *S, ASTContext &Ctx,
     // (;) but semantically the "children" are supposed to be the
     // expressions _within_ i.e. the two square brackets i.e. [[ HERE ]]
     // so we add the subexpressions first, _then_ add the "children".
-    // Only consumers that opted in see the assumption expressions: the
-    // operand of [[assume]] is never evaluated ([dcl.attr.assume]), so a
-    // mention there is not a read or a use (CFG::BuildOptions
-    // ::AddAssumeAttrExprs).
     auto *AS = cast<AttributedStmt>(S);
+    // Only consumers that opted in via AddAssumeAttrExprs see the assumption
+    // expressions: the operand of [[assume]] is never evaluated
+    // ([dcl.attr.assume]), so a mention there is not a read or a use.
     if (AddAssumeAttrExprs) {
       for (const auto *Attr : AS->getAttrs()) {
         if (const auto *AssumeAttr = dyn_cast<CXXAssumeAttr>(Attr)) {

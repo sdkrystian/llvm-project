@@ -6,11 +6,10 @@
 //
 //===----------------------------------------------------------------------===//
 /// \file
-/// The single implementation of the C++ profiles framework's suppression
-/// enumeration: given a declaration or a statement, enumerate the
-/// [[profiles::suppress]] attributes that cover it. Pure Decl/Attr/Stmt
-/// logic with no Sema dependency, so every consumer of suppression state
-/// shares one walk instead of reimplementing it.
+/// Shared suppression walks for the C++ profiles framework: given a
+/// declaration or a statement, enumerate the [[profiles::suppress]]
+/// attributes that cover it. Pure Decl/Attr/Stmt logic with no Sema
+/// dependency.
 ///
 //===----------------------------------------------------------------------===//
 
