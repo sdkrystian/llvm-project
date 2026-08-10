@@ -1,9 +1,15 @@
-//===--- Profiles.h - C++ profiles framework helpers -----------*- C++ -*-===//
+//===--- Profiles.h - C++ profiles framework helpers ------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
+//===----------------------------------------------------------------------===//
+/// \file
+/// Shared value types and helpers of the C++ profiles framework (P3589R2):
+/// profile arguments and their canonical spelling, enforced-profile records,
+/// and the suppression-matching rule.
+///
 //===----------------------------------------------------------------------===//
 
 #ifndef LLVM_CLANG_BASIC_PROFILES_H
