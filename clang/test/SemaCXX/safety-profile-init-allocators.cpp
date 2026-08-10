@@ -1,0 +1,302 @@
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -std=c++23 %s
+// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 %s
+// RUN: %clang_cc1 -fsyntax-only -verify=nobuiltin -fprofiles -fno-builtin -std=c++23 %s
+// RUN: %clang_cc1 -fsyntax-only -verify=nobuiltin -fprofiles -ffreestanding -std=c++23 %s
+
+// std::init: known allocator callees are classified without annotation
+// (paper §4.3: malloc returns a pointer to uninitialized memory, calloc to
+// zero-initialized memory, and such functions "must be known to an analyzer
+// enforcing the initialization profile"). Trusted knowledge keys on Clang's
+// builtin recognition, so the library functions are declared with matching
+// signatures here. Under -fno-builtin / -ffreestanding (the nobuiltin runs,
+// byte-identical) the builtin IDs are absent: a plain-named allocator is
+// then recognized by name but *untrusted* -- unclassified, so neither
+// binding direction diagnoses (not the trusted-initialized default), a
+// release callee still relaxes the binding (acceptance never diagnoses)
+// but no longer withdraws credit (withdrawal is a diagnostic's firing
+// basis and needs trust) -- while the __builtin_* spellings and the
+// operator new/delete families keep their recognition everywhere.
+
+// no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
+[[profiles::enforce(std::init)]];
+
+typedef __SIZE_TYPE__ size_t;
+extern "C" void *malloc(size_t);
+extern "C" void *calloc(size_t, size_t);
+extern "C" void *realloc(void *, size_t);
+extern "C" void *aligned_alloc(size_t, size_t);
+extern "C" void free(void *);
+
+void take_uninit_ptr(int *p [[ref_to_uninit]]);
+void take_ptr(int *p);
+
+// malloc returns uninitialized memory: a marked target accepts it, and an
+// unmarked one must not bind it (paper §4.3's `void* p2 = &x2` error).
+// Under nobuiltin malloc is untrusted -- unclassified -- so both directions
+// are accepted (the ex-false-positive lines are OK in every run).
+void test_malloc() {
+  int *p [[ref_to_uninit]] = (int *)malloc(4); // OK: the paper's canonical use
+  void *v [[ref_to_uninit]] = malloc(4);       // OK: no cast needed for void*
+  int *q = (int *)malloc(4); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  take_uninit_ptr((int *)malloc(4)); // OK
+  take_ptr((int *)malloc(4)); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// The __builtin_ spellings need no declaration, classify identically, and
+// keep their builtin IDs under -fno-builtin / -ffreestanding.
+void test_builtin_spellings() {
+  int *p [[ref_to_uninit]] = (int *)__builtin_malloc(4); // OK
+  int *q = (int *)__builtin_malloc(4); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}} \
+                                       // nobuiltin-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  int *r = (int *)__builtin_calloc(1, 4); // OK: zero-initialized
+}
+
+// calloc zero-initializes (paper §4.3), so its result is initialized memory
+// and the marked direction flips.
+void test_calloc() {
+  int *p = (int *)calloc(1, 4); // OK
+  int *q [[ref_to_uninit]] = (int *)calloc(1, 4); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// realloc preserves a prefix and leaves the tail indeterminate:
+// affirmatively neither initialized nor uninitialized, so neither binding
+// direction diagnoses.
+void test_realloc(void *v) {
+  int *p = (int *)realloc(v, 8);                   // OK: unknown
+  int *q [[ref_to_uninit]] = (int *)realloc(v, 8); // OK: unknown
+}
+
+void test_aligned_alloc() {
+  int *p [[ref_to_uninit]] = (int *)aligned_alloc(16, 16); // OK
+  int *q = (int *)aligned_alloc(16, 16); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// alloca's stack memory is as uninitialized as malloc's heap memory.
+void test_alloca() {
+  int *p [[ref_to_uninit]] = (int *)__builtin_alloca(4); // OK
+  int *q = (int *)__builtin_alloca(4); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}} \
+                                       // nobuiltin-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// Allocator sources compose with the existing machinery: a write through the
+// marked pointer is the pointee's initialization (with parse-order credit),
+// and a read before it is the read-through violation.
+void test_write_then_read() {
+  int *p [[ref_to_uninit]] = (int *)malloc(4);
+  *p = 5;     // OK: initializes the pointee
+  int x = *p; // OK: credited
+}
+
+void test_read_through() {
+  int *p [[ref_to_uninit]] = (int *)malloc(4);
+  int x = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}} \
+              // nobuiltin-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A direct call to a replaceable global allocation function returns
+// uninitialized memory exactly like malloc (a new-*expression* is recognized
+// separately, from its initialization style). Recognition is by form, not
+// builtin ID, so it holds in the nobuiltin runs too.
+void test_operator_new() {
+  int *p [[ref_to_uninit]] = (int *)::operator new(4); // OK
+  int *q = (int *)::operator new(4); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}} \
+                                     // nobuiltin-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  int *r = (int *)::operator new[](8); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}} \
+                                       // nobuiltin-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  int *s [[ref_to_uninit]] = (int *)__builtin_operator_new(4); // OK
+}
+
+// A class-specific operator new is not replaceable; its semantics belong to
+// its class, so it stays a trusted unmarked callee.
+struct PoolAllocated {
+  static void *operator new(size_t);
+};
+void test_class_specific_operator_new() {
+  int *p [[ref_to_uninit]] = (int *)PoolAllocated::operator new(4); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}} \
+                                                                    // nobuiltin-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int *q = (int *)PoolAllocated::operator new(4); // OK: trusted
+}
+
+// Suppression covers the binding like any other ref_to_uninit site.
+void test_suppress() {
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  [[profiles::suppress(std::init, rule: "ref_to_uninit")]]
+  int *q = (int *)malloc(4); // OK: suppressed
+}
+
+// A Decl-less binding of a non-dependent allocator call (a call argument) is
+// checked at definition time even in a never-instantiated template, like the
+// other all-non-dependent shapes (TreeTransform may reuse the node).
+template <class T>
+void template_malloc_arg() {
+  take_ptr((int *)malloc(4)); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// ============================================================
+// Storage-release callees (the deallocation side)
+// ============================================================
+
+// free, realloc's pointer argument, and replaceable global operator delete
+// release the storage they are handed: the binding accepts a pointer in any
+// state ([[now_uninit]]-equivalent), so deallocating never-written storage
+// is legal -- the RAII buffer below is the motivating shape -- and the
+// storage's credit is withdrawn, so a whole-`*p` read through a marked
+// pointer after the release is the read-through violation again. Like the
+// allocator side, free/realloc recognition keys on Clang's builtin
+// knowledge (-fno-builtin loses the relaxation, never more).
+struct RAIIBuf {
+  int *p [[ref_to_uninit]];
+  RAIIBuf() : p((int *)malloc(16)) {}
+  ~RAIIBuf() { free(p); } // OK: releasing storage in any state
+};
+
+void test_free_uninit(int *p [[ref_to_uninit]]) {
+  free(p); // OK: never-initialized storage may be released
+}
+void test_free_initialized(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  free(p); // OK: initialized storage may be released
+}
+void test_builtin_free(int *p [[ref_to_uninit]]) {
+  __builtin_free(p); // OK: same recognition by builtin ID
+}
+void test_operator_delete(int *p [[ref_to_uninit]],
+                          int *q [[ref_to_uninit]]) {
+  ::operator delete(p);   // OK: replaceable global deallocation
+  ::operator delete[](q); // OK
+}
+// Withdrawal keys on the *trusted* recognition only: in the nobuiltin runs
+// an untrusted free/realloc still relaxes the binding but leaves the credit
+// in place, so the post-release reads stay accepted there (the documented
+// missed-diagnostic direction; withdrawing on an untrusted name could
+// manufacture read-through false positives).
+void test_read_after_free(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  int x = *p; // OK: credited
+  free(p);
+  int y = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  (void)x; (void)y;
+}
+void test_realloc_releases_pointer_argument(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  int *r = (int *)realloc(p, 32); // OK both ways: unknown source, releasing sink
+  int x = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  (void)r; (void)x;
+}
+
+// Ending the object's lifetime and then releasing its storage are two
+// different, correctly ordered operations: the release callees are exempt
+// from the double-destroy check.
+template <class T> [[now_uninit]] void destroy_at(T *p);
+void test_destroy_then_free(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  destroy_at(p);
+  free(p); // OK: not a double destroy
+}
+
+// The reverse order is the destroy_uninit violation on a marked pointer: a
+// release records no destroyed state -- there is no object left for
+// [[now_uninit]] to destroy "again" -- but a trusted release withdraws the
+// pointee's credit, so the storage classifies uninitialized again and the
+// destroy fires on it. In the nobuiltin runs the untrusted free withdraws
+// nothing (the documented missed-diagnostic direction), while the
+// delete-expression withdraws by form in every mode.
+void test_free_then_destroy(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  free(p);
+  destroy_at(p); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+}
+void test_delete_then_destroy(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  delete p;
+  destroy_at(p); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}} \
+                 // nobuiltin-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+}
+// A genuine double destroy -- two [[now_uninit]] calls -- still fires, in
+// every profile-enforcing run (attribute-keyed, no builtin ID involved).
+void test_destroy_then_destroy(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  destroy_at(p);
+  destroy_at(p); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}} \
+                 // nobuiltin-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+}
+
+// Destroying a trusted allocator's raw result is destroying storage where
+// no object was ever constructed; calloc's zero-initialized result is
+// initialized memory and stays accepted. In the nobuiltin runs the
+// untrusted malloc classifies as Unknown, which never fires.
+void test_destroy_malloc_result() {
+  destroy_at((int *)malloc(4)); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+}
+void test_destroy_calloc_result() {
+  destroy_at((int *)calloc(1, 4)); // OK: zero-initialized
+}
+
+// The workaround for an ID-less deallocator (see Limitations): declare it
+// [[now_uninit]] with the pointer parameter marked [[ref_to_uninit]]. The
+// destroy role relaxes the binding and withdraws credit; the parameter
+// marker exempts it from destroy_uninit, so releasing a never-written
+// buffer -- a release function's contract -- stays legal in every run,
+// including the RAII-member shape, whose pointee no store can credit.
+[[now_uninit]] void my_aligned_free(void *p [[ref_to_uninit]]);
+void test_annotated_release_never_written() {
+  my_aligned_free(malloc(16)); // OK: releasing a never-written buffer
+}
+struct RAIIAnnotated {
+  int *p [[ref_to_uninit]];
+  RAIIAnnotated() : p((int *)malloc(16)) {}
+  ~RAIIAnnotated() { my_aligned_free(p); } // OK: any state, like free(p)
+};
+
+// A class-specific operator delete is not replaceable; its semantics belong
+// to its class, so its parameter stays the ordinary unmarked target.
+struct PoolDeallocated {
+  static void operator delete(void *);
+};
+void test_class_specific_operator_delete(int *p [[ref_to_uninit]]) {
+  PoolDeallocated::operator delete(p); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}} \
+                                       // nobuiltin-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// The delete-*expression* performs the same withdrawal without ever
+// passing through the parameter-binding funnel: no diagnostic on the
+// operand in any state (matching its historical silence), and `delete q`
+// agrees with `::operator delete(q)` on what follows.
+void test_delete_uninit(int *p [[ref_to_uninit]]) {
+  delete p; // OK: releasing never-written storage
+}
+void test_read_after_delete(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  int x = *p; // OK: credited
+  delete p;
+  int y = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}} \
+              // nobuiltin-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  (void)x; (void)y;
+}
+void test_read_after_delete_array(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  delete[] p;
+  int x = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}} \
+              // nobuiltin-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  (void)x;
+}
+// A non-dependent delete inside a template withdraws at definition time,
+// like every other non-dependent release.
+template <class T>
+void template_delete(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  delete p;
+  int x = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}} \
+              // nobuiltin-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  (void)x;
+}
+
+// __builtin_operator_delete binds its operand against a type-only entity
+// (no ParmVarDecl, no callee in sight), so the release relaxation cannot
+// key on it: marked storage keeps the unmarked-direction error -- a known
+// gap (see Limitations), like the builtin-ID-less _aligned_free and
+// reallocarray.
+void test_builtin_operator_delete_gap(int *p [[ref_to_uninit]]) {
+  __builtin_operator_delete(p); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}} \
+                                // nobuiltin-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}

@@ -1763,6 +1763,30 @@ def CXX11NoReturn : InheritableAttr {
   let Documentation = [CXX11NoReturnDocs];
 }
 
+def Uninit : InheritableAttr {
+  let Spellings = [CXX11<"", "uninit", 202602>];
+  let Subjects = SubjectList<[Var, Field], ErrorDiag>;
+  let Documentation = [UninitDocs];
+}
+
+def RefToUninit : InheritableParamAttr {
+  let Spellings = [CXX11<"", "ref_to_uninit", 202602>];
+  let Subjects = SubjectList<[Var, Field, Function], ErrorDiag>;
+  let Documentation = [RefToUninitDocs];
+}
+
+def NowInit : InheritableAttr {
+  let Spellings = [CXX11<"", "now_init", 202602>];
+  let Subjects = SubjectList<[Function], ErrorDiag>;
+  let Documentation = [NowInitDocs];
+}
+
+def NowUninit : InheritableAttr {
+  let Spellings = [CXX11<"", "now_uninit", 202602>];
+  let Subjects = SubjectList<[Function], ErrorDiag>;
+  let Documentation = [NowUninitDocs];
+}
+
 def NonBlocking : TypeAttr {
   let Spellings = [Clang<"nonblocking">];
   let Args = [ExprArgument<"Cond", /*optional*/1>];

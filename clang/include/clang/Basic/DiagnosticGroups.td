@@ -2033,6 +2033,26 @@ def ProfileTestClassFinal : ProfileGroup<"test::class_final">;
 def ProfileTestCtorFinal : ProfileGroup<"test::ctor_final">;
 def ProfileTestArithZeroDivide : ProfileRuleGroup<"test::arith", "zero_divide">;
 def ProfileTestArith : ProfileGroup<"test::arith", [ProfileTestArithZeroDivide]>;
+def ProfileStdInitUninitRead : ProfileRuleGroup<"std::init", "uninit_read">;
+def ProfileStdInitUninitDecl : ProfileRuleGroup<"std::init", "uninit_decl">;
+def ProfileStdInitUninitWrite : ProfileRuleGroup<"std::init", "uninit_write">;
+def ProfileStdInitRefToUninit : ProfileRuleGroup<"std::init", "ref_to_uninit">;
+def ProfileStdInitDoubleDestroy : ProfileRuleGroup<"std::init", "double_destroy">;
+def ProfileStdInitDestroyUninit : ProfileRuleGroup<"std::init", "destroy_uninit">;
+def ProfileStdInitCtorUninitMember : ProfileRuleGroup<"std::init", "ctor_uninit_member">;
+def ProfileStdInitStaticRuntimeInit : ProfileRuleGroup<"std::init", "static_runtime_init">;
+def ProfileStdInitUninitWithInitializer : ProfileRuleGroup<"std::init", "uninit_with_initializer">;
+def ProfileStdInitPointerMarker : ProfileRuleGroup<"std::init", "pointer_marker">;
+def ProfileStdInitUnionMarker : ProfileRuleGroup<"std::init", "union_marker">;
+def ProfileStdInitStaticMarker : ProfileRuleGroup<"std::init", "static_marker">;
+def ProfileStdInit : ProfileGroup<"std::init", [
+    ProfileStdInitUninitRead, ProfileStdInitUninitDecl, ProfileStdInitUninitWrite,
+    ProfileStdInitRefToUninit, ProfileStdInitDoubleDestroy,
+    ProfileStdInitDestroyUninit, ProfileStdInitCtorUninitMember,
+    ProfileStdInitStaticRuntimeInit, ProfileStdInitUninitWithInitializer,
+    ProfileStdInitPointerMarker, ProfileStdInitUnionMarker,
+    ProfileStdInitStaticMarker]>;
 def Profiles : DiagGroup<"profiles", [ProfileTestTypeCast, ProfileTestUninitRead,
                                       ProfileTestCfgHooks, ProfileTestClassFinal,
-                                      ProfileTestCtorFinal, ProfileTestArith]>;
+                                      ProfileTestCtorFinal, ProfileTestArith,
+                                      ProfileStdInit]>;
