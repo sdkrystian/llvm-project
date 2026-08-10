@@ -101,13 +101,13 @@ static void unzipProfileArguments(ArrayRef<profiles::ProfileArgument> Arguments,
 bool SemaProfiles::processProfilesEnforceAttr(
     const ParsedAttr &AL, Module *Mod, SmallVectorImpl<StringRef> *NewNames,
     SmallVectorImpl<StringRef> *NewDesignators) {
-  const auto &Args = AL.getProfileEnforceArgs();
-  if (Args.Designators.empty()) {
+  ArrayRef<detail::ProfileDesignator> Designators = AL.getProfileDesignators();
+  if (Designators.empty()) {
     Diag(AL.getLoc(), diag::err_attribute_too_few_arguments) << AL << 1;
     return false;
   }
 
-  for (const auto &D : Args.Designators) {
+  for (const auto &D : Designators) {
     StringRef Name = D.Name;
     StringRef Spelling = D.Spelling;
 
