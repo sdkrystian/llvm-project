@@ -116,7 +116,7 @@ struct ProfileSuppressArgs {
 };
 
 struct ProfileRequireArgs {
-  ProfileDesignator Designator;
+  ArrayRef<ProfileDesignator> Designators;
 };
 
 } // namespace detail
