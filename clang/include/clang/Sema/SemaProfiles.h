@@ -171,6 +171,13 @@ public:
   void
   checkProfileViolationsAtConstructorFinalization(CXXConstructorDecl *Ctor);
 
+  /// RAII guard pushing entries onto the parse-time suppress stack for a
+  /// construct's [[profiles::suppress]] attributes, popping them when the
+  /// construct's parse (or instantiation) ends. A declaration's guard is
+  /// pushed before its decl-specifier-seq, so the dominion covers a class or
+  /// enum defined there, NSDMIs and late-parsed member bodies included
+  /// (P3589R2 §2.4p3: the whole declaration's tokens). See
+  /// ProfilesFrameworkInternals.rst, "Suppression Dominion Mechanics".
   class ProfileSuppressScope {
     Sema &S;
     unsigned Count = 0;
@@ -179,9 +186,17 @@ public:
               SourceLocation End);
 
   public:
+    /// Push entries for the suppress attributes among \p Attrs, the prefix
+    /// attributes of a construct about to be parsed: the dominion begins at
+    /// the attribute and no end is recorded.
     ProfileSuppressScope(Sema &S, const ParsedAttributesView &Attrs);
+    /// Push entries for the suppress attributes attached to \p D (and, with
+    /// \p WalkLexicalParents, to its lexical parents), each bounded by its
+    /// owner's construct range.
     ProfileSuppressScope(Sema &S, const Decl *D,
                          bool WalkLexicalParents = false);
+    /// Push entries for the suppress attributes among \p Attrs with the
+    /// explicitly supplied dominion [\p Begin, \p End].
     ProfileSuppressScope(Sema &S, ArrayRef<const Attr *> Attrs,
                          SourceLocation Begin, SourceLocation End);
     ~ProfileSuppressScope();

@@ -1059,9 +1059,8 @@ Parser::DeclGroupPtrTy Parser::ParseDeclOrFunctionDefInternal(
   ParsedTemplateInfo TemplateInfo;
   MaybeParseMicrosoftAttributes(DS.getAttributes());
 
-  // The declaration's prefix-attribute suppress scope: pushed before the
-  // decl-specifier-seq so a class or enum defined there -- its NSDMIs and
-  // late-parsed member bodies included -- is within the dominion.
+  // The declaration's prefix-attribute suppress scope (see
+  // ProfileSuppressScope).
   SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, Attrs);
 
   // Parse the common declaration-specifiers piece.

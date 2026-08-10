@@ -214,6 +214,12 @@ or constructor finalized as a side effect of such an instantiation.
 Conversely, a local class or lambda defined *inside* the suppressed construct
 is covered, whichever path re-enters it.
 
+A declaration's guard is pushed before its decl-specifier-seq is parsed, so
+the dominion covers a class or enum defined there -- NSDMIs and late-parsed
+member bodies included.  A block-scope declaration is covered twice, once by
+the enclosing statement's guard and once by its own; the duplicate entries
+are harmless, since any matching entry suppresses.
+
 The range's end is recorded only when the construct was already fully parsed
 when the entry was pushed.  For a construct still being parsed no end exists
 yet (a mid-parse end location would be misleadingly early), so the entry's

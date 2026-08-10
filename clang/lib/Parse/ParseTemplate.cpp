@@ -199,9 +199,8 @@ Parser::DeclGroupPtrTy Parser::ParseDeclarationAfterTemplate(
   DS.SetRangeEnd(DeclSpecAttrs.Range.getEnd());
   DS.takeAttributesAppendingingFrom(DeclSpecAttrs);
 
-  // The declaration's prefix-attribute suppress scope: pushed before the
-  // decl-specifier-seq so a class or enum defined there -- its NSDMIs and
-  // late-parsed member bodies included -- is within the dominion.
+  // The declaration's prefix-attribute suppress scope (see
+  // ProfileSuppressScope).
   SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, DeclAttrs);
 
   ParseDeclarationSpecifiers(DS, TemplateInfo, AS,
