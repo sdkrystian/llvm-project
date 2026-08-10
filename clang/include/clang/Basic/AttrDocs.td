@@ -6630,44 +6630,57 @@ the ``int`` parameter is the one that represents the error.
 }
 
 def ProfilesEnforceDocs : Documentation {
-  let Category = DocCatStmt;
+  let Category = DocCatDecl;
   let Content = [{
 The ``[[profiles::enforce]]`` attribute requests enforcement of one or more
-C++ profiles (P3589R2) for the remainder of the translation unit. It must
-appear on an empty-declaration or module-declaration before any non-empty
-declaration.
+C++ profiles (P3589R2) for the remainder of the translation unit. It may
+appear on an empty-declaration at translation-unit scope that precedes every
+non-empty declaration, or on a module-declaration. It has effect only under
+``-fprofiles``.
 
 .. code-block:: c++
 
-  [[profiles::enforce(std::type)]];
-  void f(); // subject to std::type profile rules
+  [[profiles::enforce(std::safety)]];
+  void f(); // subject to std::safety profile rules
+
+See :doc:`ProfilesFramework` for details.
   }];
 }
 
 def ProfilesSuppressDocs : Documentation {
   let Category = DocCatStmt;
   let Content = [{
-The ``[[profiles::suppress]]`` attribute locally suppresses enforcement of
-a C++ profile (P3589R2) for the appertaining declaration or statement.
+The ``[[profiles::suppress]]`` attribute suppresses enforcement of a C++
+profile (P3589R2), or of a single rule of it, for the tokens of the
+declaration or statement it appertains to. It covers only the declaration it
+is written on: a suppression on a previous declaration does not carry over
+to the definition. It has effect only under ``-fprofiles``.
 
 .. code-block:: c++
 
-  [[profiles::suppress(std::type, justification: "legacy code")]]
-  void legacy_function();
+  [[profiles::suppress(std::safety, justification: "legacy code")]]
+  void legacy_function() { /* not checked */ }
+
+See :doc:`ProfilesFramework` for details.
   }];
 }
 
 def ProfilesRequireDocs : Documentation {
-  let Category = DocCatStmt;
+  let Category = DocCatDecl;
   let Content = [{
 The ``[[profiles::require]]`` attribute on a module-import-declaration
-validates that the imported module enforces one or more C++ profiles
-(P3589R2). Each profile that is not enforced is diagnosed individually.
+validates that the imported module advertises one or more C++ profiles
+through ``[[profiles::enforce]]`` on its module-declaration. Each listed
+designator must match an advertised designator's spelling exactly; each one
+that does not is diagnosed individually. It has effect only under
+``-fprofiles``.
 
 .. code-block:: c++
 
-  import MyModule [[profiles::require(std::type)]];
-  import MyModule [[profiles::require(std::type, vendor::hardened(fortify: 3))]];
+  import MyModule [[profiles::require(std::safety)]];
+  import MyModule [[profiles::require(vendor::hardened(fortify: 3))]];
+
+See :doc:`ProfilesFramework` for details.
   }];
 }
 

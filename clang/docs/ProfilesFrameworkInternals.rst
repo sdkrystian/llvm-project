@@ -251,6 +251,11 @@ covers the trigger's tokens, not the pattern's, and the positional match
 above keeps it from suppressing checks inside a synchronously instantiated
 body, NSDMI, default argument, or marker re-check.
 
+For the same reason ``ProfilesSuppressAttr`` is deliberately not inherited
+by redeclarations (``mergeDeclAttribute`` skips it): each redeclaration's
+tokens form their own dominion, so a suppression written on a previous
+declaration does not cover the definition.
+
 The post-parse violation gate used by the CFG passes consults two
 complementary sources: an AST walk (the analyzed function's enclosing
 statements via the ``ParentMap``, then its lexical declaration chain), which

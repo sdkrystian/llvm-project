@@ -63,9 +63,11 @@ Enforcing Profiles
 ==================
 
 ``[[profiles::enforce(profile-designator-list)]]`` requests enforcement of
-the named profiles for the whole translation unit.  It may appear only on an
-*empty-declaration* that precedes every other declaration at translation-unit
-scope, or on a *module-declaration* (see `Profiles and Modules`_):
+the named profiles for the remainder of the translation unit -- everything
+after the attribute; code before it, such as a global module fragment, is
+not checked.  It may appear only on an *empty-declaration* that precedes
+every other declaration at translation-unit scope, or on a
+*module-declaration* (see `Profiles and Modules`_):
 
 .. code-block:: c++
 
