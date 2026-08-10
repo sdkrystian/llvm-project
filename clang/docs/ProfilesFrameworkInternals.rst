@@ -143,14 +143,13 @@ funnels through (parsing, template instantiation, lambda completion); the
 constructor hook runs from the three functions every user-provided
 constructor definition funnels through -- ``ActOnMemInitializers``,
 ``ActOnDefaultCtorInitializers``, and ``SetDeclDefaulted`` (an out-of-line
-``= default``) -- including instantiation.  The dispatchers filter out
-dependent entities (the hooks re-fire on each instantiation), invalid ones,
-lambdas (pattern 3), and delegating constructors (pattern 4); a filter that
-is one profile's policy rather than the pattern's contract (say, a profile
-exempting defaulted copy/move constructors, which initialize member-wise
-while writing no initializer) lives in that profile's callback, so the
-dispatchers stay uniform.  Each callback gates its diagnostics on the
-decl-aware ``shouldEmitProfileViolation`` overload, which walks the finalized
+``= default``) -- including instantiation.  The per-pattern entry points
+filter out dependent entities (the hooks re-fire on each instantiation),
+invalid ones, lambdas (pattern 3), and delegating constructors (pattern 4)
+before the shared dispatcher runs the enforced callbacks; a filter that is
+one profile's policy rather than the pattern's contract lives in that
+profile's callback.  Each callback gates its diagnostics on the decl-aware
+``shouldEmitProfileViolation`` overload, which walks the finalized
 declaration and its lexical parents for a suppression.
 
 The split between the two patterns matters: class finalization runs *before
@@ -343,10 +342,19 @@ missed diagnostic, never a change to the meaning of a well-formed program.
 ``[[profiles::enforce]]`` on a *non-interface* module-declaration is recorded
 only translation-unit-locally and is invisible to importers.
 
-Serialization is automatic for every profile: enforcements are written to a
-PCH as ``ENFORCED_PROFILES`` records and restored on load, and
-``Module::EnforcedProfileDesignators`` is written to a BMI as
-``SUBMODULE_ENFORCED_PROFILES`` records within each submodule block.
+Serialization is automatic for every profile, through three records.
+Enforcements are written to a PCH as ``ENFORCED_PROFILES`` records and
+restored on load -- a PCH is the consuming TU's textual prefix, so its
+enforcements belong to the consumer.  ``Module::EnforcedProfileDesignators``
+is written to a BMI as ``SUBMODULE_ENFORCED_PROFILES`` records within each
+submodule block.  ``PROFILES_TU_HAS_NONEMPTY_DECL`` records whether a PCH
+contributed a non-empty top-level declaration, so the empty-declaration
+placement check works across a PCH boundary without deserializing the PCH's
+declarations.  ``ENFORCED_PROFILES`` is deliberately not written to a BMI
+(``WriteEnforcedProfiles`` returns early when writing a module): a named
+module's own enforcements must not leak into importers, which is what keeps
+"importing an enforcing module does not enforce its profiles in the
+importer" true.
 
 
 Redeclaration Compatibility
