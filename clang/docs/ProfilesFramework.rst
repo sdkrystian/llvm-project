@@ -49,9 +49,14 @@ off:
 
    clang++ -std=c++23 -fprofiles example.cpp
 
+Despite the similar spelling, the ``-fprofiles`` family of flags is
+unrelated to the ``-fprofile-*`` profile-guided-optimization and coverage
+options.
+
 The attributes accept both the ``[[profiles::name(...)]]`` and the
 ``[[using profiles: name(...)]]`` spelling and always require an argument
-clause; see the :doc:`AttributeReference` for the per-attribute reference.
+clause; see the :doc:`AttributeReference` for each attribute's reference
+entry.
 
 Without ``-fprofiles`` the attributes are ignored with a warning, and their
 argument clauses are not checked against the P3589R2 grammar -- like any
@@ -122,21 +127,21 @@ there:
    }
 
 A suppression covers exactly the tokens of the declaration or statement it
-appertains to -- nothing more.  The declarator-id position works too: on a
+appertains to, nothing more; P3589R2 calls this token range the
+suppression's *dominion*.  The declarator-id position works too: on a
 function definition it covers the whole definition, mem-initializers and
-body included, ending with it --
+body included, for free functions, inline members, and out-of-line
+definitions alike (the attribute must be on the *definition*; one written
+on a previous declaration does not carry over):
 
 .. code-block:: c++
 
    void legacy_code [[profiles::suppress(std::safety)]] () { /* exempt */ }
 
--- for free functions, inline members, and out-of-line definitions alike
-(the attribute must be on the *definition*; one written on a previous
-declaration does not carry over).  For a variable declaration the covered
-tokens include the
-initializer, so violations inside the initializer are silenced; but the
-variable is *not* marked as exempt at later uses, which appear in other
-declarations or statements and are checked normally:
+For a variable declaration the covered tokens include the initializer, so
+violations inside the initializer are silenced; but the variable is *not*
+marked as exempt at later uses, which appear in other declarations or
+statements and are checked normally:
 
 .. code-block:: c++
 

@@ -194,7 +194,7 @@ profile, the rule, and a trap diagnostic (``Trap`` class,
 ``DiagnosticTrapKinds.td``, category "C++ Profiles"), and passing the
 check's "no violation" predicate as a lazily-invoked builder.  The site
 guards on its own applicability conditions; the integer div/rem site is the
-in-tree example:
+in-tree pilot:
 
 .. code-block:: c++
 
@@ -336,7 +336,8 @@ one written around the use site is not -- the same answer Sema's positional
 dominion check gives.  Nesting composes automatically as the scopes save and
 restore both values.
 
-Known over-check-only gaps (a missed suppression, never a missed check):
+Known over-check-only gaps (a check that suppression fails to remove, never
+a missing check):
 member functions of a local class defined inside a suppressed *statement*,
 ObjC blocks (no lambda-style implicit-attribute propagation exists for
 ``BlockDecl``), and C++26 structured-binding condition variables, whose
@@ -349,17 +350,18 @@ there); the post-parse walker and CodeGen honor them.
 Modules and Serialization
 =========================
 
-``[[profiles::enforce]]`` on a module interface declaration records the
-enforced designators on ``Module::EnforcedProfileDesignators``, which is what
+``[[profiles::enforce]]`` on a module interface declaration *advertises* the
+enforced designators: they are recorded on
+``Module::EnforcedProfileDesignators``, which is what
 ``[[profiles::require]]`` on an import validates against.  A header unit
-records enforcement the same way from the empty-declaration form P3589R2
-prescribes for headers.  A non-partition implementation unit inherits the
+advertises the same way from the empty-declaration form P3589R2 prescribes
+for headers.  A non-partition implementation unit inherits the
 interface's enforcements through its implicit import of the primary
 interface.  A partition implementation unit does not implicitly import the
 interface, whose BMI is normally built later, so inheritance there is
 best-effort: enforcements are inherited only when the interface's BMI is
-already resident, and it is never force-loaded nor its absence diagnosed -- a
-missed diagnostic, never a change to the meaning of a well-formed program.
+already resident, and it is never force-loaded nor its absence diagnosed --
+a missed diagnostic, never a wrong one.
 ``[[profiles::enforce]]`` on a *non-interface* module-declaration is recorded
 only translation-unit-locally and is invisible to importers.
 
@@ -382,7 +384,10 @@ Redeclaration Compatibility
 ===========================
 
 P3589R2 [decl.attr.enforce]p5 requires a declaration and its redeclarations
-to appear in the dominions of mutually compatible profiles.
+to appear in the dominions of mutually compatible profiles -- an
+*enforcement's* dominion, the region of the program an
+``[[profiles::enforce]]`` covers, as distinct from a suppression's dominion
+above.
 ``checkRedeclarationProfileCompatibility`` runs from the module-level
 redeclaration funnel and checks the rule symmetrically in both directions.
 It is a framework rule: a plain error, not suppressible with
