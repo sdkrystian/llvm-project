@@ -1,8 +1,6 @@
 // RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -std=c++20 %s
 
-// ===================================================================
 // Valid enforce forms
-// ===================================================================
 
 // Single designator
 [[profiles::enforce(std::type)]];
@@ -28,9 +26,7 @@
 // Bare identifier argument
 [[profiles::enforce(bare3(abc))]];
 
-// ===================================================================
 // Valid suppress forms
-// ===================================================================
 
 [[profiles::suppress(std::type)]]
 void suppress_no_args();
@@ -44,23 +40,17 @@ void suppress_with_rule();
 [[profiles::suppress(std::type, justification: "legacy", rule: "cast")]]
 void suppress_with_both();
 
-// ===================================================================
 // [[using profiles: ...]] syntax
-// ===================================================================
 
 [[using profiles: suppress(std::type)]]
 void using_syntax();
 
-// ===================================================================
 // Profile name with :: separators
-// ===================================================================
 
 [[profiles::suppress(a::b::c)]]
 void deep_name();
 
-// ===================================================================
 // Parse errors
-// ===================================================================
 
 // enforce with empty parens: parse error
 [[profiles::enforce()]]; // expected-error {{expected profile name}}
@@ -80,9 +70,7 @@ void suppress_bare_operator();
 [[profiles::suppress(std::type, (a b))]] // expected-error {{invalid token in profile argument}}
 void suppress_bare_group();
 
-// ===================================================================
 // Missing argument clause: must diagnose, not crash
-// ===================================================================
 
 // enforce with no argument clause at TU scope
 [[profiles::enforce]]; // expected-error {{'enforce' attribute requires an argument clause}}
