@@ -1503,9 +1503,9 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
   // Attributes on the lambda apply to the method.
   ProcessDeclAttributes(CurScope, Method, ParamInfo);
 
-  // P3589R2: Propagate active profile suppressions to the call operator so
-  // that generic lambda instantiation (which walks lexical Decl parents, not
-  // the enclosing stmt tree) can recover them.
+  // Propagate active profile suppressions to the call operator so that
+  // generic lambda instantiation (which walks lexical Decl parents, not the
+  // enclosing stmt tree) can recover them.
   if (getLangOpts().Profiles)
     for (const auto &E : Profiles().ProfileSuppressStack)
       Method->addAttr(

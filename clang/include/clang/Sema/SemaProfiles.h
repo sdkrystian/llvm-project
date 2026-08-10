@@ -48,7 +48,7 @@ public:
     StringRef RuleName;
     /// Begin location of the construct the suppression appertains to (the
     /// declaration or statement, not the attribute). The entry's dominion
-    /// starts here (P3589R2 s2.4p3).
+    /// starts here (P3589R2 §2.4p3).
     SourceLocation Begin;
     /// End location of the construct, recorded only when the construct was
     /// fully parsed at push time; invalid otherwise, leaving the dominion's

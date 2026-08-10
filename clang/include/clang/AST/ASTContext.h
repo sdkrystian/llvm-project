@@ -1007,7 +1007,7 @@ public:
 
   /// True if \p Loc is exempt from profile enforcement because it lies in a
   /// system header. Temporary stopgap for the not-yet-implemented
-  /// [[profiles::exempt]] (P3589R2 s1.1.6), so enforcing a profile on a
+  /// [[profiles::exempt]] (P3589R2 §1.1.6), so enforcing a profile on a
   /// translation unit does not diagnose violations inside the standard
   /// library and the other system headers it transitively includes. On by
   /// default; -fno-profiles-exempt-system-headers restores spec-exact
