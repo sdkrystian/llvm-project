@@ -50,6 +50,28 @@ There are five implementation patterns, keyed on when -- and for pattern 5,
 how -- the rule is checked.
 
 
+Adding a Profile
+================
+
+Every profile follows the same recipe:
+
+1. Pick the pattern that matches when the rule can be decided: a single
+   semantic entry point (pattern 1), whole-function analysis (pattern 2),
+   class or constructor finalization (patterns 3 and 4), or a runtime check
+   (pattern 5).
+2. Define the diagnostic: a ``ProfileRuleError`` in
+   ``DiagnosticSemaKinds.td`` for compile-time rules, or a ``Trap`` in
+   ``DiagnosticTrapKinds.td`` for runtime-checked rules.
+3. Add the check: a ``checkProfileViolation`` or ``EmitProfileRuntimeCheck``
+   call at the check site (patterns 1 and 5), or a row in the analysis's
+   opt-in table (patterns 2-4).
+4. Add tests; a test-only profile must be named under ``test::`` (see `Test
+   Profiles`_).
+
+Enforcement, suppression, module propagation, and serialization then work
+without further profile-specific code.
+
+
 Pattern 1: Parse-Time Check Sites
 =================================
 
@@ -191,12 +213,9 @@ is not in an exempt system header, and that the rule is not suppressed for
 the code being emitted (the CodeGen suppression state above).  Only when the
 check is active does it invoke the builder for the predicate, so an inactive
 site emits no IR, and then emits a conditional branch to a trap block
-(``SanitizerHandler::ProfileViolation``).  Should several profiles ever ride
-one check, per-profile calls would duplicate the trap (redundant, never
-wrong); a grouped form emitting one trap with priority attribution is
-deferred until such a rider exists.  Unevaluated operands and discarded
-statements are never emitted at all, so the Sema-side gates for those
-contexts need no CodeGen counterpart.
+(``SanitizerHandler::ProfileViolation``).  Unevaluated operands and
+discarded statements are never emitted at all, so the Sema-side gates for
+those contexts need no CodeGen counterpart.
 
 Failure semantics are trap-only: ``llvm.ubsantrap`` with the handler's own
 immediate, no handler call, no runtime library.  That is forced rather than
@@ -204,11 +223,10 @@ merely chosen -- enforcement is declared *in source*, so the driver cannot
 see it and no runtime support library can be auto-linked.  Under the default
 ``-fsanitize-debug-trap-reasons=detailed`` with debug info enabled, the
 trap's debug location carries the rule's trap diagnostic naming the
-violated profile; external decoders of ubsantrap immediates (e.g. LLDB's
-enum copy) will not know the new immediate, which that trap-reason string
-compensates for.  With trap reasons off or basic, the fallback message is
-categorized "Undefined Behavior Sanitizer" -- cosmetic, a possible
-follow-up.  At ``-O0`` every check site gets its own trap instruction,
+violated profile.  External decoders of ``ubsantrap`` immediates (e.g.
+LLDB) do not know the new immediate and label the trap "Undefined Behavior
+Sanitizer" when trap reasons are off or basic; the detailed trap-reason
+string compensates.  At ``-O0`` every check site gets its own trap instruction,
 keeping locations and reasons exact; optimized builds coalesce the traps of
 one handler kind and merge their locations, like UBSan's trap mode.
 
@@ -294,11 +312,11 @@ structure over the AST it is emitting:
 
 ``CodeGenFunction::isProfileSuppressionActive`` composes the two *lazily at
 each check site*: the stack above its floor, then the chain from the
-suppression anchor or, absent one, from ``CurCodeDecl`` -- whatever code
-is being emitted (functions, lambdas, global dynamic initializers, coroutine
-bodies, OpenMP captured regions), that is the declaration whose chain
-carries its suppressions.  A null ``CurCodeDecl`` (synthesized helpers such
-as block copy/dispose functions) carries none.  Lazy querying is a
+suppression anchor or, absent one, from ``CurCodeDecl``.  Whatever code is
+being emitted -- a function, lambda, global dynamic initializer, coroutine
+body, or OpenMP captured region -- ``CurCodeDecl`` is the declaration whose
+chain carries its suppressions.  A null ``CurCodeDecl`` (synthesized
+helpers such as block copy/dispose functions) carries none.  Lazy querying is a
 correctness requirement, not a convenience: an inlined inheriting
 constructor swaps ``CurCodeDecl`` mid-function without a ``StartFunction``,
 so per-function seeding would apply the wrong declaration's suppressions.
@@ -323,10 +341,9 @@ member functions of a local class defined inside a suppressed *statement*,
 ObjC blocks (no lambda-style implicit-attribute propagation exists for
 ``BlockDecl``), and C++26 structured-binding condition variables, whose
 holding-variable initializer is emitted deferred, outside the variable's
-suppression scope.  Sema's parse-time stack additionally has a pre-existing
-blind spot of its own on condition-variable declarators (the parser installs
-no suppress scope there); CodeGen mirrors the post-parse walker, which
-honors them.
+suppression scope.  Sema's parse-time stack has a blind spot of its own on
+condition-variable declarators (the parser installs no suppress scope
+there); the post-parse walker and CodeGen honor them.
 
 
 Modules and Serialization

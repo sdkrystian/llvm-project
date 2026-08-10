@@ -81,8 +81,9 @@ every other declaration at translation-unit scope, or on a
    int main() { /* ... */ }
 
 A *profile-designator* is a profile name -- one or more identifiers joined
-by ``::`` -- optionally followed by a parenthesized argument list.  The arguments are not subject to
-name lookup; their interpretation is up to the profile.  Repeating an
+by ``::`` -- optionally followed by a parenthesized argument list.  The
+arguments are not subject to name lookup; their interpretation is up to the
+profile.  Repeating an
 enforcement with the same designator is allowed and has no effect, but
 requesting the same profile with a different designator is an error, as is an
 enforcement placed after another declaration:
