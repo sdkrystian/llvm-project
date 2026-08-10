@@ -141,45 +141,29 @@ void SemaProfiles::checkRedeclarationProfileCompatibility(
     const NamedDecl *New, const NamedDecl *Old) {
   if (!getLangOpts().Profiles)
     return;
-  // Only a previous declaration from another module unit (a named module or a
-  // header unit) can carry a different profile dominion. A textual or PCH
-  // previous declaration shares this TU's dominion: the placement rule makes
-  // a TU's dominion uniform over its declarations, and a PCH's enforcements
-  // are restored into this TU (ENFORCED_PROFILES).
+  // The skipped cases below are enumerated and argued in
+  // ProfilesFrameworkInternals.rst, "Redeclaration Compatibility".
+  // A textual or PCH previous declaration shares this TU's dominion.
   if (!Old->isFromASTFile())
     return;
   Module *M = Old->getOwningModule();
   if (!M)
     return;
-  // A module-map module (a Clang header module, -fmodules) is textual
-  // inclusion wearing an AST file: in the standard's model its declarations
-  // belong to this TU, so it has no dominion of its own to compare against.
-  // Named modules and header units -- the real other-TU cases with recorded
-  // designators -- stay checked.
+  // A module-map module (-fmodules): textual inclusion, no dominion of its
+  // own.
   if (M->isModuleMapModule())
     return;
   // The system-header exemption stopgap covers the previous declaration's
-  // dominion too: a header unit built from a system header has no recorded
-  // designators, and redeclaring or specializing its entities must not draw
-  // the error while every other check exempts that code. Flag-gated by
-  // construction: -fno-profiles-exempt-system-headers restores spec-exact
-  // checking.
+  // dominion too.
   if (isProfileExemptSystemHeaderLoc(Old->getLocation()))
     return;
-  // A declaration in an explicit global-module-fragment precedes the module
-  // declaration, so the module's exported enforcements do not cover it, and
-  // its TU's empty-declaration enforcements are not serialized into the BMI.
-  // Its dominion is unknown: skip rather than guess (a missed diagnostic,
-  // never a wrong one). An *implicit* global-module-fragment declaration (a
-  // purview extern "C"/"C++" declaration, the common redeclarable case) sits
-  // inside the module declaration's dominion and is checked.
+  // An explicit global-module-fragment declaration's dominion is unknown;
+  // skip rather than guess.
   if (M->isExplicitGlobalModule())
     return;
   Module *Top = M->getTopLevelModule();
-  // Within the same module family (an implementation or partition unit seeing
-  // its interface) the exported set under-approximates the interface TU's
-  // full dominion, and the interface's enforcements are inherited into this
-  // unit anyway; skip rather than false-positive on locally added profiles.
+  // Same module family: the exported set under-approximates the interface
+  // TU's dominion, which this unit inherits anyway.
   if (Module *Current = SemaRef.getCurrentModule())
     if (Current->getTopLevelModule()->getPrimaryModuleInterfaceName() ==
         Top->getPrimaryModuleInterfaceName())

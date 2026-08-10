@@ -353,6 +353,13 @@ AST file, not a separate TU in the standard's model, so it has no dominion of
 its own -- header units, which are real TUs with recorded designators, stay
 checked.  A textual or PCH previous declaration shares the current TU's
 dominion and is not checked; implicit template instantiations are exempt.
+A previous declaration covered by the system-header exemption stopgap is
+skipped as well -- a header unit built from a system header has no recorded
+designators, and redeclaring or specializing its entities must not draw the
+error while every other check exempts that code
+(``-fno-profiles-exempt-system-headers`` restores spec-exact checking).
+Profiles gated off in this compilation (``test::`` names without
+``-fprofiles-test-profiles``) are inert on either side of the comparison.
 
 
 Test Profiles
