@@ -14348,17 +14348,21 @@ def err_cuda_device_kernel_launch_not_supported
 def err_cuda_device_kernel_launch_require_rdc
     : Error<"kernel launch from __device__ or __global__ function requires "
             "relocatable device code (i.e. requires -fgpu-rdc)">;
+
 // C++ Profiles framework (P3589R2)
 class ProfileRuleError<string str> : Error<str> {
   let SFINAE = SFINAE_Suppress;
 }
 
 def err_profiles_enforce_not_empty_decl : Error<
-  "'profiles::enforce' attribute only allowed on empty-declarations and module-declarations">;
+  "'profiles::enforce' attribute only allowed on empty-declarations and "
+  "module-declarations">;
 def err_profiles_enforce_not_at_tu_scope : Error<
-  "'profiles::enforce' attribute on empty-declaration must be at translation unit scope">;
+  "'profiles::enforce' attribute on empty-declaration must be at translation "
+  "unit scope">;
 def err_profiles_enforce_after_decl : Error<
-  "'profiles::enforce' attribute on empty-declaration must precede all non-empty declarations">;
+  "'profiles::enforce' attribute on empty-declaration must precede all "
+  "non-empty declarations">;
 def err_profiles_enforce_mismatch : Error<
   "repeated enforcement of profile '%0' with different designator">;
 def err_profiles_require_not_on_import : Error<
@@ -14372,7 +14376,8 @@ def err_profiles_redecl_incompatible : Error<
   "the dominion of a profile compatible with '%2', which this translation "
   "unit enforces}0">;
 def err_profiles_suppress_justification_not_string : Error<
-  "'justification' argument of 'profiles::suppress' must be a string literal">;
+  "'justification' argument of 'profiles::suppress' must be a string "
+  "literal">;
 def err_profile_type_cast_reinterpret : ProfileRuleError<
   "'reinterpret_cast' is unsafe under profile '%0'">;
 def err_profile_uninit_read : ProfileRuleError<

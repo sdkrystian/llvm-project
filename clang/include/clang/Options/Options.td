@@ -1792,17 +1792,18 @@ defm coroutines : BoolFOption<"coroutines",
 defm profiles : BoolFOption<"profiles",
   LangOpts<"Profiles">, DefaultFalse,
   PosFlag<SetTrue, [], [ClangOption, CC1Option],
-          "Enable C++ profiles framework (P3589R2)">,
+          "Enable the C++ profiles framework (P3589R2, experimental)">,
   NegFlag<SetFalse>>,
   ShouldParseIf<cplusplus.KeyPath>;
 def fprofiles_test_profiles : Flag<["-"], "fprofiles-test-profiles">,
   Group<f_Group>, Visibility<[CC1Option]>,
-  HelpText<"Enable the C++ profiles framework's built-in test:: profiles (test suite only)">,
+  HelpText<"Enable the built-in test:: profiles (test suite only)">,
   MarshallingInfoFlag<LangOpts<"ProfilesTestProfiles">>;
-defm profiles_exempt_system_headers : BoolFOption<"profiles-exempt-system-headers",
+defm profiles_exempt_system_headers
+  : BoolFOption<"profiles-exempt-system-headers",
   LangOpts<"ProfilesExemptSystemHeaders">, DefaultTrue,
   PosFlag<SetTrue, [], [ClangOption, CC1Option],
-          "Exempt code originating in system headers from C++ profile enforcement (temporary stopgap for [[profiles::exempt]], P3589R2 1.1.6; on by default)">,
+          "Exempt system-header code from C++ profile enforcement (default)">,
   NegFlag<SetFalse, [], [ClangOption, CC1Option],
           "Enforce C++ profiles in system-header code too">>,
   ShouldParseIf<cplusplus.KeyPath>;
