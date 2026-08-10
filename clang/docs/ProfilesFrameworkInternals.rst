@@ -1,6 +1,6 @@
-====================================
+================================
 C++ Profiles Framework Internals
-====================================
+================================
 
 .. contents::
    :depth: 2
@@ -36,7 +36,7 @@ generation directly from an AST file -- observes the same enforcement state.
 wrappers) and owns the attribute's diagnostics.
 
 Profile-rule diagnostics are defined with the ``ProfileRuleError`` diagnostic
-class rather than ``Error``.  It marks them SFINAE-suppressed: they do not
+class rather than plain ``Error``.  It marks them SFINAE-suppressed: they do not
 count as substitution failures and cannot change overload resolution, but
 selected specializations replay them when actually used.  The framework
 passes the profile name as ``%0``:

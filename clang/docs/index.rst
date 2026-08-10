@@ -33,7 +33,6 @@ Using Clang as a Compiler
    DataFlowAnalysisIntro
    FunctionEffectAnalysis
    ProfilesFramework
-   ProfilesFrameworkInternals
    AddressSanitizer
    ThreadSanitizer
    MemorySanitizer
@@ -126,6 +125,7 @@ Design Documents
    Multilib
    OffloadingDesign
    PCHInternals
+   ProfilesFrameworkInternals
    ItaniumMangleAbiTags
    ControlFlowIntegrityDesign
    HardwareAssistedAddressSanitizerDesign.rst
