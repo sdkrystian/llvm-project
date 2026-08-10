@@ -2019,6 +2019,26 @@ def ProfileTestClassFinal : DiagGroup<"profile-test-class-final">;
 def ProfileTestCtorFinal : DiagGroup<"profile-test-ctor-final">;
 def ProfileTestArithZeroDivide : DiagGroup<"profile-test-arith-zero-divide">;
 def ProfileTestArith : DiagGroup<"profile-test-arith", [ProfileTestArithZeroDivide]>;
+def ProfileStdInitUninitRead : DiagGroup<"profile-std-init-uninit-read">;
+def ProfileStdInitUninitDecl : DiagGroup<"profile-std-init-uninit-decl">;
+def ProfileStdInitUninitWrite : DiagGroup<"profile-std-init-uninit-write">;
+def ProfileStdInitRefToUninit : DiagGroup<"profile-std-init-ref-to-uninit">;
+def ProfileStdInitDoubleDestroy : DiagGroup<"profile-std-init-double-destroy">;
+def ProfileStdInitDestroyUninit : DiagGroup<"profile-std-init-destroy-uninit">;
+def ProfileStdInitCtorUninitMember : DiagGroup<"profile-std-init-ctor-uninit-member">;
+def ProfileStdInitStaticRuntimeInit : DiagGroup<"profile-std-init-static-runtime-init">;
+def ProfileStdInitUninitWithInitializer : DiagGroup<"profile-std-init-uninit-with-initializer">;
+def ProfileStdInitPointerMarker : DiagGroup<"profile-std-init-pointer-marker">;
+def ProfileStdInitUnionMarker : DiagGroup<"profile-std-init-union-marker">;
+def ProfileStdInitStaticMarker : DiagGroup<"profile-std-init-static-marker">;
+def ProfileStdInit : DiagGroup<"profile-std-init", [
+    ProfileStdInitUninitRead, ProfileStdInitUninitDecl, ProfileStdInitUninitWrite,
+    ProfileStdInitRefToUninit, ProfileStdInitDoubleDestroy,
+    ProfileStdInitDestroyUninit, ProfileStdInitCtorUninitMember,
+    ProfileStdInitStaticRuntimeInit, ProfileStdInitUninitWithInitializer,
+    ProfileStdInitPointerMarker, ProfileStdInitUnionMarker,
+    ProfileStdInitStaticMarker]>;
 def Profiles : DiagGroup<"profiles", [ProfileTestTypeCast, ProfileTestUninitRead,
                                       ProfileTestCfgHooks, ProfileTestClassFinal,
-                                      ProfileTestCtorFinal, ProfileTestArith]>;
+                                      ProfileTestCtorFinal, ProfileTestArith,
+                                      ProfileStdInit]>;

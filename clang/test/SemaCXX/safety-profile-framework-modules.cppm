@@ -388,7 +388,7 @@ extern "C++" void plain_api(int);
 
 //--- redecl_std_mod.cppm
 // expected-no-diagnostics
-export module RedeclStdMod [[profiles::enforce(std::safety)]];
+export module RedeclStdMod [[profiles::enforce(std::init)]];
 extern "C++" void std_api(int);
 
 //--- redecl_vendor_mod.cppm

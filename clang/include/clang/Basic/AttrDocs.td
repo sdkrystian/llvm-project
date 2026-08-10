@@ -962,6 +962,187 @@ migration for code using ``[[noreturn]]`` after including ``<stdnoreturn.h>``.
   }];
 }
 
+def UninitDocs : Documentation {
+  let Category = DocCatVariable;
+  let Heading = "uninit";
+  let Content = [{
+The ``[[uninit]]`` attribute marks a variable or non-static data
+member definition as intentionally left uninitialized. It is purely
+informational: it has no effect on code generation and the entity still
+has the same indeterminate value it would have without the attribute.
+
+The attribute exists to support the initialization profile (see
+:doc:`ProfilesFramework`). Under that profile, a definition such as
+``int x;`` is diagnosed because it leaves ``x`` with an indeterminate
+value; writing ``int x [[uninit]];`` instead suppresses that
+declaration-site diagnostic and documents that the lack of an initializer
+is intentional. The attribute does **not** suppress diagnostics that fire
+when the variable is later read before being assigned; the read-before-init
+rule still applies.
+
+A declaration or non-static data member with both ``[[uninit]]``
+and an initializer is ill-formed under the initialization profile (the
+marker contradicts the explicit initialization). The same applies when
+default-initialization of the entity's type is not a genuine no-op -- a
+non-trivial default constructor, a default member initializer, or a virtual
+table pointer initializes something, and a type with nothing left
+indeterminate has nothing to acknowledge -- so the marker is rejected there
+too.
+
+On a non-static data member the marker also excuses the member from the
+profile's requirement that every constructor initialize it. A scalar marked
+member is instead flow-checked where local analysis is sound: a read before
+it is assigned is diagnosed in the constructor's own body, and -- for a
+member of a class with no user-provided constructor -- in any function body
+that declares a bare local of that class. A marked member of an object with
+a user-provided constructor reached through any other object is trusted (the
+constructor body may have assigned it, which local analysis cannot see).
+
+The attribute cannot be applied where leaving the entity uninitialized is
+meaningless -- a reference, a function parameter, or a structured binding --
+and these placements are diagnosed regardless of ``-fprofiles``. The
+initialization profile additionally rejects the marker on a union object or
+union member.
+
+Outside the initialization profile the attribute is otherwise silently
+accepted and has no effect, so code that uses it remains valid when compiled
+without ``-fprofiles``.
+
+This attribute is distinct from the Clang vendor attribute
+``[[clang::uninitialized]]``, which interacts with
+``-ftrivial-auto-var-init`` to force a local variable to remain
+uninitialized.
+  }];
+}
+
+def RefToUninitDocs : Documentation {
+  let Category = DocCatVariable;
+  let Heading = "ref_to_uninit";
+  let Content = [{
+The ``[[ref_to_uninit]]`` attribute marks a pointer, reference, or
+pointer-returning function as referring to *uninitialized* memory. It is
+purely informational: it has no effect on code generation.
+
+The attribute exists to support the initialization profile (see
+:doc:`ProfilesFramework`). That profile bans forming an ordinary pointer or
+reference to uninitialized storage; ``[[ref_to_uninit]]`` is the opt-in that
+lets a program thread uninitialized memory (for example, an input buffer or
+a memory-pool allocation) through pointers and references. Under the profile
+a ``[[ref_to_uninit]]`` pointer or reference may only be bound to
+uninitialized memory, and a pointer or reference that is *not* marked may
+only be bound to initialized memory.
+
+The attribute applies to a variable, non-static data member, function
+parameter, or function (for its return value) whose type is a pointer or
+reference to an object; applying it elsewhere is diagnosed regardless of
+``-fprofiles``. A function pointer or reference (or a pointer-to-member)
+denotes a function or member, never uninitialized memory, so it is rejected.
+
+Outside the initialization profile the attribute is otherwise silently
+accepted and has no effect, so code that uses it remains valid when compiled
+without ``-fprofiles``.
+  }];
+}
+
+def NowInitDocs : Documentation {
+  let Category = DocCatFunction;
+  let Heading = "now_init";
+  let Content = [{
+The ``[[now_init]]`` attribute marks a function as *initializing* the
+storage passed to each of its ``[[ref_to_uninit]]`` parameters. It is purely
+informational: it has no effect on code generation.
+
+The attribute exists to support the initialization profile (see
+:doc:`ProfilesFramework`) and implements the annotation proposed in P4222R2
+§6.2 (its exact placement and spelling track an open committee question).
+Passing uninitialized memory to a ``[[ref_to_uninit]]`` parameter never by
+itself convinces the profile that the memory was initialized -- the callee
+may merely store the pointer. On a ``[[now_init]]`` function the profile
+instead treats the storage bound to every ``[[ref_to_uninit]]`` parameter as
+initialized after the call returns, so the caller may continue to use the
+original name:
+
+.. code-block:: c++
+
+  [[now_init]] void fill(int *p [[ref_to_uninit]]);
+
+  void f() {
+    int u [[uninit]];
+    fill(&u);
+    int v = u;  // OK: fill() initialized u
+  }
+
+The attribute requires at least one parameter marked ``[[ref_to_uninit]]``
+(it would be vacuous otherwise); this is diagnosed regardless of
+``-fprofiles``. It does not cover the implicit object parameter of a member
+function, which cannot carry ``[[ref_to_uninit]]``.
+
+Outside the initialization profile the attribute is otherwise silently
+accepted and has no effect, so code that uses it remains valid when compiled
+without ``-fprofiles``.
+  }];
+}
+
+def NowUninitDocs : Documentation {
+  let Category = DocCatFunction;
+  let Heading = "now_uninit";
+  let Content = [{
+The ``[[now_uninit]]`` attribute marks a function as *ending the lifetime*
+of the storage passed to each of its pointer or reference parameters,
+leaving that storage uninitialized. It is purely informational: it has no
+effect on code generation.
+
+The attribute is the mirror of ``[[now_init]]`` and exists to support the
+initialization profile (see :doc:`ProfilesFramework`). It supplies the
+recording P4222R2 §4.4 notes is missing ("the object subjected to
+``destroy_at()`` should be considered uninitialized, but there is no way of
+recording that in the code"; the exact placement and spelling of the marker
+family track an open committee question). After a call to a
+``[[now_uninit]]`` function, the profile treats the storage bound to every
+pointer or reference parameter as uninitialized again, so the object can be
+re-initialized -- and a second destruction, or a use of the storage through
+an ordinary pointer or reference, is diagnosed:
+
+.. code-block:: c++
+
+  [[now_init]] void construct_at(int *p [[ref_to_uninit]]);
+  [[now_uninit]] void destroy_at(int *p);
+
+  void f() {
+    int u [[uninit]];
+    construct_at(&u);
+    destroy_at(&u);
+    construct_at(&u);  // OK: u is uninitialized again after the destroy
+  }
+
+  void g() {
+    int u [[uninit]];
+    construct_at(&u);
+    destroy_at(&u);
+    destroy_at(&u);    // error: double destruction
+  }
+
+The parameters themselves accept storage in any live state -- initialized
+memory, or storage that was never constructed at all (the raw-release
+shape) -- so only the double destruction above is rejected at the call
+itself.
+
+Because the attribute covers *every* pointer or reference parameter, apply
+it only to functions that end the lifetime of every such argument's
+storage. It requires at least one parameter of pointer or reference type
+(it would be vacuous otherwise); this is diagnosed regardless of
+``-fprofiles``. A function may carry both ``[[now_uninit]]`` and
+``[[now_init]]``: such a reinitializer models destroy-then-construct, so
+the storage bound to its ``[[ref_to_uninit]]`` parameters is initialized
+after the call -- and calling it on already-initialized storage is exactly
+its purpose, so it is accepted.
+
+Outside the initialization profile the attribute is otherwise silently
+accepted and has no effect, so code that uses it remains valid when compiled
+without ``-fprofiles``.
+  }];
+}
+
 def NoMergeDocs : Documentation {
   let Category = DocCatStmt;
   let Content = [{

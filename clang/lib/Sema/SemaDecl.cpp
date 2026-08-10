@@ -5976,6 +5976,10 @@ Decl *Sema::BuildAnonymousStructOrUnion(Scope *S, DeclSpec &DS,
     // trivial in almost all cases, except if a union member has an in-class
     // initializer:
     //   union { int n = 0; };
+    // This runs before setImplicit() below, and that ordering is
+    // load-bearing: std::init's uninit_decl check (reached through
+    // ActOnUninitializedDecl) skips implicit variables, but a block-scope
+    // anonymous union is a user-written declaration that must stay checked.
     ActOnUninitializedDecl(Anon);
   }
   Anon->setImplicit();
@@ -10964,6 +10968,11 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
             Previous.getResultKind() != LookupResultKind::FoundOverloaded) &&
            "previous declaration set still overloaded");
 
+    // The [[now_init]] vacuity rule is checked only now: a [[ref_to_uninit]]
+    // parameter marker written on a previous declaration arrives in the
+    // merge above, after the parse-time attribute handlers have run.
+    Profiles().checkNowInitVacuity(NewFD);
+
     NamedDecl *PrincipalDecl = (FunctionTemplate
                                 ? cast<NamedDecl>(FunctionTemplate)
                                 : NewFD);
@@ -14864,6 +14873,9 @@ void Sema::ActOnUninitializedDecl(Decl *RealDecl) {
         Var->setInit(RecoveryExpr.get());
     }
 
+    Profiles().checkInitProfileUninitDecl(Var);
+    Profiles().checkInitProfileStaticMarker(Var);
+
     CheckCompleteVariableDeclaration(Var);
   }
 }
@@ -14970,6 +14982,13 @@ void Sema::addLifetimeBoundToImplicitThis(CXXMethodDecl *MD) {
 
 void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
   if (var->isInvalidDecl()) return;
+
+  Profiles().checkInitProfileUninitWithInitializer(var, var->getInit());
+
+  // std::init / ref_to_uninit (paper §5): a pointer or reference variable
+  // must be bound consistently with its [[ref_to_uninit]] marking.
+  Profiles().checkInitProfileRefToUninitBinding(
+      var->getLocation(), var, var->getType(), var->getInit(), var);
 
   CUDA().MaybeAddConstantAttr(var);
 
@@ -15207,6 +15226,9 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
       for (auto &it : Notes)
         Diag(it.first, it.second);
       var->setInvalidDecl();
+    } else if (IsGlobal && Profiles().checkInitProfileStaticRuntimeInit(
+                               var, checkConstInit)) {
+      // The profile diagnostic supersedes -Wglobal-constructors below.
     } else if (IsGlobal &&
                !getDiagnostics().isIgnored(diag::warn_global_constructor,
                                            var->getLocation())) {
