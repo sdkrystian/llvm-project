@@ -1654,13 +1654,14 @@ void Sema::ActOnModuleImportAttrs(Decl *D,
       continue;
     }
 
-    const auto &Args = AL.getProfileRequireArgs();
-    if (Args.Designators.empty()) {
+    ArrayRef<detail::ProfileDesignator> Designators =
+        AL.getProfileDesignators();
+    if (Designators.empty()) {
       Diag(AL.getLoc(), diag::err_attribute_too_few_arguments) << AL << 1;
       continue;
     }
 
-    for (const auto &D : Args.Designators) {
+    for (const auto &D : Designators) {
       StringRef Desig = D.Spelling;
 
       bool Found = llvm::any_of(

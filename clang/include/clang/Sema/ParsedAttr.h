@@ -103,20 +103,12 @@ struct ProfileDesignator {
   ArrayRef<profiles::ProfileArgument> Arguments;
 };
 
-struct ProfileEnforceArgs {
-  ArrayRef<ProfileDesignator> Designators;
-};
-
 struct ProfileSuppressArgs {
   StringRef Name;
   StringRef Justification;
   StringRef Rule;
   ArrayRef<StringRef> RawArguments;
   ArrayRef<profiles::ProfileArgument> Arguments;
-};
-
-struct ProfileRequireArgs {
-  ArrayRef<ProfileDesignator> Designators;
 };
 
 } // namespace detail
@@ -517,10 +509,11 @@ public:
     return *static_cast<const T *>(CustomData);
   }
 
-  const detail::ProfileEnforceArgs &getProfileEnforceArgs() const {
-    assert(getKind() == AT_ProfilesEnforce &&
-           "not a profiles::enforce attribute");
-    return getCustomData<detail::ProfileEnforceArgs>();
+  ArrayRef<detail::ProfileDesignator> getProfileDesignators() const {
+    assert((getKind() == AT_ProfilesEnforce ||
+            getKind() == AT_ProfilesRequire) &&
+           "not a profiles::enforce or profiles::require attribute");
+    return getCustomData<ArrayRef<detail::ProfileDesignator>>();
   }
 
   const detail::ProfileSuppressArgs &getProfileSuppressArgs() const {
@@ -529,27 +522,16 @@ public:
     return getCustomData<detail::ProfileSuppressArgs>();
   }
 
-  const detail::ProfileRequireArgs &getProfileRequireArgs() const {
-    assert(getKind() == AT_ProfilesRequire &&
-           "not a profiles::require attribute");
-    return getCustomData<detail::ProfileRequireArgs>();
-  }
-
-  void setProfileEnforceArgs(detail::ProfileEnforceArgs *Args) {
-    assert(getKind() == AT_ProfilesEnforce &&
-           "not a profiles::enforce attribute");
-    setCustomData(Args);
+  void setProfileDesignators(ArrayRef<detail::ProfileDesignator> *Designators) {
+    assert((getKind() == AT_ProfilesEnforce ||
+            getKind() == AT_ProfilesRequire) &&
+           "not a profiles::enforce or profiles::require attribute");
+    setCustomData(Designators);
   }
 
   void setProfileSuppressArgs(detail::ProfileSuppressArgs *Args) {
     assert(getKind() == AT_ProfilesSuppress &&
            "not a profiles::suppress attribute");
-    setCustomData(Args);
-  }
-
-  void setProfileRequireArgs(detail::ProfileRequireArgs *Args) {
-    assert(getKind() == AT_ProfilesRequire &&
-           "not a profiles::require attribute");
     setCustomData(Args);
   }
 
