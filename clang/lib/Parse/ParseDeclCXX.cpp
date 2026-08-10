@@ -5349,26 +5349,21 @@ bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
       *EndLoc = End;
 
     AttributePool &Pool = Attrs.getPool();
-    detail::ProfileEnforceArgs *EnforceArgs = nullptr;
+    ArrayRef<detail::ProfileDesignator> *Designators = nullptr;
     detail::ProfileSuppressArgs *SuppressArgs = nullptr;
-    detail::ProfileRequireArgs *RequireArgs = nullptr;
-    if (AttrName->isStr("enforce"))
-      EnforceArgs = Pool.make<detail::ProfileEnforceArgs>();
-    else if (AttrName->isStr("suppress"))
+    if (AttrName->isStr("suppress"))
       SuppressArgs = Pool.make<detail::ProfileSuppressArgs>();
     else
-      RequireArgs = Pool.make<detail::ProfileRequireArgs>();
+      Designators = Pool.make<ArrayRef<detail::ProfileDesignator>>();
 
     ParsedAttr *PA =
         Attrs.addNew(AttrName, SourceRange(AttrNameLoc, End),
                      AttributeScopeInfo(ScopeName, ScopeLoc), nullptr, 0,
                      ParsedAttr::Form::CXX11());
-    if (EnforceArgs)
-      PA->setProfileEnforceArgs(EnforceArgs);
-    else if (SuppressArgs)
+    if (SuppressArgs)
       PA->setProfileSuppressArgs(SuppressArgs);
     else
-      PA->setProfileRequireArgs(RequireArgs);
+      PA->setProfileDesignators(Designators);
     return true;
   }
 
@@ -5392,18 +5387,9 @@ bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
   // addNew cannot be hoisted ahead of the grammar (each error path bails via
   // SkipToRParen and must create no attribute), so exactly one of these
   // typed locals is set here and installed after addNew below.
-  detail::ProfileEnforceArgs *EnforceArgs = nullptr;
+  ArrayRef<detail::ProfileDesignator> *Designators = nullptr;
   detail::ProfileSuppressArgs *SuppressArgs = nullptr;
-  detail::ProfileRequireArgs *RequireArgs = nullptr;
-  if (AttrName->isStr("enforce")) {
-    SmallVector<ParsedProfileDesignator, 2> Parsed;
-    if (ParseProfileDesignatorList(Parsed))
-      return SkipToRParen();
-
-    auto *Args = Pool.make<detail::ProfileEnforceArgs>();
-    Args->Designators = copyProfileDesignators(Pool, Parsed);
-    EnforceArgs = Args;
-  } else if (AttrName->isStr("suppress")) {
+  if (AttrName->isStr("suppress")) {
     ParsedProfileSuppressArgs Parsed;
     if (ParseProfileSuppressBody(Parsed))
       return SkipToRParen();
@@ -5425,9 +5411,8 @@ bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
     if (ParseProfileDesignatorList(Parsed))
       return SkipToRParen();
 
-    auto *Args = Pool.make<detail::ProfileRequireArgs>();
-    Args->Designators = copyProfileDesignators(Pool, Parsed);
-    RequireArgs = Args;
+    Designators = Pool.make<ArrayRef<detail::ProfileDesignator>>(
+        copyProfileDesignators(Pool, Parsed));
   }
 
   if (!Tok.is(tok::r_paren)) {
@@ -5443,11 +5428,9 @@ bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
       Attrs.addNew(AttrName, SourceRange(AttrNameLoc, RParen),
                    AttributeScopeInfo(ScopeName, ScopeLoc), nullptr, 0,
                    ParsedAttr::Form::CXX11());
-  if (EnforceArgs)
-    PA->setProfileEnforceArgs(EnforceArgs);
-  else if (SuppressArgs)
+  if (SuppressArgs)
     PA->setProfileSuppressArgs(SuppressArgs);
   else
-    PA->setProfileRequireArgs(RequireArgs);
+    PA->setProfileDesignators(Designators);
   return true;
 }
