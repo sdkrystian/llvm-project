@@ -24,8 +24,8 @@
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
 #include "clang/Sema/ParsedTemplate.h"
 #include "clang/Sema/Scope.h"
-#include "clang/Sema/SemaProfiles.h"
 #include "clang/Sema/SemaCodeCompletion.h"
+#include "clang/Sema/SemaProfiles.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <numeric>

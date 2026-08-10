@@ -24,8 +24,8 @@
 #include "clang/Sema/SemaARM.h"
 #include "clang/Sema/SemaCUDA.h"
 #include "clang/Sema/SemaInternal.h"
-#include "clang/Sema/SemaProfiles.h"
 #include "clang/Sema/SemaOpenMP.h"
+#include "clang/Sema/SemaProfiles.h"
 #include "clang/Sema/SemaSYCL.h"
 #include "clang/Sema/Template.h"
 #include "llvm/ADT/STLExtras.h"
@@ -1508,9 +1508,8 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
   // enclosing stmt tree) can recover them.
   if (getLangOpts().Profiles)
     for (const auto &E : Profiles().ProfileSuppressStack)
-      Method->addAttr(
-          Profiles().makeImplicitProfilesSuppressAttr(E.ProfileName,
-                                                      E.RuleName));
+      Method->addAttr(Profiles().makeImplicitProfilesSuppressAttr(E.ProfileName,
+                                                                  E.RuleName));
 
   if (Context.getTargetInfo().getTriple().isAArch64())
     ARM().CheckSMEFunctionDefAttributes(Method);

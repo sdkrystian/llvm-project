@@ -46,11 +46,10 @@ void CodeGenFunction::ProfileSuppressionScope::addFromDecl(const Decl *D) {
 
 bool CodeGenFunction::isProfileSuppressionActive(StringRef Profile,
                                                  StringRef Rule) const {
-  for (const ProfilesSuppressAttr *A :
-       llvm::ArrayRef(ProfileStmtSuppressions)
-           .drop_front(ProfileSuppressionFloor))
-    if (profiles::suppressionMatches(A->getProfileName(), A->getRule(),
-                                     Profile, Rule))
+  for (const ProfilesSuppressAttr *A : llvm::ArrayRef(ProfileStmtSuppressions)
+                                           .drop_front(ProfileSuppressionFloor))
+    if (profiles::suppressionMatches(A->getProfileName(), A->getRule(), Profile,
+                                     Rule))
       return true;
   // The declaration side rides the shared lexical-chain walk, off the anchor
   // when one is set (the code being emitted belongs to that declaration's

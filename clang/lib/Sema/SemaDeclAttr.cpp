@@ -43,7 +43,6 @@
 #include "clang/Sema/Scope.h"
 #include "clang/Sema/ScopeInfo.h"
 #include "clang/Sema/Sema.h"
-#include "clang/Sema/SemaProfiles.h"
 #include "clang/Sema/SemaAMDGPU.h"
 #include "clang/Sema/SemaARM.h"
 #include "clang/Sema/SemaAVR.h"
@@ -58,6 +57,7 @@
 #include "clang/Sema/SemaOpenCL.h"
 #include "clang/Sema/SemaOpenMP.h"
 #include "clang/Sema/SemaPPC.h"
+#include "clang/Sema/SemaProfiles.h"
 #include "clang/Sema/SemaRISCV.h"
 #include "clang/Sema/SemaSYCL.h"
 #include "clang/Sema/SemaSwift.h"
@@ -5753,9 +5753,9 @@ static void handleProfilesEnforceAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   if (!S.Profiles().processProfilesEnforceAttr(AL, Mod, &Names, &Designators))
     return;
 
-  D->addAttr(::new (S.Context) ProfilesEnforceAttr(
-      S.Context, AL, Names.data(), Names.size(), Designators.data(),
-      Designators.size()));
+  D->addAttr(::new (S.Context)
+                 ProfilesEnforceAttr(S.Context, AL, Names.data(), Names.size(),
+                                     Designators.data(), Designators.size()));
 }
 
 static void handleProfilesSuppressDeclAttr(Sema &S, Decl *D,

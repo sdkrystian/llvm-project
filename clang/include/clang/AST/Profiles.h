@@ -49,7 +49,8 @@ bool forEachSuppression(
 /// (parent maps are context-specific). \p Callback returns true to stop the
 /// enumeration; returns true if it did. A null \p S is a no-op.
 bool forEachSuppression(
-    const Stmt *S, llvm::function_ref<bool(const ProfilesSuppressAttr &)> Callback);
+    const Stmt *S,
+    llvm::function_ref<bool(const ProfilesSuppressAttr &)> Callback);
 
 /// True if \p D or a lexical parent carries a [[profiles::suppress]]
 /// matching \p Profile / \p Rule.

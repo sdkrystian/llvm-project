@@ -59,12 +59,12 @@ bool profiles::forEachSuppression(
 
 bool profiles::isSuppressedFor(const Decl *D, llvm::StringRef Profile,
                                llvm::StringRef Rule) {
-  return forEachSuppression(
-      D, /*WalkLexicalParents=*/true,
-      [&](const Decl &, const ProfilesSuppressAttr &A) {
-        return suppressionMatches(A.getProfileName(), A.getRule(), Profile,
-                                  Rule);
-      });
+  return forEachSuppression(D, /*WalkLexicalParents=*/true,
+                            [&](const Decl &, const ProfilesSuppressAttr &A) {
+                              return suppressionMatches(A.getProfileName(),
+                                                        A.getRule(), Profile,
+                                                        Rule);
+                            });
 }
 
 bool profiles::isSuppressedFor(const Stmt *S, llvm::StringRef Profile,

@@ -2434,10 +2434,9 @@ Parser::ParseModuleDecl(Sema::ModuleImportState &ImportState) {
                            tok::getKeywordSpelling(tok::kw_module)))
     SkipUntil(tok::semi);
 
-  return Actions.ActOnModuleDecl(StartLoc, ModuleLoc, MDK, Path, Partition,
-                                 ImportState,
-                                 Introducer.hasSeenNoTrivialPPDirective(),
-                                 Attrs);
+  return Actions.ActOnModuleDecl(
+      StartLoc, ModuleLoc, MDK, Path, Partition, ImportState,
+      Introducer.hasSeenNoTrivialPPDirective(), Attrs);
 }
 
 Decl *Parser::ParseModuleImport(SourceLocation AtLoc,

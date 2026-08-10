@@ -29,7 +29,6 @@ using namespace clang;
 
 SemaProfiles::SemaProfiles(Sema &S) : SemaBase(S) {}
 
-
 bool SemaProfiles::isProfileEnforced(StringRef ProfileName) const {
   return getASTContext().isProfileEnforced(ProfileName);
 }
@@ -65,7 +64,7 @@ SemaProfiles::getProfileEnforcement(StringRef ProfileName) const {
 }
 
 bool SemaProfiles::addProfileEnforcement(StringRef Name, StringRef Designator,
-                                 SourceLocation Loc) {
+                                         SourceLocation Loc) {
   if (const auto *Existing = getProfileEnforcement(Name)) {
     if (Existing->Designator != Designator) {
       Diag(Loc, diag::err_profiles_enforce_mismatch) << Name;
@@ -223,17 +222,17 @@ SemaProfiles::makeProfilesSuppressAttr(const ParsedAttr &AL) {
   unzipProfileArguments(Args.Arguments, RawArgumentKeys, RawArgumentValues,
                         RawArgumentKinds);
 
-  return ::new (getASTContext()) ProfilesSuppressAttr(
-      getASTContext(), AL, Args.Name, Args.Justification, Args.Rule,
-      RawArgs.data(), RawArgs.size(), RawArgumentKeys.data(),
-      RawArgumentKeys.size(), RawArgumentValues.data(),
-      RawArgumentValues.size(), RawArgumentKinds.data(),
-      RawArgumentKinds.size());
+  return ::new (getASTContext())
+      ProfilesSuppressAttr(getASTContext(), AL, Args.Name, Args.Justification,
+                           Args.Rule, RawArgs.data(), RawArgs.size(),
+                           RawArgumentKeys.data(), RawArgumentKeys.size(),
+                           RawArgumentValues.data(), RawArgumentValues.size(),
+                           RawArgumentKinds.data(), RawArgumentKinds.size());
 }
 
 ProfilesSuppressAttr *
 SemaProfiles::makeImplicitProfilesSuppressAttr(StringRef ProfileName,
-                                       StringRef RuleName) {
+                                               StringRef RuleName) {
   return ProfilesSuppressAttr::CreateImplicit(
       getASTContext(), ProfileName, /*Justification=*/"", RuleName,
       /*RawArguments=*/nullptr, /*RawArgumentsSize=*/0,
@@ -277,7 +276,6 @@ bool SemaProfiles::isProfileSuppressed(StringRef ProfileName,
 bool SemaProfiles::isProfileExemptSystemHeaderLoc(SourceLocation Loc) const {
   return getASTContext().isProfileExemptSystemHeaderLoc(Loc);
 }
-
 
 bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
                                               StringRef RuleName,
@@ -345,9 +343,9 @@ bool SemaProfiles::checkProfileViolation(StringRef ProfileName,
 }
 
 void SemaProfiles::ProfileSuppressScope::push(StringRef ProfileName,
-                                      StringRef RuleName,
-                                      SourceLocation Begin,
-                                      SourceLocation End) {
+                                              StringRef RuleName,
+                                              SourceLocation Begin,
+                                              SourceLocation End) {
   S.Profiles().ProfileSuppressStack.push_back(
       {ProfileName, RuleName, Begin, End});
   ++Count;
@@ -409,8 +407,8 @@ static SourceLocation getCompletedConstructEnd(const Decl *D) {
   return SourceLocation();
 }
 
-SemaProfiles::ProfileSuppressScope::ProfileSuppressScope(Sema &S, const Decl *D,
-                                                  bool WalkLexicalParents)
+SemaProfiles::ProfileSuppressScope::ProfileSuppressScope(
+    Sema &S, const Decl *D, bool WalkLexicalParents)
     : S(S) {
   if (!S.getLangOpts().Profiles || !D)
     return;
@@ -428,10 +426,9 @@ SemaProfiles::ProfileSuppressScope::ProfileSuppressScope(Sema &S, const Decl *D,
       });
 }
 
-SemaProfiles::ProfileSuppressScope::ProfileSuppressScope(Sema &S,
-                                                  ArrayRef<const Attr *> Attrs,
-                                                  SourceLocation Begin,
-                                                  SourceLocation End)
+SemaProfiles::ProfileSuppressScope::ProfileSuppressScope(
+    Sema &S, ArrayRef<const Attr *> Attrs, SourceLocation Begin,
+    SourceLocation End)
     : S(S) {
   if (!S.getLangOpts().Profiles)
     return;
@@ -519,4 +516,3 @@ void SemaProfiles::checkProfileViolationsAtConstructorFinalization(
     return;
   dispatchFinalizationProfiles(SemaRef, Ctor, ConstructorFinalizationProfiles);
 }
-

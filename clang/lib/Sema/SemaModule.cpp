@@ -246,12 +246,10 @@ static bool DiagReservedModuleName(Sema &S, const IdentifierInfo *II,
   llvm_unreachable("fell off a fully covered switch");
 }
 
-Sema::DeclGroupPtrTy
-Sema::ActOnModuleDecl(SourceLocation StartLoc, SourceLocation ModuleLoc,
-                      ModuleDeclKind MDK, ModuleIdPath Path,
-                      ModuleIdPath Partition, ModuleImportState &ImportState,
-                      bool SeenNoTrivialPPDirective,
-                      const ParsedAttributesView &Attrs) {
+Sema::DeclGroupPtrTy Sema::ActOnModuleDecl(
+    SourceLocation StartLoc, SourceLocation ModuleLoc, ModuleDeclKind MDK,
+    ModuleIdPath Path, ModuleIdPath Partition, ModuleImportState &ImportState,
+    bool SeenNoTrivialPPDirective, const ParsedAttributesView &Attrs) {
   assert(getLangOpts().CPlusPlusModules &&
          "should only have module decl in standard C++ modules");
 
@@ -494,7 +492,7 @@ Sema::ActOnModuleDecl(SourceLocation StartLoc, SourceLocation ModuleLoc,
             Mod->getPrimaryModuleInterfaceName()))
       for (const auto &EP : Primary->EnforcedProfileDesignators)
         Profiles().addProfileEnforcement(EP.ProfileName, EP.Designator,
-                                       ModuleLoc);
+                                         ModuleLoc);
   }
 
   // We already potentially made an implicit import (in the case of a module
@@ -1630,8 +1628,7 @@ void Sema::checkReferenceToTULocalFromOtherTU(
       std::make_pair(FD, PointOfInstantiation));
 }
 
-void Sema::ActOnModuleImportAttrs(Decl *D,
-                                  const ParsedAttributesView &Attrs) {
+void Sema::ActOnModuleImportAttrs(Decl *D, const ParsedAttributesView &Attrs) {
   if (!D)
     return;
 
@@ -1659,11 +1656,10 @@ void Sema::ActOnModuleImportAttrs(Decl *D,
     for (const auto &D : Designators) {
       StringRef Desig = D.Spelling;
 
-      bool Found = llvm::any_of(
-          ImportedMod->EnforcedProfileDesignators,
-          [&](const Module::EnforcedProfile &EP) {
-            return EP.Designator == Desig;
-          });
+      bool Found = llvm::any_of(ImportedMod->EnforcedProfileDesignators,
+                                [&](const Module::EnforcedProfile &EP) {
+                                  return EP.Designator == Desig;
+                                });
 
       if (!Found)
         Diag(AL.getLoc(), diag::err_profiles_require_not_enforced) << Desig;

@@ -28,9 +28,9 @@
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
 #include "clang/Sema/ParsedTemplate.h"
 #include "clang/Sema/Scope.h"
-#include "clang/Sema/SemaProfiles.h"
 #include "clang/Sema/SemaCodeCompletion.h"
 #include "clang/Sema/SemaHLSL.h"
+#include "clang/Sema/SemaProfiles.h"
 #include "llvm/Support/TimeProfiler.h"
 #include <optional>
 
@@ -3298,8 +3298,9 @@ ExprResult Parser::ParseCXXMemberInitializer(Decl *D, bool IsFunction,
           : Sema::ExpressionEvaluationContext::PotentiallyEvaluated,
       D);
 
-  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, D,
-                                                  /*WalkLexicalParents=*/true);
+  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(
+      Actions, D,
+      /*WalkLexicalParents=*/true);
 
   // CWG2760
   // Default member initializers used to initialize a base or member subobject
@@ -5094,8 +5095,8 @@ bool Parser::ParseProfileName(std::string &Name) {
 }
 
 template <typename ProfileArguments>
-static ArrayRef<profiles::ProfileArgument> copyProfileArguments(
-    AttributePool &Pool, const ProfileArguments &Parsed) {
+static ArrayRef<profiles::ProfileArgument>
+copyProfileArguments(AttributePool &Pool, const ProfileArguments &Parsed) {
   if (Parsed.empty())
     return {};
 
@@ -5110,8 +5111,8 @@ static ArrayRef<profiles::ProfileArgument> copyProfileArguments(
 }
 
 template <typename ProfileDesignators>
-static ArrayRef<detail::ProfileDesignator> copyProfileDesignators(
-    AttributePool &Pool, const ProfileDesignators &Parsed) {
+static ArrayRef<detail::ProfileDesignator>
+copyProfileDesignators(AttributePool &Pool, const ProfileDesignators &Parsed) {
   auto Desigs = Pool.allocateArray<detail::ProfileDesignator>(Parsed.size());
   for (unsigned I = 0; I < Parsed.size(); ++I) {
     Desigs[I].Name = Pool.copyString(Parsed[I].Name);
@@ -5128,9 +5129,18 @@ bool Parser::ParseNonCommaBalancedToken(std::string &Spelling,
     tok::TokenKind Close;
     Spelling = PP.getSpelling(Tok);
     switch (Tok.getKind()) {
-    case tok::l_paren:  Close = tok::r_paren;  ConsumeParen();   break;
-    case tok::l_square: Close = tok::r_square; ConsumeBracket(); break;
-    default:            Close = tok::r_brace;  ConsumeBrace();   break;
+    case tok::l_paren:
+      Close = tok::r_paren;
+      ConsumeParen();
+      break;
+    case tok::l_square:
+      Close = tok::r_square;
+      ConsumeBracket();
+      break;
+    default:
+      Close = tok::r_brace;
+      ConsumeBrace();
+      break;
     }
 
     CachedTokens Toks;
@@ -5150,7 +5160,7 @@ bool Parser::ParseNonCommaBalancedToken(std::string &Spelling,
   }
 
   if (Tok.isOneOf(tok::comma, tok::r_paren, tok::r_square, tok::r_brace,
-                   tok::eof)) {
+                  tok::eof)) {
     Diag(Tok, diag::err_profiles_invalid_argument_token);
     return true;
   }
@@ -5353,10 +5363,9 @@ bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
     else
       Designators = Pool.make<ArrayRef<detail::ProfileDesignator>>();
 
-    ParsedAttr *PA =
-        Attrs.addNew(AttrName, SourceRange(AttrNameLoc, End),
-                     AttributeScopeInfo(ScopeName, ScopeLoc), nullptr, 0,
-                     ParsedAttr::Form::CXX11());
+    ParsedAttr *PA = Attrs.addNew(AttrName, SourceRange(AttrNameLoc, End),
+                                  AttributeScopeInfo(ScopeName, ScopeLoc),
+                                  nullptr, 0, ParsedAttr::Form::CXX11());
     if (SuppressArgs)
       PA->setProfileSuppressArgs(SuppressArgs);
     else
@@ -5419,10 +5428,9 @@ bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
   if (EndLoc)
     *EndLoc = RParen;
 
-  ParsedAttr *PA =
-      Attrs.addNew(AttrName, SourceRange(AttrNameLoc, RParen),
-                   AttributeScopeInfo(ScopeName, ScopeLoc), nullptr, 0,
-                   ParsedAttr::Form::CXX11());
+  ParsedAttr *PA = Attrs.addNew(AttrName, SourceRange(AttrNameLoc, RParen),
+                                AttributeScopeInfo(ScopeName, ScopeLoc),
+                                nullptr, 0, ParsedAttr::Form::CXX11());
   if (SuppressArgs)
     PA->setProfileSuppressArgs(SuppressArgs);
   else

@@ -507,9 +507,9 @@ public:
   }
 
   ArrayRef<detail::ProfileDesignator> getProfileDesignators() const {
-    assert((getKind() == AT_ProfilesEnforce ||
-            getKind() == AT_ProfilesRequire) &&
-           "not a profiles::enforce or profiles::require attribute");
+    assert(
+        (getKind() == AT_ProfilesEnforce || getKind() == AT_ProfilesRequire) &&
+        "not a profiles::enforce or profiles::require attribute");
     return getCustomData<ArrayRef<detail::ProfileDesignator>>();
   }
 
@@ -520,9 +520,9 @@ public:
   }
 
   void setProfileDesignators(ArrayRef<detail::ProfileDesignator> *Designators) {
-    assert((getKind() == AT_ProfilesEnforce ||
-            getKind() == AT_ProfilesRequire) &&
-           "not a profiles::enforce or profiles::require attribute");
+    assert(
+        (getKind() == AT_ProfilesEnforce || getKind() == AT_ProfilesRequire) &&
+        "not a profiles::enforce or profiles::require attribute");
     setCustomData(Designators);
   }
 
