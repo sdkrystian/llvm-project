@@ -371,23 +371,13 @@ SemaProfiles::ProfileSuppressScope::ProfileSuppressScope(
 
 /// The end location of \p D's construct if it is fully parsed, invalid
 /// otherwise. A partially parsed construct's end location is usually *valid
-/// but early* -- a mid-parse class collapses to its name token (the brace
-/// range is set only by ActOnTagFinishDefinition, after even the late-parsed
-/// members), a body-pending function ends at its declarator, an
-/// uninitialized variable at its declarator -- so each arm gates on the
-/// marker that the construct's real end has been seen. Returning invalid
-/// falls back to scope-lifetime bounding, which is exact mid-parse.
-///
-/// Deliberately dyn_cast dispatch with a fail-open tail, not a Decl::Kind
-/// switch: a switch would fail open for a newly added *derived* kind anyway
-/// (recreating the same defect one level down), while here every unhandled
-/// declaration kind reaches the tail explicitly. The tail's invalid return
-/// is safe by construction: with no recorded end, the entry's scope
-/// lifetime bounds the dominion, which can only make the dominion *longer*
-/// -- more suppression, never a false positive.
+/// but early*, so each arm gates on the marker that the construct's real end
+/// has been seen. An unhandled declaration kind returns invalid, which falls
+/// back to scope-lifetime bounding -- a longer dominion, more suppression,
+/// never a false positive.
 static SourceLocation getCompletedConstructEnd(const Decl *D) {
-  // Self-gating: the brace range is set only by ActOnTagFinishDefinition,
-  // so a mid-parse tag yields an invalid end with no explicit gate.
+  // The brace range is set only by ActOnTagFinishDefinition, so a mid-parse
+  // tag yields an invalid end with no explicit gate.
   if (const auto *TD = dyn_cast<TagDecl>(D))
     return TD->getBraceRange().getEnd();
   if (const auto *FD = dyn_cast<FunctionDecl>(D)) {
@@ -411,12 +401,10 @@ static SourceLocation getCompletedConstructEnd(const Decl *D) {
       return FD->getInClassInitializer()->getEndLoc();
     return SourceLocation();
   }
-  // Self-gating: the r-brace is recorded only when the namespace body
-  // finishes.
+  // The r-brace is recorded only when the namespace body finishes.
   if (const auto *ND = dyn_cast<NamespaceDecl>(D))
     return ND->getRBraceLoc();
-  // Fail-open tail (see above): an unhandled declaration kind gets
-  // scope-lifetime bounding, the longer -- suppression-favoring -- dominion.
+  // Unhandled kinds fall back to scope-lifetime bounding (see above).
   return SourceLocation();
 }
 
