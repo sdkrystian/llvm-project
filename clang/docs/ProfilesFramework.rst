@@ -150,18 +150,24 @@ A module interface advertises the profiles it enforces through
 ``[[profiles::enforce]]`` on its module-declaration, and importers can insist
 on that advertisement with
 ``[[profiles::require(profile-designator-list)]]``, which may appear only on
-a module-import-declaration.  Every listed profile must be advertised; each
-one that is not is diagnosed individually:
+a module-import-declaration.  Each listed designator must be advertised with
+exactly the same spelling, arguments included; each one that is not is
+diagnosed individually:
 
 .. code-block:: c++
 
    // M.cppm
-   export module M [[profiles::enforce(std::safety, vendor::hardened(fortify: 3))]];
+   export module M
+       [[profiles::enforce(std::safety, vendor::hardened(fortify: 3))]];
 
    // user.cpp
-   import M [[profiles::require(std::safety)]];  // OK: M enforces it
-   import M [[profiles::require(std::safety, vendor::hardened(fortify: 3))]];  // OK
-   import N [[profiles::require(std::safety)]];  // error unless N does too
+   import M [[profiles::require(std::safety)]];        // OK: M advertises it
+   import M [[profiles::require(
+       std::safety, vendor::hardened(fortify: 3))]];   // OK: exact spellings
+   import M [[profiles::require(vendor::hardened)]];   // error: not the
+                                                       // advertised spelling
+   import N [[profiles::require(std::safety)]];        // error unless N
+                                                       // advertises it too
 
 ``[[profiles::require]]`` only verifies the advertisement; importing an
 enforcing module does **not** enforce its profiles in the importer.
@@ -191,9 +197,10 @@ units:
 A declaration and its redeclarations must appear under mutually *compatible*
 profiles (P3589R2 [decl.attr.enforce]p5): redeclaring an entity from a module
 or header unit that was compiled without a compatible profile is diagnosed.
-Two profiles are compatible when they have the same name (designator
-arguments configure a profile without changing its identity), and all
-standard ``std::`` profiles are mutually compatible.
+Two profiles are compatible when they have the same name -- here, unlike
+``[[profiles::require]]``'s exact designator matching, arguments configure a
+profile without changing its identity -- and all standard ``std::`` profiles
+are mutually compatible.
 
 
 Runtime-Checked Rules
