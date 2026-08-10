@@ -205,6 +205,17 @@ likewise keeps dispatching per-function analysis after a TU error when such
 a profile is enforced; without this, the first error would disable the
 profile for every later function.
 
+``std::init`` installs all three hook columns: ``VarExempt`` exempts
+``std::byte`` variables (P4222R2 §4), ``ConfigureCFG`` always-adds lambda
+expressions for the constructor-body pass, and ``ExtraPass`` runs the member
+read-before-init passes (``checkInitProfileCtorBody`` and
+``checkInitProfileLocalMembers``).  The row threads the profile's *identity*
+-- its name and its uninitialized-read diagnostic -- through the passes and
+their shared reporter, not its semantics: the tracked-member vocabulary the
+passes implement (``[[uninit]]`` scalar members of constructor-less
+aggregates) and the member diagnostic are ``std::init``'s own.
+
+
 Patterns 3 and 4: Class and Constructor Finalization
 ====================================================
 
@@ -231,10 +242,11 @@ constructor definition funnels through -- ``ActOnMemInitializers``,
 filter out dependent entities (the hooks re-fire on each instantiation),
 invalid ones, lambdas (pattern 3), and delegating constructors (pattern 4)
 before the shared dispatcher runs the enforced callbacks; a filter that is
-one profile's policy rather than the pattern's contract lives in that
-profile's callback.  Each callback gates its diagnostics on
-``shouldEmitProfileViolation`` with the finalized declaration and its
-location.
+one profile's policy rather than the pattern's contract (``std::init``
+exempting defaulted copy/move constructors, which initialize member-wise
+while writing no initializer) lives in that profile's callback.  Each
+callback gates its diagnostics on ``shouldEmitProfileViolation`` with the
+finalized declaration and its location.
 
 The split between the two patterns matters: class finalization runs *before
 any constructor body or member-initializer list has been parsed*, so a
@@ -529,3 +541,162 @@ The names ``test::other``, ``test::bounds``, ``test::new_profile``, and
 negative tests as "some other profile" stand-ins; adding a real profile under
 any of them would invalidate those tests.
 
+
+The std::init Implementation Map
+================================
+
+``std::init`` (documented in :doc:`ProfilesFramework`) uses all four
+patterns.  Its rules map to mechanisms as follows:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 12 64
+
+   * - Rule
+     - Pattern
+     - Primary entry points
+   * - ``uninit_read``
+     - 2 and 1
+     - ``CFGProfiles`` row for local variables;
+       ``checkInitProfileCtorBody`` and ``checkInitProfileLocalMembers``,
+       run for the same row through its ``ExtraPass`` hook
+       (definite-assignment dataflow over ``[[uninit]]`` members; the
+       ctor-body pass's ``CallExpr`` arm turns a ``[[now_init]]`` call into a
+       ``Gen`` bit for the current-object storage bound to the callee's
+       marked parameters (P4222R2 §6.2) and a ``[[now_uninit]]`` call into
+       a ``Kill`` that clears the assigned bit again; the local-member
+       pass's ``CallExpr`` arm kills the same way, while its escape credit
+       already subsumes ``[[now_init]]``.  A "destroyed here"
+       note on the read is deferred -- a kill witness would have to be
+       carried per bit through the meet and both engine replays, roughly
+       doubling the engine state and touching the enqueue-skip invariant);
+       ``checkInitProfileReadThrough`` at the lvalue-to-rvalue chokepoint,
+       plus compound-assignment and increment/decrement hooks
+   * - ``uninit_decl``
+     - 1
+     - ``checkInitProfileUninitDecl``
+   * - ``uninit_with_initializer``
+     - 1
+     - ``checkInitProfileUninitWithInitializer``
+   * - ``static_runtime_init``
+     - 1
+     - ``checkInitProfileStaticRuntimeInit``
+   * - ``static_marker``
+     - 1
+     - ``checkInitProfileStaticMarker``
+   * - ``union_marker``, ``pointer_marker``
+     - attribute handler (enforcement-gated)
+     - ``checkInitProfileMarkerPlacement``
+   * - ``ctor_uninit_member``
+     - 4; 3 for inherited constructors
+     - ``ConstructorFinalizationProfiles`` row for user-provided
+       constructors; ``runStdInitInheritedCtorUninitMemberCallback`` (a
+       second ``std::init`` ``ClassFinalizationProfiles`` row) checks the
+       members and non-nominated bases an inherited constructor leaves
+       uninitialized, once per class at the ``using``-declaration
+   * - ``ref_to_uninit``
+     - 1
+     - ``checkInitProfileRefToUninit`` behind per-site wrappers (variable
+       and member initialization, call arguments, returns, throws,
+       new-initializers, captures, object arguments)
+   * - ``double_destroy``, ``destroy_uninit``
+     - 1
+     - the destroy arm of ``checkInitProfileRefToUninitBinding`` (the
+       parameter-binding funnel): ``storageIsDestroyed`` answers the
+       destroyed state, and ``classifyUninitSource`` -- run exactly as for
+       an unmarked binding target (``Maybe`` credit) -- the uninitialized
+       one
+   * - ``uninit_write``
+     - 1
+     - ``checkInitProfileSubobjectWrite`` (its store preset trusts
+       ``[[ref_to_uninit]]`` at the top level only: the member arm of the
+       glvalue recognizer clears the trust, so subobject writes below the
+       marker classify uninitialized)
+
+Two helpers are shared across the rules.  ``refersToUninitializedMemory``
+classifies an expression as referring to initialized, uninitialized, or
+unknown storage purely from its syntactic form (parse-order store credit
+refines it, recorded by ``recordInitProfileStore`` and by the
+``recordNowInitArgument`` / ``recordNowUninitArgument`` pair, which share
+one argument-shape walk to add or withdraw the credit of storage a
+``[[now_init]]`` callee initializes or a ``[[now_uninit]]`` callee
+destroys); its ``UninitAccessOpts``
+presets distinguish a *binding* source (markers count everywhere), a value
+*read*, and a scalar *store* (which differ in whether the top-level
+``[[uninit]]`` marker counts and whether ``[[ref_to_uninit]]`` storage is
+trusted).  ``defaultInitLeavesScalarIndeterminate`` answers whether a type's
+default-initialization leaves an unacknowledged scalar subobject
+indeterminate, trusting user-provided default constructors -- the paper's
+trust-the-constructor principle (P4222R1.1 §5.1), which is also why members
+of objects initialized by a user-provided constructor are deliberately not
+flow-tracked.
+
+
+Parse-Order Store Credit (std::init)
+====================================
+
+The ``std::init`` recognizers classify storage from an expression's
+syntactic form alone; *parse-order store credit* refines that classification
+by remembering the stores and lifetime-annotated calls seen earlier in the
+translation unit.  ``recordInitProfileStore`` records direct stores; the
+``recordNowInitArgument`` / ``recordNowUninitArgument`` pair records what a
+``[[now_init]]`` / ``[[now_uninit]]`` callee does to the storage bound to
+its parameters; ``InitStoreCreditMap`` is the façade that owns the recorded
+facts, keyed by unique declarations (entries persist across the translation
+unit, only the named clear operations remove a fact, and template
+instantiations build fresh declarations, so pattern-time and
+instantiation-time state stay independent).  This section is the canonical
+rationale for all of them; the code comments carry only site-specific
+deltas.
+
+**Credit is parse-order.**  There is no dominance or flow analysis: a store
+counts for every consult that happens later in parse order, whatever the
+control flow between them.  The design consequently errs only toward missed
+diagnostics -- crediting a store the execution might skip can at worst
+*suppress* a diagnostic, never manufacture one.
+
+**Two strengths.**  Every store records ``Maybe`` credit, which only ever
+*suppresses* a diagnostic (the storage may well be initialized).  A
+diagnostic may *fire* only on ``Definite`` credit, which needs the store to
+be certain.  ``currentStoreStrength`` decides, and its rules are the API
+contract: the strength a store (or lifetime-annotated call) recorded at the
+current parse position earns toward the credit keyed by a given key is
+``Definite`` iff the store is unconditionally executed in the function body
+that owns the credited entity -- outside template instantiation (the parser
+scope chain is parser-only state, and the requires-uninit direction ignores
+credit while instantiating anyway), at conditional depth 0
+(``currentConditionalDepth``), before the function has branched by ``goto``
+(a ``goto`` earlier in the body could skip a later store without
+introducing any scope; the tracking flag is shared with ``switch``, an
+over-inclusion in the safe direction), with the enclosing function's
+parse-time pattern equal to the entity's owning function: the
+``DeclContext`` of a credited local/parameter (or of the directly named
+local base object of member credit), or the key itself for current-object
+member credit, which ``resolveMemberStoreBase`` already keys on that
+pattern.  The same-function requirement is what stops a store inside a
+lambda body from definitely crediting an enclosing function's local; the
+enclosing function is resolved from the context chain directly, so a store
+inside a *block* body -- which ``getCurFunctionDecl`` would skip -- stays
+``Maybe`` too.  Everything else records ``Maybe``.
+
+**Recording is not gated on enforcement or suppression.**  A suppressed
+store still initializes, and failing to credit it would turn suppression
+into later false positives.  There is likewise no in-template gate:
+non-dependent code in a template is checked at definition time and must
+find pattern-time credit (instantiations rebuild their ``DeclRefExpr``\ s
+against fresh declarations, so they re-record independently).  The one gate
+is never-executed contexts -- unevaluated and discarded-statement contexts,
+mirroring ``shouldEmitProfileViolation``: a store there never executes, so
+it earns no credit and a destroy there withdraws none.
+
+**Withdrawal mirrors recording.**  A ``[[now_uninit]]`` or storage-release
+callee withdraws credit at the strength the destroy itself earns under the
+same rules: an unconditional same-function destroy withdraws credit of both
+strengths, while a merely-possible one withdraws only the ``Definite``
+claim -- it may have destroyed the storage, so no credit-fired diagnostic
+may rely on it, but the ``Maybe`` credit survives and the lenient direction
+gains no new errors.  A mutable alias escape of a marked pointer object --
+``T **pp = &p;``, a ``T *&`` binding, or a lambda capturing ``p`` by
+reference -- withdraws the same way at ``Definite`` strength only: whoever
+holds the alias can reseat the pointer, so its pointee credit can no longer
+fire a diagnostic, but the suppressing ``Maybe`` credit survives.
