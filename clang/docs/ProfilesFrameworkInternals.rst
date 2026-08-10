@@ -208,9 +208,13 @@ violated profile; external decoders of ubsantrap immediates (e.g. LLDB's
 enum copy) will not know the new immediate, which that trap-reason string
 compensates for.  With trap reasons off or basic, the fallback message is
 categorized "Undefined Behavior Sanitizer" -- cosmetic, a possible
-follow-up.  At -O0 every check site gets its own trap instruction, keeping
-locations and reasons exact; optimized builds coalesce the traps of one
-handler kind and merge their locations, like UBSan's trap mode.
+follow-up.  At ``-O0`` every check site gets its own trap instruction,
+keeping locations and reasons exact; optimized builds coalesce the traps of
+one handler kind and merge their locations, like UBSan's trap mode.
+
+The pilot's zero-divisor check deliberately mirrors UBSan's blind spots: GCC
+vector-extension integer division and ``_Complex int`` division are not
+checked.
 
 
 Suppression Dominion Mechanics

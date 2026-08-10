@@ -28,7 +28,9 @@ Profiles do not change the meaning of well-formed programs with no undefined
 behavior.  Their effects are conceptually applied only after translation
 phase 7: a profile cannot change the outcome of overload resolution or
 template instantiation, and it is not possible to SFINAE on a profile
-violation.
+violation.  One deviation: a violation in a template that does not depend on
+the template's parameters is diagnosed when the template is *defined*, even
+if it is never instantiated (see :doc:`ProfilesFrameworkInternals`).
 
 Profile names are open-ended: standard (``std::``-prefixed),
 implementation-defined, and third-party profiles are all requested with the
@@ -78,8 +80,8 @@ every other declaration at translation-unit scope, or on a
 
    int main() { /* ... */ }
 
-A *profile-designator* is a ``::``-qualified profile name, optionally
-followed by a parenthesized argument list.  The arguments are not subject to
+A *profile-designator* is a profile name -- one or more identifiers joined
+by ``::`` -- optionally followed by a parenthesized argument list.  The arguments are not subject to
 name lookup; their interpretation is up to the profile.  Repeating an
 enforcement with the same designator is allowed and has no effect, but
 requesting the same profile with a different designator is an error, as is an
@@ -145,6 +147,18 @@ To exempt an object from a profile's checks everywhere it is used, a profile
 must provide its own per-object, decl-scoped marker attribute.
 
 
+System Headers
+==============
+
+As a temporary stopgap until ``[[profiles::exempt]]`` is implemented (see
+`Not Yet Implemented`_), code originating in a *system header* is exempt
+from profile enforcement.  The exemption is on by default, so enforcing a
+profile does not report violations inside the standard library and the
+other system headers a translation unit includes.  Pass
+``-fno-profiles-exempt-system-headers`` to disable it and enforce profiles
+in system-header code as well (spec-exact behavior).
+
+
 Profiles and Modules
 ====================
 
@@ -208,62 +222,49 @@ are mutually compatible.
 Runtime-Checked Rules
 =====================
 
-P3589R2 anticipates profiles with *dynamic semantics*: a profile "may have
-an effect on the runtime behavior of a program", such as enabling runtime
-instrumentation like bound checking (§1.1, §2.2.2).  The framework supports
-such rules: enforcing the profile makes the compiler emit a runtime check
-into the generated code, and a failed check *traps* -- deterministically
-stopping the program (typically ``SIGILL``) before the guarded operation
-executes.  No real profile with runtime-checked rules ships yet; the
-in-tree pilot rule (``test::arith`` / ``zero_divide``, which traps on
-integer division or remainder by a runtime zero) exists to exercise the
-machinery and is inert outside the test suite.
+P3589R2 anticipates profiles with *dynamic semantics*: rules enforced by a
+runtime check in the generated code rather than by a compile-time diagnostic
+(§1.1, §2.2.2).  Enforcing such a profile makes the compiler emit the
+checks, and a failed check *traps* -- deterministically stopping the program
+(typically ``SIGILL``) before the guarded operation executes.  There is no
+handler library, no runtime error message, and no way to continue past a
+failed check.  When debug info is enabled, the trap's debug location carries
+a message naming the violated profile, which debuggers display.  At ``-O0``
+every check site gets its own trap instruction with an exact source
+location; optimized builds merge a function's profile trap blocks, like
+UBSan's trap mode.
 
 Behavior of a runtime check:
 
-- **Trap-only.**  Enforcement is declared in source, so the driver cannot
-  know at link time that a support runtime would be needed: there is no
-  handler library, no runtime error message, and no way to continue past a
-  failed check.  When debug info is enabled (and under the default
-  ``-fsanitize-debug-trap-reasons=detailed``), the trap's debug location
-  carries a message naming the violated profile, which debuggers display.
-  At ``-O0`` every check site gets its own trap instruction with an exact
-  source location; optimized builds merge a function's profile trap blocks,
-  like UBSan's trap mode.
-- **Suppression applies identically.**  ``[[profiles::suppress]]`` on the
-  statement, the declaration, or an enclosing declaration removes the
-  runtime check, with the same token-dominion rule as compile-time
-  diagnostics: a suppression around a use site does not silence checks in a
-  default member initializer or default argument emitted there -- those
-  belong to the member's or parameter's construct, so suppress on the
-  member or parameter instead.  Two known over-checking gaps (a check that
-  suppression fails to remove, never a missing check): suppression from an
-  enclosing *statement* does not reach the member functions of a local
-  class defined inside it, nor the body of an Objective-C block (a lambda
-  body is covered).
+- **Suppression applies identically.**  ``[[profiles::suppress]]`` removes a
+  runtime check under the same dominion rule as a compile-time diagnostic: a
+  suppression around a use site does not silence checks in a default member
+  initializer or default argument emitted there -- those belong to the
+  member's or parameter's construct, so suppress on the member or parameter
+  instead.  A small number of known over-checking gaps (a check that
+  suppression fails to remove, never a missing check) are listed in
+  :doc:`ProfilesFrameworkInternals`.
 - **System-header exemption.**  As for compile-time rules, code originating
-  in a system header gets no checks by default;
-  ``-fno-profiles-exempt-system-headers`` restores them.
+  in a system header gets no checks by default (see `System Headers`_).
 - **Sanitizer independence.**  The checks are emitted regardless of
-  sanitizer configuration.  Enabling a sanitizer that guards the same
-  operation (e.g. ``-fsanitize=integer-divide-by-zero`` alongside the pilot
-  rule) instruments the operation twice -- redundant, never wrong -- and no
-  sanitizer facility (ignorelists, ``__attribute__((no_sanitize))``,
-  ``-fsanitize-skip-hot-cutoff``) can disable a profile's check, which is a
-  language guarantee rather than opt-in instrumentation.
+  sanitizer configuration: a sanitizer guarding the same operation
+  instruments it twice (redundant, never wrong), and no sanitizer facility
+  (ignorelists, ``__attribute__((no_sanitize))``, hot cutoffs) can disable a
+  profile's check, which is a language guarantee rather than opt-in
+  instrumentation.
 - **Per-TU enforcement.**  A check is emitted exactly when the translation
-  unit *emitting the code* enforces the profile.  An inline function
-  defined in a textual header is therefore compiled with checks in
-  enforcing TUs and without them elsewhere, and the linker keeps one copy
-  arbitrarily -- the situation long accepted for mixing sanitized and
-  unsanitized TUs.  Code imported from a named module currently follows the
-  same rule: it is checked only if the *importing* TU enforces the profile,
-  even when the module interface itself did.
+  unit *emitting the code* enforces the profile.  An inline function defined
+  in a textual header is therefore compiled with checks in enforcing TUs and
+  without them elsewhere, and the linker keeps one copy arbitrarily -- as
+  when mixing sanitized and unsanitized TUs.  Code imported from a named
+  module follows the same rule: it is checked only if the *importing* TU
+  enforces the profile, even when the module interface itself did.
 
-The pilot's zero-divisor check deliberately mirrors UBSan's blind spots:
-GCC vector-extension integer division, ``_Complex int`` division, and (in C
-only) compound assignment of a scalar by a ``_Complex`` operand are not
-checked.
+No real profile with runtime-checked rules ships yet; the in-tree pilot rule
+(``test::arith`` / ``zero_divide``, which traps on integer division or
+remainder by a runtime zero) exists to exercise the machinery and is inert
+outside the test suite (see `Test Profiles`_).  Trap emission and the
+pilot's known blind spots are described in :doc:`ProfilesFrameworkInternals`.
 
 
 Test Profiles
@@ -280,21 +281,5 @@ Not Yet Implemented
 ===================
 
 ``[[profiles::exempt(...)]]`` (P3589R2 §1.1.6), which would exempt named
-included source files from the enforcement of a profile, is not implemented.
-
-As a **temporary stopgap** until ``[[profiles::exempt]]`` has wording and an
-implementation, Clang exempts code that originates in a *system header* from
-profile enforcement.  This is on by default whenever a profile is enforced, so
-enforcing a profile on a translation unit does not report violations inside the
-standard library and the other system headers it transitively includes.  Pass
-``-fno-profiles-exempt-system-headers`` to disable the exemption and enforce
-profiles in system-header code as well (spec-exact behavior).
-
-
-Extending the Framework
-=======================
-
-The framework is profile-agnostic: profile names are opaque strings, there is
-no central registry, and adding a new profile requires no changes to the
-framework itself.  See :doc:`ProfilesFrameworkInternals` for the
-implementation patterns and the API for adding a new profile.
+included source files from the enforcement of a profile, is not implemented;
+the `System Headers`_ exemption stands in for it.
