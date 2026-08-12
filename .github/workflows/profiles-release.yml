@@ -1,0 +1,149 @@
+name: Profiles Release
+
+on:
+  push:
+    branches:
+      - profiles-init
+      - profiles-core-ub
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_TAG: ${{ github.ref_name }}-latest
+  LINUX_ASSET: clang-${{ github.ref_name }}-linux-x86_64.tar.gz
+  WINDOWS_ASSET: clang-${{ github.ref_name }}-windows-x86_64.zip
+
+jobs:
+  build-linux:
+    name: Build Linux x86_64
+    # Builds run only on the release remote. The branch check guards
+    # workflow_dispatch, which the push trigger's branches filter does not
+    # constrain: a dispatch on profiles would otherwise publish a framework-only
+    # toolchain as profiles-latest. The deleted check excludes branch-deletion
+    # pushes, which run this workflow from the default branch's tree.
+    if: >-
+      github.repository == 'cppalliance/clang' &&
+      github.event.deleted != true &&
+      (github.ref_name == 'profiles-init' || github.ref_name == 'profiles-core-ub')
+    runs-on: ubuntu-24.04
+    # A newer push supersedes the build still in flight for this branch.
+    concurrency:
+      group: profiles-release-linux-${{ github.ref_name }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build ccache
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-linux-${{ github.sha }}
+          restore-keys: ccache-linux-
+
+      - name: Configure
+        run: |
+          cmake -G Ninja -S llvm -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_ASSERTIONS=ON \
+            -DCMAKE_C_COMPILER=gcc \
+            -DCMAKE_CXX_COMPILER=g++ \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DLLVM_ENABLE_PROJECTS=clang \
+            -DLLVM_TARGETS_TO_BUILD="X86;AArch64" \
+            -DLLVM_INSTALL_TOOLCHAIN_ONLY=ON \
+            -DCMAKE_INSTALL_PREFIX=build/install
+
+      - name: Build and install
+        run: ninja -C build install-clang install-clang-resource-headers
+
+      - name: Package
+        run: tar czf "$LINUX_ASSET" -C build/install .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clang-${{ github.ref_name }}-linux-x86_64
+          path: ${{ env.LINUX_ASSET }}
+
+  build-windows:
+    name: Build Windows x86_64
+    # Gated as build-linux.
+    if: >-
+      github.repository == 'cppalliance/clang' &&
+      github.event.deleted != true &&
+      (github.ref_name == 'profiles-init' || github.ref_name == 'profiles-core-ub')
+    runs-on: windows-2022
+    concurrency:
+      group: profiles-release-windows-${{ github.ref_name }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure
+        run: >
+          cmake -G Ninja -S llvm -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=cl
+          -DCMAKE_CXX_COMPILER=cl
+          -DLLVM_ENABLE_PROJECTS=clang
+          -DLLVM_TARGETS_TO_BUILD="X86;AArch64"
+          -DLLVM_INSTALL_TOOLCHAIN_ONLY=ON
+          -DCMAKE_INSTALL_PREFIX=build/install
+
+      - name: Build and install
+        run: ninja -C build install-clang install-clang-resource-headers
+
+      - name: Package
+        run: Compress-Archive -Path build\install\* -DestinationPath $env:WINDOWS_ASSET
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clang-${{ github.ref_name }}-windows-x86_64
+          path: ${{ env.WINDOWS_ASSET }}
+
+  publish:
+    name: Publish rolling release
+    # Skipped along with the builds when the gate above rejects the ref.
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    # Publishing is never cancelled: it deletes the release before recreating it,
+    # so an interrupted run would leave the download URL dead.
+    concurrency:
+      group: profiles-release-publish-${{ github.ref_name }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: clang-${{ github.ref_name }}-*
+          merge-multiple: true
+          path: artifacts
+
+      # gh needs GH_REPO because this job has no checkout to infer the repository
+      # from. Recreating the release along with its tag is what moves the rolling
+      # tag to this commit: the REST API ignores target_commitish for a tag that
+      # already exists. The tag ref is deleted separately because --cleanup-tag
+      # cleans nothing when an interrupted run left a tag behind with no release.
+      - name: Replace the rolling prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          printf 'Rolling build of `%s` at `%s`.\n' \
+            "$GITHUB_REF_NAME" "$GITHUB_SHA" > notes.md
+          gh release delete "$RELEASE_TAG" --yes --cleanup-tag || true
+          gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG" \
+            >/dev/null 2>&1 || true
+          gh release create "$RELEASE_TAG" \
+            --target "$GITHUB_SHA" --prerelease \
+            --notes-file notes.md \
+            artifacts/*
