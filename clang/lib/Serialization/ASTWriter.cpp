@@ -5344,7 +5344,10 @@ void ASTWriter::WriteRISCVIntrinsicPragmas(Sema &SemaRef) {
 }
 
 void ASTWriter::WriteEnforcedProfiles(Sema &SemaRef) {
-  if (WritingModule)
+  // Profiles is a Compatible langopt, so a consumer of this PCH runs with the
+  // same -fprofiles setting and never looks for these records when they are
+  // absent.
+  if (WritingModule || !SemaRef.getLangOpts().Profiles)
     return;
 
   // Record whether the TU contains a non-empty top-level declaration, so an
