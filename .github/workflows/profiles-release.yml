@@ -6,6 +6,10 @@ on:
 permissions:
   contents: write
 
+env:
+  LINUX_ASSET: clang-${{ github.ref_name }}-linux-x86_64.tar.gz
+  WINDOWS_ASSET: clang-${{ github.ref_name }}-windows-x86_64.zip
+
 jobs:
   build-linux:
     name: Build Linux x86_64
@@ -41,12 +45,12 @@ jobs:
         run: ninja -C build install-clang install-clang-resource-headers
 
       - name: Package
-        run: tar czf clang-profiles-linux-x86_64.tar.gz -C build/install .
+        run: tar czf "$LINUX_ASSET" -C build/install .
 
       - uses: actions/upload-artifact@v4
         with:
-          name: clang-profiles-linux-x86_64
-          path: clang-profiles-linux-x86_64.tar.gz
+          name: clang-${{ github.ref_name }}-linux-x86_64
+          path: ${{ env.LINUX_ASSET }}
 
   build-windows:
     name: Build Windows x86_64
@@ -71,12 +75,12 @@ jobs:
         run: ninja -C build install-clang install-clang-resource-headers
 
       - name: Package
-        run: Compress-Archive -Path build\install\* -DestinationPath clang-profiles-windows-x86_64.zip
+        run: Compress-Archive -Path build\install\* -DestinationPath $env:WINDOWS_ASSET
 
       - uses: actions/upload-artifact@v4
         with:
-          name: clang-profiles-windows-x86_64
-          path: clang-profiles-windows-x86_64.zip
+          name: clang-${{ github.ref_name }}-windows-x86_64
+          path: ${{ env.WINDOWS_ASSET }}
 
   create-release:
     name: Create GitHub Release
@@ -85,12 +89,12 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: clang-profiles-linux-x86_64
+          name: clang-${{ github.ref_name }}-linux-x86_64
           path: artifacts
 
       - uses: actions/download-artifact@v4
         with:
-          name: clang-profiles-windows-x86_64
+          name: clang-${{ github.ref_name }}-windows-x86_64
           path: artifacts
 
       - name: Compute tag
@@ -113,5 +117,5 @@ jobs:
             **Commit:** `${{ github.sha }}`
 
             ### Artifacts
-            - `clang-profiles-linux-x86_64.tar.gz` — Linux x86_64 (Ubuntu 22.04, gcc)
-            - `clang-profiles-windows-x86_64.zip` — Windows x86_64 (MSVC 2022)
+            - `${{ env.LINUX_ASSET }}` — Linux x86_64 (Ubuntu 22.04, gcc)
+            - `${{ env.WINDOWS_ASSET }}` — Windows x86_64 (MSVC 2022)
