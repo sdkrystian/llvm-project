@@ -128,6 +128,31 @@ The analysis's diagnostic reporter walks the table calling
 site, emitting the entry's diagnostic (and skipping the default warning) when
 it returns true.
 
+A row may additionally install up to three optional hooks; a null column
+costs nothing:
+
+- ``VarExempt`` -- a per-variable exemption consulted once per variable,
+  before either reporter arm; an exempting row takes no part in that
+  variable's diagnosis.  The hook must not emit.
+- ``ConfigureCFG`` -- adds the row's extra always-add statement classes to
+  the CFG build options; both analysis paths apply it, so they build the
+  same CFG shape.
+- ``ExtraPass`` -- a whole-function pass run on both analysis paths after
+  the uninitialized-variables reporter has flushed.  It owns its rules and
+  diagnostics, gating each check site through
+  ``shouldEmitProfileViolation``, and receives its row so the profile's
+  identity keeps flowing from the table.
+
+An ``ExtraPass`` must tolerate both CFG shapes the dispatch points can
+build: the non-linearized shape (the base always-add classes plus whatever
+the enforced rows' ``ConfigureCFG`` hooks add) and the fully linearized
+shape (another analysis in the same run forced ``setAllAlwaysAdd``, which
+adds arbitrary extra elements).  A pass's extraction arms may therefore only
+match always-add classes or unconditional CFG elements: an element class
+that is neither is present in one shape and absent in the other, so matching
+it would produce diagnostics on one path only.  ``test::cfg_hooks`` is the
+in-tree pilot for the hook columns.
+
 Profile rules are errors, so the pass must also run where the warning
 pipeline is skipped.  ``AnalysisBasedWarnings::hasEnforcedCFGProfile()``
 gates those paths: after an uncompilable TU error, and when warnings are
@@ -160,6 +185,9 @@ dispatcher and one per-pass table shape:
    constexpr FinalizationProfile<CXXRecordDecl> ClassFinalizationProfiles[] = {
        {"my::profile", &runMyProfileCallback},
    };
+
+A profile may register several rows in one table -- one per independent
+rule -- and the dispatcher runs every row whose profile is enforced.
 
 The class hook runs from the single function every class-completion path
 funnels through (parsing, template instantiation, lambda completion); the
@@ -423,7 +451,7 @@ Profiles gated off in this compilation (``test::`` names without
 Test Profiles
 =============
 
-The five built-in ``test::`` profiles exist only to exercise the framework in
+The six built-in ``test::`` profiles exist only to exercise the framework in
 the test suite.  They are gated on the ``-cc1``-only
 ``-fprofiles-test-profiles`` flag: under ``-fprofiles`` alone their
 designators are still parsed, recorded, and exported across modules, but
@@ -435,6 +463,11 @@ enforced, so no ``test::`` rule ever fires.  Because that gate keys on the
   keyword form only).
 - ``test::uninit_read`` -- pattern 2; rides the existing CFG
   uninitialized-variables analysis.
+- ``test::cfg_hooks`` -- pattern 2; exercises the optional hook columns: its
+  ``VarExempt`` hook exempts variables named with an ``exempt`` prefix from
+  its uninitialized-read rule, its ``ConfigureCFG`` hook always-adds lambda
+  expressions, and its ``ExtraPass`` diagnoses every lambda-expression CFG
+  element under its ``lambda`` rule.
 - ``test::class_final`` -- pattern 3; fires on completion of every non-lambda
   class, on instantiations rather than dependent patterns.
 - ``test::ctor_final`` -- pattern 4; fires once per user-defined,

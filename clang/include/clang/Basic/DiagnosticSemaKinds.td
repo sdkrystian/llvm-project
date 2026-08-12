@@ -14387,4 +14387,6 @@ def err_profile_class_final_test : ProfileRuleError<
 def err_profile_ctor_final_test : ProfileRuleError<
   "test profile fired on finalization of a constructor for class %1 under "
   "profile '%0'">;
+def err_profile_cfg_hooks_test : ProfileRuleError<
+  "test profile fired on a lambda expression under profile '%0'">;
 } // end of sema component.

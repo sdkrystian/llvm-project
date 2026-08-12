@@ -276,10 +276,10 @@ pilot's known blind spots are described in :doc:`ProfilesFrameworkInternals`.
 Test Profiles
 =============
 
-Clang also ships five ``test::`` profiles (``test::type_cast``,
-``test::uninit_read``, ``test::class_final``, ``test::ctor_final``, and
-``test::arith``) that exist only to exercise the framework in the test
-suite.  They are inert without an additional ``-cc1``-only flag; see
+Clang also ships six ``test::`` profiles (``test::type_cast``,
+``test::uninit_read``, ``test::cfg_hooks``, ``test::class_final``,
+``test::ctor_final``, and ``test::arith``) that exist only to exercise the
+framework in the test suite.  They are inert without an additional ``-cc1``-only flag; see
 :doc:`ProfilesFrameworkInternals`.
 
 
