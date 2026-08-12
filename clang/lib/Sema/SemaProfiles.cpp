@@ -107,15 +107,6 @@ bool SemaProfiles::processProfilesEnforceAttr(
   return true;
 }
 
-/// P3589R2 [decl.attr.enforce]p5: profiles are compatible if they are the
-/// same -- by name; arguments configure a profile without changing its
-/// identity -- or proclaimed compatible by the implementation. "All standard
-/// profiles are compatible with each other" is the one proclamation modeled
-/// here.
-static bool areProfilesCompatible(StringRef A, StringRef B) {
-  return A == B || (A.starts_with("std::") && B.starts_with("std::"));
-}
-
 void SemaProfiles::checkRedeclarationProfileCompatibility(
     const NamedDecl *New, const NamedDecl *Old) {
   if (!getLangOpts().Profiles)
@@ -150,7 +141,8 @@ void SemaProfiles::checkRedeclarationProfileCompatibility(
 
   // A gated-off test:: profile is inert in this compilation, on either side.
   auto IsActive = [&](StringRef Name) {
-    return getLangOpts().ProfilesTestProfiles || !Name.starts_with("test::");
+    return !profiles::isProfileNameInert(Name,
+                                         getLangOpts().ProfilesTestProfiles);
   };
   // First active profile in Enforced with no compatible counterpart in
   // Covering; empty if fully covered.
@@ -161,7 +153,7 @@ void SemaProfiles::checkRedeclarationProfileCompatibility(
       if (!IsActive(Name))
         continue;
       if (llvm::none_of(Covering, [&](const auto &Other) {
-            return areProfilesCompatible(Name, Other.ProfileName);
+            return profiles::areProfilesCompatible(Name, Other.ProfileName);
           }))
         return Name;
     }

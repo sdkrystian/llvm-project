@@ -8,7 +8,7 @@
 /// \file
 /// Shared value types and helpers of the C++ profiles framework (P3589R2):
 /// profile arguments and their canonical spelling, enforced-profile records,
-/// and the suppression-matching rule.
+/// the suppression-matching rule, and the profile-name-convention policies.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -67,6 +67,25 @@ inline bool suppressionMatches(llvm::StringRef EntryProfile,
                                llvm::StringRef EntryRule,
                                llvm::StringRef Profile, llvm::StringRef Rule) {
   return EntryProfile == Profile && (EntryRule.empty() || EntryRule == Rule);
+}
+
+/// True if the profile named \p Name is inert in this compilation: the
+/// built-in test:: profiles only exercise the framework and their rules
+/// never fire unless the test suite opts in via -fprofiles-test-profiles
+/// (callers pass LangOptions::ProfilesTestProfiles as
+/// \p TestProfilesEnabled). See ProfilesFrameworkInternals.rst, "Test
+/// Profiles".
+inline bool isProfileNameInert(llvm::StringRef Name, bool TestProfilesEnabled) {
+  return !TestProfilesEnabled && Name.starts_with("test::");
+}
+
+/// P3589R2 [decl.attr.enforce]p5: profiles are compatible if they are the
+/// same -- by name; arguments configure a profile without changing its
+/// identity -- or proclaimed compatible by the implementation. "All standard
+/// profiles are compatible with each other" is the one proclamation modeled
+/// here.
+inline bool areProfilesCompatible(llvm::StringRef A, llvm::StringRef B) {
+  return A == B || (A.starts_with("std::") && B.starts_with("std::"));
 }
 
 /// The canonical spelling of a profile argument: the value token for a

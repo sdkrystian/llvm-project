@@ -894,9 +894,8 @@ ASTContext::getProfileEnforcement(StringRef ProfileName) const {
 bool ASTContext::isProfileEnforced(StringRef ProfileName) const {
   if (!getLangOpts().Profiles)
     return false;
-  // The built-in test:: profiles only exercise the framework; keep them inert
-  // unless the test suite opts in via -fprofiles-test-profiles.
-  if (!getLangOpts().ProfilesTestProfiles && ProfileName.starts_with("test::"))
+  if (profiles::isProfileNameInert(ProfileName,
+                                   getLangOpts().ProfilesTestProfiles))
     return false;
   return getProfileEnforcement(ProfileName) != nullptr;
 }
