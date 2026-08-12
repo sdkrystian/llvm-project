@@ -46,6 +46,8 @@ void CodeGenFunction::ProfileSuppressionScope::addFromDecl(const Decl *D) {
 
 bool CodeGenFunction::isProfileSuppressionActive(StringRef Profile,
                                                  StringRef Rule) const {
+  assert(ProfileSuppressionFloor <= ProfileStmtSuppressions.size() &&
+         "suppression floor points past the end of the stack");
   for (const ProfilesSuppressAttr *A : llvm::ArrayRef(ProfileStmtSuppressions)
                                            .drop_front(ProfileSuppressionFloor))
     if (profiles::suppressionMatches(A->getProfileName(), A->getRule(), Profile,

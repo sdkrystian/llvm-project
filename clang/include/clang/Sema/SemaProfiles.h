@@ -206,6 +206,8 @@ public:
     /// explicitly supplied dominion [\p Begin, \p End].
     ProfileSuppressScope(Sema &S, ArrayRef<const Attr *> Attrs,
                          SourceLocation Begin, SourceLocation End);
+    ProfileSuppressScope(const ProfileSuppressScope &) = delete;
+    ProfileSuppressScope &operator=(const ProfileSuppressScope &) = delete;
     ~ProfileSuppressScope();
   };
 };

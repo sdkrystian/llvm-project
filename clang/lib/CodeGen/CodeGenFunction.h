@@ -633,7 +633,7 @@ public:
   /// or an inlined inherited constructor raises the floor; P3589R2's
   /// suppression dominion) and are not consulted.
   SmallVector<const ProfilesSuppressAttr *, 4> ProfileStmtSuppressions;
-  unsigned ProfileSuppressionFloor = 0;
+  size_t ProfileSuppressionFloor = 0;
 
   /// When non-null, the declaration whose lexical chain carries the
   /// [[profiles::suppress]] entries for the code being emitted *instead of*
@@ -664,6 +664,9 @@ public:
   public:
     ProfileSuppressionScope(CodeGenFunction &CGF)
         : CGF(CGF), OldSize(CGF.ProfileStmtSuppressions.size()) {}
+    ProfileSuppressionScope(const ProfileSuppressionScope &) = delete;
+    ProfileSuppressionScope &
+    operator=(const ProfileSuppressionScope &) = delete;
     /// Push the entries the statement node \p S itself carries: an
     /// AttributedStmt's attributes, or those of a DeclStmt's declarations.
     void addFromStmt(const Stmt *S);
@@ -1914,7 +1917,7 @@ public:
     llvm::Value *OldCXXThisValue;
     CharUnits OldCXXThisAlignment;
     SourceLocExprScopeGuard SourceLocScope;
-    SaveAndRestore<unsigned> ProfileFloor;
+    SaveAndRestore<size_t> ProfileFloor;
     SaveAndRestore<const Decl *> ProfileAnchor;
   };
 
@@ -1928,7 +1931,7 @@ public:
           ProfileFloor(CGF.ProfileSuppressionFloor,
                        CGF.ProfileStmtSuppressions.size()),
           ProfileAnchor(CGF.ProfileSuppressionAnchor, E->getParam()) {}
-    SaveAndRestore<unsigned> ProfileFloor;
+    SaveAndRestore<size_t> ProfileFloor;
     SaveAndRestore<const Decl *> ProfileAnchor;
   };
 
@@ -2006,7 +2009,7 @@ public:
     Address OldReturnValue;
     QualType OldFnRetTy;
     CallArgList OldCXXInheritedCtorInitExprArgs;
-    SaveAndRestore<unsigned> ProfileFloor;
+    SaveAndRestore<size_t> ProfileFloor;
   };
 
   // Helper class for the OpenMP IR Builder. Allows reusability of code used for
