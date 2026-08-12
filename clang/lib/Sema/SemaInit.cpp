@@ -30,7 +30,6 @@
 #include "clang/Sema/Ownership.h"
 #include "clang/Sema/SemaHLSL.h"
 #include "clang/Sema/SemaObjC.h"
-#include "clang/Sema/SemaProfiles.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/FoldingSet.h"
