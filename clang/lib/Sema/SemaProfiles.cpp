@@ -214,21 +214,17 @@ SemaProfiles::makeProfilesSuppressAttr(const ParsedAttr &AL) {
   if (Args.Name.empty())
     return nullptr;
 
-  SmallVector<StringRef, 4> RawArgs;
-  for (const auto &Arg : Args.RawArguments)
-    RawArgs.push_back(Arg);
   SmallVector<StringRef, 4> RawArgumentKeys;
   SmallVector<StringRef, 4> RawArgumentValues;
   SmallVector<unsigned, 4> RawArgumentKinds;
   unzipProfileArguments(Args.Arguments, RawArgumentKeys, RawArgumentValues,
                         RawArgumentKinds);
 
-  return ::new (getASTContext())
-      ProfilesSuppressAttr(getASTContext(), AL, Args.Name, Args.Justification,
-                           Args.Rule, RawArgs.data(), RawArgs.size(),
-                           RawArgumentKeys.data(), RawArgumentKeys.size(),
-                           RawArgumentValues.data(), RawArgumentValues.size(),
-                           RawArgumentKinds.data(), RawArgumentKinds.size());
+  return ::new (getASTContext()) ProfilesSuppressAttr(
+      getASTContext(), AL, Args.Name, Args.Justification, Args.Rule,
+      RawArgumentKeys.data(), RawArgumentKeys.size(), RawArgumentValues.data(),
+      RawArgumentValues.size(), RawArgumentKinds.data(),
+      RawArgumentKinds.size());
 }
 
 ProfilesSuppressAttr *
@@ -236,7 +232,6 @@ SemaProfiles::makeImplicitProfilesSuppressAttr(StringRef ProfileName,
                                                StringRef RuleName) {
   return ProfilesSuppressAttr::CreateImplicit(
       getASTContext(), ProfileName, /*Justification=*/"", RuleName,
-      /*RawArguments=*/nullptr, /*RawArgumentsSize=*/0,
       /*RawArgumentKeys=*/nullptr, /*RawArgumentKeysSize=*/0,
       /*RawArgumentValues=*/nullptr, /*RawArgumentValuesSize=*/0,
       /*RawArgumentKinds=*/nullptr, /*RawArgumentKindsSize=*/0);

@@ -5281,8 +5281,6 @@ bool Parser::ParseProfileSuppressBody(ParsedProfileSuppressArgs &Args) {
       ParsedProfileDesignator::Argument Arg;
       if (ParseNonOperatorNonPunctuatorToken(Arg.Value, &Arg.Range))
         return true;
-      Args.RawArguments.push_back(
-          profiles::getCanonicalProfileArgumentSpelling(Arg));
       Args.Arguments.push_back(std::move(Arg));
       continue;
     }
@@ -5320,8 +5318,6 @@ bool Parser::ParseProfileSuppressBody(ParsedProfileSuppressArgs &Args) {
     Arg.Value = std::move(Value);
     Arg.Kind = profiles::ProfileArgumentKind::Named;
     Arg.Range = SourceRange(KeyLoc, ValueRange.getEnd());
-    Args.RawArguments.push_back(
-        profiles::getCanonicalProfileArgumentSpelling(Arg));
     Args.Arguments.push_back(std::move(Arg));
   }
 
@@ -5402,12 +5398,6 @@ bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
     Args->Name = Pool.copyString(Parsed.Name);
     Args->Justification = Pool.copyString(Parsed.Justification);
     Args->Rule = Pool.copyString(Parsed.Rule);
-    if (!Parsed.RawArguments.empty()) {
-      auto RawBuf = Pool.allocateArray<StringRef>(Parsed.RawArguments.size());
-      for (unsigned I = 0; I < Parsed.RawArguments.size(); ++I)
-        RawBuf[I] = Pool.copyString(Parsed.RawArguments[I]);
-      Args->RawArguments = RawBuf;
-    }
     Args->Arguments = copyProfileArguments(Pool, Parsed.Arguments);
     SuppressArgs = Args;
   } else {

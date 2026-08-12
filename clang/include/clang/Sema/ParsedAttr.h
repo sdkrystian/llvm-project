@@ -107,7 +107,6 @@ struct ProfileSuppressArgs {
   StringRef Name;
   StringRef Justification;
   StringRef Rule;
-  ArrayRef<StringRef> RawArguments;
   ArrayRef<profiles::ProfileArgument> Arguments;
 };
 

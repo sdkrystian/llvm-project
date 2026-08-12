@@ -2355,7 +2355,6 @@ private:
     std::string Name;
     std::string Justification;
     std::string Rule;
-    SmallVector<std::string, 2> RawArguments;
     SmallVector<ParsedProfileDesignator::Argument, 2> Arguments;
   };
 

@@ -3531,7 +3531,6 @@ def ProfilesSuppress : DeclOrStmtAttr {
     StringArgument<"ProfileName">,
     StringArgument<"Justification", 1>,
     StringArgument<"Rule", 1>,
-    VariadicStringArgument<"RawArguments">,
     VariadicStringArgument<"RawArgumentKeys">,
     VariadicStringArgument<"RawArgumentValues">,
     VariadicUnsignedArgument<"RawArgumentKinds">
