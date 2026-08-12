@@ -776,6 +776,13 @@ private:
   /// to decide which entities should be instrumented.
   std::unique_ptr<ProfileList> ProfList;
 
+  /// The profiles enforced on this translation unit by [[profiles::enforce]]
+  /// (P3589R2). Sema records entries (and owns the attribute's diagnostics);
+  /// the state lives here so consumers without a Sema -- e.g. code generation
+  /// from an AST file -- can query enforcement, and the ASTReader restores a
+  /// PCH's enforcements directly into it.
+  SmallVector<profiles::ProfileEnforcement, 4> EnforcedProfiles;
+
   /// The allocator used to create AST objects.
   ///
   /// AST objects are never destructed; rather, all memory associated with the
@@ -986,12 +993,17 @@ public:
 
   const ProfileList &getProfileList() const { return *ProfList; }
 
-  /// The profiles enforced on this translation unit by [[profiles::enforce]]
-  /// (P3589R2). Sema records entries (and owns the attribute's diagnostics);
-  /// the state lives here so consumers without a Sema -- e.g. code generation
-  /// from an AST file -- can query enforcement, and the ASTReader restores a
-  /// PCH's enforcements directly into it.
-  SmallVector<profiles::ProfileEnforcement, 4> EnforcedProfiles;
+  /// Record an enforcement of \p ProfileName by the designator spelled
+  /// \p Designator at \p EnforceLoc (invalid for an enforcement restored
+  /// from an AST file). Callers deduplicate against getProfileEnforcement
+  /// first; a repeated recording asserts.
+  void addEnforcedProfile(StringRef ProfileName, StringRef Designator,
+                          SourceLocation EnforceLoc);
+
+  /// The recorded enforcements, in recording order.
+  ArrayRef<profiles::ProfileEnforcement> enforced_profiles() const {
+    return EnforcedProfiles;
+  }
 
   /// The recorded enforcement of \p ProfileName, or null. Ungated: reports a
   /// recorded entry even when the profile is inert in this compilation
@@ -1004,6 +1016,12 @@ public:
   /// recorded, -fprofiles is enabled, and (for a test:: profile) the test
   /// suite opted in via -fprofiles-test-profiles.
   bool isProfileEnforced(StringRef ProfileName) const;
+
+  /// Like isProfileEnforced, but additionally false when \p Loc lies before
+  /// the enforcement's dominion (P3589R2 [decl.attr.enforce]p4: the dominion
+  /// starts after the attribute), so a violation located in the global module
+  /// fragment is not diagnosed. Fails open on invalid locations.
+  bool isProfileEnforcedAt(StringRef ProfileName, SourceLocation Loc) const;
 
   /// True if \p Loc is exempt from profile enforcement because it lies in a
   /// system header. Temporary stopgap for the not-yet-implemented

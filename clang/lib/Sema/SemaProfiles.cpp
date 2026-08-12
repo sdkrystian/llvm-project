@@ -35,28 +35,7 @@ bool SemaProfiles::isProfileEnforced(StringRef ProfileName) const {
 
 bool SemaProfiles::isProfileEnforcedAt(StringRef ProfileName,
                                        SourceLocation Loc) const {
-  if (!isProfileEnforced(ProfileName))
-    return false;
-  // P3589R2 [decl.attr.enforce]p4: the enforcement's dominion starts after
-  // the attribute, so a violation located before it -- global-module-fragment
-  // tokens ahead of the module declaration -- is outside it. Fail open on an
-  // invalid location on either side (isBeforeInTranslationUnit rejects
-  // invalid locations): a PCH restore records no location and must mean
-  // "whole TU" (a PCH is this TU's textual prefix), and synthesized code
-  // keeps plain-enforcement behavior. Locations are compared by *expansion*
-  // location, deliberately unlike the suppression comparator's raw token
-  // order (see isProfileSuppressed): enforcement dominion is TU-scale, so a
-  // macro defined in the GMF but *invoked* in the purview stays enforced --
-  // its invocation tokens are purview tokens -- while GMF pattern tokens are
-  // skipped.
-  const profiles::ProfileEnforcement *E = getProfileEnforcement(ProfileName);
-  assert(E && "enforced profile has no enforcement entry");
-  const SourceManager &SM = getASTContext().getSourceManager();
-  if (Loc.isValid() && E->EnforceLoc.isValid() &&
-      SM.isBeforeInTranslationUnit(SM.getExpansionLoc(Loc),
-                                   SM.getExpansionLoc(E->EnforceLoc)))
-    return false;
-  return true;
+  return getASTContext().isProfileEnforcedAt(ProfileName, Loc);
 }
 
 const profiles::ProfileEnforcement *
@@ -74,8 +53,7 @@ bool SemaProfiles::addProfileEnforcement(StringRef Name, StringRef Designator,
     }
     return true;
   }
-  getASTContext().EnforcedProfiles.push_back(
-      {{Name.str(), Designator.str()}, Loc});
+  getASTContext().addEnforcedProfile(Name, Designator, Loc);
   return true;
 }
 
@@ -194,8 +172,8 @@ void SemaProfiles::checkRedeclarationProfileCompatibility(
   // declaration must have a compatible counterpart covering the other.
   // Report the first violation in each direction.
   StringRef MissingHere = FindUncovered(Top->EnforcedProfileDesignators,
-                                        getASTContext().EnforcedProfiles);
-  StringRef MissingThere = FindUncovered(getASTContext().EnforcedProfiles,
+                                        getASTContext().enforced_profiles());
+  StringRef MissingThere = FindUncovered(getASTContext().enforced_profiles(),
                                          Top->EnforcedProfileDesignators);
   if (MissingHere.empty() && MissingThere.empty())
     return;

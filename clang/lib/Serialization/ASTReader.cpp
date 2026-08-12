@@ -5800,8 +5800,7 @@ void ASTReader::InitializeContext() {
       (void)Existing;
       continue;
     }
-    Context.EnforcedProfiles.push_back(
-        {{EP.ProfileName, EP.Designator}, SourceLocation()});
+    Context.addEnforcedProfile(EP.ProfileName, EP.Designator, SourceLocation());
   }
   SerializedEnforcedProfiles.clear();
 

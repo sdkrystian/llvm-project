@@ -5369,7 +5369,8 @@ void ASTWriter::WriteEnforcedProfiles(Sema &SemaRef) {
     Stream.EmitRecord(PROFILES_TU_HAS_NONEMPTY_DECL, Record);
   }
 
-  const auto &EnforcedProfiles = SemaRef.getASTContext().EnforcedProfiles;
+  ArrayRef<profiles::ProfileEnforcement> EnforcedProfiles =
+      SemaRef.getASTContext().enforced_profiles();
   if (EnforcedProfiles.empty())
     return;
 

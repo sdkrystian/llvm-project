@@ -875,6 +875,14 @@ bool ASTContext::isTypeIgnoredBySanitizer(const SanitizerMask &Mask,
   return NoSanitizeL->containsType(Mask, TyName);
 }
 
+void ASTContext::addEnforcedProfile(StringRef ProfileName, StringRef Designator,
+                                    SourceLocation EnforceLoc) {
+  assert(!getProfileEnforcement(ProfileName) &&
+         "profile already has a recorded enforcement");
+  EnforcedProfiles.push_back(
+      {{ProfileName.str(), Designator.str()}, EnforceLoc});
+}
+
 const profiles::ProfileEnforcement *
 ASTContext::getProfileEnforcement(StringRef ProfileName) const {
   for (const auto &E : EnforcedProfiles)
@@ -891,6 +899,32 @@ bool ASTContext::isProfileEnforced(StringRef ProfileName) const {
   if (!getLangOpts().ProfilesTestProfiles && ProfileName.starts_with("test::"))
     return false;
   return getProfileEnforcement(ProfileName) != nullptr;
+}
+
+bool ASTContext::isProfileEnforcedAt(StringRef ProfileName,
+                                     SourceLocation Loc) const {
+  if (!isProfileEnforced(ProfileName))
+    return false;
+  // P3589R2 [decl.attr.enforce]p4: the enforcement's dominion starts after
+  // the attribute, so a violation located before it -- global-module-fragment
+  // tokens ahead of the module declaration -- is outside it. Fail open on an
+  // invalid location on either side (isBeforeInTranslationUnit rejects
+  // invalid locations): a PCH restore records no location and must mean
+  // "whole TU" (a PCH is this TU's textual prefix), and synthesized code
+  // keeps plain-enforcement behavior. Locations are compared by *expansion*
+  // location, deliberately unlike the suppression comparator's raw token
+  // order (see SemaProfiles::isProfileSuppressed): enforcement dominion is
+  // TU-scale, so a macro defined in the GMF but *invoked* in the purview
+  // stays enforced -- its invocation tokens are purview tokens -- while GMF
+  // pattern tokens are skipped.
+  const profiles::ProfileEnforcement *E = getProfileEnforcement(ProfileName);
+  assert(E && "enforced profile has no enforcement entry");
+  const SourceManager &SM = getSourceManager();
+  if (Loc.isValid() && E->EnforceLoc.isValid() &&
+      SM.isBeforeInTranslationUnit(SM.getExpansionLoc(Loc),
+                                   SM.getExpansionLoc(E->EnforceLoc)))
+    return false;
+  return true;
 }
 
 bool ASTContext::isProfileExemptSystemHeaderLoc(SourceLocation Loc) const {

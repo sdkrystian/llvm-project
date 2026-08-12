@@ -64,10 +64,7 @@ public:
   /// lives on the ASTContext).
   bool isProfileEnforced(StringRef ProfileName) const;
 
-  /// Like isProfileEnforced, but additionally false when \p Loc lies before
-  /// the enforcement's dominion (P3589R2 [decl.attr.enforce]p4: the dominion
-  /// starts after the attribute), so a violation located in the global module
-  /// fragment is not diagnosed. Fails open on invalid locations. Used by the
+  /// Thin wrapper over ASTContext::isProfileEnforcedAt. Used by the
   /// per-violation emission gates; the pass-dispatch gates use the name-only
   /// query.
   bool isProfileEnforcedAt(StringRef ProfileName, SourceLocation Loc) const;

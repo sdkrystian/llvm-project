@@ -26,9 +26,10 @@ instantiation, module propagation, and PCH/BMI serialization -- so a profile
 implementation consists only of its diagnostics plus calls to the framework
 at its semantic check sites.
 
-The enforced-profile list itself is stored on the ``ASTContext``
-(``ASTContext::EnforcedProfiles``, queried through ``isProfileEnforced`` /
-``getProfileEnforcement`` / ``isProfileExemptSystemHeaderLoc``) rather than
+The enforced-profile list itself is stored on the ``ASTContext`` (recorded
+through ``addEnforcedProfile``; queried through ``isProfileEnforced`` /
+``isProfileEnforcedAt`` / ``getProfileEnforcement`` /
+``isProfileExemptSystemHeaderLoc`` / ``enforced_profiles``) rather than
 on ``Sema``: the ASTReader restores a PCH's ``ENFORCED_PROFILES`` records
 directly into it, so a consumer that never sees a Sema -- e.g. code
 generation directly from an AST file -- observes the same enforcement state.
@@ -207,9 +208,10 @@ in-tree pilot:
          });
 
 ``EmitProfileRuntimeCheck`` checks that the profile is enforced
-(``ASTContext::EnforcedProfiles``, so a body deserialized from an AST file
-is decided by the same state the importer restored), that the given location
-is not in an exempt system header, and that the rule is not suppressed for
+(the ``ASTContext`` enforcement list, so a body deserialized from an AST
+file is decided by the same state the importer restored), that the given
+location is not in an exempt system header, and that the rule is not
+suppressed for
 the code being emitted (the CodeGen suppression state above).  Only when the
 check is active does it invoke the builder for the predicate, so an inactive
 site emits no IR, and then emits a conditional branch to a trap block
