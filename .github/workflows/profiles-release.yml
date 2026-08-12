@@ -1,6 +1,10 @@
 name: Profiles Release
 
 on:
+  push:
+    branches:
+      - profiles-init
+      - profiles-core-ub
   workflow_dispatch:
 
 permissions:
@@ -14,7 +18,20 @@ env:
 jobs:
   build-linux:
     name: Build Linux x86_64
+    # Builds run only on the release remote. The branch check guards
+    # workflow_dispatch, which the push trigger's branches filter does not
+    # constrain: a dispatch on profiles would otherwise publish a framework-only
+    # toolchain as profiles-latest. The deleted check excludes branch-deletion
+    # pushes, which run this workflow from the default branch's tree.
+    if: >-
+      github.repository == 'cppalliance/clang' &&
+      github.event.deleted != true &&
+      (github.ref_name == 'profiles-init' || github.ref_name == 'profiles-core-ub')
     runs-on: ubuntu-24.04
+    # A newer push supersedes the build still in flight for this branch.
+    concurrency:
+      group: profiles-release-linux-${{ github.ref_name }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
 
@@ -55,7 +72,15 @@ jobs:
 
   build-windows:
     name: Build Windows x86_64
+    # Gated as build-linux.
+    if: >-
+      github.repository == 'cppalliance/clang' &&
+      github.event.deleted != true &&
+      (github.ref_name == 'profiles-init' || github.ref_name == 'profiles-core-ub')
     runs-on: windows-2022
+    concurrency:
+      group: profiles-release-windows-${{ github.ref_name }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
 
@@ -85,8 +110,14 @@ jobs:
 
   publish:
     name: Publish rolling release
+    # Skipped along with the builds when the gate above rejects the ref.
     needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
+    # Publishing is never cancelled: it deletes the release before recreating it,
+    # so an interrupted run would leave the download URL dead.
+    concurrency:
+      group: profiles-release-publish-${{ github.ref_name }}
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
