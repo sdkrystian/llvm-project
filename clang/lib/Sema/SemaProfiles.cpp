@@ -50,6 +50,7 @@ bool SemaProfiles::isProfileEnforcedAt(StringRef ProfileName,
   // its invocation tokens are purview tokens -- while GMF pattern tokens are
   // skipped.
   const profiles::ProfileEnforcement *E = getProfileEnforcement(ProfileName);
+  assert(E && "enforced profile has no enforcement entry");
   const SourceManager &SM = getASTContext().getSourceManager();
   if (Loc.isValid() && E->EnforceLoc.isValid() &&
       SM.isBeforeInTranslationUnit(SM.getExpansionLoc(Loc),
