@@ -1,4 +1,4 @@
-name: Weekly Profiles Release
+name: Profiles Release
 
 on:
   workflow_dispatch:
