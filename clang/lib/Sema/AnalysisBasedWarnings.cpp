@@ -3205,8 +3205,8 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
     return;
   }
 
-  // Queried at every use below; the enforced set cannot change within one
-  // invocation.
+  // Cached for the uses below (the enforced set cannot change within one
+  // invocation); the skip path above queries hasEnforcedCFGProfile directly.
   const bool CFGProfileEnforced = hasEnforcedCFGProfile();
 
   if (S.hasUncompilableErrorOccurred()) {
@@ -3315,8 +3315,7 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
       !Diags.isIgnored(diag::warn_uninit_const_pointer, D->getBeginLoc())) {
     if (CFG *cfg = AC.getCFG()) {
       UninitValsDiagReporter reporter(S, AC);
-      UninitVariablesAnalysisStats stats;
-      std::memset(&stats, 0, sizeof(UninitVariablesAnalysisStats));
+      UninitVariablesAnalysisStats stats = {};
       runUninitializedVariablesAnalysis(*cast<DeclContext>(D), *cfg, AC,
                                         reporter, stats);
 
