@@ -2326,12 +2326,11 @@ private:
   /// profile attributes and the caller should parse it normally. Returns true
   /// if the attribute was consumed -- either parsed successfully (an attribute
   /// was added to \p Attrs) or diagnosed and skipped (no attribute added).
-  bool TryParseProfilesAttribute(IdentifierInfo *AttrName,
-                                 SourceLocation AttrNameLoc,
-                                 ParsedAttributes &Attrs,
-                                 SourceLocation *EndLoc,
-                                 IdentifierInfo *ScopeName,
-                                 SourceLocation ScopeLoc);
+  bool TryParseProfilesAttribute(
+      IdentifierInfo *AttrName, SourceLocation AttrNameLoc,
+      ParsedAttributes &Attrs, SourceLocation *EndLoc,
+      IdentifierInfo *ScopeName, SourceLocation ScopeLoc,
+      SourceLocation CommonScopeLoc, ParsedAttr::Form Form);
   /// A profile-designator parsed from a profiles:: attribute: the profile
   /// name, the designator's canonical spelling, and its arguments.
   struct ParsedProfileDesignator {

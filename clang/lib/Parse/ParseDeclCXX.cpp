@@ -4706,7 +4706,10 @@ void Parser::ParseCXX11AttributeSpecifierInternal(ParsedAttributes &Attrs,
     // well-formed and the missing argument clause forms.
     if (ScopeName && ScopeName->isStr("profiles") &&
         TryParseProfilesAttribute(AttrName, AttrLoc, Attrs, EndLoc, ScopeName,
-                                  ScopeLoc))
+                                  ScopeLoc, CommonScopeLoc,
+                                  getLangOpts().CPlusPlus
+                                      ? ParsedAttr::Form::CXX11()
+                                      : ParsedAttr::Form::C23()))
       AttrParsed = true;
 
     // Parse attribute arguments
@@ -5324,12 +5327,11 @@ bool Parser::ParseProfileSuppressBody(ParsedProfileSuppressArgs &Args) {
   return false;
 }
 
-bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
-                                       SourceLocation AttrNameLoc,
-                                       ParsedAttributes &Attrs,
-                                       SourceLocation *EndLoc,
-                                       IdentifierInfo *ScopeName,
-                                       SourceLocation ScopeLoc) {
+bool Parser::TryParseProfilesAttribute(
+    IdentifierInfo *AttrName, SourceLocation AttrNameLoc,
+    ParsedAttributes &Attrs, SourceLocation *EndLoc, IdentifierInfo *ScopeName,
+    SourceLocation ScopeLoc, SourceLocation CommonScopeLoc,
+    ParsedAttr::Form Form) {
   assert(ScopeName && ScopeName->isStr("profiles"));
 
   if (!AttrName->isStr("enforce") && !AttrName->isStr("suppress") &&
@@ -5359,9 +5361,10 @@ bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
     else
       Designators = Pool.make<ArrayRef<detail::ProfileDesignator>>();
 
-    ParsedAttr *PA = Attrs.addNew(AttrName, SourceRange(AttrNameLoc, End),
-                                  AttributeScopeInfo(ScopeName, ScopeLoc),
-                                  nullptr, 0, ParsedAttr::Form::CXX11());
+    ParsedAttr *PA =
+        Attrs.addNew(AttrName, SourceRange(AttrNameLoc, End),
+                     AttributeScopeInfo(ScopeName, ScopeLoc, CommonScopeLoc),
+                     nullptr, 0, Form);
     if (SuppressArgs)
       PA->setProfileSuppressArgs(SuppressArgs);
     else
@@ -5418,9 +5421,10 @@ bool Parser::TryParseProfilesAttribute(IdentifierInfo *AttrName,
   if (EndLoc)
     *EndLoc = RParen;
 
-  ParsedAttr *PA = Attrs.addNew(AttrName, SourceRange(AttrNameLoc, RParen),
-                                AttributeScopeInfo(ScopeName, ScopeLoc),
-                                nullptr, 0, ParsedAttr::Form::CXX11());
+  ParsedAttr *PA =
+      Attrs.addNew(AttrName, SourceRange(AttrNameLoc, RParen),
+                   AttributeScopeInfo(ScopeName, ScopeLoc, CommonScopeLoc),
+                   nullptr, 0, Form);
   if (SuppressArgs)
     PA->setProfileSuppressArgs(SuppressArgs);
   else
