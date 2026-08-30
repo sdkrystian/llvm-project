@@ -480,6 +480,32 @@ void test_lambda_arguments() {
   l(&g_init);   // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
 }
 
+// A defaulted argument is checked once, at CXXDefaultArgExpr creation, so
+// call forms that never reach GatherArgumentsForCall -- functors in both
+// spellings, lambdas, and C++23 subscript operators -- diagnose it like a
+// plain call, and call-site suppression covers it.
+struct BadDefaultFunctor {
+  void operator()(int *p = &g_uninit);
+  void operator[](int i, int *p = &g_uninit);
+};
+void test_defaulted_argument_call_forms(BadDefaultFunctor f) {
+  f();            // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  f.operator()(); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  f[0];           // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  auto l = [](int *p = &g_uninit) {};
+  l();            // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  [[profiles::suppress(std::init)]] { f(); l(); } // OK: suppressed
+}
+
+// The enable_if machinery builds defaulted arguments under a SFINAE trap,
+// where no profile check runs: the candidate resolves, and the call
+// diagnoses once.
+void enable_if_default(int *p = &g_uninit) __attribute__((enable_if(true, "")));
+void test_enable_if_defaulted_argument() {
+  enable_if_default(); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
 // A call with no declared callee (through a function pointer) has no
 // parameter declaration that could carry [[ref_to_uninit]], so its arguments
 // are checked as unmarked targets (paper §7.2: passing uninitialized memory

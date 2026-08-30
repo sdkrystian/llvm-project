@@ -5808,7 +5808,7 @@ struct EnsureImmediateInvocationInDefaultArgs
 
 ExprResult Sema::BuildCXXDefaultArgExpr(SourceLocation CallLoc,
                                         FunctionDecl *FD, ParmVarDecl *Param,
-                                        Expr *Init) {
+                                        Expr *Init, bool CheckInitProfile) {
   assert(Param->hasDefaultArg() && "can't build nonexistent default arg");
 
   bool NestedDefaultChecking = isCheckingDefaultArgumentOrInitializer();
@@ -5878,8 +5878,20 @@ ExprResult Sema::BuildCXXDefaultArgExpr(SourceLocation CallLoc,
           /*SkipImmediateInvocations=*/NestedDefaultChecking))
     return ExprError();
 
-  return CXXDefaultArgExpr::Create(Context, InitializationContext->Loc, Param,
-                                   Init, InitializationContext->Context);
+  auto *DAE =
+      CXXDefaultArgExpr::Create(Context, InitializationContext->Loc, Param,
+                                Init, InitializationContext->Context);
+  // std::init / ref_to_uninit (paper §5): a defaulted pointer or reference
+  // argument must match the parameter's [[ref_to_uninit]] marking. A default
+  // argument does not re-run copy-initialization at the use site, so the
+  // shared hook in PerformCopyInitialization never sees it; check the
+  // underlying expression on the freshly created node instead (the
+  // recognizers don't see through the CXXDefaultArgExpr wrapper), once per
+  // use, whatever call form reached it.
+  if (CheckInitProfile && getLangOpts().Profiles)
+    Profiles().checkInitProfileRefToUninitBinding(
+        DAE->getExprLoc(), Param, Param->getType(), DAE->getExpr());
+  return DAE;
 }
 
 static FieldDecl *FindFieldDeclInstantiationPattern(const ASTContext &Ctx,
@@ -6359,17 +6371,6 @@ bool Sema::GatherArgumentsForCall(SourceLocation CallLoc, FunctionDecl *FDecl,
 
       Arg = ArgExpr.getAs<Expr>();
     }
-
-    // std::init / ref_to_uninit (paper §5): a pointer or reference argument
-    // must match the [[ref_to_uninit]] marking of its parameter. A real
-    // argument is checked once, by the shared hook in
-    // PerformCopyInitialization; a default argument does not re-run
-    // copy-initialization here, so check its underlying expression (the
-    // recognizers don't see through the CXXDefaultArgExpr wrapper).
-    if (Param && getLangOpts().Profiles)
-      if (const auto *DAE = dyn_cast<CXXDefaultArgExpr>(Arg))
-        Profiles().checkInitProfileRefToUninitBinding(
-            Arg->getExprLoc(), Param, Param->getType(), DAE->getExpr());
 
     // Check for array bounds violations for each argument to the call. This
     // check only triggers warnings when the argument isn't a more complex Expr
