@@ -74,7 +74,10 @@ the named profiles for the remainder of the translation unit -- everything
 after the attribute; code before it, such as a global module fragment, is
 not checked.  It may appear only on an *empty-declaration* that precedes
 every other declaration at translation-unit scope, or on a
-*module-declaration* (see `Profiles and Modules`_):
+*module-declaration* (see `Profiles and Modules`_).  A module-declaration
+itself does not count as a preceding declaration, nor does the implicit
+import of the interface that a ``module M;`` implementation unit performs,
+so an implementation unit may open with its own empty-declaration enforce:
 
 .. code-block:: c++
 

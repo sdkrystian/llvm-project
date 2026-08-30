@@ -5735,6 +5735,14 @@ static void handleProfilesEnforceAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   for (const auto *Prev : TU->noload_decls()) {
     if (Prev->isImplicit() || !Prev->getLocation().isValid())
       continue;
+    // An implementation unit's import of its own interface is the one
+    // ActOnModuleDecl synthesizes, not a written declaration: a written one
+    // would be the self-import error ([module.import]p9).
+    if (const auto *ID = dyn_cast<ImportDecl>(Prev))
+      if (const Module *M = S.getCurrentModule();
+          M && M->isModuleImplementation() &&
+          ID->getImportedModule()->Name == M->Name)
+        continue;
     if (!isa<EmptyDecl>(Prev)) {
       S.Diag(AL.getLoc(), diag::err_profiles_enforce_after_decl);
       S.Diag(Prev->getLocation(), diag::note_previous_decl) << "declaration";

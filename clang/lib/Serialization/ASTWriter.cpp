@@ -5354,7 +5354,9 @@ void ASTWriter::WriteEnforcedProfiles(Sema &SemaRef) {
   // including compile's [[profiles::enforce]] placement check (P3589R2
   // [decl.attr.enforce]p1) can consult the bit instead of deserializing this
   // PCH's declarations. OR in the flag restored from a base PCH so chains
-  // propagate it; the walk itself covers only the decls parsed here.
+  // propagate it; the walk itself covers only the decls parsed here. Unlike
+  // handleProfilesEnforceAttr's walk it needs no synthesized-interface-import
+  // skip: a PCH is never a module implementation unit.
   bool HasNonEmptyDecl = SemaRef.Profiles().TUPrecededByNonEmptyDecl;
   if (!HasNonEmptyDecl)
     for (const auto *D :

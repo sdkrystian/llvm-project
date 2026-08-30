@@ -54,6 +54,11 @@
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fsyntax-only %t/require_list_partial.cpp -fmodule-file=MultiMod=%t/mod_multi.pcm -verify
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fsyntax-only %t/require_list_none.cpp -fmodule-file=MultiMod=%t/mod_multi.pcm -verify
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fsyntax-only %t/require_list_dup.cpp -fmodule-file=MultiMod=%t/mod_multi.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/impl_empty_enforce.cpp -fmodule-file=RedeclPlainMod=%t/redecl_plain_mod.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/impl_empty_enforce_same.cpp -fmodule-file=TestMod=%t/mod_enforced.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/impl_empty_enforce_mismatch.cpp -fmodule-file=TestMod=%t/mod_enforced.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/impl_import_then_enforce.cpp -fmodule-file=RedeclPlainMod=%t/redecl_plain_mod.pcm -fmodule-file=MultiMod=%t/mod_multi.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/part_impl_empty_enforce.cppm -verify
 
 // Module with enforced profiles
 //--- mod_enforced.cppm
@@ -475,3 +480,44 @@ template<class T> void impl_pv_uninit() {
   (void)(x + 1); // expected-error {{variable 'x' is read before initialization under profile 'test::uninit_read'}}
 }
 void impl_use2() { impl_pv_uninit<int>(); } // expected-note {{in instantiation of function template specialization 'impl_pv_uninit<int>' requested here}}
+
+// An implementation unit's implicit import of its interface is not a written
+// declaration: an empty-declaration enforce right after 'module M;' is
+// accepted and is live for the rest of the unit.
+//--- impl_empty_enforce.cpp
+module RedeclPlainMod;
+[[profiles::enforce(test::type_cast)]];
+void impl_empty_enforce_func() {
+  int *p = reinterpret_cast<int*>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+}
+
+// Repeating the interface's designator in the implementation unit has no
+// effect; the violation is diagnosed once.
+//--- impl_empty_enforce_same.cpp
+module TestMod;
+[[profiles::enforce(test::type_cast)]];
+void impl_same_func() {
+  int *p = reinterpret_cast<int*>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+}
+
+// A different designator for the interface's profile is the usual mismatch;
+// the inherited enforcement is anchored at this unit's module-declaration.
+//--- impl_empty_enforce_mismatch.cpp
+module TestMod; // expected-note {{previous attribute is here}}
+[[profiles::enforce(test::type_cast(strict: true))]]; // expected-error {{repeated enforcement of profile 'test::type_cast' with different designator}}
+
+// A written import before the enforce is a non-empty declaration and still
+// blocks it.
+//--- impl_import_then_enforce.cpp
+module RedeclPlainMod;
+import MultiMod; // expected-note {{declaration declared here}}
+[[profiles::enforce(test::type_cast)]]; // expected-error {{'profiles::enforce' attribute on empty-declaration must precede all non-empty declarations}}
+
+// A partition implementation unit performs no implicit import; the
+// empty-declaration enforce is accepted there as well.
+//--- part_impl_empty_enforce.cppm
+module PartEmpty:impl;
+[[profiles::enforce(test::type_cast)]];
+void part_impl_empty_func() {
+  int *p = reinterpret_cast<int*>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+}
