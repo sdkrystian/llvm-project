@@ -26,6 +26,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include <optional>
 
 namespace clang {
 
@@ -198,21 +199,23 @@ public:
   bool defaultInitLeavesScalarIndeterminate(QualType T,
                                             bool HonorUninitMarkers = false);
 
-  /// True if default-initialization of \p T is a genuine no-op that leaves
-  /// the object (or every array element) uninitialized -- the only state
-  /// consistent with an [[uninit]] marker. A non-trivial default constructor
+  /// Why default-initialization of \p T is not the genuine no-op an
+  /// [[uninit]] marker claims -- as the select index of
+  /// note_init_uninit_marker_type -- or std::nullopt when it is: vacuous,
+  /// leaving the object (or every array element) uninitialized, the only
+  /// state consistent with the marker. A non-trivial default constructor
   /// (user-provided anywhere in the subtree, a default member initializer, a
   /// virtual table pointer) initializes something, contradicting the marker
-  /// (paper §4.2 rule 2, §5.3); a deleted or absent default constructor makes
-  /// default-initialization ill-formed, not a no-op (the marker is
-  /// unsatisfiable); an all-scalars-determinate type (e.g. an
-  /// empty struct) has nothing uninitialized. Type-level (not a query on the
-  /// synthesized construct-expression) because the field flavor and
-  /// static_marker's no-initializer arm have no construct-expression, and
-  /// getBaseElementType handles arrays and scalars uniformly. Shared by
-  /// uninit_with_initializer and static_marker (through their common
-  /// initializer guard) and the field-marker flavor.
-  bool defaultInitIsVacuous(QualType T);
+  /// (paper §4.2 rule 2, §5.3; index 0); a deleted or absent default
+  /// constructor makes default-initialization ill-formed, not a no-op (the
+  /// marker is unsatisfiable; index 2); an all-scalars-determinate type
+  /// (e.g. an empty struct) has nothing uninitialized (index 1). Type-level
+  /// (not a query on the synthesized construct-expression) because the field
+  /// flavor and static_marker's no-initializer arm have no
+  /// construct-expression, and getBaseElementType handles arrays and scalars
+  /// uniformly. Shared by uninit_with_initializer and static_marker (through
+  /// their common initializer guard) and the field-marker flavor.
+  std::optional<unsigned> defaultInitNonVacuityReason(QualType T);
 
   /// Whether \p Init is the *shape* of a plain default-initialization -- the
   /// language's own, not something the user wrote. No initializer at all (a
@@ -225,7 +228,7 @@ public:
   /// range. The shared shape half of two separate questions: whether an
   /// [[uninit]] marker's declaration wrote an initializer (whether such a
   /// default-initialization is *vacuous* is the type's business,
-  /// defaultInitIsVacuous, so a written initializer and a non-no-op
+  /// defaultInitNonVacuityReason, so a written initializer and a non-no-op
   /// default-initialization get different diagnostics), and whether a local
   /// aggregate's declaration ran nothing before flow-tracking starts
   /// (getTrackedLocalAggregate in AnalysisBasedWarnings.cpp, where a

@@ -386,8 +386,8 @@ static bool anyLeafHasNSDMI(const CXXRecordDecl *RD) {
 }
 
 // UntrustRoot bypasses the user-provided default-constructor trust for the
-// *root* record only (recursion always re-trusts): defaultInitIsVacuous uses
-// it to ask the factual question about a class whose out-of-line defaulted
+// *root* record only (recursion always re-trusts): defaultInitNonVacuityReason
+// uses it to ask the factual question about a class whose out-of-line defaulted
 // default constructor is user-provided yet initializes nothing.
 static bool defaultInitLeavesScalarIndeterminateImpl(
     ASTContext &Ctx, QualType T, bool HonorUninitMarkers,
@@ -547,17 +547,31 @@ static bool defaultedDefaultCtorIsTrivial(ASTContext &Ctx,
   return true;
 }
 
-bool SemaProfiles::defaultInitIsVacuous(QualType T) {
+std::optional<unsigned> SemaProfiles::defaultInitNonVacuityReason(QualType T) {
   QualType BaseTy = getASTContext().getBaseElementType(T);
   bool UntrustRoot = false;
   if (const auto *RD = BaseTy->getAsCXXRecordDecl()) {
+    // hasTrivialDefaultConstructor asserts without a definition.
+    if (!RD->hasDefinition())
+      return 1;
+    const CXXRecordDecl *Def = RD->getDefinition();
+    // A deleted or absent default constructor keeps the triviality bit, but
+    // makes default-initialization ill-formed rather than a no-op: the entity
+    // can never be left default-initialized, so the marker is unsatisfiable.
+    // Only a declared deleted constructor is visible here; a lazily
+    // *implicitly* deleted one of an otherwise trivial type escapes this
+    // scan -- a missed diagnostic (never a false positive), like the
+    // framework's other conservative omissions.
+    bool Deleted = !Def->hasDefaultConstructor();
+    for (const CXXConstructorDecl *Ctor : Def->ctors())
+      if (Ctor->isDefaultConstructor() && Ctor->isDeleted())
+        Deleted = true;
+    if (Deleted)
+      return 2;
     // A non-trivial default constructor (user-provided anywhere in the
     // subtree, a default member initializer, a virtual table pointer)
     // initializes something, contradicting an [[uninit]] marker (paper §4.2
-    // rule 2, §5.3). hasTrivialDefaultConstructor asserts without a
-    // definition.
-    if (!RD->hasDefinition())
-      return false;
+    // rule 2, §5.3).
     if (!RD->hasTrivialDefaultConstructor()) {
       // The record-level bit is poisoned for a default constructor
       // explicitly defaulted after its first declaration (see the helpers
@@ -571,31 +585,25 @@ bool SemaProfiles::defaultInitIsVacuous(QualType T) {
       // single diagnosis point. A marker written *before* the '= default'
       // definition has been parsed still sees the unrecovered state and
       // stays rejected (see Limitations).
-      const CXXRecordDecl *Def = RD->getDefinition();
       if (!hasOutOfLineDefaultedDefaultCtor(Def) ||
           !defaultedDefaultCtorIsTrivial(getASTContext(), Def))
-        return false;
+        return 0;
       UntrustRoot = true;
     }
-    // A deleted default constructor keeps the triviality bit, but makes
-    // default-initialization ill-formed rather than a no-op: the entity can
-    // never be left default-initialized, so the marker is unsatisfiable. Only
-    // a declared deleted constructor is visible here; a lazily *implicitly*
-    // deleted one of an otherwise trivial type escapes this scan -- a missed
-    // diagnostic (never a false positive), like the framework's other
-    // conservative omissions.
-    for (const CXXConstructorDecl *Ctor : RD->getDefinition()->ctors())
-      if (Ctor->isDefaultConstructor() && Ctor->isDeleted())
-        return false;
   }
   // The factual (HonorUninitMarkers=false) walk: an all-scalars-determinate
   // type (e.g. an empty struct) has nothing uninitialized, so the marker
   // contradicts it too, while a type whose only indeterminate scalars are
   // themselves marked members really is left uninitialized.
   llvm::SmallPtrSet<const CXXRecordDecl *, 8> Visited;
-  return defaultInitLeavesScalarIndeterminateImpl(getASTContext(), T,
-                                                  /*HonorUninitMarkers=*/false,
-                                                  Visited, UntrustRoot);
+  if (defaultInitLeavesScalarIndeterminateImpl(getASTContext(), T,
+                                               /*HonorUninitMarkers=*/false,
+                                               Visited, UntrustRoot))
+    return std::nullopt;
+  // Nothing is left indeterminate. The recovered out-of-line-defaulted root
+  // still reads as running a constructor, matching its poisoned triviality
+  // bit.
+  return UntrustRoot ? 0 : 1;
 }
 
 // Documented at the declaration: the shape of the language's own plain
@@ -620,27 +628,7 @@ bool SemaProfiles::isDefaultInitShape(const Expr *Init) {
 static bool isVacuousDefaultInit(SemaProfiles &SP, const Expr *Init,
                                  QualType T) {
   return SemaProfiles::isDefaultInitShape(Init) &&
-         (!Init || SP.defaultInitIsVacuous(T));
-}
-
-// Why default-initialization of \p BaseTy is not the no-op an [[uninit]]
-// marker claims, as the select index of note_init_uninit_marker_type: a
-// non-trivial default constructor runs code (0); a trivial one that leaves no
-// subobject uninitialized has nothing to acknowledge (1); a deleted or absent
-// one makes the marker unsatisfiable (2). Shared by the variable and data
-// member flavors of uninit_with_initializer so both explain it the same way.
-static unsigned uninitMarkerNonVacuityReason(QualType BaseTy) {
-  const auto *RD = BaseTy->getAsCXXRecordDecl();
-  if (!RD || !RD->hasDefinition())
-    return 1;
-  const CXXRecordDecl *Def = RD->getDefinition();
-  bool Deleted = !Def->hasDefaultConstructor();
-  for (const CXXConstructorDecl *Ctor : Def->ctors())
-    if (Ctor->isDefaultConstructor() && Ctor->isDeleted())
-      Deleted = true;
-  if (Deleted)
-    return 2;
-  return Def->hasTrivialDefaultConstructor() ? 1 : 0;
+         (!Init || !SP.defaultInitNonVacuityReason(T));
 }
 
 void SemaProfiles::checkInitProfileUninitDecl(const VarDecl *Var) {
@@ -828,7 +816,7 @@ void SemaProfiles::checkInitProfileUninitWithInitializer(const ValueDecl *D,
     if (const auto *DD = dyn_cast<DeclaratorDecl>(D))
       NoteLoc = DD->getTypeSpecStartLoc();
     Diag(NoteLoc, diag::note_init_uninit_marker_type)
-        << BaseTy << uninitMarkerNonVacuityReason(BaseTy);
+        << BaseTy << *defaultInitNonVacuityReason(D->getType());
     return;
   }
   Diag(Loc, diag::err_init_uninit_with_initializer)
@@ -3031,7 +3019,9 @@ void runStdInitUninitFieldMarkerCallback(Sema &S, CXXRecordDecl *RD) {
     // checkInitProfileUninitDecl.
     if (BaseTy->isStdByteType())
       continue;
-    if (S.Profiles().defaultInitIsVacuous(F->getType()))
+    std::optional<unsigned> Reason =
+        S.Profiles().defaultInitNonVacuityReason(F->getType());
+    if (!Reason)
       continue;
     // Decl-aware gate: defers on templated patterns (instantiations re-fire
     // through CheckCompletedCXXClass) and honors [[profiles::suppress]] on
@@ -3043,7 +3033,7 @@ void runStdInitUninitFieldMarkerCallback(Sema &S, CXXRecordDecl *RD) {
     S.Diag(UA->getLocation(), diag::err_init_uninit_not_left_uninitialized)
         << "std::init" << F->getDeclName() << F->getType() << /*IsMember=*/1;
     S.Diag(F->getTypeSpecStartLoc(), diag::note_init_uninit_marker_type)
-        << BaseTy << uninitMarkerNonVacuityReason(BaseTy);
+        << BaseTy << *Reason;
   }
 }
 
