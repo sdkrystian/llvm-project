@@ -408,6 +408,9 @@ void Parser::ParseLexedMethodDeclaration(LateParsedMethodDeclaration &LM) {
     std::unique_ptr<CachedTokens> Toks = std::move(LM.DefaultArgs[I].Toks);
     if (Toks) {
       ParenBraceBracketBalancer BalancerRAIIObj(*this);
+      // The parameter's suppress attributes cover its default argument;
+      // see ProfileSuppressScope.
+      SemaProfiles::ProfileSuppressScope ProfileSuppressForInit(Actions, Param);
 
       // Mark the end of the default argument so that we know when to stop when
       // we parse it later on.

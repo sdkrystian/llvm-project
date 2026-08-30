@@ -7775,6 +7775,11 @@ void Parser::ParseParameterDeclarationClause(
       if (Tok.is(tok::equal)) {
         SourceLocation EqualLoc = Tok.getLocation();
 
+        // The parameter's suppress attributes cover its default argument;
+        // see ProfileSuppressScope.
+        SemaProfiles::ProfileSuppressScope ProfileSuppressForInit(Actions,
+                                                                  Param);
+
         // Parse the default argument
         if (DeclaratorCtx == DeclaratorContext::Member) {
           // If we're inside a class definition, cache the tokens

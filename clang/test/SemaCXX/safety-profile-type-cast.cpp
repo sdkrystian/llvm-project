@@ -136,6 +136,22 @@ void test_requires_unevaluated() {
 // Default function argument with violation.
 void default_arg_func(int *p = reinterpret_cast<int*>(0)); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
 
+// Suppress on a parameter covers its default argument, in both attribute
+// positions.
+// no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+void param_suppress_prefix([[profiles::suppress(test::type_cast)]] int *p = reinterpret_cast<int*>(0));
+// no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+void param_suppress_postfix(int *p [[profiles::suppress(test::type_cast)]] = reinterpret_cast<int*>(0));
+
+// Another parameter's suppression does not cover it: the dominion is the
+// suppressed parameter's own tokens.
+// no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+void param_suppress_other([[profiles::suppress(test::type_cast)]] int a, int *p = reinterpret_cast<int*>(0)); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+
+// Naming another rule does not suppress.
+// no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+void param_suppress_rule_mismatch([[profiles::suppress(test::type_cast, rule: "static_cast")]] int *p = reinterpret_cast<int*>(0)); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+
 // Suppress with justification works identically to suppress without.
 // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
 [[profiles::suppress(test::type_cast, justification: "legacy code")]]
@@ -603,6 +619,17 @@ struct InlineDefaultArgSuppress {
   // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
   [[profiles::suppress(test::type_cast)]]
   void f(int *p = reinterpret_cast<int*>(0));
+};
+
+// Suppress on a member function's parameter covers its late-parsed default
+// argument; another parameter's suppression does not.
+struct MemberParamDefaultArgSuppress {
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  void f([[profiles::suppress(test::type_cast)]] int *p = reinterpret_cast<int*>(0));
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  void g(int *p [[profiles::suppress(test::type_cast)]] = reinterpret_cast<int*>(0));
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  void h([[profiles::suppress(test::type_cast)]] int a, int *p = reinterpret_cast<int*>(0)); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
 };
 
 // Without per-method suppress, the violation still fires in an inline body.
