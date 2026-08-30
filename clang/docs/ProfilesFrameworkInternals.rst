@@ -414,18 +414,21 @@ a missed diagnostic, never a wrong one.
 only translation-unit-locally and is invisible to importers.
 
 Serialization is automatic for every profile, through three records.
-Enforcements are written to a PCH as ``ENFORCED_PROFILES`` records and
-restored on load -- a PCH is the consuming TU's textual prefix, so its
-enforcements belong to the consumer.  ``Module::EnforcedProfileDesignators``
-is written to a BMI as ``SUBMODULE_ENFORCED_PROFILES`` records within each
-submodule block.  ``PROFILES_TU_HAS_NONEMPTY_DECL`` records whether a PCH
-contributed a non-empty top-level declaration, so the empty-declaration
-placement check works across a PCH boundary without deserializing the PCH's
-declarations.  ``ENFORCED_PROFILES`` is deliberately not written to a BMI
-(``WriteEnforcedProfiles`` returns early when writing a module): a named
-module's own enforcements must not leak into importers, which is what keeps
-"importing an enforcing module does not enforce its profiles in the
-importer" true.
+The TU's enforcements are written to every AST file as ``ENFORCED_PROFILES``
+records, and the reader restores them only when the file is the
+compilation's own textual prefix or main input -- a PCH, a preamble, or the
+AST file being code-generated (a module unit compiled from its BMI) -- never
+from an import, whatever its module kind.  The no-leak invariant therefore
+lives in the reader's kind gate: it keeps "importing an enforcing module does
+not enforce its profiles in the importer" true while a BMI compiled to object
+code still emits its own pattern-5 checks, TU-local enforcements included.
+``Module::EnforcedProfileDesignators`` is written to a BMI as
+``SUBMODULE_ENFORCED_PROFILES`` records within each submodule block.
+``PROFILES_TU_HAS_NONEMPTY_DECL`` records whether a PCH contributed a
+non-empty top-level declaration, so the empty-declaration placement check
+works across a PCH boundary without deserializing the PCH's declarations; it
+is written for PCHs only and restored from PCHs and preambles only, since an
+importer's placement state is its own.
 
 
 Redeclaration Compatibility

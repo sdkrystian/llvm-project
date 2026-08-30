@@ -4477,11 +4477,15 @@ llvm::Error ASTReader::ReadASTBlock(ModuleFile &F,
       break;
 
     case ENFORCED_PROFILES:
-      SerializedEnforcedProfiles.push_back(readEnforcedProfile(Record, Blob));
+      // Enforcements belong to the TU that wrote them: restore them from the
+      // compilation's own prefix or main input, never from an import.
+      if (F.Kind == MK_PCH || F.Kind == MK_Preamble || F.Kind == MK_MainFile)
+        SerializedEnforcedProfiles.push_back(readEnforcedProfile(Record, Blob));
       break;
 
     case PROFILES_TU_HAS_NONEMPTY_DECL:
-      SerializedTUHasNonEmptyDecl = true;
+      if (F.Kind == MK_PCH || F.Kind == MK_Preamble)
+        SerializedTUHasNonEmptyDecl = true;
       break;
 
     case DECLS_WITH_EFFECTS_TO_VERIFY:

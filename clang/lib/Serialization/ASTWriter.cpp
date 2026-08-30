@@ -5344,33 +5344,40 @@ void ASTWriter::WriteRISCVIntrinsicPragmas(Sema &SemaRef) {
 }
 
 void ASTWriter::WriteEnforcedProfiles(Sema &SemaRef) {
-  // Profiles is a Compatible langopt, so a consumer of this PCH runs with the
-  // same -fprofiles setting and never looks for these records when they are
-  // absent.
-  if (WritingModule || !SemaRef.getLangOpts().Profiles)
+  // Profiles is a Compatible langopt, so a consumer of this AST file runs with
+  // the same -fprofiles setting and never looks for these records when they
+  // are absent.
+  if (!SemaRef.getLangOpts().Profiles)
     return;
 
-  // Record whether the TU contains a non-empty top-level declaration, so an
+  // Record whether a PCH contains a non-empty top-level declaration, so an
   // including compile's [[profiles::enforce]] placement check (P3589R2
-  // [decl.attr.enforce]p1) can consult the bit instead of deserializing this
+  // [decl.attr.enforce]p1) can consult the bit instead of deserializing the
   // PCH's declarations. OR in the flag restored from a base PCH so chains
   // propagate it; the walk itself covers only the decls parsed here. Unlike
   // handleProfilesEnforceAttr's walk it needs no synthesized-interface-import
-  // skip: a PCH is never a module implementation unit.
-  bool HasNonEmptyDecl = SemaRef.Profiles().TUPrecededByNonEmptyDecl;
-  if (!HasNonEmptyDecl)
-    for (const auto *D :
-         SemaRef.getASTContext().getTranslationUnitDecl()->noload_decls())
-      if (!D->isImplicit() && D->getLocation().isValid() &&
-          !isa<EmptyDecl>(D)) {
-        HasNonEmptyDecl = true;
-        break;
-      }
-  if (HasNonEmptyDecl) {
-    RecordData::value_type Record[] = {1};
-    Stream.EmitRecord(PROFILES_TU_HAS_NONEMPTY_DECL, Record);
+  // skip: a PCH is never a module implementation unit. A BMI gets no such
+  // record, since an importer's placement state is its own.
+  if (!WritingModule) {
+    bool HasNonEmptyDecl = SemaRef.Profiles().TUPrecededByNonEmptyDecl;
+    if (!HasNonEmptyDecl)
+      for (const auto *D :
+           SemaRef.getASTContext().getTranslationUnitDecl()->noload_decls())
+        if (!D->isImplicit() && D->getLocation().isValid() &&
+            !isa<EmptyDecl>(D)) {
+          HasNonEmptyDecl = true;
+          break;
+        }
+    if (HasNonEmptyDecl) {
+      RecordData::value_type Record[] = {1};
+      Stream.EmitRecord(PROFILES_TU_HAS_NONEMPTY_DECL, Record);
+    }
   }
 
+  // The TU's enforcements go into every AST file; the reader restores them
+  // only from the compilation's own prefix or main input, never from an
+  // import (ASTReader::ReadASTBlock), so a module unit code-generated from its
+  // BMI keeps its checks while its importers stay unenforced.
   ArrayRef<profiles::ProfileEnforcement> EnforcedProfiles =
       SemaRef.getASTContext().enforced_profiles();
   if (EnforcedProfiles.empty())
