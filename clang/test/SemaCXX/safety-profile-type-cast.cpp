@@ -152,6 +152,19 @@ void param_suppress_other([[profiles::suppress(test::type_cast)]] int a, int *p 
 // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
 void param_suppress_rule_mismatch([[profiles::suppress(test::type_cast, rule: "static_cast")]] int *p = reinterpret_cast<int*>(0)); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
 
+// A type-dependent violation in a template's default argument is checked
+// when a call instantiates it; the suppression on the pattern's parameter is
+// re-established around that instantiation.
+// no-profiles-warning@+2 {{'profiles::suppress' attribute ignored}}
+template <typename T>
+void tmpl_param_suppress([[profiles::suppress(test::type_cast)]] T *p = reinterpret_cast<T*>(0));
+template <typename T>
+void tmpl_param_unsuppressed(T *p = reinterpret_cast<T*>(0)); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+void instantiate_tmpl_default_args() {
+  tmpl_param_suppress<int>();
+  tmpl_param_unsuppressed<int>(); // expected-note {{in instantiation of default function argument expression for 'tmpl_param_unsuppressed<int>' required here}}
+}
+
 // Suppress with justification works identically to suppress without.
 // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
 [[profiles::suppress(test::type_cast, justification: "legacy code")]]
