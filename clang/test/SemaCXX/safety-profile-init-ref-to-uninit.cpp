@@ -283,6 +283,31 @@ void test_conditional_assignment_target(bool c) {
   (void)p; (void)q; (void)r; (void)s;
 }
 
+// A store through a conditional target credits each named arm with the
+// suppressing strength only: the chosen arm is not known, so the credit
+// suppresses the unmarked-target diagnostic but cannot fire the
+// marked-target one.
+void test_conditional_store_credit(bool c) {
+  int u [[uninit]], u2 [[uninit]];
+  (c ? u : u2) = 5;
+  int *a = &u;                    // OK: the store may have initialized 'u'
+  int *b [[ref_to_uninit]] = &u2; // OK: Maybe credit cannot fire the marked direction
+  (void)a; (void)b;
+}
+
+// A reseat through a conditional target retires the marked pointer's pointee
+// credit wholesale, whichever arm: every pointee fact described the old
+// pointee.
+void test_conditional_reseat(bool c) {
+  int u [[uninit]], u2 [[uninit]];
+  int *p [[ref_to_uninit]] = &u;
+  *p = 1;
+  int *m0 [[ref_to_uninit]] = p; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (c ? p : p) = &u2;
+  int *m [[ref_to_uninit]] = p;  // OK: the stale pointee credit is retired
+  (void)m0; (void)m;
+}
+
 void test_suppress() {
   // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
   [[profiles::suppress(std::init, rule: "ref_to_uninit")]] int *s = &g_uninit; // OK: suppressed
