@@ -6977,6 +6977,12 @@ void Parser::ParseDirectDeclarator(Declarator &D) {
   if (D.hasName() && !D.getNumTypeObjects())
     MaybeParseCXX11Attributes(D);
 
+  // Declarator-id suppress attributes cover the rest of the declarator, the
+  // parameter clause and its default arguments included; see
+  // ProfileSuppressScope.
+  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions,
+                                                          D.getAttributes());
+
   while (true) {
     if (Tok.is(tok::l_paren)) {
       bool IsFunctionDeclaration = D.isFunctionDeclaratorAFunctionDeclaration();

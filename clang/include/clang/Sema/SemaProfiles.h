@@ -180,8 +180,11 @@ public:
   /// construct's parse (or instantiation) ends. A declaration's guard is
   /// pushed before its decl-specifier-seq, so the dominion covers a class or
   /// enum defined there, NSDMIs and late-parsed member bodies included
-  /// (P3589R2 §2.4p3: the whole declaration's tokens). See
-  /// ProfilesFrameworkInternals.rst, "Suppression Dominion Mechanics".
+  /// (P3589R2 §2.4p3: the whole declaration's tokens). A declarator whose
+  /// attributes are attached only once its Decl exists gets a second,
+  /// Decl-keyed guard around its initializer or default argument; the sites
+  /// are enumerated in ProfilesFrameworkInternals.rst, "Suppression Dominion
+  /// Mechanics".
   class ProfileSuppressScope {
     Sema &S;
     unsigned Count = 0;

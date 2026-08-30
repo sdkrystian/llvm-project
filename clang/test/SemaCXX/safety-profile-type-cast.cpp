@@ -152,6 +152,20 @@ void param_suppress_other([[profiles::suppress(test::type_cast)]] int a, int *p 
 // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
 void param_suppress_rule_mismatch([[profiles::suppress(test::type_cast, rule: "static_cast")]] int *p = reinterpret_cast<int*>(0)); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
 
+// On a function declaration, the prefix, declarator-id, and member
+// declarator-id suppression spellings agree: each covers the parameter
+// clause and its default arguments.
+// no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+[[profiles::suppress(test::type_cast)]] void decl_suppress_prefix(int *p = reinterpret_cast<int*>(0));
+// no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+void decl_suppress_declarator_id [[profiles::suppress(test::type_cast)]] (int *p = reinterpret_cast<int*>(0));
+struct DeclSuppressMemberDeclaratorId {
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  void f [[profiles::suppress(test::type_cast)]] (int *p = reinterpret_cast<int*>(0));
+};
+// no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+void decl_suppress_declarator_id_mismatch [[profiles::suppress(test::other)]] (int *p = reinterpret_cast<int*>(0)); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+
 // A type-dependent violation in a template's default argument is checked
 // when a call instantiates it; the suppression on the pattern's parameter is
 // re-established around that instantiation.

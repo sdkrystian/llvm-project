@@ -288,6 +288,22 @@ member bodies included.  A block-scope declaration is covered twice, once by
 the enclosing statement's guard and once by its own; the duplicate entries
 are harmless, since any matching entry suppresses.
 
+A suppression written on a *declarator* rather than in the declaration's
+prefix reaches the parse-time stack only once the declarator's Decl exists,
+so the parser pushes a second, Decl-keyed guard at each point where a
+freshly created Decl's initializer or default argument is about to be parsed
+(or instantiated): the declarator initializer
+(``Parser::ParseDeclarationAfterDeclaratorAndAttributes``), an immediately
+parsed default argument (``Parser::ParseParameterDeclarationClause``), a
+late-parsed member default argument
+(``Parser::ParseLexedMethodDeclaration``), an instantiated default argument
+(``Sema::SubstDefaultArgument``), and a condition variable
+(``Parser::ParseCondition``).  Declarator-id attributes are the one case
+where the tokens to cover precede the Decl -- the parameter clause is parsed
+before the function is declared -- so ``Parser::ParseDirectDeclarator``
+pushes them from the ``Declarator`` itself, which makes the prefix,
+declarator-id, and member declarator-id spellings agree on a declaration.
+
 The range's end is recorded only when the construct was already fully parsed
 when the entry was pushed.  For a construct still being parsed no end exists
 yet (a mid-parse end location would be misleadingly early), so the entry's
