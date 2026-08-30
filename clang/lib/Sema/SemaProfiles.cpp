@@ -619,18 +619,6 @@ bool SemaProfiles::isDefaultInitShape(const Expr *Init) {
          CCE->getParenOrBraceRange().isInvalid();
 }
 
-// Whether the declaration initializer \p Init is a vacuous
-// default-initialization of \p T: one that runs no code and leaves the object
-// factually uninitialized, hence consistent with an [[uninit]] marker. The
-// shared guard of static_marker and uninit_with_initializer keeps the pair
-// complementary by construction: exactly one of the two fires for a marked
-// static.
-static bool isVacuousDefaultInit(SemaProfiles &SP, const Expr *Init,
-                                 QualType T) {
-  return SemaProfiles::isDefaultInitShape(Init) &&
-         (!Init || !SP.defaultInitNonVacuityReason(T));
-}
-
 void SemaProfiles::checkInitProfileUninitDecl(const VarDecl *Var) {
   // std::init / uninit_decl: a definition without any initializer (after
   // attempted default-initialization) must either carry [[uninit]] or
@@ -706,19 +694,107 @@ static bool isPointerMarkerBannedType(QualType T) {
          T->isBlockPointerType();
 }
 
+namespace {
+/// Which std::init marker rule owns the [[uninit]] on an entity, in the
+/// fixed precedence the exactly-one-diagnostic invariants encode: the
+/// subject's type first (union_marker / pointer_marker fire regardless of
+/// storage duration or initializer state and retain the marker), then a
+/// vacuously default-initialized -- hence zero-initialized -- static- or
+/// thread-storage object (static_marker), then an initializer or a
+/// non-vacuous default-initialization contradicting the marker
+/// (uninit_with_initializer, in its written-initializer or type wording).
+/// Consistent means the marker stands.
+enum class UninitMarkerVerdict {
+  Consistent,
+  Union,
+  Pointer,
+  StaticStorage,
+  WrittenInitializer,
+  NonVacuousDefault,
+};
+
+/// A verdict plus, for NonVacuousDefault, note_init_uninit_marker_type's
+/// select index.
+struct UninitMarkerClass {
+  UninitMarkerVerdict Verdict;
+  unsigned Reason = 0;
+};
+} // namespace
+
+/// The subject-type half of the classification: union_marker and
+/// pointer_marker key on the base element type (and union membership) alone,
+/// so the attribute handler can consult it before any initializer exists.
+static UninitMarkerVerdict classifyUninitMarkerSubject(ASTContext &Ctx,
+                                                       const ValueDecl *D) {
+  QualType BaseTy = Ctx.getBaseElementType(D->getType());
+  bool UnionMember =
+      isa<FieldDecl>(D) && cast<FieldDecl>(D)->getParent()->isUnion();
+  if (BaseTy->isUnionType() || UnionMember)
+    return UninitMarkerVerdict::Union;
+  if (isPointerMarkerBannedType(BaseTy))
+    return UninitMarkerVerdict::Pointer;
+  return UninitMarkerVerdict::Consistent;
+}
+
+/// Classify the [[uninit]] on \p D against its initializer state \p Init
+/// (a variable's attached initializer or a data member's NSDMI; null when
+/// none exists). Every funnel acts on exactly the verdicts it owns, which is
+/// what makes exactly one diagnostic fire per marked entity.
+static UninitMarkerClass
+classifyUninitMarker(SemaProfiles &SP, const ValueDecl *D, const Expr *Init) {
+  ASTContext &Ctx = SP.getASTContext();
+  UninitMarkerVerdict Subject = classifyUninitMarkerSubject(Ctx, D);
+  if (Subject != UninitMarkerVerdict::Consistent)
+    return {Subject};
+  // A RecoveryExpr is a placeholder for an initialization that already
+  // failed, not an initializer the user wrote.
+  if (Init && isa<RecoveryExpr>(Init->IgnoreParens()))
+    return {UninitMarkerVerdict::Consistent};
+  QualType T = D->getType();
+  if (isa<FieldDecl>(D) && !Init) {
+    // The initializer-less data member: the marker's claim is about the
+    // member type's default-initialization alone. std::byte may be left
+    // uninitialized (paper §4), mirroring checkInitProfileUninitDecl.
+    if (Ctx.getBaseElementType(T)->isStdByteType())
+      return {UninitMarkerVerdict::Consistent};
+    if (std::optional<unsigned> Reason = SP.defaultInitNonVacuityReason(T))
+      return {UninitMarkerVerdict::NonVacuousDefault, *Reason};
+    return {UninitMarkerVerdict::Consistent};
+  }
+  // A vacuous default-initialization -- no initializer at all (a scalar
+  // default-init synthesizes none), or a synthesized trivial
+  // default-constructor call that runs no code -- leaves the object
+  // factually uninitialized, consistent with the marker; at static or
+  // thread storage duration the object is nonetheless zero-initialized by
+  // language rule, which is static_marker's contradiction (paper §3, §4.2).
+  if (SemaProfiles::isDefaultInitShape(Init) &&
+      (!Init || !SP.defaultInitNonVacuityReason(T))) {
+    if (const auto *Var = dyn_cast<VarDecl>(D);
+        Var && (Var->getStorageDuration() == SD_Static ||
+                Var->getStorageDuration() == SD_Thread))
+      return {UninitMarkerVerdict::StaticStorage};
+    return {UninitMarkerVerdict::Consistent};
+  }
+  // A default-initialization that is not a no-op initializes something
+  // without the user writing anything; anything else is a written
+  // initializer.
+  if (SemaProfiles::isDefaultInitShape(Init))
+    return {UninitMarkerVerdict::NonVacuousDefault,
+            *SP.defaultInitNonVacuityReason(T)};
+  return {UninitMarkerVerdict::WrittenInitializer};
+}
+
 void SemaProfiles::checkInitProfileStaticMarker(const VarDecl *Var) {
   // std::init / static_marker: a variable with static or thread storage
   // duration is zero-initialized by language rule (paper §3), so it is an
   // initialized object; marking it [[uninit]] contradicts paper §4.2 ("an
-  // initialized object marked [[uninit]] is an error"). The case with a real
-  // initializer -- explicit, or a default-initialization that is not a no-op
-  // -- is already caught by uninit_with_initializer (R4, in
-  // CheckCompleteVariableDeclaration); this covers the vacuous-initialization
-  // case R4 treats as consistent. The guard is the shared
-  // isVacuousDefaultInit, so the pair stays complementary by construction and
-  // exactly one of static_marker / uninit_with_initializer fires (this one
-  // runs first, from ActOnUninitializedDecl, after the synthesized
-  // default-initialization is attached).
+  // initialized object marked [[uninit]] is an error"). This funnel owns the
+  // classifier's StaticStorage verdict; the case with a real initializer --
+  // explicit, or a default-initialization that is not a no-op -- is
+  // uninit_with_initializer's (R4, in CheckCompleteVariableDeclaration), so
+  // exactly one of the pair fires (this one runs first, from
+  // ActOnUninitializedDecl, after the synthesized default-initialization is
+  // attached).
   static constexpr StringRef Profile = "std::init";
   // Enforcement first (same rationale as checkInitProfileUninitDecl: the
   // call site is ungated, the hoisted gate is shouldEmitProfileViolation's
@@ -731,15 +807,14 @@ void SemaProfiles::checkInitProfileStaticMarker(const VarDecl *Var) {
        Var->getStorageDuration() != SD_Thread) ||
       !Var->hasAttr<UninitAttr>())
     return;
-  QualType BaseTy = getASTContext().getBaseElementType(Var->getType());
-  // A union or pointer object -- or an array of them -- marked [[uninit]]
-  // is already rejected by union_marker / pointer_marker (regardless of
-  // storage duration, and keyed on the same base element type), and they
-  // retain the marker; do not pile a second diagnostic on top.
-  if (!BaseTy->isUnionType() && !isPointerMarkerBannedType(BaseTy) &&
-      shouldEmitProfileViolation(diag::err_init_uninit_static_marker,
-                                 Var->getLocation(), Var) &&
-      isVacuousDefaultInit(*this, Var->getInit(), Var->getType())) {
+  // Act only on the classifier's StaticStorage verdict: a union or pointer
+  // subject is union_marker / pointer_marker's, and a contradicting
+  // initializer is uninit_with_initializer's.
+  if (classifyUninitMarker(*this, Var, Var->getInit()).Verdict !=
+      UninitMarkerVerdict::StaticStorage)
+    return;
+  if (shouldEmitProfileViolation(diag::err_init_uninit_static_marker, Var->getLocation(),
+                                 Var)) {
     bool IsThread = Var->getStorageDuration() == SD_Thread;
     Diag(Var->getLocation(), diag::err_init_uninit_static_marker)
         << Profile << Var->getDeclName() << IsThread;
@@ -791,16 +866,11 @@ void SemaProfiles::checkInitProfileUninitWithInitializer(const ValueDecl *D,
   if (!shouldEmitProfileViolation(diag::err_init_uninit_with_initializer, Loc,
                                   D))
     return;
-  // A vacuous default-initialization -- a synthesized trivial
-  // default-constructor call that runs no code and leaves the object
-  // indeterminate -- is consistent with the marker: the object really is left
-  // uninitialized, to be initialized later (e.g. via construct_at), mirroring
-  // the scalar case. Anything else -- an explicit initializer, a `= P()`
-  // value-initialization, or a default-initialization that initializes
-  // something (a non-trivial default constructor, paper §4.2 rule 2, §5.3) --
-  // contradicts it.
-  if (isVacuousDefaultInit(*this, Init, D->getType()))
-    return;
+  // Act only on the classifier's initializer verdicts: the subject-type and
+  // static-storage contradictions belong to union_marker / pointer_marker /
+  // static_marker, and a Consistent entity really is left uninitialized, to
+  // be initialized later (e.g. via construct_at).
+  UninitMarkerClass C = classifyUninitMarker(*this, D, Init);
   bool IsMember = isa<FieldDecl>(D);
   // The marker is contradicted for one of two reasons, which read very
   // differently to a user. A *default*-initialization that is not a no-op
@@ -808,19 +878,28 @@ void SemaProfiles::checkInitProfileUninitWithInitializer(const ValueDecl *D,
   // entity "has an initializer" would be wrong; report the type and why, as
   // the initializer-less data member flavor in
   // runStdInitUninitFieldMarkerCallback does.
-  if (isDefaultInitShape(Init)) {
+  switch (C.Verdict) {
+  case UninitMarkerVerdict::NonVacuousDefault: {
     QualType BaseTy = getASTContext().getBaseElementType(D->getType());
     Diag(Loc, diag::err_init_uninit_not_left_uninitialized)
         << Profile << D->getDeclName() << D->getType() << IsMember;
     SourceLocation NoteLoc = Loc;
     if (const auto *DD = dyn_cast<DeclaratorDecl>(D))
       NoteLoc = DD->getTypeSpecStartLoc();
-    Diag(NoteLoc, diag::note_init_uninit_marker_type)
-        << BaseTy << *defaultInitNonVacuityReason(D->getType());
+    Diag(NoteLoc, diag::note_init_uninit_marker_type) << BaseTy << C.Reason;
     return;
   }
-  Diag(Loc, diag::err_init_uninit_with_initializer)
-      << Profile << D->getDeclName() << IsMember;
+  case UninitMarkerVerdict::WrittenInitializer:
+    Diag(Loc, diag::err_init_uninit_with_initializer)
+        << Profile << D->getDeclName() << IsMember;
+    return;
+  case UninitMarkerVerdict::Consistent:
+  case UninitMarkerVerdict::Union:
+  case UninitMarkerVerdict::Pointer:
+  case UninitMarkerVerdict::StaticStorage:
+    return;
+  }
+  llvm_unreachable("covered switch");
 }
 
 void SemaProfiles::checkInitProfileMarkerPlacement(const Decl *D) {
@@ -851,20 +930,22 @@ void SemaProfiles::checkInitProfileMarkerPlacement(const Decl *D) {
   // entirely. The union rule also covers a union-typed data member of a
   // non-union class -- delayed initialization by assigning its member is just
   // as erroneous there (paper §5.6).
-  QualType BaseTy =
-      getASTContext().getBaseElementType(cast<ValueDecl>(D)->getType());
-  bool UnionMember =
-      isa<FieldDecl>(D) && cast<FieldDecl>(D)->getParent()->isUnion();
-  if ((BaseTy->isUnionType() || UnionMember) &&
-      shouldEmitProfileViolation(diag::err_init_union_marker, Loc, D))
-    Diag(Loc, diag::err_init_union_marker) << "std::init"
-                                           << (UnionMember         ? 1
-                                               : isa<FieldDecl>(D) ? 2
-                                                                   : 0);
-  else if (isPointerMarkerBannedType(BaseTy) &&
-           shouldEmitProfileViolation(diag::err_init_uninit_pointer_marker, Loc,
-                                      D))
-    Diag(Loc, diag::err_init_uninit_pointer_marker) << "std::init";
+  switch (classifyUninitMarkerSubject(getASTContext(), cast<ValueDecl>(D))) {
+  case UninitMarkerVerdict::Union:
+    if (shouldEmitProfileViolation(diag::err_init_union_marker, Loc, D)) {
+      bool UnionMember =
+          isa<FieldDecl>(D) && cast<FieldDecl>(D)->getParent()->isUnion();
+      unsigned Select = UnionMember ? 1 : isa<FieldDecl>(D) ? 2 : 0;
+      Diag(Loc, diag::err_init_union_marker) << "std::init" << Select;
+    }
+    break;
+  case UninitMarkerVerdict::Pointer:
+    if (shouldEmitProfileViolation(diag::err_init_uninit_pointer_marker, Loc, D))
+      Diag(Loc, diag::err_init_uninit_pointer_marker) << "std::init";
+    break;
+  default:
+    break;
+  }
 }
 
 bool SemaProfiles::diagnoseInvalidUninitMarker(const Decl *D,
@@ -3007,21 +3088,13 @@ void runStdInitUninitFieldMarkerCallback(Sema &S, CXXRecordDecl *RD) {
     // late-parsed NSDMI is still pending.
     if (!UA || F->isInvalidDecl() || F->hasInClassInitializer())
       continue;
-    QualType BaseTy = S.Context.getBaseElementType(F->getType());
-    // A union- or pointer-typed member (keyed on the same base element type)
-    // already draws union_marker / pointer_marker and keeps the marker; do
-    // not pile a second diagnostic on top. Load-bearing for union members: a
-    // union with a non-trivial member has a deleted -- hence non-trivial --
-    // default constructor and would otherwise draw both.
-    if (BaseTy->isUnionType() || isPointerMarkerBannedType(BaseTy))
-      continue;
-    // std::byte may be left uninitialized (paper §4), mirroring
-    // checkInitProfileUninitDecl.
-    if (BaseTy->isStdByteType())
-      continue;
-    std::optional<unsigned> Reason =
-        S.Profiles().defaultInitNonVacuityReason(F->getType());
-    if (!Reason)
+    // Act only on the classifier's NonVacuousDefault verdict: a union- or
+    // pointer-typed member is union_marker / pointer_marker's (load-bearing
+    // for union members: a union with a non-trivial member has a deleted --
+    // hence non-trivial -- default constructor and would otherwise draw
+    // both), and a Consistent member really is left uninitialized.
+    UninitMarkerClass C = classifyUninitMarker(S.Profiles(), F, nullptr);
+    if (C.Verdict != UninitMarkerVerdict::NonVacuousDefault)
       continue;
     // Decl-aware gate: defers on templated patterns (instantiations re-fire
     // through CheckCompletedCXXClass) and honors [[profiles::suppress]] on
@@ -3033,7 +3106,7 @@ void runStdInitUninitFieldMarkerCallback(Sema &S, CXXRecordDecl *RD) {
     S.Diag(UA->getLocation(), diag::err_init_uninit_not_left_uninitialized)
         << "std::init" << F->getDeclName() << F->getType() << /*IsMember=*/1;
     S.Diag(F->getTypeSpecStartLoc(), diag::note_init_uninit_marker_type)
-        << BaseTy << *Reason;
+        << S.Context.getBaseElementType(F->getType()) << C.Reason;
   }
 }
 
