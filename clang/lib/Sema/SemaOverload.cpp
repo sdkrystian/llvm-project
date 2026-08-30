@@ -7701,7 +7701,11 @@ static bool convertArgsForAvailabilityChecks(
       ParmVarDecl *P = Function->getParamDecl(i);
       if (!P->hasDefaultArg())
         return false;
-      ExprResult R = S.BuildCXXDefaultArgExpr(CallLoc, Function, P);
+      // No profile check under the SFINAE trap: an error here would silently
+      // kill the candidate; the real call diagnoses once.
+      ExprResult R = S.BuildCXXDefaultArgExpr(CallLoc, Function, P,
+                                              /*Init=*/nullptr,
+                                              /*CheckInitProfile=*/false);
       if (R.isInvalid())
         return false;
       ConvertedArgs.push_back(R.get());

@@ -7794,9 +7794,12 @@ public:
                               bool SkipImmediateInvocations = true);
 
   /// BuildCXXDefaultArgExpr - Creates a CXXDefaultArgExpr, instantiating
-  /// the default expr if needed.
+  /// the default expr if needed. \p CheckInitProfile runs the std::init
+  /// ref_to_uninit binding check on the created node; a caller building a
+  /// speculative node, or one under a SFINAE trap, passes false.
   ExprResult BuildCXXDefaultArgExpr(SourceLocation CallLoc, FunctionDecl *FD,
-                                    ParmVarDecl *Param, Expr *Init = nullptr);
+                                    ParmVarDecl *Param, Expr *Init = nullptr,
+                                    bool CheckInitProfile = true);
 
   /// Wrap the expression in a ConstantExpr if it is a potential immediate
   /// invocation.

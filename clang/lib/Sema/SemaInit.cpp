@@ -7489,8 +7489,10 @@ static ExprResult CopyObject(Sema &S,
 
       // Build the default argument expression; we don't actually care
       // if this succeeds or not, because this routine will complain
-      // if there was a problem.
-      S.BuildCXXDefaultArgExpr(Loc, Constructor, Parm);
+      // if there was a problem. No profile check on the speculative node:
+      // the elided copy has no user-written call site.
+      S.BuildCXXDefaultArgExpr(Loc, Constructor, Parm, /*Init=*/nullptr,
+                               /*CheckInitProfile=*/false);
     }
 
     return CurInitExpr;
