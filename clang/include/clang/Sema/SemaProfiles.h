@@ -524,15 +524,16 @@ public:
   /// its diagnostic early-returns (recorders never gate on enforcement).
   void recordInitProfilePointerAliasEscape(const ValueDecl *Var);
 
-  /// The tracked storage a lifetime-annotated callee's argument denotes, as
-  /// resolved by resolveLifetimeAnnotatedStorage: the whole [[uninit]]
-  /// entity (Whole), the storage behind a marked pointer or reference
-  /// (Pointee), the [[uninit]] member of a trackable base object (Member),
-  /// or nothing trackable (None).
+  /// The tracked storage a glvalue (or a lifetime-annotated callee's
+  /// argument) denotes: the whole [[uninit]] entity (Whole), the storage
+  /// behind a marked pointer or reference (Pointee), the [[uninit]] member
+  /// of a trackable base object (Member), a marked pointer object as a
+  /// store target -- its own reseat, a store-side-only kind the argument
+  /// side maps to None -- (Reseat), or nothing trackable (None).
   struct LifetimeAnnotatedStorage {
-    enum class Kind { None, Whole, Pointee, Member };
+    enum class Kind { None, Whole, Pointee, Member, Reseat };
     Kind StorageKind = Kind::None;
-    /// The credited local/parameter (Whole and Pointee).
+    /// The credited local/parameter (Whole, Pointee, and Reseat).
     const VarDecl *Entity = nullptr;
     /// The member store-credit key (Member; resolveMemberStoreBase's base).
     const Decl *Base = nullptr;
@@ -548,17 +549,34 @@ public:
                                            const FieldDecl *F) {
       return {Kind::Member, nullptr, Base, F};
     }
+    static LifetimeAnnotatedStorage reseat(const VarDecl *VD) {
+      return {Kind::Reseat, VD, nullptr, nullptr};
+    }
   };
+
+  /// Resolve the already caller-normalized glvalue \p E -- each caller
+  /// peels its own layer: the store funnel ignoreTransparentCasts, the
+  /// argument-side derivation IgnoreParenImpCasts under `&` -- to the
+  /// tracked storage it denotes: *p (Pointee), base.m (Member), u (Whole),
+  /// r (Pointee), or a marked pointer p itself (Reseat). The single shape
+  /// walk shared by recordInitProfileStore and
+  /// resolveLifetimeAnnotatedStorage; the two suppress-only corners --
+  /// marked pointer members' pointees and element accesses -- resolve None
+  /// by construction.
+  LifetimeAnnotatedStorage resolveTrackedGlvalue(const Expr *E) const;
 
   /// The shared shape walk of recordNowInitArgument and
   /// recordNowUninitArgument: resolve \p Src (bound as \p T) to the storage
   /// the annotated callee initializes or destroys -- &u / u (whole-entity),
   /// p / *p / &*p (marked-pointer pointee), r (marked-reference referent),
-  /// &base.m / base.m (per-object member) -- through the recognizers'
-  /// explicit-cast pass-through. Marker-keyed on the source side: an
-  /// ordinary unmarked argument resolves to None.
-  LifetimeAnnotatedStorage
-  resolveLifetimeAnnotatedStorage(QualType T, const Expr *Src) const;
+  /// &base.m / base.m (per-object member) -- deriving the target glvalue
+  /// from the binding and resolving it through resolveTrackedGlvalue, with
+  /// Reseat mapped to None (the argument side never credits a reseat
+  /// target). Marker-keyed on the source side: an ordinary unmarked
+  /// argument resolves to None.
+  LifetimeAnnotatedStorage resolveLifetimeAnnotatedStorage(QualType T,
+                                                           const Expr *Src)
+      const;
 
   /// What a lifecycle-annotated (or release-recognized) callee does to the
   /// storage handed to it. Construct adds credit. Destroy and Release both

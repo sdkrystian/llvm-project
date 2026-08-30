@@ -2098,6 +2098,57 @@ void SemaProfiles::recordInitProfilePointerAliasEscape(const ValueDecl *Var) {
 }
 
 SemaProfiles::LifetimeAnnotatedStorage
+SemaProfiles::resolveTrackedGlvalue(const Expr *E) const {
+  // *p: the whole-`*p` lvalue of a marked local/parameter pointer denotes
+  // its pointee (paper §4.3/§4.5: for a built-in type, a write is its
+  // initialization). Class-typed pointees never get here: `*sp = S{...}`
+  // resolves to a member operator= (already rejected as a call on
+  // uninitialized storage), so pointee credit is only ever recorded for
+  // built-in-typed stores. Subscript forms (p[i]) are deliberately not
+  // tracked: the paper bans element-wise tracking (§5.4/§5.5).
+  if (const auto *UO = dyn_cast<UnaryOperator>(E);
+      UO && UO->getOpcode() == UO_Deref) {
+    if (const VarDecl *VD = getCreditableMarkedPointer(UO->getSubExpr()))
+      return LifetimeAnnotatedStorage::pointee(VD);
+    return {};
+  }
+  // base.m: the whole-member glvalue of an [[uninit]] field of a trackable
+  // base object, under exactly the member-store keys
+  // (resolveMemberStoreBase) so unrelated objects and other function bodies
+  // never share credit; an untrackable base -- a parameter-reached object,
+  // a deeper chain (x.agg.m, §5.4) -- resolves nothing, the same boundary
+  // everywhere. Member *pointee* forms (*a.p) take the deref arm above,
+  // which keys on local pointers only: the pinned per-object aliasing
+  // boundary (copies share pointees).
+  if (const auto *ME = dyn_cast<MemberExpr>(E)) {
+    if (const auto *F = dyn_cast<FieldDecl>(ME->getMemberDecl());
+        F && F->hasAttr<UninitAttr>())
+      if (const Decl *Base = resolveMemberStoreBase(ME))
+        return LifetimeAnnotatedStorage::member(Base, F);
+    return {};
+  }
+  // Only a directly named local-storage variable is trackable beyond this
+  // point: statics fail hasLocalStorage.
+  const auto *VD = dyn_cast_or_null<VarDecl>(getDirectlyNamedDecl(E));
+  if (!VD || !VD->hasLocalStorage())
+    return {};
+  // u: the whole [[uninit]] entity (paper §4.2/§4.5).
+  if (VD->hasAttr<UninitAttr>())
+    return LifetimeAnnotatedStorage::whole(VD);
+  if (VD->hasAttr<RefToUninitAttr>()) {
+    // r: the marked reference's referent; a reference cannot be reseated,
+    // so no store ever clears that credit -- only a [[now_uninit]] callee's
+    // withdrawal does.
+    if (VD->getType()->isReferenceType())
+      return LifetimeAnnotatedStorage::pointee(VD);
+    // p as a store target: the marked pointer's own reseat.
+    if (VD->getType()->isPointerType())
+      return LifetimeAnnotatedStorage::reseat(VD);
+  }
+  return {};
+}
+
+SemaProfiles::LifetimeAnnotatedStorage
 SemaProfiles::resolveLifetimeAnnotatedStorage(QualType T,
                                               const Expr *Src) const {
   // Mirror the recognizers' explicit-cast pass-through
@@ -2121,38 +2172,13 @@ SemaProfiles::resolveLifetimeAnnotatedStorage(QualType T,
   else if (E->getType()->isArrayType())
     Glvalue = E;
   if (Glvalue) {
-    // &base.m / base.m: the per-object member shape, under exactly the
-    // member-store keys (resolveMemberStoreBase); an untrackable base -- a
-    // parameter-reached object, a deeper chain -- resolves null and stays
-    // strict, the same boundary as a direct store.
-    if (const auto *ME = dyn_cast<MemberExpr>(Glvalue)) {
-      if (const auto *F = dyn_cast<FieldDecl>(ME->getMemberDecl());
-          F && F->hasAttr<UninitAttr>())
-        if (const Decl *Base = resolveMemberStoreBase(ME))
-          return LifetimeAnnotatedStorage::member(Base, F);
+    // The argument side never credits a reseat target: a marked pointer
+    // object handed out by address is an alias escape
+    // (recordInitProfilePointerAliasEscape), not a store.
+    LifetimeAnnotatedStorage Storage = resolveTrackedGlvalue(Glvalue);
+    if (Storage.StorageKind == LifetimeAnnotatedStorage::Kind::Reseat)
       return {};
-    }
-    // &*p / *p: the pointee of a marked pointer.
-    if (const auto *UO = dyn_cast<UnaryOperator>(Glvalue);
-        UO && UO->getOpcode() == UO_Deref) {
-      if (const VarDecl *VD = getCreditableMarkedPointer(UO->getSubExpr()))
-        return LifetimeAnnotatedStorage::pointee(VD);
-      return {};
-    }
-    if (const auto *VD =
-            dyn_cast_or_null<VarDecl>(getDirectlyNamedDecl(Glvalue));
-        VD && VD->hasLocalStorage()) {
-      // &u / u: the whole [[uninit]] entity, exactly the storage `u = e`
-      // would credit.
-      if (VD->hasAttr<UninitAttr>())
-        return LifetimeAnnotatedStorage::whole(VD);
-      // r (a marked reference bound onward): its referent; a reference
-      // cannot be reseated, so no store ever clears that credit -- only a
-      // [[now_uninit]] callee's withdrawal does.
-      if (VD->getType()->isReferenceType() && VD->hasAttr<RefToUninitAttr>())
-        return LifetimeAnnotatedStorage::pointee(VD);
-    }
-    return {};
+    return Storage;
   }
   // p as a pointer value: p's pointee -- §6.2's initialize2(p) example
   // verbatim. Only a directly named marked local/parameter pointer is
@@ -2204,6 +2230,8 @@ void SemaProfiles::recordLifetimeAnnotatedArgument(
       StoreCredit.markMemberStored(Storage.Base, Storage.Field,
                                    currentStoreStrength(Storage.Base));
     break;
+  case LifetimeAnnotatedStorage::Kind::Reseat:
+    llvm_unreachable("resolveLifetimeAnnotatedStorage maps Reseat to None");
   }
 }
 
@@ -2241,6 +2269,8 @@ bool SemaProfiles::storageIsDestroyed(QualType T, const Expr *Src) const {
     return StoreCredit.isPointeeDestroyed(Storage.Entity);
   case LifetimeAnnotatedStorage::Kind::Member:
     return StoreCredit.isMemberDestroyed(Storage.Base, Storage.Field);
+  case LifetimeAnnotatedStorage::Kind::Reseat:
+    llvm_unreachable("resolveLifetimeAnnotatedStorage maps Reseat to None");
   }
   llvm_unreachable("unknown LifetimeAnnotatedStorage kind");
 }
@@ -2637,68 +2667,37 @@ void SemaProfiles::recordInitProfileStore(const Expr *LHS) {
   // (int *&)p = q reseats p), symmetric with the recognizers' cast
   // pass-through.
   const Expr *E = ignoreTransparentCasts(LHS);
-  // *p = e: a store through the exact whole-`*p` lvalue of a marked
-  // local/parameter pointer is the pointee's initialization (paper
-  // §4.3/§4.5: for a built-in type, a write is its initialization).
-  // Class-typed pointees never get here: `*sp = S{...}` resolves to a member
-  // operator= (already rejected as a call on uninitialized storage), so
-  // PointeeStored is only ever set for built-in-typed pointee stores.
-  // Subscript stores (p[i] = e) are deliberately neither credited nor
-  // invalidating: the paper bans element-wise tracking (§5.4/§5.5).
-  if (const auto *UO = dyn_cast<UnaryOperator>(E);
-      UO && UO->getOpcode() == UO_Deref) {
-    if (const VarDecl *VD = getCreditableMarkedPointer(UO->getSubExpr()))
-      StoreCredit.markPointeeStored(VD, currentStoreStrength(VD));
+  // The store target's shape -- *p = e, a.m = e / this->m = e / m = e,
+  // u = e, r = e, p = q (also `@=` and `++`, via the shared hosts) --
+  // resolves through the shared glvalue resolver; each arm's credit action
+  // lives here (paper §4.2: "After initialization, the object is no longer
+  // [[uninit]]"; §6: ordinary assignment initializes a built-in).
+  LifetimeAnnotatedStorage Storage = resolveTrackedGlvalue(E);
+  switch (Storage.StorageKind) {
+  case LifetimeAnnotatedStorage::Kind::None:
     return;
-  }
-  // a.m = e / this->m = e / m = e (also `@=` and `++`, via the shared
-  // hosts): a whole-member store to an [[uninit]] field of a trackable base
-  // object is that member's initialization (paper §4.2: "After
-  // initialization, the object is no longer [[uninit]]"; §6: ordinary
-  // assignment initializes a built-in), keyed per (base, field) so unrelated
-  // objects and other function bodies never share credit. Only single-level
-  // bases earn credit (x.agg.m = e resolves no base -- and is itself an
-  // uninit_write violation; §5.4 rejects deep delayed-initialization
-  // tracking), element stores (a.m[i] = e) present a subscript, not a
-  // MemberExpr, and stay uncredited, and a class-typed x.agg = e is a member
-  // operator= call (rejected as a call on uninitialized storage) that never
-  // reaches this built-in-assignment funnel -- so only scalar members are
-  // ever credited. Member *pointee* stores (*a.p = e) took the deref arm
-  // above, which keys on local pointers only: the pinned per-object aliasing
-  // boundary (copies share pointees).
-  if (const auto *ME = dyn_cast<MemberExpr>(E)) {
-    if (const auto *F = dyn_cast<FieldDecl>(ME->getMemberDecl());
-        F && F->hasAttr<UninitAttr>())
-      if (const Decl *Base = resolveMemberStoreBase(ME))
-        StoreCredit.markMemberStored(Base, F, currentStoreStrength(Base));
+  case LifetimeAnnotatedStorage::Kind::Whole:
+    StoreCredit.markWholeStored(Storage.Entity,
+                                currentStoreStrength(Storage.Entity));
     return;
-  }
-  // Only a directly named local-storage variable can be credited beyond
-  // this point: statics fail hasLocalStorage.
-  const auto *VD = dyn_cast_or_null<VarDecl>(getDirectlyNamedDecl(E));
-  if (!VD || !VD->hasLocalStorage())
+  case LifetimeAnnotatedStorage::Kind::Pointee:
+    StoreCredit.markPointeeStored(Storage.Entity,
+                                  currentStoreStrength(Storage.Entity));
     return;
-  // u = e (also u @= e and ++u, via the inc-dec host): assigning the whole
-  // [[uninit]] entity is its initialization (paper §4.2/§4.5).
-  if (VD->hasAttr<UninitAttr>()) {
-    StoreCredit.markWholeStored(VD, currentStoreStrength(VD));
+  case LifetimeAnnotatedStorage::Kind::Member:
+    StoreCredit.markMemberStored(Storage.Base, Storage.Field,
+                                 currentStoreStrength(Storage.Base));
     return;
-  }
-  if (!VD->hasAttr<RefToUninitAttr>())
-    return;
-  if (VD->getType()->isReferenceType()) {
-    // r = e stores through the marked reference to its referent; a reference
-    // cannot be reseated, so the credit is never cleared.
-    StoreCredit.markPointeeStored(VD, currentStoreStrength(VD));
-  } else if (VD->getType()->isPointerType()) {
-    // p = q / p += n / ++p reseats the marked pointer: every pointee fact
-    // -- credit and the destroyed state -- described the old pointee, so
-    // all of it is retired wholesale, whatever the reseat's own
-    // conditionality (the parse-order status quo). The clear lives here in
-    // the tail funnel -- not in checkInitProfilePointerAssignment, which
+  case LifetimeAnnotatedStorage::Kind::Reseat:
+    // The reseat retires every pointee fact -- credit and the destroyed
+    // state -- wholesale, whatever its own conditionality (the parse-order
+    // status quo): they all described the old pointee. The clear lives in
+    // this tail funnel -- not in checkInitProfilePointerAssignment, which
     // runs only for plain assignment and would miss compound reseats.
-    StoreCredit.clearPointee(VD);
+    StoreCredit.clearPointee(Storage.Entity);
+    return;
   }
+  llvm_unreachable("unknown LifetimeAnnotatedStorage kind");
 }
 
 bool SemaProfiles::hasWholeObjectStoreCredit(
