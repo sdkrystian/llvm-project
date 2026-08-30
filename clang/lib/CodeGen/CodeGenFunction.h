@@ -1927,10 +1927,12 @@ public:
           // The default argument's tokens belong to the parameter's
           // construct, not to the caller being emitted: hide the caller's
           // statement suppressions and anchor the suppression chain walk at
-          // the parameter.
+          // the parameter of the redeclaration that wrote the default
+          // argument, whose dominion holds those tokens.
           ProfileFloor(CGF.ProfileSuppressionFloor,
                        CGF.ProfileStmtSuppressions.size()),
-          ProfileAnchor(CGF.ProfileSuppressionAnchor, E->getParam()) {}
+          ProfileAnchor(CGF.ProfileSuppressionAnchor,
+                        E->getParam()->getDefaultArgOwningParam()) {}
     SaveAndRestore<size_t> ProfileFloor;
     SaveAndRestore<const Decl *> ProfileAnchor;
   };

@@ -177,6 +177,31 @@ int callee(int x = 1 / g);
 // CHECK: call void @llvm.ubsantrap(i8
 [[profiles::suppress(test::arith)]] int caller() { return callee(); }
 
+// A suppression on the parameter of the declaration that writes the default
+// argument covers its emission at the call site.
+int suppressed_dfl([[profiles::suppress(test::arith)]] int x = 1 / g);
+// CHECK-LABEL: define {{.*}} @_Z18use_suppressed_dflv(
+// CHECK-NOT: llvm.ubsantrap
+// CHECK: ret i32
+int use_suppressed_dfl() { return suppressed_dfl(); }
+
+// The same holds when the called definition inherits the default argument:
+// the anchor is the parameter of the declaration that wrote it.
+int inherited_dfl([[profiles::suppress(test::arith)]] int x = 1 / g);
+int inherited_dfl(int x) { return x; }
+// CHECK-LABEL: define {{.*}} @_Z17use_inherited_dflv(
+// CHECK-NOT: llvm.ubsantrap
+// CHECK: ret i32
+int use_inherited_dfl() { return inherited_dfl(); }
+
+// A suppression on the definition's parameter has no default argument in its
+// dominion: an inherited default argument's tokens stay checked.
+int later_suppressed(int x = 1 / g);
+int later_suppressed([[profiles::suppress(test::arith)]] int x) { return x; }
+// CHECK-LABEL: define {{.*}} @_Z20use_later_suppressedv(
+// CHECK: call void @llvm.ubsantrap(i8
+int use_later_suppressed() { return later_suppressed(); }
+
 // An inlined inheriting constructor (variadic base constructor) raises the
 // suppression floor: the statement suppression at the use site does not
 // cover the NSDMI emitted within the inlined constructor.

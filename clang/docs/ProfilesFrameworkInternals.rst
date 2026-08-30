@@ -360,7 +360,11 @@ to the current stack size, hiding the statement suppressions of the function
 whose emission reached the construct, and the first two set
 ``ProfileSuppressionAnchor`` to the field or parameter whose construct the
 emitted tokens belong to (the inherited-constructor scope needs no anchor;
-it already swaps ``CurCodeDecl``).  A suppression written on the field,
+it already swaps ``CurCodeDecl``).  For a default argument that anchor is
+the parameter of the redeclaration that *wrote* it
+(``ParmVarDecl::getDefaultArgOwningParam``), not the parameter of the
+declaration the call resolved to, whose dominion holds no default-argument
+tokens when it inherits the default.  A suppression written on the field,
 parameter, or a lexical parent is honored through the anchored chain walk;
 one written around the use site is not -- the same answer Sema's positional
 dominion check gives.  Nesting composes automatically as the scopes save and
