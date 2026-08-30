@@ -29,6 +29,17 @@ void test_marker_alone() {
   (void)x;
 }
 
+// A marked pointer or union with an initializer draws only its subject-type
+// rule (pointer_marker / union_marker, which retain the marker);
+// uninit_with_initializer stays silent -- exactly one diagnostic per line.
+union UWI { int x; float y; };
+void test_subject_type_precedence() {
+  int *pp [[uninit]] = nullptr; // expected-error {{'[[uninit]]' cannot be applied to a pointer under profile 'std::init'; initialize the pointer (for example to 'nullptr')}}
+  [[uninit]] int *pq = nullptr; // expected-error {{'[[uninit]]' cannot be applied to a pointer under profile 'std::init'; initialize the pointer (for example to 'nullptr')}}
+  UWI u [[uninit]] = {1};       // expected-error {{'[[uninit]]' cannot be applied to a variable of union type under profile 'std::init'}}
+  (void)pp; (void)pq; (void)u;
+}
+
 void test_init_alone() {
   int x = 0;
   (void)x;
