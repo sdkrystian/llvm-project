@@ -602,7 +602,11 @@ patterns.  Its rules map to mechanisms as follows:
      - 1
      - ``checkInitProfileRefToUninit`` behind per-site wrappers (variable
        and member initialization, call arguments, returns, throws,
-       new-initializers, captures, object arguments)
+       new-initializers, captures, object arguments); a defaulted argument
+       is checked once at ``CXXDefaultArgExpr`` creation, in
+       ``Sema::BuildCXXDefaultArgExpr``, whatever call form reaches it --
+       speculative creations (a SFINAE-trapped candidate, an elided-copy
+       probe, an MS-ABI ctor closure) opt out per call site
    * - ``double_destroy``, ``destroy_uninit``
      - 1
      - the destroy arm of ``checkInitProfileRefToUninitBinding`` (the
