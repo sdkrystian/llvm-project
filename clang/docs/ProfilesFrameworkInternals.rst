@@ -671,7 +671,12 @@ current parse position earns toward the credit keyed by a given key is
 that owns the credited entity -- outside template instantiation (the parser
 scope chain is parser-only state, and the requires-uninit direction ignores
 credit while instantiating anyway), at conditional depth 0
-(``currentConditionalDepth``), before the function has branched by ``goto``
+(``currentConditionalDepth``; a conditional-target store's arms
+additionally carry an explicit ``Maybe`` cap in ``recordStoreTarget``,
+because the conditional expression's own region has unwound by
+assignment-completion time -- a marked-pointer arm still reseats
+wholesale, per ``clearPointee``'s semantics), before the function has
+branched by ``goto``
 (a ``goto`` earlier in the body could skip a later store without
 introducing any scope; the tracking flag is shared with ``switch``, an
 over-inclusion in the safe direction), with the enclosing function's

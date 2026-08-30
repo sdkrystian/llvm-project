@@ -2691,34 +2691,62 @@ void SemaProfiles::recordInitProfileStore(const Expr *LHS) {
   // form ((int &)u = 5 credits u whole; *(int *)p = 5 credits p's pointee;
   // (int *&)p = q reseats p), symmetric with the recognizers' cast
   // pass-through.
-  const Expr *E = ignoreTransparentCasts(LHS);
-  // The store target's shape -- *p = e, a.m = e / this->m = e / m = e,
+  recordStoreTarget(LHS, /*ConditionalArm=*/false);
+}
+
+void SemaProfiles::recordStoreTarget(const Expr *E, bool ConditionalArm) {
+  E = ignoreTransparentCasts(E);
+  // A conditional or comma target stores to whichever lvalue the chosen arm
+  // names: record each named arm. The Maybe cap is explicit because
+  // ConditionalExprRegion has unwound by assignment-completion time, so
+  // currentStoreStrength alone cannot see the target's own conditionality.
+  if (const auto *CO = dyn_cast<ConditionalOperator>(E)) {
+    recordStoreTarget(CO->getTrueExpr(), /*ConditionalArm=*/true);
+    recordStoreTarget(CO->getFalseExpr(), /*ConditionalArm=*/true);
+    return;
+  }
+  if (const auto *BCO = dyn_cast<BinaryConditionalOperator>(E)) {
+    // The written common operand doubles as the true arm, mirroring
+    // classifyUninitPassThrough's OVE avoidance.
+    recordStoreTarget(BCO->getCommon(), /*ConditionalArm=*/true);
+    recordStoreTarget(BCO->getFalseExpr(), /*ConditionalArm=*/true);
+    return;
+  }
+  if (const auto *BO = dyn_cast<BinaryOperator>(E); BO && BO->isCommaOp()) {
+    recordStoreTarget(BO->getRHS(), ConditionalArm);
+    return;
+  }
+  // The leaf target's shape -- *p = e, a.m = e / this->m = e / m = e,
   // u = e, r = e, p = q (also `@=` and `++`, via the shared hosts) --
   // resolves through the shared glvalue resolver; each arm's credit action
   // lives here (paper §4.2: "After initialization, the object is no longer
   // [[uninit]]"; §6: ordinary assignment initializes a built-in).
   LifetimeAnnotatedStorage Storage = resolveTrackedGlvalue(E);
+  auto Strength = [&](const Decl *CreditKey) {
+    return ConditionalArm ? InitCreditStrength::Maybe
+                          : currentStoreStrength(CreditKey);
+  };
   switch (Storage.StorageKind) {
   case LifetimeAnnotatedStorage::Kind::None:
     return;
   case LifetimeAnnotatedStorage::Kind::Whole:
-    StoreCredit.markWholeStored(Storage.Entity,
-                                currentStoreStrength(Storage.Entity));
+    StoreCredit.markWholeStored(Storage.Entity, Strength(Storage.Entity));
     return;
   case LifetimeAnnotatedStorage::Kind::Pointee:
-    StoreCredit.markPointeeStored(Storage.Entity,
-                                  currentStoreStrength(Storage.Entity));
+    StoreCredit.markPointeeStored(Storage.Entity, Strength(Storage.Entity));
     return;
   case LifetimeAnnotatedStorage::Kind::Member:
     StoreCredit.markMemberStored(Storage.Base, Storage.Field,
-                                 currentStoreStrength(Storage.Base));
+                                 Strength(Storage.Base));
     return;
   case LifetimeAnnotatedStorage::Kind::Reseat:
     // The reseat retires every pointee fact -- credit and the destroyed
     // state -- wholesale, whatever its own conditionality (the parse-order
-    // status quo): they all described the old pointee. The clear lives in
-    // this tail funnel -- not in checkInitProfilePointerAssignment, which
-    // runs only for plain assignment and would miss compound reseats.
+    // status quo, matching clearPointee's documented semantics -- so a
+    // conditional arm reseats like a direct target): they all described the
+    // old pointee. The clear lives in this tail funnel -- not in
+    // checkInitProfilePointerAssignment, which runs only for plain
+    // assignment and would miss compound reseats.
     StoreCredit.clearPointee(Storage.Entity);
     return;
   }

@@ -904,6 +904,13 @@ public:
   /// consulted through the has*Credit queries.
   InitStoreCreditMap StoreCredit;
 
+  /// The recursive tail of recordInitProfileStore: record the store's credit
+  /// (or reseat) for every lvalue the target \p E can name, walking
+  /// conditional arms -- with \p ConditionalArm capping their credit at the
+  /// suppressing strength, since the chosen arm is not known -- and comma
+  /// right operands, then resolving the leaf through resolveTrackedGlvalue.
+  void recordStoreTarget(const Expr *E, bool ConditionalArm);
+
   /// std::init / ref_to_uninit (paper §5): a thrown pointer copy-initializes
   /// the exception object, which cannot carry [[ref_to_uninit]]; a no-op for
   /// a non-pointer exception object. Hosts the cluster from

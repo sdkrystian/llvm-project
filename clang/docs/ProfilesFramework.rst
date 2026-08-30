@@ -719,8 +719,11 @@ The parse-order refinement: a *whole-entity store* credits its target as
 initialized (§4.2, §4.5).  After ``u = 5;`` the ``[[uninit]]`` variable
 ``u`` counts as initialized, and after ``*p = 5;`` the marked pointer's
 pointee does, for every later ``*p`` access -- until ``p`` is reseated
-(``p = q``, ``p += n``, ``p++``), which withdraws the credit; a store
-through a marked *reference* credits its referent permanently.  A store
+(``p = q``, ``p += n``, ``p++``; a reseat through a conditional target,
+``(c ? p : q) = e``, counts for every marked arm), which withdraws the
+credit; a store through a marked *reference* credits its referent
+permanently.  A store through a conditional target credits each named arm
+with the suppressing strength only, since the chosen arm is not known.  A store
 through a transparent cast credits (and reseats) like its uncast form --
 ``(int &)u = 5`` credits ``u`` whole, ``*(int *)p = 5`` the pointee,
 ``(int *&)p = q`` reseats ``p`` -- exactly the transparency the
