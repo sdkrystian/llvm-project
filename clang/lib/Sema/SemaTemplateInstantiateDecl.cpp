@@ -6343,8 +6343,12 @@ void Sema::InstantiateVariableInitializer(
     // `inline` variables are a definition and declaration all in one; we won't
     // pick up an initializer from anywhere else.
     if (Var->isStaticDataMember() && !Var->isInline()) {
-      if (!Var->isOutOfLine())
+      if (!Var->isOutOfLine()) {
+        // The instantiated in-class declaration of a static data member never
+        // reaches ActOnUninitializedDecl; a stale [[uninit]] classifies here.
+        Profiles().checkInitProfileStaticMarker(Var);
         return;
+      }
 
       // If the declaration inside the class had an initializer, don't add
       // another one to the out-of-line definition.

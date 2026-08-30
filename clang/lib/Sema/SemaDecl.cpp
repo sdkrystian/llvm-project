@@ -14698,6 +14698,11 @@ void Sema::ActOnUninitializedDecl(Decl *RealDecl) {
           !Var->isInvalidDecl())
         ExternalDeclarations.push_back(Var);
 
+      // A stale [[uninit]] contradicts a zero-initialized static-duration
+      // entity on a non-defining declaration too (an extern declaration, an
+      // in-class static data member); see checkInitProfileStaticMarker.
+      Profiles().checkInitProfileStaticMarker(Var);
+
       return;
 
     case VarDecl::TentativeDefinition:
