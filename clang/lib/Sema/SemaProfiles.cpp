@@ -802,10 +802,15 @@ void SemaProfiles::checkInitProfileStaticMarker(const VarDecl *Var) {
   // cheap decl-state tests, then the type walk.
   if (!isProfileEnforced(Profile))
     return;
-  if (Var->isInvalidDecl() ||
-      (Var->getStorageDuration() != SD_Static &&
-       Var->getStorageDuration() != SD_Thread) ||
-      !Var->hasAttr<UninitAttr>())
+  if (Var->isInvalidDecl() || (Var->getStorageDuration() != SD_Static &&
+                               Var->getStorageDuration() != SD_Thread))
+    return;
+  // An inherited marker was written -- and classified -- on a previous
+  // declaration; diagnosing it again on every redeclaration would only
+  // repeat the answer. An instantiated marker is a fresh clone, so a
+  // template's static data members still classify.
+  const auto *UA = Var->getAttr<UninitAttr>();
+  if (!UA || UA->isInherited())
     return;
   // Act only on the classifier's StaticStorage verdict: a union or pointer
   // subject is union_marker / pointer_marker's, and a contradicting

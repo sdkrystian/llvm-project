@@ -482,7 +482,12 @@ guarantee -- are rejected:
    }
 
 Each of these keys on the array element type, so an array of pointers or of
-unions is rejected exactly like a single one.  A no-op initialization -- the
+unions is rejected exactly like a single one.  The rules apply in a fixed
+precedence, so a marked entity draws exactly one of them: the subject's type
+first (a marked pointer or union is rejected by ``pointer_marker`` /
+``union_marker`` whatever its storage duration or initializer), then static
+or thread storage duration, then a contradicting initializer.  A no-op
+initialization -- the
 trivial default-initialization of a scalar or aggregate that leaves a scalar
 subobject indeterminate -- is consistent with the marker; any other
 synthesized initialization contradicts it and is rejected (§5.3): a member or
@@ -951,7 +956,10 @@ they are never uninitialized: ``[[uninit]]`` on one is rejected -- by
 ``static_marker`` when nothing else initializes the object, and by
 ``uninit_with_initializer`` when a written initializer or a non-no-op
 default-initialization already contradicts the marker (exactly one of the
-pair fires).  Non-local variables with static storage duration must
+pair fires).  ``static_marker`` fires at the declaration that writes the
+marker, defining or not: an ``extern`` declaration and an in-class static
+data member declaration are rejected themselves, and redeclarations that
+merely inherit the marker are not diagnosed again.  Non-local variables with static storage duration must
 additionally be initialized at compile time (rule ``static_runtime_init``,
 §3), because cross-translation-unit initialization order can otherwise
 produce a read of a not-yet-initialized object:

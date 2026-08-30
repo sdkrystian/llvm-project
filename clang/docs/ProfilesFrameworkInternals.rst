@@ -583,7 +583,11 @@ patterns.  Its rules map to mechanisms as follows:
      - ``checkInitProfileStaticRuntimeInit``
    * - ``static_marker``
      - 1
-     - ``checkInitProfileStaticMarker``
+     - ``checkInitProfileStaticMarker``, hosted at every point a
+       static-duration declaration's initializer state becomes final: both
+       arms of ``ActOnUninitializedDecl`` (definitions and non-defining
+       declarations) and the instantiated in-class static data member arm of
+       ``InstantiateVariableInitializer``
    * - ``union_marker``, ``pointer_marker``
      - attribute handler (enforcement-gated)
      - ``checkInitProfileMarkerPlacement``

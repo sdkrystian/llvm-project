@@ -165,6 +165,40 @@ MixedAgg g_mixed_marked [[uninit]]; // expected-error {{variable 'g_mixed_marked
 // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
 [[profiles::suppress(std::init)]] int g_marker_suppressed_all [[uninit]];
 
+// The marker is rejected at the declaration that writes it, defining or not:
+// an extern declaration and an in-class static data member declaration are
+// zero-initialized entities like any other static.
+extern int g_extern_marked [[uninit]];        // expected-error {{'[[uninit]]' cannot be applied to variable 'g_extern_marked' with static storage duration under profile 'std::init'; it is zero-initialized}}
+struct InClassStatic {
+  static int s [[uninit]];                    // expected-error {{'[[uninit]]' cannot be applied to variable 's' with static storage duration under profile 'std::init'; it is zero-initialized}}
+};
+
+// A redeclaration that merely inherits the marker is not diagnosed again --
+// in either direction, and not on an out-of-line definition either.
+extern int g_redecl_first [[uninit]];         // expected-error {{'[[uninit]]' cannot be applied to variable 'g_redecl_first' with static storage duration under profile 'std::init'; it is zero-initialized}}
+extern int g_redecl_first;
+extern int g_redecl_second;
+extern int g_redecl_second [[uninit]];        // expected-error {{'[[uninit]]' cannot be applied to variable 'g_redecl_second' with static storage duration under profile 'std::init'; it is zero-initialized}}
+int InClassStatic::s;
+
+// A marked extern declaration *with* an initializer is a definition and
+// stays uninit_with_initializer's (exactly one of the pair fires).
+extern int g_extern_with_init [[uninit]] = 0; // expected-error {{variable 'g_extern_with_init' cannot be both '[[uninit]]' and have an initializer under profile 'std::init'}} \
+                                              // expected-warning {{'extern' variable has an initializer}} \
+                                              // no-profiles-warning {{'extern' variable has an initializer}}
+
+// Suppression covers the non-defining host like the defining one.
+// no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+[[profiles::suppress(std::init, rule: "static_marker")]] extern int g_extern_suppressed [[uninit]];
+
+// A class template's static data member classifies at instantiation (the
+// pattern's marker is a fresh clone there, not an inherited one).
+template <typename T>
+struct TemplateStatic {
+  static T s [[uninit]]; // expected-error {{'[[uninit]]' cannot be applied to variable 's' with static storage duration under profile 'std::init'; it is zero-initialized}}
+};
+template struct TemplateStatic<int>; // expected-note {{in instantiation of template class 'TemplateStatic<int>' requested here}}
+
 // A profile rule fires on the instantiation, not the template pattern: a
 // dependent static is diagnosed once, at instantiation.
 template <typename T>
