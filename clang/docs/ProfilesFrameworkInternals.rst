@@ -376,9 +376,7 @@ member functions of a local class defined inside a suppressed *statement*,
 ObjC blocks (no lambda-style implicit-attribute propagation exists for
 ``BlockDecl``), and C++26 structured-binding condition variables, whose
 holding-variable initializer is emitted deferred, outside the variable's
-suppression scope.  Sema's parse-time stack has a blind spot of its own on
-condition-variable declarators (the parser installs no suppress scope
-there); the post-parse walker and CodeGen honor them.
+suppression scope.
 
 
 Modules and Serialization

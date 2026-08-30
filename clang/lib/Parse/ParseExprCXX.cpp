@@ -2060,6 +2060,10 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
     return Sema::ConditionError();
   Decl *DeclOut = Dcl.get();
 
+  // The condition variable's suppress attributes cover its initializer; see
+  // ProfileSuppressScope.
+  SemaProfiles::ProfileSuppressScope ProfileSuppressForInit(Actions, DeclOut);
+
   // '=' assignment-expression
   // If a '==' or '+=' is found, suggest a fixit to '='.
   bool CopyInitialization = isTokenEqualOrEqualTypo();

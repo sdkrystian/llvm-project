@@ -191,6 +191,18 @@ void test_suppress_on_stmts() {
   (void)reinterpret_cast<int*>(0);
 }
 
+// Suppress on a condition variable's declarator covers its initializer; the
+// unsuppressed form and a mismatched rule are diagnosed.
+void test_suppress_on_condition_variable() {
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  if ([[profiles::suppress(test::type_cast)]] int *p = reinterpret_cast<int*>(0)) {}
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  while ([[profiles::suppress(test::type_cast)]] int *p = reinterpret_cast<int*>(0)) break;
+  if (int *p = reinterpret_cast<int*>(0)) {} // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  if ([[profiles::suppress(test::type_cast, rule: "static_cast")]] int *p = reinterpret_cast<int*>(0)) {} // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+}
+
 // Suppress on null-statement is a no-op: the next statement is NOT suppressed.
 void test_suppress_null_stmt() {
   // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
