@@ -2519,13 +2519,36 @@ void SemaProfiles::checkInitProfileSubobjectWrite(SourceLocation Loc,
               : (uninitWriteChainSeesMarker(LHS) ? 1 : 2));
 }
 
+/// The [[ref_to_uninit]] marking of the pointer entity an assignment target
+/// names: true/false for a directly named marked/unmarked entity -- any
+/// other lvalue (e.g. *pp, arr[i]) cannot carry a local marker, so it is
+/// the default unmarked pointer (paper §4.3) -- and std::nullopt for a
+/// conditional whose arms disagree, where neither direction of the binding
+/// check is sound. Peels transparent casts and walks the pass-through
+/// target shapes ((c ? p : q) = e assigns whichever arm is chosen, comma
+/// yields its right operand, the GNU form's written common operand doubles
+/// as the true arm -- mirroring classifyUninitPassThrough's OVE avoidance).
+static std::optional<bool> resolveAssignTargetMarking(const Expr *E) {
+  E = SemaProfiles::ignoreTransparentCasts(E);
+  if (const auto *CO = dyn_cast<ConditionalOperator>(E)) {
+    std::optional<bool> T = resolveAssignTargetMarking(CO->getTrueExpr());
+    std::optional<bool> F = resolveAssignTargetMarking(CO->getFalseExpr());
+    return T == F ? T : std::nullopt;
+  }
+  if (const auto *BCO = dyn_cast<BinaryConditionalOperator>(E)) {
+    std::optional<bool> T = resolveAssignTargetMarking(BCO->getCommon());
+    std::optional<bool> F = resolveAssignTargetMarking(BCO->getFalseExpr());
+    return T == F ? T : std::nullopt;
+  }
+  if (const auto *BO = dyn_cast<BinaryOperator>(E); BO && BO->isCommaOp())
+    return resolveAssignTargetMarking(BO->getRHS());
+  const ValueDecl *VD = SemaProfiles::getDirectlyNamedDecl(E);
+  return VD && VD->hasAttr<RefToUninitAttr>();
+}
+
 void SemaProfiles::checkInitProfilePointerAssignment(Expr *LHS, Expr *RHS,
                                                      SourceLocation OpLoc) {
-  // References cannot be reseated, so only pointer assignment applies. The
-  // marker is read when the LHS directly names a pointer entity; any other
-  // lvalue (e.g. *pp, arr[i]) cannot carry a local marker, so it is the
-  // default unmarked pointer (paper §4.3) and must not be bound to
-  // uninitialized memory.
+  // References cannot be reseated, so only pointer assignment applies.
   if (!LHS->getType()->isPointerType())
     return;
   // An instantiation-dependent LHS (e.g. an unresolved member access) has no
@@ -2537,9 +2560,11 @@ void SemaProfiles::checkInitProfilePointerAssignment(Expr *LHS, Expr *RHS,
   // marker must judge q), like every other marker read.
   if (LHS->isInstantiationDependent())
     return;
-  const ValueDecl *VD = getDirectlyNamedDecl(ignoreTransparentCasts(LHS));
-  checkInitProfileRefToUninit(OpLoc, VD && VD->hasAttr<RefToUninitAttr>(),
-                              /*IsReference=*/false, RHS);
+  // Mixed-marking conditional targets check neither direction: the source
+  // must be acceptable to whichever arm is chosen, and either marking
+  // answer would reject one legal combination.
+  if (std::optional<bool> Marked = resolveAssignTargetMarking(LHS))
+    checkInitProfileRefToUninit(OpLoc, *Marked, /*IsReference=*/false, RHS);
   // An assignment can hand out a mutable alias of a marked pointer object
   // (pp = &p) exactly like a binding does; the withdrawal mirrors the
   // funnel's recorder tail.

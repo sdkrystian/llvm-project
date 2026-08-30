@@ -262,6 +262,27 @@ void test_assignment_indirect() {
   (void)pp; (void)arr;
 }
 
+// A conditional, comma, or GNU `?:` assignment target stores to whichever
+// pointer the chosen arm names: arms that agree on their marking are checked
+// under it, and arms of mixed marking are accepted in both directions (the
+// source must suit whichever arm is chosen; either marking answer would
+// reject one legal combination).
+void test_conditional_assignment_target(bool c) {
+  int *p [[ref_to_uninit]] = &g_uninit;
+  int *q [[ref_to_uninit]] = &g_uninit2;
+  int *r = &g_init;
+  int *s = &g_init2;
+  (c ? p : q) = &g_uninit; // OK: both arms marked, uninitialized source
+  (c ? p : q) = &g_init;   // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (c ? r : s) = &g_init;   // OK: both arms unmarked, initialized source
+  (c ? r : s) = &g_uninit; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (c ? p : r) = &g_uninit; // OK: mixed marking
+  (c ? p : r) = &g_init;   // OK: mixed marking
+  (h(), p) = &g_init;      // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (q ?: p) = &g_init;      // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)p; (void)q; (void)r; (void)s;
+}
+
 void test_suppress() {
   // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
   [[profiles::suppress(std::init, rule: "ref_to_uninit")]] int *s = &g_uninit; // OK: suppressed
