@@ -625,14 +625,23 @@ public:
   /// True if the current statement has noconvergent attribute.
   bool InNoConvergentAttributedStmt = false;
 
-  /// The [[profiles::suppress]] attributes of the statements enclosing the
+  /// One statement-carried [[profiles::suppress]] entry: the attribute and,
+  /// for a DeclStmt or local-variable entry, its owning declarator's dominion
+  /// (profiles::declaratorDominion). The range is invalid for an
+  /// AttributedStmt entry -- statement scoping already bounds those.
+  struct ProfileStmtSuppression {
+    const ProfilesSuppressAttr *Attr;
+    SourceRange OwnerDominion;
+  };
+
+  /// The [[profiles::suppress]] entries of the statements enclosing the
   /// code being emitted, innermost last -- pushed by the AttributedStmt,
   /// DeclStmt, and local-variable emission hooks. Entries at indices below
   /// ProfileSuppressionFloor belong to an enclosing construct whose tokens do
   /// not cover the code being emitted (emitting an NSDMI, a default argument,
   /// or an inlined inherited constructor raises the floor; P3589R2's
   /// suppression dominion) and are not consulted.
-  SmallVector<const ProfilesSuppressAttr *, 4> ProfileStmtSuppressions;
+  SmallVector<ProfileStmtSuppression, 4> ProfileStmtSuppressions;
   size_t ProfileSuppressionFloor = 0;
 
   /// When non-null, the declaration whose lexical chain carries the
@@ -642,14 +651,16 @@ public:
   const Decl *ProfileSuppressionAnchor = nullptr;
 
   /// True if an active [[profiles::suppress]] for \p Profile / \p Rule covers
-  /// the code being emitted: consults the statement-suppression stack above
-  /// the floor, then the lexical declaration chain of the suppression anchor
-  /// (or, absent one, of CurCodeDecl -- null in synthesized helpers such as
-  /// block copy/dispose functions, which carry no suppressions). Queried
-  /// lazily at each check site rather than seeded per-function because the
-  /// current declaration can change mid-function without a StartFunction
-  /// (inlined inheriting constructors).
-  bool isProfileSuppressionActive(StringRef Profile, StringRef Rule) const;
+  /// the code being emitted at \p Loc: consults the statement-suppression
+  /// stack above the floor (an entry with a valid dominion matches only when
+  /// it contains \p Loc), then the lexical declaration chain of the
+  /// suppression anchor (or, absent one, of CurCodeDecl -- null in
+  /// synthesized helpers such as block copy/dispose functions, which carry no
+  /// suppressions). Queried lazily at each check site rather than seeded
+  /// per-function because the current declaration can change mid-function
+  /// without a StartFunction (inlined inheriting constructors).
+  bool isProfileSuppressionActive(StringRef Profile, StringRef Rule,
+                                  SourceLocation Loc) const;
 
   /// RAII bounding the lifetime of statement-carried [[profiles::suppress]]
   /// entries on ProfileStmtSuppressions: entries added through it are popped

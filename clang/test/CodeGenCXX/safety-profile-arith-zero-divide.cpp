@@ -83,6 +83,30 @@ int decl_suppressed(int a, int b) {
   return x;
 }
 
+// In a multi-declarator group, a declarator's suppression covers that
+// declarator's initializer only: its siblings keep their checks.
+// CHECK-LABEL: define {{.*}} @_Z10group_declii(
+// CHECK: call void @llvm.ubsantrap(i8
+// CHECK: sdiv i32 1000,
+// CHECK-NOT: llvm.ubsantrap
+// CHECK: sdiv i32 10,
+// CHECK: call void @llvm.ubsantrap(i8
+// CHECK: sdiv i32 20,
+int group_decl(int a, int b) {
+  int x = 1000 / b, y [[profiles::suppress(test::arith)]] = 10 / b,
+      z = 20 / b;
+  return x + y + z;
+}
+
+// A prefix suppression covers every declarator of the group.
+// CHECK-LABEL: define {{.*}} @_Z12group_prefixii(
+// CHECK-NOT: llvm.ubsantrap
+// CHECK: ret i32
+int group_prefix(int a, int b) {
+  [[profiles::suppress(test::arith)]] int x = 1000 / b, y = 10 / b;
+  return x + y;
+}
+
 // A condition variable is emitted without an enclosing DeclStmt; it is
 // checked, and suppression on its declarator is honored.
 // CHECK-LABEL: define {{.*}} @_Z8cond_varii(

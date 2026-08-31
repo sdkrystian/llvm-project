@@ -358,10 +358,15 @@ structure over the AST it is emitting:
 - A *statement-suppression stack* (``ProfileStmtSuppressions``), pushed and
   popped by ``ProfileSuppressionScope`` RAII guards in every
   statement-emission path that can carry ``[[profiles::suppress]]``:
-  ``EmitAttributedStmt``, ``EmitDeclStmt`` (a suppression on a local variable
-  covers its whole declaration statement), and the local-variable arm of
+  ``EmitAttributedStmt``, ``EmitDeclStmt``, and the local-variable arm of
   ``EmitDecl`` (an if/while/for/switch condition variable is emitted
-  directly, never through ``EmitDeclStmt``).
+  directly, never through ``EmitDeclStmt``).  A declaration-carried entry
+  records its owning declarator's dominion
+  (``profiles::declaratorDominion``) and matches only check sites located
+  inside it, so one declarator's suppression stays off its siblings in a
+  multi-declarator group -- the same positional rule the post-parse walk
+  applies; an AttributedStmt entry records no range, since the emitting
+  scope's lifetime already bounds it.
 - The lexical declaration chain, reached through the shared walk in
   ``clang/AST/Profiles.h``.  Because Sema propagates active suppressions onto
   lambda call operators as implicit attributes, the chain walk also recovers

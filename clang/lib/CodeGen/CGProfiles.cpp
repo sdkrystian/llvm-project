@@ -24,8 +24,9 @@ void CodeGenFunction::ProfileSuppressionScope::addFromStmt(const Stmt *S) {
   if (!CGF.getLangOpts().Profiles)
     return;
   profiles::forEachSuppression(
-      S, [&](const Decl *, const ProfilesSuppressAttr &A) {
-        CGF.ProfileStmtSuppressions.push_back(&A);
+      S, [&](const Decl *Owner, const ProfilesSuppressAttr &A) {
+        CGF.ProfileStmtSuppressions.push_back(
+            {&A, Owner ? profiles::declaratorDominion(*Owner) : SourceRange()});
         return false;
       });
 }
@@ -39,20 +40,25 @@ void CodeGenFunction::ProfileSuppressionScope::addFromDecl(const Decl *D) {
     return;
   profiles::forEachSuppression(
       D, /*WalkLexicalParents=*/false,
-      [&](const Decl &, const ProfilesSuppressAttr &A) {
-        CGF.ProfileStmtSuppressions.push_back(&A);
+      [&](const Decl &Owner, const ProfilesSuppressAttr &A) {
+        CGF.ProfileStmtSuppressions.push_back(
+            {&A, profiles::declaratorDominion(Owner)});
         return false;
       });
 }
 
 bool CodeGenFunction::isProfileSuppressionActive(StringRef Profile,
-                                                 StringRef Rule) const {
+                                                 StringRef Rule,
+                                                 SourceLocation Loc) const {
   assert(ProfileSuppressionFloor <= ProfileStmtSuppressions.size() &&
          "suppression floor points past the end of the stack");
-  for (const ProfilesSuppressAttr *A : llvm::ArrayRef(ProfileStmtSuppressions)
-                                           .drop_front(ProfileSuppressionFloor))
-    if (profiles::suppressionMatches(A->getProfileName(), A->getRule(), Profile,
-                                     Rule))
+  const SourceManager &SM = getContext().getSourceManager();
+  for (const ProfileStmtSuppression &E :
+       llvm::ArrayRef(ProfileStmtSuppressions)
+           .drop_front(ProfileSuppressionFloor))
+    if (profiles::suppressionMatches(E.Attr->getProfileName(),
+                                     E.Attr->getRule(), Profile, Rule) &&
+        profiles::dominionCovers(E.OwnerDominion, Loc, SM))
       return true;
   // The declaration side rides the shared lexical-chain walk, off the anchor
   // when one is set (the code being emitted belongs to that declaration's
@@ -77,7 +83,7 @@ void CodeGenFunction::EmitProfileRuntimeCheck(
   // is parsed, or from a BMI -- outside the dominion.
   if (!getContext().isProfileEnforcedAt(Profile, Loc) ||
       getContext().isProfileExemptSystemHeaderLoc(Loc) ||
-      isProfileSuppressionActive(Profile, Rule))
+      isProfileSuppressionActive(Profile, Rule, Loc))
     return;
   // The check fires: only now build the site's "no violation" predicate, so
   // an inactive site emits no IR at all.
