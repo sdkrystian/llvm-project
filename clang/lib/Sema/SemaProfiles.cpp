@@ -1026,6 +1026,33 @@ void SemaProfiles::checkNowInitVacuity(FunctionDecl *FD) {
   FD->dropAttr<NowInitAttr>();
 }
 
+void SemaProfiles::addKnownInitLifecycleAttributes(FunctionDecl *FD) {
+  // Injected implicit attributes are indistinguishable from hand-written
+  // ones, so the funnels, store credit, CFG passes, serialization, and
+  // suppression all apply unchanged, and template specializations inherit
+  // them from the pattern via attribute instantiation. The injected pair is
+  // consistent by construction (marker and NowInit added together, first
+  // parameter checked as a pointer), so checkNowInitVacuity -- which runs
+  // before this seam -- is never contradicted.
+  if (!getLangOpts().Profiles || !FD->getIdentifier() ||
+      !FD->isInStdNamespace() || FD->getNumParams() < 1)
+    return;
+  const ParmVarDecl *P0 = FD->getParamDecl(0);
+  if (!P0->getType()->isPointerType())
+    return;
+  ASTContext &Context = getASTContext();
+  if (FD->getName() == "construct_at") {
+    if (!P0->hasAttr<RefToUninitAttr>())
+      FD->getParamDecl(0)->addAttr(
+          RefToUninitAttr::CreateImplicit(Context, P0->getLocation()));
+    if (!FD->hasAttr<NowInitAttr>())
+      FD->addAttr(NowInitAttr::CreateImplicit(Context, FD->getLocation()));
+  } else if (FD->getName() == "destroy_at") {
+    if (!FD->hasAttr<NowUninitAttr>())
+      FD->addAttr(NowUninitAttr::CreateImplicit(Context, FD->getLocation()));
+  }
+}
+
 // std::init / ref_to_uninit (paper §5). Two mutually-recursive local
 // recognizers over the syntactic form of a source expression -- no flow
 // analysis and no type-system tracking. Uninitialized storage is only ever

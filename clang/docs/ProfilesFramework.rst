@@ -797,9 +797,11 @@ consequence
 (after an *unconditional* ``fill(&u)`` in the entity's own function, a
 second ``fill(&u)`` is rejected: ``u`` no longer refers to uninitialized
 memory, which incidentally catches double ``construct_at``).  This is R2
-§4.5's requested library annotation: declare ``construct_at`` with
-``[[now_init]]`` and a ``[[ref_to_uninit]]`` first parameter and the
-lifecycle *start* is checked.  The §4.4 ``now_init()`` identity function
+§4.5's requested library annotation, and Clang applies it itself: a
+``std::construct_at`` declaration whose first parameter is of pointer type
+receives ``[[now_init]]`` and the parameter marker implicitly, so the real
+``<memory>`` declaration checks the lifecycle *start* with no user
+declaration.  The §4.4 ``now_init()`` identity function
 needs no compiler support at all -- declared as ``template<class T> T*
 now_init(T* p [[ref_to_uninit]]);``, its unmarked return is already trusted
 as initialized -- but only the attribute legalizes the original *name* after
@@ -833,11 +835,11 @@ release function.  Never accepted is storage a
 ``[[now_uninit]]`` call already destroyed.  That is a double destruction
 (rule ``double_destroy``), definite by construction: only an unconditional
 same-function destroy records the destroyed state, and any store or
-``[[now_init]]`` call retires it.  Declare ``destroy_at`` as
-``template<class T> [[now_uninit]] void destroy_at(T* p);`` and the
-construct/destroy/construct cycle
-is legal, a second destruction is rejected, a destroy of never-constructed
-storage is rejected too, and binding the destroyed
+``[[now_init]]`` call retires it.  Clang declares ``std::destroy_at`` this
+way itself -- a ``std::destroy_at`` whose first parameter is of pointer type
+receives ``[[now_uninit]]`` implicitly -- so the construct/destroy/construct
+cycle is legal, a second destruction is rejected, a destroy of
+never-constructed storage is rejected too, and binding the destroyed
 storage to an ordinary pointer or reference is rejected as the
 unmarked-direction violation.  A function may
 carry both attributes -- a reinitializer that destroys and then
@@ -1066,6 +1068,11 @@ those entries never cause a rejection.
   are suppress-only: a marked pointer *member*'s pointee is never
   credited, and an element access (``ptr[i].x``) skips the store-credit
   consult, so no prior fill legalizes either.
+- Placement ``new`` into marked storage (``new (&u) T``) is rejected --
+  the address binds an unmarked placement parameter -- and earns no
+  credit; ``std::construct_at`` is the sanctioned spelling for
+  constructing into ``[[uninit]]`` storage (it carries the lifecycle
+  annotations implicitly, above).
 
 **Missed diagnostics (never rejections):**
 
@@ -1079,6 +1086,13 @@ those entries never cause a rejection.
   plain ``[[uninit]]`` *local* after a destroy stays with the flow-based
   local-variable analysis, which treats the call as an escape in every
   mode, so it is a missed diagnostic).
+- The implicit standard-library annotation covers ``std::construct_at``
+  and ``std::destroy_at`` with pointer first parameters only.
+  ``std::destroy_n`` and the ``std::uninitialized_*`` family take
+  iterator-typed parameters -- not pointers by form, and iterator shapes
+  have no credit representation -- and the ``std::ranges::`` lifecycle
+  CPOs are class objects, not named functions, so none of them are
+  annotated: their calls earn and withdraw nothing.
 - The raw storage-release callees (``free``, ``realloc``, replaceable
   global ``operator delete``) accept storage that was never constructed:
   that is ``free``'s contract, not a gap -- only a ``[[now_uninit]]``

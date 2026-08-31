@@ -981,6 +981,18 @@ public:
   /// profile policy -- fires regardless of -fprofiles, like the parse-time
   /// marker subject checks.
   void checkNowInitVacuity(FunctionDecl *FD);
+
+  /// std::init: attach the lifecycle markers to a matching std::construct_at
+  /// (RefToUninit on the first parameter + NowInit) or std::destroy_at
+  /// (NowUninit) declaration, so the real library functions work under
+  /// enforcement -- there is no portable way to annotate namespace-std
+  /// declarations from user code. Keyed on form (a first parameter of
+  /// pointer type, dependent or not), so the marker subject rules hold by
+  /// construction; iterator-shaped relatives (destroy_n, the uninitialized_*
+  /// family) and ranges:: CPOs are out of scope. Idempotent across
+  /// redeclarations and future library annotations. Called from
+  /// Sema::AddKnownFunctionAttributes; see ProfilesFrameworkInternals.rst.
+  void addKnownInitLifecycleAttributes(FunctionDecl *FD);
 };
 
 } // namespace clang

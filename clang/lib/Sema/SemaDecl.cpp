@@ -17656,6 +17656,7 @@ void Sema::AddKnownFunctionAttributes(FunctionDecl *FD) {
   inferLifetimeBoundAttribute(FD);
   inferLifetimeCaptureByAttribute(FD);
   AddKnownFunctionAttributesForReplaceableGlobalAllocationFunction(FD);
+  Profiles().addKnownInitLifecycleAttributes(FD);
 
   // If C++ exceptions are enabled but we are told extern "C" functions cannot
   // throw, add an implicit nothrow attribute to any extern "C" function we come

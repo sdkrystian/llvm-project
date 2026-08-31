@@ -641,6 +641,23 @@ trust-the-constructor principle (P4222R1.1 §5.1), which is also why members
 of objects initialized by a user-provided constructor are deliberately not
 flow-tracked.
 
+Clang itself supplies the standard library's lifecycle annotations:
+``SemaProfiles::addKnownInitLifecycleAttributes``, called from
+``Sema::AddKnownFunctionAttributes`` for every function declaration, attaches
+an implicit ``RefToUninitAttr`` (first parameter) plus ``NowInitAttr`` to a
+``std::construct_at``, and ``NowUninitAttr`` to a ``std::destroy_at``, whose
+first parameter is of pointer type.  The form key keeps the marker subject
+rules holding by construction (a ``T*`` parameter is a pointer by form even
+when ``T`` is dependent), and the seam runs after declaration merging and
+after ``checkNowInitVacuity``, so the vacuity check never sees a
+half-injected pair.  Implicit attributes are indistinguishable from
+hand-written ones, so the funnels, store credit, the CFG passes' Gen/Kill
+arms, serialization, and suppression apply unchanged, and specializations
+inherit them from the pattern via attribute instantiation.  Iterator-shaped
+relatives (``destroy_n``, the ``uninitialized_*`` family) and ``ranges::``
+CPOs sit outside the form key; the user-facing scope note lives in
+:doc:`ProfilesFramework`.
+
 
 Parse-Order Store Credit (std::init)
 ====================================
