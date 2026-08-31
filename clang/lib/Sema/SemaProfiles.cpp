@@ -216,14 +216,8 @@ bool SemaProfiles::isProfileSuppressed(StringRef ProfileName,
                                       RuleName))
       continue;
     // Dominion check; see ProfilesFrameworkInternals.rst, "Suppression
-    // Dominion Mechanics". Fail open on an invalid location on either side
-    // (isBeforeInTranslationUnit rejects invalid locations), preserving
-    // plain-liveness behavior for synthesized code. Compare raw TU token
-    // order: expansion-loc normalization would collapse a macro expansion's
-    // tokens onto the invocation and over-suppress.
-    if (Loc.isInvalid() || E.Begin.isInvalid() ||
-        (!SM.isBeforeInTranslationUnit(Loc, E.Begin) &&
-         (E.End.isInvalid() || !SM.isBeforeInTranslationUnit(E.End, Loc))))
+    // Dominion Mechanics".
+    if (profiles::dominionCovers(SourceRange(E.Begin, E.End), Loc, SM))
       return true;
   }
   return false;
@@ -232,9 +226,11 @@ bool SemaProfiles::isProfileSuppressed(StringRef ProfileName,
 bool SemaProfiles::isProfileSuppressed(StringRef ProfileName,
                                        StringRef RuleName, const Stmt *S,
                                        AnalysisDeclContext &AC) const {
+  const SourceManager &SM = getASTContext().getSourceManager();
+  SourceLocation UseLoc = S ? S->getBeginLoc() : SourceLocation();
   ParentMap &PM = AC.getParentMap();
   for (const Stmt *Cur = S; Cur; Cur = PM.getParent(Cur))
-    if (profiles::isSuppressedFor(Cur, ProfileName, RuleName))
+    if (profiles::isSuppressedFor(Cur, ProfileName, RuleName, UseLoc, SM))
       return true;
   return profiles::isSuppressedFor(AC.getDecl(), ProfileName, RuleName);
 }

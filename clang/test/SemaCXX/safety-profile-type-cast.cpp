@@ -90,6 +90,19 @@ void test_suppress_var_init() {
   [[profiles::suppress(test::type_cast)]] int *p = reinterpret_cast<int*>(0);
 }
 
+// In a multi-declarator group, a declarator's suppression covers that
+// declarator's initializer only, not its siblings' in either direction.
+void test_group_suppress_per_declarator() {
+  long a = (long)reinterpret_cast<long *>(0), // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+      // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+      b [[profiles::suppress(test::type_cast)]] =
+          (long)reinterpret_cast<long *>(0),
+      c = (long)reinterpret_cast<long *>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+  (void)a;
+  (void)b;
+  (void)c;
+}
+
 // Profile violations are suppressed in discarded if-constexpr branches.
 void test_discarded_branch() {
   if constexpr (false) {

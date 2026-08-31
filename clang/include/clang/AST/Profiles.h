@@ -17,6 +17,7 @@
 #define LLVM_CLANG_AST_PROFILES_H
 
 #include "clang/Basic/Profiles.h"
+#include "clang/Basic/SourceLocation.h"
 #include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/StringRef.h"
 
@@ -24,6 +25,7 @@ namespace clang {
 
 class Decl;
 class ProfilesSuppressAttr;
+class SourceManager;
 class Stmt;
 
 namespace profiles {
@@ -43,14 +45,32 @@ bool forEachSuppression(
 /// Enumerate the [[profiles::suppress]] attributes carried by the statement
 /// node \p S itself: the attributes of an AttributedStmt, or the attributes
 /// of each declaration of a DeclStmt ([[profiles::suppress]] on a local
-/// variable attaches to the VarDecl, not the enclosing statement, and it
-/// covers the whole declaration group). Other statements carry none. Does
-/// not ascend to enclosing statements -- ancestry is the caller's to walk
+/// variable attaches to the VarDecl, not the enclosing statement). \p Owner
+/// is null for an AttributedStmt entry and the owning declaration for a
+/// DeclStmt entry, so a consumer can bound the entry to its declarator's
+/// dominion (see declaratorDominion). Other statements carry none. Does not
+/// ascend to enclosing statements -- ancestry is the caller's to walk
 /// (parent maps are context-specific). \p Callback returns true to stop the
 /// enumeration; returns true if it did. A null \p S is a no-op.
 bool forEachSuppression(
     const Stmt *S,
-    llvm::function_ref<bool(const ProfilesSuppressAttr &)> Callback);
+    llvm::function_ref<bool(const Decl *Owner, const ProfilesSuppressAttr &)>
+        Callback);
+
+/// The token range a declaration's suppression covers within its declaration
+/// group (P3589R2 §2.4p3): the declarator-id through the end
+/// of the declarator's initializer for a DeclaratorDecl, an invalid range
+/// otherwise (consumers fail open).
+SourceRange declaratorDominion(const Decl &D);
+
+/// True if \p Loc is within \p Dominion in raw TU token order, failing open
+/// on any invalid location on either side: an entry with no computable
+/// dominion covers every location, and synthesized code keeps plain
+/// suppression behavior. The one containment predicate shared by every
+/// dominion-checked suppression consumer; see ProfilesFrameworkInternals.rst,
+/// "Suppression Dominion Mechanics".
+bool dominionCovers(SourceRange Dominion, SourceLocation Loc,
+                    const SourceManager &SM);
 
 /// True if \p D or a lexical parent carries a [[profiles::suppress]]
 /// matching \p Profile / \p Rule.
@@ -58,9 +78,12 @@ bool isSuppressedFor(const Decl *D, llvm::StringRef Profile,
                      llvm::StringRef Rule);
 
 /// True if the statement node \p S carries a [[profiles::suppress]] matching
-/// \p Profile / \p Rule (see the Stmt enumerator for what a node carries).
+/// \p Profile / \p Rule that covers \p UseLoc: an AttributedStmt entry covers
+/// the whole statement (the caller's statement scoping bounds it), a DeclStmt
+/// entry covers its owning declarator's dominion.
 bool isSuppressedFor(const Stmt *S, llvm::StringRef Profile,
-                     llvm::StringRef Rule);
+                     llvm::StringRef Rule, SourceLocation UseLoc,
+                     const SourceManager &SM);
 
 } // namespace profiles
 } // namespace clang

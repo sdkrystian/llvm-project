@@ -158,6 +158,35 @@ void test_decl_suppress_does_not_extend() {
   (void)y;
 }
 
+// In a multi-declarator group, a declarator's suppression covers that
+// declarator only: the suppressed declarator's own initializer is silent and
+// a sibling's initializer is diagnosed, in either order.
+void test_group_suppress_covers_own_declarator() {
+  int x; // expected-note {{variable 'x' is declared here}}
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  int r [[profiles::suppress(test::uninit_read)]] = x, s = x; // expected-error {{variable 'x' is read before initialization under profile 'test::uninit_read'}}
+  (void)r;
+  (void)s;
+}
+
+void test_group_suppress_not_backward() {
+  int x; // expected-note {{variable 'x' is declared here}}
+  // no-profiles-warning@+2 {{'profiles::suppress' attribute ignored}}
+  int s = x, // expected-error {{variable 'x' is read before initialization under profile 'test::uninit_read'}}
+      r [[profiles::suppress(test::uninit_read)]] = x;
+  (void)s;
+  (void)r;
+}
+
+// A prefix suppression attaches to every declarator of the group.
+void test_group_suppress_prefix() {
+  int x;
+  // no-profiles-warning@+1 2 {{'profiles::suppress' attribute ignored}}
+  [[profiles::suppress(test::uninit_read)]] int s = x, t = x;
+  (void)s;
+  (void)t;
+}
+
 void take_const_ref(const int &);
 void take_const_ptr(const int *);
 

@@ -334,6 +334,17 @@ the ``ProfileSuppressScope`` of the statement the class is declared in is
 still live.  The stack consult is dominion-checked as above, so an unrelated
 live scope never matches.
 
+The AST walk reconstructs the same positional rule for a ``DeclStmt``: a
+suppression there is attached to a ``VarDecl``, so the walk bounds it to that
+declarator's tokens (``profiles::declaratorDominion`` -- the declarator-id
+through the end of its initializer), keeping one declarator's suppression off
+its siblings in a multi-declarator group.  A prefix suppression is attached
+to every declarator by the attribute machinery, so per-declarator containment
+reproduces whole-declaration coverage.  One accepted corner: decl-specifier
+tokens precede every declarator-id, so the AST-walk consumers do not cover
+them; expressions there do not execute in the enclosing function's CFG or IR,
+and the parse-time stack still covers them at parse time.
+
 
 Suppression During Code Generation
 ==================================

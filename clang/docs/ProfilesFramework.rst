@@ -152,6 +152,11 @@ statements and are checked normally:
                                                // suppressed for this decl
    int y = x;  // uses of 'x' elsewhere are checked normally
 
+In a declaration declaring multiple declarators, a suppression written on one
+declarator covers that declarator only -- its declarator-id through the end
+of its initializer -- never its siblings; a suppression written in the
+declaration's prefix covers every declarator.
+
 To exempt an object from a profile's checks everywhere it is used, a profile
 must provide its own per-object, decl-scoped marker attribute.
 

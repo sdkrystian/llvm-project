@@ -23,10 +23,11 @@ using namespace clang::CodeGen;
 void CodeGenFunction::ProfileSuppressionScope::addFromStmt(const Stmt *S) {
   if (!CGF.getLangOpts().Profiles)
     return;
-  profiles::forEachSuppression(S, [&](const ProfilesSuppressAttr &A) {
-    CGF.ProfileStmtSuppressions.push_back(&A);
-    return false;
-  });
+  profiles::forEachSuppression(
+      S, [&](const Decl *, const ProfilesSuppressAttr &A) {
+        CGF.ProfileStmtSuppressions.push_back(&A);
+        return false;
+      });
 }
 
 void CodeGenFunction::ProfileSuppressionScope::addFromDecl(const Decl *D) {
