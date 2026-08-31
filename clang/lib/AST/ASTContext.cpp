@@ -906,24 +906,32 @@ bool ASTContext::isProfileEnforcedAt(StringRef ProfileName,
     return false;
   // P3589R2 [decl.attr.enforce]p4: the enforcement's dominion starts after
   // the attribute, so a violation located before it -- global-module-fragment
-  // tokens ahead of the module declaration -- is outside it. Fail open on an
-  // invalid location on either side (isBeforeInTranslationUnit rejects
-  // invalid locations): a PCH restore records no location and must mean
-  // "whole TU" (a PCH is this TU's textual prefix), and synthesized code
-  // keeps plain-enforcement behavior. Locations are compared by *expansion*
-  // location, deliberately unlike the suppression comparator's raw token
-  // order (see SemaProfiles::isProfileSuppressed): enforcement dominion is
-  // TU-scale, so a macro defined in the GMF but *invoked* in the purview
-  // stays enforced -- its invocation tokens are purview tokens -- while GMF
-  // pattern tokens are skipped.
+  // tokens ahead of the module declaration -- is outside it. Enforcements
+  // restored from an AST file carry their serialized locations. The
+  // comparison is made only when the two locations are in the same TU per
+  // SourceManager::isInTheSameTranslationUnit (the same file or one loaded
+  // allocation, where token order is exact); everything else fails open to
+  // plain-enforcement behavior: invalid locations (synthesized code, a
+  // module's advertisement set), locations split across chained AST files
+  // (whose relative order isBeforeInTranslationUnit does not model), and code
+  // deserialized from an import. Locations are compared by *expansion*
+  // location, unlike the suppression comparator's raw token order (see
+  // SemaProfiles::isProfileSuppressed): enforcement dominion is TU-scale, so
+  // a macro defined in the GMF but *invoked* in the purview stays enforced --
+  // its invocation tokens are purview tokens -- while GMF pattern tokens are
+  // skipped.
   const profiles::ProfileEnforcement *E = getProfileEnforcement(ProfileName);
   assert(E && "enforced profile has no enforcement entry");
   const SourceManager &SM = getSourceManager();
-  if (Loc.isValid() && E->EnforceLoc.isValid() &&
-      SM.isBeforeInTranslationUnit(SM.getExpansionLoc(Loc),
-                                   SM.getExpansionLoc(E->EnforceLoc)))
-    return false;
-  return true;
+  if (Loc.isInvalid() || E->EnforceLoc.isInvalid())
+    return true;
+  FileIDAndOffset VOffs = SM.getDecomposedLoc(SM.getExpansionLoc(Loc));
+  FileIDAndOffset EOffs =
+      SM.getDecomposedLoc(SM.getExpansionLoc(E->EnforceLoc));
+  if (VOffs.first.isInvalid() || EOffs.first.isInvalid())
+    return true;
+  std::pair<bool, bool> InSameTU = SM.isInTheSameTranslationUnit(VOffs, EOffs);
+  return !InSameTU.first || !InSameTU.second;
 }
 
 bool ASTContext::isProfileExemptSystemHeaderLoc(SourceLocation Loc) const {

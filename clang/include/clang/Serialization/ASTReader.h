@@ -988,8 +988,9 @@ private:
   /// The floating point pragma option settings.
   SmallVector<uint64_t, 1> FPPragmaOptions;
 
-  /// Enforced profile designators from PCH (P3589R2).
-  SmallVector<profiles::EnforcedProfile, 0> SerializedEnforcedProfiles;
+  /// Enforced profile designators from PCH (P3589R2), with their enforce
+  /// locations already translated into this compilation's source manager.
+  SmallVector<profiles::ProfileEnforcement, 0> SerializedEnforcedProfiles;
 
   /// Whether an included AST file recorded a non-empty top-level declaration
   /// (PROFILES_TU_HAS_NONEMPTY_DECL, P3589R2 enforce placement).

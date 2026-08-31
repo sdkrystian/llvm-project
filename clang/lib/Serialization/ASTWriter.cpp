@@ -2969,8 +2969,9 @@ unsigned ASTWriter::getSubmoduleID(Module *Mod) {
 }
 
 /// Create the abbrev for an enforced-profile blob record (P3589R2): the
-/// profile name length as VBR followed by the concatenated name + designator
-/// blob. Decoded by readEnforcedProfile in ASTReader.cpp. Shared by the
+/// profile name length as VBR, the raw enforce location, and the concatenated
+/// name + designator blob. Decoded by the ENFORCED_PROFILES case of
+/// ReadASTBlock via readEnforcedProfile in ASTReader.cpp. Shared by the
 /// ENFORCED_PROFILES (PCH) and SUBMODULE_ENFORCED_PROFILES records.
 static unsigned createEnforcedProfileAbbrev(llvm::BitstreamWriter &Stream,
                                             unsigned RecordCode) {
@@ -2978,17 +2979,24 @@ static unsigned createEnforcedProfileAbbrev(llvm::BitstreamWriter &Stream,
   Abbrev->Add(llvm::BitCodeAbbrevOp(RecordCode));
   Abbrev->Add(llvm::BitCodeAbbrevOp(llvm::BitCodeAbbrevOp::VBR,
                                     6)); // Profile name length
+  Abbrev->Add(llvm::BitCodeAbbrevOp(llvm::BitCodeAbbrevOp::VBR,
+                                    8)); // Raw enforce location
   Abbrev->Add(
       llvm::BitCodeAbbrevOp(llvm::BitCodeAbbrevOp::Blob)); // Name + Designator
   return Stream.EmitAbbrev(std::move(Abbrev));
 }
 
 /// Emit one enforced-profile record with the abbrev built by
-/// createEnforcedProfileAbbrev.
-static void emitEnforcedProfile(llvm::BitstreamWriter &Stream,
+/// createEnforcedProfileAbbrev. \p Loc is the enforcement's location for the
+/// TU's own ENFORCED_PROFILES records; a module's advertisement set has no
+/// dominion, so the SUBMODULE_ENFORCED_PROFILES site passes an invalid
+/// location.
+static void emitEnforcedProfile(ASTWriter &W, llvm::BitstreamWriter &Stream,
                                 unsigned AbbrevID, unsigned RecordCode,
-                                const profiles::EnforcedProfile &EP) {
-  uint64_t Record[] = {RecordCode, EP.ProfileName.size()};
+                                const profiles::EnforcedProfile &EP,
+                                SourceLocation Loc) {
+  ASTWriter::RecordData Record{RecordCode, EP.ProfileName.size()};
+  W.AddSourceLocation(Loc, Record);
   Stream.EmitRecordWithBlob(AbbrevID, Record, EP.ProfileName + EP.Designator);
 }
 
@@ -3289,8 +3297,8 @@ void ASTWriter::WriteSubmodules(Module *WritingModule, ASTContext *Context) {
 
     // Emit enforced profile designators (P3589R2).
     for (const auto &EP : Mod->EnforcedProfileDesignators)
-      emitEnforcedProfile(Stream, EnforcedProfilesAbbrev,
-                          SUBMODULE_ENFORCED_PROFILES, EP);
+      emitEnforcedProfile(*this, Stream, EnforcedProfilesAbbrev,
+                          SUBMODULE_ENFORCED_PROFILES, EP, SourceLocation());
 
     // Emit the sentinel signifying the end of this submodule.
     {
@@ -5385,7 +5393,8 @@ void ASTWriter::WriteEnforcedProfiles(Sema &SemaRef) {
 
   unsigned AbbrevID = createEnforcedProfileAbbrev(Stream, ENFORCED_PROFILES);
   for (const auto &EP : EnforcedProfiles)
-    emitEnforcedProfile(Stream, AbbrevID, ENFORCED_PROFILES, EP);
+    emitEnforcedProfile(*this, Stream, AbbrevID, ENFORCED_PROFILES, EP,
+                        EP.EnforceLoc);
 }
 
 //===----------------------------------------------------------------------===//

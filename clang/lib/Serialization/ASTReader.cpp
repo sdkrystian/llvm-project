@@ -4478,9 +4478,14 @@ llvm::Error ASTReader::ReadASTBlock(ModuleFile &F,
 
     case ENFORCED_PROFILES:
       // Enforcements belong to the TU that wrote them: restore them from the
-      // compilation's own prefix or main input, never from an import.
+      // compilation's own prefix or main input, never from an import. The
+      // enforce location is decoded here, where the file's SLoc remap is in
+      // scope, not deferred to InitializeContext.
       if (F.Kind == MK_PCH || F.Kind == MK_Preamble || F.Kind == MK_MainFile)
-        SerializedEnforcedProfiles.push_back(readEnforcedProfile(Record, Blob));
+        SerializedEnforcedProfiles.push_back(
+            {readEnforcedProfile(Record, Blob),
+             Record.size() > 1 ? ReadSourceLocation(F, Record[1])
+                               : SourceLocation()});
       break;
 
     case PROFILES_TU_HAS_NONEMPTY_DECL:
@@ -5804,7 +5809,7 @@ void ASTReader::InitializeContext() {
       (void)Existing;
       continue;
     }
-    Context.addEnforcedProfile(EP.ProfileName, EP.Designator, SourceLocation());
+    Context.addEnforcedProfile(EP.ProfileName, EP.Designator, EP.EnforceLoc);
   }
   SerializedEnforcedProfiles.clear();
 
