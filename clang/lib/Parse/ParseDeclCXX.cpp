@@ -4703,13 +4703,12 @@ void Parser::ParseCXX11AttributeSpecifierInternal(ParsedAttributes &Attrs,
     }
 
     // P3589R2 profile attributes need custom parsing for both the
-    // well-formed and the missing argument clause forms.
-    if (ScopeName && ScopeName->isStr("profiles") &&
+    // well-formed and the missing argument clause forms. The framework is
+    // C++-only; in C the attributes take the unknown-attribute path below.
+    if (getLangOpts().CPlusPlus && ScopeName && ScopeName->isStr("profiles") &&
         TryParseProfilesAttribute(AttrName, AttrLoc, Attrs, EndLoc, ScopeName,
                                   ScopeLoc, CommonScopeLoc,
-                                  getLangOpts().CPlusPlus
-                                      ? ParsedAttr::Form::CXX11()
-                                      : ParsedAttr::Form::C23()))
+                                  ParsedAttr::Form::CXX11()))
       AttrParsed = true;
 
     // Parse attribute arguments
