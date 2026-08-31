@@ -1776,6 +1776,14 @@ void test_alias_escape_declaration_form(int *p [[ref_to_uninit]]) {
   int *m [[ref_to_uninit]] = p; // OK: pp can reseat p
   (void)pp; (void)m;
 }
+// A ternary-wrapped alias source withdraws per named arm (the escape is
+// Maybe-only already, so the arm's conditionality changes nothing).
+void test_alias_escape_ternary_source(int *p [[ref_to_uninit]], bool c) {
+  *p = 5;
+  int **pp = (c ? &p : &p);
+  int *m [[ref_to_uninit]] = p; // OK: whichever arm escaped can reseat p
+  (void)pp; (void)m;
+}
 
 // A lambda capturing the marked pointer by reference holds the same mutable
 // alias as `pp = &p` above and withdraws the same way: the Definite firing
@@ -2080,6 +2088,18 @@ void test_now_init_reference(int &r [[ref_to_uninit]]) {
   (void)v;
 }
 
+// A ternary-wrapped [[now_init]] argument credits each named arm at Maybe
+// strength only, since the chosen arm is not known: the unmarked binding is
+// suppressed, the marked binding stays legal.
+void test_now_init_ternary_arms(bool c) {
+  int u [[uninit]], v [[uninit]];
+  now_init_fill(c ? &u : &v);
+  int *w = &u;                   // OK: the Maybe credit suppresses
+  int *m [[ref_to_uninit]] = &u; // OK: no Definite claim to fire on
+  (void)w;
+  (void)m;
+}
+
 // Members earn the same per-object credit as a direct member store, under
 // the same base-identity keys and boundaries: a member of a parameter-
 // reached object stays uncredited (the pinned aliasing boundary).
@@ -2269,6 +2289,41 @@ void test_reseat_clears_destroyed(int *p [[ref_to_uninit]],
   nu_wipe(p);
   p = q;
   nu_wipe(p); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+}
+
+// A ternary-wrapped destroy withdraws each arm's credit at Maybe strength
+// only: the Definite claim goes -- the marked binding is legal again -- while
+// the suppressing Maybe credit survives, and no destroyed state is recorded.
+void test_destroy_ternary_arm(int *p [[ref_to_uninit]], bool c) {
+  *p = 1;
+  nu_wipe(c ? p : p);
+  take_uninit_ptr(p); // OK: the Definite claim is withdrawn
+  int *u2 = p;        // OK: the Maybe credit still suppresses
+  (void)u2;
+}
+
+// The exact comma shape stays unconditional: both strengths are withdrawn
+// and the destroyed state is recorded, so the storage is uninitialized again
+// and a second destroy is double_destroy.
+void test_destroy_comma(int *p [[ref_to_uninit]]) {
+  *p = 1;
+  nu_wipe(((void)0, p));
+  take_uninit_ptr(p); // OK: uninitialized again
+  nu_wipe(p); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+}
+
+// double_destroy stays definite by construction: a two-leaf destroy fires it
+// only when every leaf is destroyed. With only p's arm destroyed the binding
+// direction rejects the destroy of the uninitialized arm instead, and both
+// arms' Definite claims are gone.
+void test_destroy_ternary_mixed_arms(int *p [[ref_to_uninit]],
+                                     int *q [[ref_to_uninit]], bool c) {
+  *p = 1;
+  *q = 1;
+  nu_wipe(p);
+  nu_wipe(c ? p : q); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+  int *mq [[ref_to_uninit]] = q; // OK: q's Definite claim is withdrawn
+  (void)mq;
 }
 
 // Destroying through a marked pointer with no prior store is rejected: the
