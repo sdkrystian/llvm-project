@@ -184,7 +184,10 @@ public:
   /// attributes are attached only once its Decl exists gets a second,
   /// Decl-keyed guard around its initializer or default argument; the sites
   /// are enumerated in ProfilesFrameworkInternals.rst, "Suppression Dominion
-  /// Mechanics".
+  /// Mechanics". Every parser path that parses an initializer or body for a
+  /// construct that can carry [[profiles::suppress]] must install a guard;
+  /// clang/test/SemaCXX/safety-profile-suppress-coverage.cpp is the
+  /// per-context regression net for this contract.
   class ProfileSuppressScope {
     Sema &S;
     unsigned Count = 0;

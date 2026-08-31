@@ -304,6 +304,14 @@ before the function is declared -- so ``Parser::ParseDirectDeclarator``
 pushes them from the ``Declarator`` itself, which makes the prefix,
 declarator-id, and member declarator-id spellings agree on a declaration.
 
+An enum body gets the same two-guard treatment in
+``Parser::ParseEnumBody``: a Decl-keyed guard covering the body from the
+enum-head's attributes (mirroring the class and namespace body guards), and,
+per enumerator, a guard around the initializer parse built from the
+enumerator's parsed attributes -- its ``EnumConstantDecl`` is created only
+after the initializer, so the attribute-keyed constructor is the one that
+works, exactly as for statements.
+
 The range's end is recorded only when the construct was already fully parsed
 when the entry was pushed.  For a construct still being parsed no end exists
 yet (a mid-parse end location would be misleadingly early), so the entry's

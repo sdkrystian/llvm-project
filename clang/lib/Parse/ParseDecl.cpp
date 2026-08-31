@@ -5484,6 +5484,10 @@ void Parser::ParseEnumBody(SourceLocation StartLoc, Decl *EnumDecl,
   BalancedDelimiterTracker T(*this, tok::l_brace);
   T.consumeOpen();
 
+  // The enum-head suppress scope; the body is mid-parse, so the guard's
+  // lifetime bounds the dominion (see ProfileSuppressScope).
+  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, EnumDecl);
+
   // C does not allow an empty enumerator-list, C++ does [dcl.enum].
   if (Tok.is(tok::r_brace) && !getLangOpts().CPlusPlus) {
     if (getLangOpts().MicrosoftExt)
@@ -5531,6 +5535,10 @@ void Parser::ParseEnumBody(SourceLocation StartLoc, Decl *EnumDecl,
     EnterExpressionEvaluationContext ConstantEvaluated(
         Actions, Sema::ExpressionEvaluationContext::ConstantEvaluated);
     if (TryConsumeToken(tok::equal, EqualLoc)) {
+      // The enumerator's own suppress scope: its EnumConstantDecl does not
+      // exist until after the initializer, so the guard is built from the
+      // prefix attributes (see ProfileSuppressScope).
+      SemaProfiles::ProfileSuppressScope ProfileSuppressForInit(Actions, attrs);
       AssignedVal = ParseConstantExpressionInExprEvalContext();
       if (AssignedVal.isInvalid())
         SkipUntil(tok::comma, tok::r_brace, StopBeforeMatch);
