@@ -511,8 +511,9 @@ public:
   /// the binding funnel's recorder tail and from pointer assignment; gated
   /// on never-executed contexts like the other recorders. Stale reads
   /// through the escaped pointer remain the documented parse-order missed
-  /// diagnostic; void* escapes of &p and ternary/comma-wrapped sources are
-  /// not recognized (missed withdrawals, toward missed diagnostics only).
+  /// diagnostic; a void* escape of &p is not recognized -- a missed
+  /// withdrawal leaves stale firing-strength credit, erring toward a false
+  /// positive of the marked-target rule.
   void recordInitProfilePointerAliasEscape(QualType T, const Expr *Src);
 
   /// The by-reference-capture flavor of the alias escape: a lambda capturing
@@ -904,11 +905,21 @@ public:
   /// consulted through the has*Credit queries.
   InitStoreCreditMap StoreCredit;
 
-  /// The recursive tail of recordInitProfileStore: record the store's credit
-  /// (or reseat) for every lvalue the target \p E can name, walking
-  /// conditional arms -- with \p ConditionalArm capping their credit at the
-  /// suppressing strength, since the chosen arm is not known -- and comma
-  /// right operands, then resolving the leaf through resolveTrackedGlvalue.
+  /// Enumerate the lvalue leaves the assignment target or lifecycle argument
+  /// \p E can name: peel transparent casts, walk conditional arms (\p
+  /// ConditionalArm set for each, since the chosen arm is not known) and
+  /// comma right operands, and hand each leaf to \p F with its arm flag. The
+  /// one target-shape walk shared by the store recorder and the
+  /// lifecycle-argument consumers, so a wrapped argument affects credit
+  /// exactly like its leaf form at the arm's certainty.
+  void forEachTargetLeaf(
+      const Expr *E, bool ConditionalArm,
+      llvm::function_ref<void(const Expr *Leaf, bool ConditionalArm)> F) const;
+
+  /// The leaf-credit tail of recordInitProfileStore: record the store's
+  /// credit (or reseat) for every leaf of forEachTargetLeaf, at Maybe
+  /// strength on a conditional arm and currentStoreStrength otherwise,
+  /// resolving each leaf through resolveTrackedGlvalue.
   void recordStoreTarget(const Expr *E, bool ConditionalArm);
 
   /// std::init / ref_to_uninit (paper §5): a thrown pointer copy-initializes

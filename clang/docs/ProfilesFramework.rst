@@ -734,9 +734,9 @@ whether as a call argument, an initializer, or an assignment source --
 lets the holder reseat it, so the escape withdraws the credit's firing
 strength while the suppressing credit survives, like a conditional
 ``[[now_uninit]]`` destroy; a const alias (``T* const &``) cannot reseat
-and withdraws nothing.  (A ``void*`` escape of ``&p``, or an alias source
-wrapped in a ternary or comma, is not recognized -- missed withdrawals,
-toward missed diagnostics only.)  The two
+and withdraws nothing.  (A ``void*`` escape of ``&p`` is not recognized: the
+missed withdrawal leaves stale firing-strength credit, which errs toward a
+false positive of the marked-target rule.)  The two
 directions consult the credit differently, because they use it
 differently.  Credit *suppresses* the unmarked-target diagnostic in plain
 parse order: ``int *q = &u;`` after any earlier store -- even one under a

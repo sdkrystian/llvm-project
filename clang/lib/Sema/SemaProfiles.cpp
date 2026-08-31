@@ -2065,17 +2065,22 @@ void SemaProfiles::recordInitProfilePointerAliasEscape(QualType T,
   // escapes nothing.
   if (inNeverExecutedContext())
     return;
-  const Expr *E = ignoreTransparentCasts(Src);
-  if (T->isPointerType()) {
-    // T**: peel the &p to reach the pointer object.
-    const auto *UO = dyn_cast<UnaryOperator>(E);
-    if (!UO || UO->getOpcode() != UO_AddrOf)
-      return;
-    E = UO->getSubExpr();
-  }
-  if (const VarDecl *VD = getCreditableMarkedPointer(E))
-    StoreCredit.destroyPointee(VD, InitCreditStrength::Maybe,
-                               /*EndsLifetime=*/false);
+  // A ternary- or comma-wrapped source escapes whichever arm is chosen:
+  // withdraw per leaf. The withdrawal is Maybe-only already, so the arm flag
+  // changes nothing per leaf.
+  forEachTargetLeaf(Src, /*ConditionalArm=*/false, [&](const Expr *Leaf, bool) {
+    const Expr *E = Leaf;
+    if (T->isPointerType()) {
+      // T**: peel the &p to reach the pointer object.
+      const auto *UO = dyn_cast<UnaryOperator>(E);
+      if (!UO || UO->getOpcode() != UO_AddrOf)
+        return;
+      E = UO->getSubExpr();
+    }
+    if (const VarDecl *VD = getCreditableMarkedPointer(E))
+      StoreCredit.destroyPointee(VD, InitCreditStrength::Maybe,
+                                 /*EndsLifetime=*/false);
+  });
 }
 
 void SemaProfiles::recordInitProfilePointerAliasEscape(const ValueDecl *Var) {
@@ -2199,40 +2204,52 @@ void SemaProfiles::recordLifetimeAnnotatedArgument(
   // run, so it kills only the Definite claim and leaves the
   // suppression-only Maybe credit in place (see recordNowUninitArgument).
   // Only a Destroy records the destroyed state (LifetimeAnnotationEffect).
+  // A conditional or comma argument shape walks like a store target: each
+  // leaf's effect applies at Maybe strength on a conditional arm, so a
+  // wrapped construct only suppresses and a wrapped destroy kills only the
+  // Definite claim, recording no destroyed state.
   bool Withdraw = Effect != LifetimeAnnotationEffect::Construct;
   bool EndsLifetime = Effect == LifetimeAnnotationEffect::Destroy;
-  LifetimeAnnotatedStorage Storage = resolveLifetimeAnnotatedStorage(T, Src);
-  switch (Storage.StorageKind) {
-  case LifetimeAnnotatedStorage::Kind::None:
-    break;
-  case LifetimeAnnotatedStorage::Kind::Whole:
-    if (Withdraw)
-      StoreCredit.destroyWhole(
-          Storage.Entity, currentStoreStrength(Storage.Entity), EndsLifetime);
-    else
-      StoreCredit.markWholeStored(Storage.Entity,
-                                  currentStoreStrength(Storage.Entity));
-    break;
-  case LifetimeAnnotatedStorage::Kind::Pointee:
-    if (Withdraw)
-      StoreCredit.destroyPointee(
-          Storage.Entity, currentStoreStrength(Storage.Entity), EndsLifetime);
-    else
-      StoreCredit.markPointeeStored(Storage.Entity,
-                                    currentStoreStrength(Storage.Entity));
-    break;
-  case LifetimeAnnotatedStorage::Kind::Member:
-    if (Withdraw)
-      StoreCredit.destroyMember(Storage.Base, Storage.Field,
-                                currentStoreStrength(Storage.Base),
-                                EndsLifetime);
-    else
-      StoreCredit.markMemberStored(Storage.Base, Storage.Field,
-                                   currentStoreStrength(Storage.Base));
-    break;
-  case LifetimeAnnotatedStorage::Kind::Reseat:
-    llvm_unreachable("resolveLifetimeAnnotatedStorage maps Reseat to None");
-  }
+  forEachTargetLeaf(
+      Src, /*ConditionalArm=*/false, [&](const Expr *Leaf, bool Arm) {
+        LifetimeAnnotatedStorage Storage =
+            resolveLifetimeAnnotatedStorage(T, Leaf);
+        auto Strength = [&](const Decl *CreditKey) {
+          return Arm ? InitCreditStrength::Maybe
+                     : currentStoreStrength(CreditKey);
+        };
+        switch (Storage.StorageKind) {
+        case LifetimeAnnotatedStorage::Kind::None:
+          break;
+        case LifetimeAnnotatedStorage::Kind::Whole:
+          if (Withdraw)
+            StoreCredit.destroyWhole(Storage.Entity, Strength(Storage.Entity),
+                                     EndsLifetime);
+          else
+            StoreCredit.markWholeStored(Storage.Entity,
+                                        Strength(Storage.Entity));
+          break;
+        case LifetimeAnnotatedStorage::Kind::Pointee:
+          if (Withdraw)
+            StoreCredit.destroyPointee(Storage.Entity, Strength(Storage.Entity),
+                                       EndsLifetime);
+          else
+            StoreCredit.markPointeeStored(Storage.Entity,
+                                          Strength(Storage.Entity));
+          break;
+        case LifetimeAnnotatedStorage::Kind::Member:
+          if (Withdraw)
+            StoreCredit.destroyMember(Storage.Base, Storage.Field,
+                                      Strength(Storage.Base), EndsLifetime);
+          else
+            StoreCredit.markMemberStored(Storage.Base, Storage.Field,
+                                         Strength(Storage.Base));
+          break;
+        case LifetimeAnnotatedStorage::Kind::Reseat:
+          llvm_unreachable(
+              "resolveLifetimeAnnotatedStorage maps Reseat to None");
+        }
+      });
 }
 
 void SemaProfiles::checkInitProfileDeleteOperand(const Expr *Operand) {
@@ -2259,20 +2276,35 @@ void SemaProfiles::checkInitProfileDeleteOperand(const Expr *Operand) {
 }
 
 bool SemaProfiles::storageIsDestroyed(QualType T, const Expr *Src) const {
-  LifetimeAnnotatedStorage Storage = resolveLifetimeAnnotatedStorage(T, Src);
-  switch (Storage.StorageKind) {
-  case LifetimeAnnotatedStorage::Kind::None:
-    return false;
-  case LifetimeAnnotatedStorage::Kind::Whole:
-    return StoreCredit.isWholeDestroyed(Storage.Entity);
-  case LifetimeAnnotatedStorage::Kind::Pointee:
-    return StoreCredit.isPointeeDestroyed(Storage.Entity);
-  case LifetimeAnnotatedStorage::Kind::Member:
-    return StoreCredit.isMemberDestroyed(Storage.Base, Storage.Field);
-  case LifetimeAnnotatedStorage::Kind::Reseat:
-    llvm_unreachable("resolveLifetimeAnnotatedStorage maps Reseat to None");
-  }
-  llvm_unreachable("unknown LifetimeAnnotatedStorage kind");
+  // Every leaf of a conditional or comma shape must resolve to destroyed
+  // storage, preserving double_destroy's definite-by-construction contract:
+  // destroy(c ? p : q) with one destroyed arm does not fire, while
+  // destroy(c ? p : p) after an unconditional destroy still does.
+  bool AnyLeaf = false, AllDestroyed = true;
+  forEachTargetLeaf(Src, /*ConditionalArm=*/false, [&](const Expr *Leaf, bool) {
+    AnyLeaf = true;
+    LifetimeAnnotatedStorage Storage = resolveLifetimeAnnotatedStorage(T, Leaf);
+    switch (Storage.StorageKind) {
+    case LifetimeAnnotatedStorage::Kind::None:
+      AllDestroyed = false;
+      return;
+    case LifetimeAnnotatedStorage::Kind::Whole:
+      AllDestroyed &= StoreCredit.isWholeDestroyed(Storage.Entity);
+      return;
+    case LifetimeAnnotatedStorage::Kind::Pointee:
+      AllDestroyed &= StoreCredit.isPointeeDestroyed(Storage.Entity);
+      return;
+    case LifetimeAnnotatedStorage::Kind::Member:
+      AllDestroyed &=
+          StoreCredit.isMemberDestroyed(Storage.Base, Storage.Field);
+      return;
+    case LifetimeAnnotatedStorage::Kind::Reseat:
+      llvm_unreachable("resolveLifetimeAnnotatedStorage maps Reseat to "
+                       "None");
+    }
+    llvm_unreachable("unknown LifetimeAnnotatedStorage kind");
+  });
+  return AnyLeaf && AllDestroyed;
 }
 
 void SemaProfiles::checkInitProfileVariadicArgument(const Expr *Arg) {
@@ -2694,63 +2726,70 @@ void SemaProfiles::recordInitProfileStore(const Expr *LHS) {
   recordStoreTarget(LHS, /*ConditionalArm=*/false);
 }
 
-void SemaProfiles::recordStoreTarget(const Expr *E, bool ConditionalArm) {
+void SemaProfiles::forEachTargetLeaf(
+    const Expr *E, bool ConditionalArm,
+    llvm::function_ref<void(const Expr *, bool)> F) const {
   E = ignoreTransparentCasts(E);
-  // A conditional or comma target stores to whichever lvalue the chosen arm
-  // names: record each named arm. The Maybe cap is explicit because
-  // ConditionalExprRegion has unwound by assignment-completion time, so
-  // currentStoreStrength alone cannot see the target's own conditionality.
+  // A conditional or comma shape names whichever lvalue the chosen arm
+  // does: walk each named arm. The Maybe cap is explicit because
+  // ConditionalExprRegion has unwound by the consumers' run time, so
+  // currentStoreStrength alone cannot see the shape's own conditionality.
   if (const auto *CO = dyn_cast<ConditionalOperator>(E)) {
-    recordStoreTarget(CO->getTrueExpr(), /*ConditionalArm=*/true);
-    recordStoreTarget(CO->getFalseExpr(), /*ConditionalArm=*/true);
+    forEachTargetLeaf(CO->getTrueExpr(), /*ConditionalArm=*/true, F);
+    forEachTargetLeaf(CO->getFalseExpr(), /*ConditionalArm=*/true, F);
     return;
   }
   if (const auto *BCO = dyn_cast<BinaryConditionalOperator>(E)) {
     // The written common operand doubles as the true arm, mirroring
     // classifyUninitPassThrough's OVE avoidance.
-    recordStoreTarget(BCO->getCommon(), /*ConditionalArm=*/true);
-    recordStoreTarget(BCO->getFalseExpr(), /*ConditionalArm=*/true);
+    forEachTargetLeaf(BCO->getCommon(), /*ConditionalArm=*/true, F);
+    forEachTargetLeaf(BCO->getFalseExpr(), /*ConditionalArm=*/true, F);
     return;
   }
   if (const auto *BO = dyn_cast<BinaryOperator>(E); BO && BO->isCommaOp()) {
-    recordStoreTarget(BO->getRHS(), ConditionalArm);
+    forEachTargetLeaf(BO->getRHS(), ConditionalArm, F);
     return;
   }
-  // The leaf target's shape -- *p = e, a.m = e / this->m = e / m = e,
-  // u = e, r = e, p = q (also `@=` and `++`, via the shared hosts) --
-  // resolves through the shared glvalue resolver; each arm's credit action
-  // lives here (paper §4.2: "After initialization, the object is no longer
-  // [[uninit]]"; §6: ordinary assignment initializes a built-in).
-  LifetimeAnnotatedStorage Storage = resolveTrackedGlvalue(E);
-  auto Strength = [&](const Decl *CreditKey) {
-    return ConditionalArm ? InitCreditStrength::Maybe
-                          : currentStoreStrength(CreditKey);
-  };
-  switch (Storage.StorageKind) {
-  case LifetimeAnnotatedStorage::Kind::None:
-    return;
-  case LifetimeAnnotatedStorage::Kind::Whole:
-    StoreCredit.markWholeStored(Storage.Entity, Strength(Storage.Entity));
-    return;
-  case LifetimeAnnotatedStorage::Kind::Pointee:
-    StoreCredit.markPointeeStored(Storage.Entity, Strength(Storage.Entity));
-    return;
-  case LifetimeAnnotatedStorage::Kind::Member:
-    StoreCredit.markMemberStored(Storage.Base, Storage.Field,
-                                 Strength(Storage.Base));
-    return;
-  case LifetimeAnnotatedStorage::Kind::Reseat:
-    // The reseat retires every pointee fact -- credit and the destroyed
-    // state -- wholesale, whatever its own conditionality (the parse-order
-    // status quo, matching clearPointee's documented semantics -- so a
-    // conditional arm reseats like a direct target): they all described the
-    // old pointee. The clear lives in this tail funnel -- not in
-    // checkInitProfilePointerAssignment, which runs only for plain
-    // assignment and would miss compound reseats.
-    StoreCredit.clearPointee(Storage.Entity);
-    return;
-  }
-  llvm_unreachable("unknown LifetimeAnnotatedStorage kind");
+  F(E, ConditionalArm);
+}
+
+void SemaProfiles::recordStoreTarget(const Expr *E, bool ConditionalArm) {
+  forEachTargetLeaf(E, ConditionalArm, [&](const Expr *Leaf, bool Arm) {
+    // The leaf target's shape -- *p = e, a.m = e / this->m = e / m = e,
+    // u = e, r = e, p = q (also `@=` and `++`, via the shared hosts) --
+    // resolves through the shared glvalue resolver; each arm's credit action
+    // lives here (paper §4.2: "After initialization, the object is no longer
+    // [[uninit]]"; §6: ordinary assignment initializes a built-in).
+    LifetimeAnnotatedStorage Storage = resolveTrackedGlvalue(Leaf);
+    auto Strength = [&](const Decl *CreditKey) {
+      return Arm ? InitCreditStrength::Maybe : currentStoreStrength(CreditKey);
+    };
+    switch (Storage.StorageKind) {
+    case LifetimeAnnotatedStorage::Kind::None:
+      return;
+    case LifetimeAnnotatedStorage::Kind::Whole:
+      StoreCredit.markWholeStored(Storage.Entity, Strength(Storage.Entity));
+      return;
+    case LifetimeAnnotatedStorage::Kind::Pointee:
+      StoreCredit.markPointeeStored(Storage.Entity, Strength(Storage.Entity));
+      return;
+    case LifetimeAnnotatedStorage::Kind::Member:
+      StoreCredit.markMemberStored(Storage.Base, Storage.Field,
+                                   Strength(Storage.Base));
+      return;
+    case LifetimeAnnotatedStorage::Kind::Reseat:
+      // The reseat retires every pointee fact -- credit and the destroyed
+      // state -- wholesale, whatever its own conditionality (the parse-order
+      // status quo, matching clearPointee's documented semantics -- so a
+      // conditional arm reseats like a direct target): they all described the
+      // old pointee. The clear lives in this tail funnel -- not in
+      // checkInitProfilePointerAssignment, which runs only for plain
+      // assignment and would miss compound reseats.
+      StoreCredit.clearPointee(Storage.Entity);
+      return;
+    }
+    llvm_unreachable("unknown LifetimeAnnotatedStorage kind");
+  });
 }
 
 bool SemaProfiles::hasWholeObjectStoreCredit(
