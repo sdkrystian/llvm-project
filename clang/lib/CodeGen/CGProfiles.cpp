@@ -71,8 +71,10 @@ void CodeGenFunction::EmitProfileRuntimeCheck(
   if (!getLangOpts().Profiles)
     return;
   // Enforcement first, so a TU that does not enforce the profile never pays
-  // the suppression walk.
-  if (!getContext().isProfileEnforced(Profile) ||
+  // the suppression walk. The location-aware query keeps code before the
+  // enforcement -- global-module-fragment functions emitted after the purview
+  // is parsed, or from a BMI -- outside the dominion.
+  if (!getContext().isProfileEnforcedAt(Profile, Loc) ||
       getContext().isProfileExemptSystemHeaderLoc(Loc) ||
       isProfileSuppressionActive(Profile, Rule))
     return;

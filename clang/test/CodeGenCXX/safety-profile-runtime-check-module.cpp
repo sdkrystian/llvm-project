@@ -21,6 +21,12 @@
 //
 // Importing an enforcing module does not enforce its profiles in the importer.
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++23 -fprofiles -fprofiles-test-profiles -fmodule-file=M=%t/m.pcm -emit-llvm -o - %t/use.cpp | FileCheck %s --check-prefix=IMPORTER
+//
+// Global-module-fragment code precedes the enforcement, so it is outside the
+// dominion on both compilation paths.
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++23 -fprofiles -fprofiles-test-profiles -emit-llvm -o - %t/g.cppm | FileCheck %s --check-prefix=GMF
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++23 -fprofiles -fprofiles-test-profiles -emit-module-interface -o %t/g.pcm %t/g.cppm
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++23 -emit-llvm -o - %t/g.pcm | FileCheck %s --check-prefix=GMF
 
 //--- m.cppm
 export module M [[profiles::enforce(test::arith)]];
@@ -41,3 +47,24 @@ import M;
 // IMPORTER-NOT: llvm.ubsantrap
 // IMPORTER: ret i32
 int use(int a, int b) { return mdiv(a, b) / b; }
+
+//--- g.cppm
+// Neither the eagerly emitted nor the deferred inline GMF function is
+// checked, while a GMF-defined macro invoked in the purview still is: the
+// dominion compares expansion locations, and the invocation tokens are
+// purview tokens.
+module;
+#define GMF_DIV(x, y) ((x) / (y))
+int gmfdiv(int a, int b) { return a / b; }
+inline int gmf_inline_div(int a, int b) { return a / b; }
+export module G [[profiles::enforce(test::arith)]];
+// GMF-LABEL: define {{.*}} @_Z6gmfdivii(
+// GMF-NOT: call void @llvm.ubsantrap
+// GMF-LABEL: define {{.*}} @_ZW1G4guseii(
+// GMF: call void @llvm.ubsantrap(i8
+// GMF-LABEL: define {{.*}} @_Z14gmf_inline_divii(
+// GMF-NOT: call void @llvm.ubsantrap
+// GMF: declare void @llvm.ubsantrap
+export int guse(int a, int b) {
+  return gmfdiv(a, b) + gmf_inline_div(a, b) + GMF_DIV(a, b);
+}
