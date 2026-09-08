@@ -1208,8 +1208,22 @@ static UninitStorage
 glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
                             UninitAccessOpts Opts = UninitBindAccess);
 
+/// The expression a structured binding decomposes -- the member (a member
+/// binding, whose field carries the marker) or the get<> call (a tuple-like
+/// binding) -- when \p E names a BindingDecl; null otherwise. The recognizers
+/// classify that expression in the binding's place.
+static const Expr *getStructuredBindingSource(const Expr *E) {
+  if (const auto *DRE = dyn_cast<DeclRefExpr>(E))
+    if (const auto *BD = dyn_cast<BindingDecl>(DRE->getDecl()))
+      return BD->getBinding();
+  return nullptr;
+}
+
 const ValueDecl *SemaProfiles::getDirectlyNamedDecl(const Expr *E) {
   E = E->IgnoreParenImpCasts();
+  // A structured binding names the member it decomposes, marker included.
+  if (const Expr *Bound = getStructuredBindingSource(E))
+    return getDirectlyNamedDecl(Bound);
   if (const auto *DRE = dyn_cast<DeclRefExpr>(E))
     return DRE->getDecl();
   if (const auto *ME = dyn_cast<MemberExpr>(E))
@@ -1635,6 +1649,10 @@ pointerRefersToUninitStorage(ASTContext &Ctx, const Expr *E,
     if (UO->getOpcode() == UO_AddrOf)
       return glvalueDenotesUninitStorage(Ctx, UO->getSubExpr(), Opts);
 
+  // A structured binding classifies as the member or element it decomposes.
+  if (const Expr *Bound = getStructuredBindingSource(E))
+    return pointerRefersToUninitStorage(Ctx, Bound, Opts);
+
   // A value of a [[ref_to_uninit]] pointer is Uninitialized (Unknown when the
   // marker is trusted); an unmarked named pointer is a trusted Initialized
   // pointer (paper §4.3). A named *function* is excluded: function-to-pointer
@@ -1806,6 +1824,9 @@ static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
             !(Opts.Credit &&
               Opts.Credit->hasPointeeStoreCredit(VD, Opts.Strength)));
   };
+  // A structured binding classifies as the member or element it decomposes.
+  if (const Expr *Bound = getStructuredBindingSource(E))
+    return glvalueDenotesUninitStorage(Ctx, Bound, Opts);
   if (const auto *DRE = dyn_cast<DeclRefExpr>(E))
     return DeclDenotesUninit(DRE->getDecl()) ? UninitStorage::Uninitialized
                                              : UninitStorage::Initialized;

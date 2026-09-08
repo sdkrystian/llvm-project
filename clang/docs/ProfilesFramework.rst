@@ -694,7 +694,9 @@ of a marked pointer is rejected like any unmarked pointer copy; capture by
 reference, or store through the marker first, if the flow is intended), and
 the implicit object argument of a member call -- so calling a member function
 on an object recognized as uninitialized storage is rejected, and so is
-copying a class object out of one.  For the copy, the escape is the paper's
+copying a class object out of one.  A structured binding names the member or
+element it decomposes, marker included, so after ``auto [a, b] = s;`` a use
+of ``b`` is judged by the marking of the field it names.  For the copy, the escape is the paper's
 own (§7.2): declare the copy constructor's parameter ``[[ref_to_uninit]]``.
 Positions that cannot carry the marker -- a variadic argument, a parameter of
 a function called through a function pointer, the implicit object parameter,
