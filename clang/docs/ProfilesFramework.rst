@@ -560,8 +560,9 @@ as initialized (see `Binding Pointers and References`_):
      }               // initialization (§4.5)
    };
 
-A member or variable counts as assigned only when every path to the read
-assigns it (§1.3), and a compound assignment (``x += 1``) or an increment or
+A member (each base-class copy of a member separately) or variable counts as
+assigned only when every path to the read assigns it (§1.3), and a compound
+assignment (``x += 1``) or an increment or
 decrement reads the old value first, so it is diagnosed like a read.  A
 comma or conditional lvalue reads (or assigns) whichever member the chosen
 arm names; an assignment through a conditional whose arms name different

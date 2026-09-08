@@ -1050,3 +1050,26 @@ struct CondWriteMixed {
     (void)r;
   }
 };
+
+// Two copies of one base member through a non-virtual diamond are distinct
+// members.
+struct DiaBase {
+  int bm [[uninit]]; // expected-note {{member 'bm' declared here}}
+};
+struct DiaL : DiaBase {};
+struct DiaR : DiaBase {};
+struct Dia : DiaL, DiaR {
+  Dia() {
+    DiaL::bm = 1;
+    int r = DiaR::bm; // expected-error {{member 'bm' is read before initialization under profile 'std::init'}}
+    (void)r;
+  }
+};
+struct Dia2 : DiaL, DiaR {
+  Dia2() {
+    DiaL::bm = 1;
+    DiaR::bm = 2;
+    int r = DiaL::bm + DiaR::bm; // OK
+    (void)r;
+  }
+};

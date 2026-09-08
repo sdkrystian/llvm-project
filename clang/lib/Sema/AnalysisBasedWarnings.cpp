@@ -1855,24 +1855,69 @@ static bool hasUserProvidedCtor(const CXXRecordDecl *RD) {
   });
 }
 
+/// A derived-to-base path: the canonical class of each base step from an
+/// object's class to the class declaring a member; empty for the object's own
+/// members. Two copies of one member reached through different bases (a
+/// non-virtual diamond) have different paths.
+using BasePath = SmallVector<const CXXRecordDecl *, 2>;
+
 // Visit the candidate fields of RD and of its non-virtual, constructor-less
-// base classes, recursively.
+// base classes, recursively, each with its derived-to-base path from RD.
 template <typename Fn>
 static void forEachCandidateUninitField(const CXXRecordDecl *RD, Fn Visit) {
-  SmallVector<const CXXRecordDecl *, 4> RecordStack(1, RD);
+  SmallVector<std::pair<const CXXRecordDecl *, BasePath>, 4> RecordStack;
+  RecordStack.push_back({RD, BasePath()});
   while (!RecordStack.empty()) {
-    const CXXRecordDecl *Cur = RecordStack.pop_back_val();
+    auto [Cur, Path] = RecordStack.pop_back_val();
     for (const FieldDecl *F : Cur->fields())
-      Visit(F);
+      Visit(Path, F);
     for (const CXXBaseSpecifier &BS : Cur->bases()) {
       if (BS.isVirtual())
         continue;
       const CXXRecordDecl *BRD = BS.getType()->getAsCXXRecordDecl();
       if (BRD && BRD->hasDefinition() &&
-          !hasUserProvidedCtor(BRD->getDefinition()))
-        RecordStack.push_back(BRD->getDefinition());
+          !hasUserProvidedCtor(BRD->getDefinition())) {
+        BasePath BP(Path);
+        BP.push_back(BRD->getCanonicalDecl());
+        RecordStack.push_back({BRD->getDefinition(), std::move(BP)});
+      }
     }
   }
+}
+
+/// Peel the transparent casts SemaProfiles::ignoreTransparentCasts peels --
+/// parens, implicit casts, and explicit casts of a pointer or glvalue -- from
+/// \p E, prepending the derived-to-base steps they take to \p Path in
+/// object-to-member order (this step's casts sit closer to the object than
+/// the caller's); returns the operand reached.
+static const Expr *peelBaseCasts(const Expr *E, BasePath &Path) {
+  SmallVector<const CastExpr *, 4> Casts;
+  E = E->IgnoreParens();
+  while (true) {
+    if (const auto *FE = dyn_cast<FullExpr>(E)) {
+      E = FE->getSubExpr()->IgnoreParens();
+      continue;
+    }
+    const auto *CE = dyn_cast<CastExpr>(E);
+    if (!CE)
+      break;
+    if (isa<ExplicitCastExpr>(CE)) {
+      const Expr *Sub = CE->getSubExpr();
+      if (!Sub->getType()->isPointerType() && !Sub->isGLValue())
+        break;
+    }
+    Casts.push_back(CE);
+    E = CE->getSubExpr()->IgnoreParens();
+  }
+  BasePath Steps;
+  for (const CastExpr *CE : llvm::reverse(Casts))
+    if (CE->getCastKind() == CK_DerivedToBase ||
+        CE->getCastKind() == CK_UncheckedDerivedToBase)
+      for (const CXXBaseSpecifier *BS : CE->path())
+        Steps.push_back(
+            BS->getType()->getAsCXXRecordDecl()->getCanonicalDecl());
+  Path.insert(Path.begin(), Steps.begin(), Steps.end());
+  return E;
 }
 
 /// One flow-tracked std::init storage entity of the analyzed body: an
@@ -1883,6 +1928,8 @@ struct TrackedEntity {
   Kind K;
   /// The local (LocalMember); null for the current object.
   const VarDecl *Base;
+  /// The derived-to-base path from the object's class to Field's class.
+  BasePath Path;
   const FieldDecl *Field;
 };
 
@@ -1923,8 +1970,14 @@ struct TrackedStorage {
   llvm::DenseMap<const VarDecl *, std::pair<unsigned, unsigned>> LocalRange;
   /// The current object's range (a constructor body); empty otherwise.
   std::pair<unsigned, unsigned> CurrentObjectRange{0, 0};
-  /// The tracked local each tracked copy was copy- or move-constructed from.
-  llvm::DenseMap<const VarDecl *, const VarDecl *> CopySource;
+  /// The tracked local a tracked copy was copy- or move-constructed from,
+  /// and the derived-to-base path of the conversion a slicing copy applied
+  /// to it (empty for a same-class copy).
+  struct CopyOrigin {
+    const VarDecl *Src = nullptr;
+    BasePath Path;
+  };
+  llvm::DenseMap<const VarDecl *, CopyOrigin> CopySource;
 
   /// Append one entity per flow-trackable member of \p RD -- an [[uninit]]
   /// built-in scalar (arithmetic or enum) member with no default member
@@ -1938,9 +1991,11 @@ struct TrackedStorage {
   std::pair<unsigned, unsigned> addObject(Sema &S, const VarDecl *Base,
                                           const CXXRecordDecl *RD);
 
-  /// The entity of member \p F of the object \p Base (null: the current
-  /// object), if tracked.
-  std::optional<unsigned> find(const VarDecl *Base, const FieldDecl *F) const;
+  /// The entity of member \p F reached through \p Path in the object
+  /// \p Base (null: the current object), if tracked.
+  std::optional<unsigned> find(const VarDecl *Base,
+                               ArrayRef<const CXXRecordDecl *> Path,
+                               const FieldDecl *F) const;
 
   /// What resolving a glvalue found: the tracked entity it names, or -- for
   /// an access that reaches a tracked local without naming a tracked member
@@ -1970,8 +2025,8 @@ std::pair<unsigned, unsigned>
 TrackedStorage::addObject(Sema &S, const VarDecl *Base,
                           const CXXRecordDecl *RD) {
   unsigned Begin = Entities.size();
-  llvm::SmallPtrSet<const FieldDecl *, 8> Seen;
-  forEachCandidateUninitField(RD, [&](const FieldDecl *F) {
+  forEachCandidateUninitField(RD, [&](const BasePath &Path,
+                                      const FieldDecl *F) {
     if (!F->hasAttr<UninitAttr>() || !F->getDeclName() ||
         F->hasInClassInitializer())
       return;
@@ -1980,11 +2035,12 @@ TrackedStorage::addObject(Sema &S, const VarDecl *Base,
       return;
     if (S.Context.getBaseElementType(T)->isStdByteType())
       return;
-    if (!Seen.insert(F).second)
-      return;
+    for (unsigned I = Begin, N = Entities.size(); I != N; ++I)
+      if (Entities[I].Field == F && Entities[I].Path == Path)
+        return;
     Entities.push_back({Base ? TrackedEntity::Kind::LocalMember
                              : TrackedEntity::Kind::CurrentObjectMember,
-                        Base, F});
+                        Base, Path, F});
   });
   std::pair<unsigned, unsigned> Range{Begin, (unsigned)Entities.size()};
   if (!Base)
@@ -1994,8 +2050,9 @@ TrackedStorage::addObject(Sema &S, const VarDecl *Base,
   return Range;
 }
 
-std::optional<unsigned> TrackedStorage::find(const VarDecl *Base,
-                                             const FieldDecl *F) const {
+std::optional<unsigned>
+TrackedStorage::find(const VarDecl *Base, ArrayRef<const CXXRecordDecl *> Path,
+                     const FieldDecl *F) const {
   std::pair<unsigned, unsigned> Range = CurrentObjectRange;
   if (Base) {
     auto It = LocalRange.find(Base);
@@ -2004,7 +2061,7 @@ std::optional<unsigned> TrackedStorage::find(const VarDecl *Base,
     Range = It->second;
   }
   for (unsigned I = Range.first; I != Range.second; ++I)
-    if (Entities[I].Field == F)
+    if (Entities[I].Field == F && llvm::ArrayRef(Entities[I].Path) == Path)
       return I;
   return std::nullopt;
 }
@@ -2028,7 +2085,8 @@ TrackedStorage::Resolution TrackedStorage::resolve(const Expr *E) const {
   // object only.
   SmallVector<const FieldDecl *, 4> Named;
   bool Subscript = false;
-  const Expr *Cur = SemaProfiles::ignoreTransparentCasts(E);
+  BasePath Path;
+  const Expr *Cur = peelBaseCasts(E, Path);
   while (true) {
     if (const auto *ME = dyn_cast<MemberExpr>(Cur)) {
       const auto *F = dyn_cast<FieldDecl>(ME->getMemberDecl());
@@ -2036,7 +2094,7 @@ TrackedStorage::Resolution TrackedStorage::resolve(const Expr *E) const {
         return {};
       if (!F->isAnonymousStructOrUnion())
         Named.push_back(F);
-      Cur = SemaProfiles::ignoreTransparentCasts(ME->getBase());
+      Cur = peelBaseCasts(ME->getBase(), Path);
       if (ME->isArrow()) {
         if (!isa<CXXThisExpr>(Cur))
           return {};
@@ -2046,15 +2104,22 @@ TrackedStorage::Resolution TrackedStorage::resolve(const Expr *E) const {
     }
     if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(Cur)) {
       Subscript = true;
-      Cur = SemaProfiles::ignoreTransparentCasts(ASE->getBase());
+      Cur = peelBaseCasts(ASE->getBase(), Path);
       continue;
     }
     break;
   }
   if (Named.empty())
     return {};
+  // `(*this).m`, with any base cast inside the dereference.
+  if (const auto *UO = dyn_cast<UnaryOperator>(Cur);
+      UO && UO->getOpcode() == UO_Deref) {
+    Cur = peelBaseCasts(UO->getSubExpr(), Path);
+    if (!isa<CXXThisExpr>(Cur))
+      return {};
+  }
   std::pair<unsigned, unsigned> Range;
-  if (isCurrentObjectBase(Cur)) {
+  if (isa<CXXThisExpr>(Cur)) {
     Range = CurrentObjectRange;
   } else if (const auto *DRE = dyn_cast<DeclRefExpr>(Cur)) {
     const auto *V = dyn_cast<VarDecl>(DRE->getDecl());
@@ -2070,7 +2135,7 @@ TrackedStorage::Resolution TrackedStorage::resolve(const Expr *E) const {
   const FieldDecl *Top = Named.back();
   if (Named.size() == 1 && !Subscript) {
     for (unsigned I = Range.first; I != Range.second; ++I)
-      if (Entities[I].Field == Top) {
+      if (Entities[I].Field == Top && Entities[I].Path == Path) {
         R.Entity = I;
         R.Benign = true;
         return R;
@@ -2426,7 +2491,8 @@ static void appendThisCaptureLambdaReadEvents(
   }
 }
 
-static const DeclRefExpr *getLocalCopySourceRef(const VarDecl *V);
+static const DeclRefExpr *getLocalCopySourceRef(const VarDecl *V,
+                                                BasePath &CastPath);
 
 /// The statements of a constructor body the engine takes current-object
 /// events from: the body plus each *written* member/base initializer
@@ -2523,9 +2589,11 @@ extractStdInitEvents(const CFG &cfg, const TrackedStorage &Storage,
       } else if (const auto *DS = dyn_cast<DeclStmt>(St)) {
         for (const Decl *Dcl : DS->decls())
           if (const auto *V = dyn_cast<VarDecl>(Dcl))
-            if (Storage.CopySource.count(V))
-              if (const DeclRefExpr *Base = getLocalCopySourceRef(V))
+            if (Storage.CopySource.count(V)) {
+              BasePath Unused;
+              if (const DeclRefExpr *Base = getLocalCopySourceRef(V, Unused))
                 Benign.insert(Base);
+            }
       }
     }
   }
@@ -2579,19 +2647,21 @@ extractStdInitEvents(const CFG &cfg, const TrackedStorage &Storage,
           continue;
         if (CI->isAnyMemberInitializer()) {
           if (const FieldDecl *F = CI->getAnyMember())
-            if (std::optional<unsigned> Idx = Storage.find(nullptr, F))
+            if (std::optional<unsigned> Idx = Storage.find(nullptr, {}, F))
               BlockEvents.push_back(
                   {DefAssignEventKind::Write, *Idx, CI->getInit()});
         } else if (CI->isBaseInitializer()) {
+          // Every entity below that base: its path starts with the base.
           const auto *BRD = CI->getBaseClass()->getAsCXXRecordDecl();
-          if (!BRD || !BRD->hasDefinition())
+          if (!BRD)
             continue;
-          forEachCandidateUninitField(
-              BRD->getDefinition(), [&](const FieldDecl *F) {
-                if (std::optional<unsigned> Idx = Storage.find(nullptr, F))
-                  BlockEvents.push_back(
-                      {DefAssignEventKind::Write, *Idx, CI->getInit()});
-              });
+          for (unsigned Idx = Storage.CurrentObjectRange.first;
+               Idx != Storage.CurrentObjectRange.second; ++Idx) {
+            const BasePath &Path = Storage.Entities[Idx].Path;
+            if (!Path.empty() && Path.front() == BRD->getCanonicalDecl())
+              BlockEvents.push_back(
+                  {DefAssignEventKind::Write, Idx, CI->getInit()});
+          }
         }
         continue;
       }
@@ -2637,13 +2707,13 @@ extractStdInitEvents(const CFG &cfg, const TrackedStorage &Storage,
           BlockEvents.push_back({DefAssignEventKind::Write, Idx, DRE});
       } else if (const auto *DS = dyn_cast<DeclStmt>(St)) {
         // A tracked copy: each dest member's state becomes its source
-        // member's, keyed per FieldDecl (a sliced copy shares the base's
-        // FieldDecls with a differently laid out source range). The
-        // DeclStmt element follows its initializer's subexpression
-        // elements, so the transfer sees the source's state at the copy
-        // point. A source field the source does not track cannot occur (the
-        // dest's fields are a subset of the source's); fall back to Write
-        // (assume assigned) if it somehow does.
+        // member's -- the source entity at the copy's derived-to-base path
+        // followed by the member's own path, so a sliced copy maps onto the
+        // right base subobject. The DeclStmt element follows its
+        // initializer's subexpression elements, so the transfer sees the
+        // source's state at the copy point. A source entity that does not
+        // exist cannot occur (the dest's members are a subset of the
+        // source's); fall back to Write (assume assigned) if it somehow does.
         for (const Decl *Dcl : DS->decls()) {
           const auto *V = dyn_cast<VarDecl>(Dcl);
           if (!V)
@@ -2653,8 +2723,10 @@ extractStdInitEvents(const CFG &cfg, const TrackedStorage &Storage,
             continue;
           auto Range = Storage.LocalRange.find(V)->second;
           for (unsigned Idx = Range.first; Idx != Range.second; ++Idx) {
-            if (std::optional<unsigned> SrcIdx =
-                    Storage.find(CopyIt->second, Storage.Entities[Idx].Field))
+            BasePath SrcPath(CopyIt->second.Path);
+            SrcPath.append(Storage.Entities[Idx].Path);
+            if (std::optional<unsigned> SrcIdx = Storage.find(
+                    CopyIt->second.Src, SrcPath, Storage.Entities[Idx].Field))
               BlockEvents.push_back(
                   {DefAssignEventKind::Copy, Idx, V->getInit(), *SrcIdx});
             else
@@ -2723,10 +2795,12 @@ static const CXXRecordDecl *getTrackedLocalAggregate(const VarDecl *V) {
 }
 
 // If V is copy- or move-constructed from a directly named variable, return
-// that source's DeclRefExpr; null otherwise. The explicit-cast peel resolves
+// that source's DeclRefExpr and, in \p CastPath, the derived-to-base path a
+// slicing copy converts it through; null otherwise. The cast peel resolves
 // the move form (`Agg b = static_cast<Agg&&>(a);`) to its named operand,
 // mirroring the parse-time recognizers' pass-through.
-static const DeclRefExpr *getLocalCopySourceRef(const VarDecl *V) {
+static const DeclRefExpr *getLocalCopySourceRef(const VarDecl *V,
+                                                BasePath &CastPath) {
   const Expr *Init = V->getInit();
   if (!Init)
     return nullptr;
@@ -2734,13 +2808,7 @@ static const DeclRefExpr *getLocalCopySourceRef(const VarDecl *V) {
   if (!CCE || CCE->getNumArgs() < 1 ||
       !CCE->getConstructor()->isCopyOrMoveConstructor())
     return nullptr;
-  const Expr *Arg = CCE->getArg(0)->IgnoreParenImpCasts();
-  while (const auto *CE = dyn_cast<ExplicitCastExpr>(Arg)) {
-    if (!CE->getSubExpr()->isGLValue())
-      break;
-    Arg = CE->getSubExpr()->IgnoreParenImpCasts();
-  }
-  return dyn_cast<DeclRefExpr>(Arg);
+  return dyn_cast<DeclRefExpr>(peelBaseCasts(CCE->getArg(0), CastPath));
 }
 
 /// Harvest the tracked locals of the analyzed body into \p Storage: by-value
@@ -2808,14 +2876,15 @@ static void harvestTrackedLocals(Sema &S, AnalysisDeclContext &AC,
           const CXXRecordDecl *RD = getTrackableLocalClass(V);
           if (!RD)
             continue;
-          const DeclRefExpr *SrcRef = getLocalCopySourceRef(V);
+          BasePath CastPath;
+          const DeclRefExpr *SrcRef = getLocalCopySourceRef(V, CastPath);
           const auto *Src =
               SrcRef ? dyn_cast<VarDecl>(SrcRef->getDecl()) : nullptr;
           if (!Src || !Storage.LocalRange.count(Src))
             continue;
           if (!HarvestVar(V, RD))
             continue;
-          Storage.CopySource[V] = Src;
+          Storage.CopySource[V] = {Src, std::move(CastPath)};
           Added = true;
         }
       }
