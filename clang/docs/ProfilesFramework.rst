@@ -1193,8 +1193,11 @@ those entries never cause a rejection.
   credit they themselves recorded -- which makes a reverse-direction
   violation established only by credit in fully dependent code a missed
   diagnostic as well.
-- In a template, a violation in non-dependent code is diagnosed at definition
-  time and may be repeated at instantiation.
+- In a template, the declaration rules, the constructor rules, and the
+  flow-based rules fire per instantiation; ``uninit_read`` (through a
+  marker), ``uninit_write``, and the binding rule fire at the definition when
+  their operands do not depend on the template's parameters, and again at
+  each instantiation that rebuilds the expression.
 
 
 Test Profiles

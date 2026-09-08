@@ -713,10 +713,11 @@ inside a *block* body -- which ``getCurFunctionDecl`` would skip -- stays
 
 **Recording is not gated on enforcement or suppression.**  A suppressed
 store still initializes, and failing to credit it would turn suppression
-into later false positives.  There is likewise no in-template gate:
-non-dependent code in a template is checked at definition time and must
-find pattern-time credit (instantiations rebuild their ``DeclRefExpr``\ s
-against fresh declarations, so they re-record independently).  The one gate
+into later false positives.  There is likewise no in-template gate: an
+expression check with a non-dependent operand fires at the definition and
+must find pattern-time credit (instantiations rebuild their
+``DeclRefExpr``\ s against fresh declarations, so they re-record
+independently).  The one gate
 is never-executed contexts -- unevaluated and discarded-statement contexts,
 mirroring ``shouldEmitProfileViolation``: a store there never executes, so
 it earns no credit and a destroy there withdraws none.
