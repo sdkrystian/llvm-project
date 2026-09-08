@@ -563,9 +563,9 @@ void test_variadic_arguments() {
   (void)rtu;
 }
 
-// Decl-less with a non-dependent argument: fires at definition time, and
-// again when the call (always rebuilt) re-promotes the argument at
-// instantiation -- the accepted repetition.
+// A variadic argument with a non-dependent source is reported at the
+// definition and again at each instantiation, which rebuilds the call and
+// re-promotes the argument.
 template <typename T>
 void template_variadic_arg() {
   vf(0, &g_uninit); // expected-error 2 {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
@@ -677,10 +677,10 @@ void test_ref_capture_body_store() {
   (void)L; (void)q;
 }
 
-// A by-reference capture of a variable with a non-dependent type fires at
-// definition time, and again when TreeTransform's unconditional lambda
-// rebuild re-processes the capture at instantiation -- the accepted
-// repetition. (The body must not assign x, as in test_ref_captures.)
+// A by-reference capture of a variable with a non-dependent type is reported
+// at the definition and again at each instantiation, which rebuilds the
+// lambda and re-processes the capture. (The body must not assign x, as in
+// test_ref_captures.)
 template <typename T>
 void template_ref_capture_bad() {
   int x [[uninit]];
@@ -739,9 +739,9 @@ void test_operator_arguments() {
   a = &g_init;   // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
 }
 
-// A non-dependent functor-call argument fires at definition time like every
-// other Decl-less binding site, and repeats when the call is rebuilt at
-// instantiation (the local functor forces the rebuild).
+// A non-dependent functor-call argument is reported at the definition and
+// again at each instantiation, which rebuilds the call (the local functor
+// forces the rebuild).
 template <typename T>
 void template_functor_bad() {
   MarkedFunctor mf;
@@ -974,8 +974,9 @@ void template_bad() {
 }
 template void template_bad<int>(); // expected-note {{in instantiation of function template specialization 'template_bad<int>' requested here}}
 
-// A *non-dependent* pointer bound to uninitialized memory inside a template
-// body is diagnosed once, at instantiation, not on the pattern (no double-fire).
+// A variable initializer carries its declaration, so a *non-dependent* pointer
+// bound to uninitialized memory inside a template body is reported once, at
+// instantiation, never on the pattern.
 template <typename T>
 void template_nondependent_bad() {
   int *p = &g_uninit; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
@@ -1118,13 +1119,12 @@ void template_new_bad() {
 }
 template void template_new_bad<int>(); // expected-note {{in instantiation of function template specialization 'template_new_bad<int>' requested here}}
 
-// The call-argument, pointer-assignment, and return sites pass no Decl, so
-// (unlike the variable-init site, template_nondependent_bad above) they defer
-// only on an instantiation-dependent source. These sources are non-dependent,
-// so each fires at definition time -- and each construct is rebuilt at
-// instantiation anyway (the callee's implicit cast is stripped, forcing a
-// call rebuild; the local p is remapped; a return statement always rebuilds),
-// so the diagnostic repeats there. The repetition is accepted for now.
+// The call-argument, pointer-assignment, and return sites are expression
+// checks (unlike the variable-init site, template_nondependent_bad above): a
+// non-dependent source is reported at the definition and again at each
+// instantiation that rebuilds the construct -- a call is always rebuilt (the
+// callee's implicit cast is stripped), the local p is remapped, and a return
+// statement always rebuilds.
 template <typename T>
 void template_call_arg_unmarked() {
   take_ptr(&g_uninit); // expected-error 2 {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
@@ -1183,10 +1183,9 @@ template void template_dependent_per_spec<int>();  // expected-note {{in instant
 template void template_dependent_per_spec<long>(); // expected-note {{in instantiation of function template specialization 'template_dependent_per_spec<long>' requested here}}
 
 // Fully non-dependent constructs whose operands transform to themselves are
-// *reused* by TreeTransform at instantiation -- their Build* never re-runs.
-// Deferring would silently lose the diagnostic (these all-global shapes were
-// silent before), so they are checked at definition time: exactly one error,
-// on the pattern, with no instantiation note.
+// *reused* by TreeTransform at instantiation -- their Build* never re-runs --
+// so they are reported at the definition only: exactly one error, on the
+// pattern, with no instantiation note.
 int *g_ptr_sink = nullptr;
 int **g_pp_sink = nullptr;
 
@@ -1198,9 +1197,8 @@ void template_allglobal_bad() {
 }
 template void template_allglobal_bad<int>();
 
-// The same shapes diagnose in a never-instantiated template: definition-time
-// checking deliberately trades strict "as-if after phase 7" purity for
-// reuse-proof diagnostics.
+// The same shapes are reported in a never-instantiated template: an
+// expression check with a non-dependent operand fires on the pattern.
 template <typename T>
 void template_allglobal_never_instantiated() {
   g_ptr_sink = &g_uninit;             // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
@@ -1550,9 +1548,9 @@ struct HasAggMember {
   int get() { return agg.x; } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
 };
 
-// Like every Decl-less check, the member read fires at definition time when
-// its glvalue is non-dependent, and repeats when the read is rebuilt at
-// instantiation (the local s is remapped) -- the accepted repetition.
+// A member read with a non-dependent glvalue is reported at the definition
+// and again at each instantiation that rebuilds the read (the local s is
+// remapped).
 template <typename T>
 void template_member_read_bad() {
   Pair s [[uninit]];
@@ -1561,12 +1559,12 @@ void template_member_read_bad() {
 }
 template void template_member_read_bad<int>(); // expected-note {{in instantiation of function template specialization 'template_member_read_bad<int>' requested here}}
 
-// A read through a [[ref_to_uninit]] parameter inside a template body fires at
-// definition time when the operand is non-dependent
-// (template_read_nondependent_bad; the parameter remap rebuilds the read at
-// instantiation, repeating the diagnostic) and defers to instantiation when it
-// is dependent (template_read_dependent_bad). Mirrors the binding template_*
-// cases above.
+// A read through a [[ref_to_uninit]] parameter inside a template body with a
+// non-dependent operand is reported at the definition and again at each
+// instantiation that rebuilds the read (the parameter remap does;
+// template_read_nondependent_bad); with a dependent operand it is reported
+// once per instantiation (template_read_dependent_bad). Mirrors the binding
+// template_* cases above.
 template <typename T>
 void template_read_nondependent_bad(int *p [[ref_to_uninit]]) {
   int y = *p; // expected-error 2 {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
@@ -1642,9 +1640,9 @@ void test_compound_read_suppress(int *p [[ref_to_uninit]]) {
   [[profiles::suppress(std::init, rule: "uninit_read")]] { *p += 1; } // OK: rule-targeted suppress
 }
 
-// Like every Decl-less read check, the compound read fires at definition time
-// on a non-dependent operand and repeats when the parameter remap rebuilds the
-// assignment at instantiation.
+// A compound read with a non-dependent operand is reported at the definition
+// and again at each instantiation that rebuilds the assignment (the parameter
+// remap does).
 template <typename T>
 void template_compound_read_bad(int *p [[ref_to_uninit]]) {
   *p += 1; // expected-error 2 {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
@@ -2911,11 +2909,10 @@ void test_store_after_switch(int n) {
   (void)r;
 }
 
-// Store credit is recorded at pattern-parse time too: non-dependent
-// store-then-read inside a template is checked at definition time (the
-// documented phase-7 trade-off) and must find the pattern-time credit;
-// instantiations rebuild every DeclRefExpr against fresh declarations and
-// re-record independently.
+// Store credit is recorded at pattern-parse time too: a non-dependent
+// store-then-read inside a template is checked at the definition and finds
+// the pattern-time credit; instantiations rebuild every DeclRefExpr against
+// fresh declarations and re-record independently.
 template <typename T>
 void template_store_then_read(int *p [[ref_to_uninit]]) {
   *p = 5;
@@ -2938,12 +2935,11 @@ void template_discarded_store(int *p [[ref_to_uninit]]) {
 template void template_discarded_store<true>(int *);  // OK: store instantiated
 template void template_discarded_store<false>(int *); // expected-note {{in instantiation of function template specialization 'template_discarded_store<false>' requested here}}
 
-// Known residual gap (documented definition-time-purity trade-off): a store
-// with a *type-dependent RHS* routes through the overloaded-operator path at
-// pattern time and never reaches the built-in assignment funnel, so it earns
-// no pattern-time credit and the following non-dependent read
-// false-positives at definition time. The instantiation is clean (its
-// rebuilt store re-records first) -- exactly one error total.
+// A store with a *type-dependent RHS* routes through the overloaded-operator
+// path at pattern time and never reaches the built-in assignment funnel, so
+// it earns no pattern-time credit and the following non-dependent read is
+// reported at the definition (a false positive). The instantiation is clean
+// (its rebuilt store re-records first) -- exactly one error total.
 template <typename T>
 void template_dependent_rhs_store(int *p [[ref_to_uninit]], T t) {
   *p = t;
