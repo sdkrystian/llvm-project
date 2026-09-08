@@ -157,6 +157,10 @@ costs nothing:
   ``shouldEmitProfileViolation``, and receives its row so the profile's
   identity keeps flowing from the table.
 
+A row whose diagnostic is ``0`` takes no part in the uninitialized-read
+reporter and rides the analysis for its hooks alone -- an ``ExtraPass`` that
+owns every diagnostic of its profile.
+
 An ``ExtraPass`` must tolerate both CFG shapes the dispatch points can
 build: the non-linearized shape (the base always-add classes plus whatever
 the enforced rows' ``ConfigureCFG`` hooks add) and the fully linearized

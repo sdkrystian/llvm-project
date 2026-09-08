@@ -1697,6 +1697,9 @@ namespace {
 struct CFGProfileEntry {
   StringRef Name;
   StringRef Rule;
+  /// The uninitialized-read diagnostic; 0 opts the row out of the
+  /// uninitialized-variables reporter, so it rides the analysis for its hooks
+  /// alone.
   unsigned DiagID;
   /// When non-null, exempts a variable from the row's uninitialized-read
   /// rule. Consulted once per variable, before either reporter arm; must not
@@ -1763,7 +1766,7 @@ tryDiagnoseProfileUninitRead(Sema &S, AnalysisDeclContext &AC,
                              const SmallVectorImpl<UninitUse> &vec) {
   SmallVector<const CFGProfileEntry *, 4> Rows;
   for (const CFGProfileEntry &E : CFGProfiles)
-    if (!E.VarExempt || !E.VarExempt(S, vd))
+    if (E.DiagID != 0 && (!E.VarExempt || !E.VarExempt(S, vd)))
       Rows.push_back(&E);
   if (Rows.empty())
     return false;
