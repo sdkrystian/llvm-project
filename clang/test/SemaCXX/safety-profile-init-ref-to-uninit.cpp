@@ -173,10 +173,12 @@ void test_braced_reference() {
   (void)r1; (void)r2; (void)r3; (void)r4;
 }
 
+// A conditional source whose arms disagree is rejected for a marked target
+// as for an unmarked one (P4222R2 §4.9).
 void test_conditional_pointer(bool c) {
   int *p1 = c ? &g_uninit : &g_init;                       // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   int *p2 [[ref_to_uninit]] = c ? &g_uninit : &g_uninit2;  // OK: both arms uninitialized
-  int *p3 [[ref_to_uninit]] = c ? &g_uninit : &g_init;     // OK: either arm may be uninitialized
+  int *p3 [[ref_to_uninit]] = c ? &g_uninit : &g_init;     // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   int *p4 [[ref_to_uninit]] = c ? &g_init : &g_init2;      // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   int *p5 = c ? &g_init : &g_init2;                        // OK
   (void)p1; (void)p2; (void)p3; (void)p4; (void)p5;
@@ -286,7 +288,7 @@ void test_pointer_alias_mutable() {
 // parameter is a trusted Initialized source, a marked one Uninitialized.
 void test_gnu_conditional_pointer(int *q, int *q2, int *up [[ref_to_uninit]]) {
   int *p1 = up ?: q;                   // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
-  int *p2 [[ref_to_uninit]] = up ?: q; // OK: the common arm may be uninitialized
+  int *p2 [[ref_to_uninit]] = up ?: q; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   int *p3 [[ref_to_uninit]] = q ?: q2; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   int *p4 = q ?: q2;                   // OK
   int *p5 = q ?: &g_uninit;            // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
@@ -848,7 +850,7 @@ void test_passthrough_call_arguments(bool c) {
   take_ref({g_uninit});        // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   take_ref({g_init});          // OK
 
-  take_uninit_ptr(c ? &g_uninit : &g_init); // OK: either arm may be uninitialized
+  take_uninit_ptr(c ? &g_uninit : &g_init); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   take_ptr(c ? &g_uninit : &g_init);        // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   take_uninit_ref(c ? g_uninit : g_uninit2);// OK
   take_ref(c ? g_uninit : g_init);          // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
@@ -924,9 +926,27 @@ int &ret_braced_ref_bad() {
   return {g_init}; // expected-error {{reference marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
 }
 
-[[ref_to_uninit]] int *ret_cond_ptr_ok(bool c) { return c ? &g_uninit : &g_init; } // OK
+[[ref_to_uninit]] int *ret_cond_ptr_mixed(bool c) { return c ? &g_uninit : &g_init; } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
 int *ret_cond_ptr_bad(bool c) {
   return c ? &g_uninit : &g_init; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// P4222R2 §4.9: a conditional source whose arms disagree -- one initialized,
+// one uninitialized -- is rejected for either target; mixing requires
+// suppression. Both-uninitialized arms are one uninitialized source.
+extern "C" void *malloc(__SIZE_TYPE__);
+int *both_arms_uninit(int x) {
+  return (0 < x) ? (int *)malloc(x * sizeof(int)) : new int[x]; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+int *mixed_arms_unmarked(bool c) {
+  return c ? new int : &g_init; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+[[ref_to_uninit]] int *mixed_arms_marked(bool c) {
+  return c ? new int : &g_init; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+[[ref_to_uninit]] int *mixed_arms_suppressed(bool c) {
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  [[profiles::suppress(std::init)]] { return c ? new int : &g_init; } // OK: suppressed
 }
 
 [[ref_to_uninit]] int *ret_comma_ptr_ok() { return (h(), &g_uninit); } // OK
