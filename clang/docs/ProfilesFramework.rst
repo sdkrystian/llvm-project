@@ -712,7 +712,9 @@ on their marking are checked under it, and arms of mixed marking accept
 either source (any one answer would reject a legal combination); a target
 that does not directly name a pointer declaration -- a reference to a
 pointer, ``*pp``, an array element -- has unknown marking and accepts either
-source as well.  A parameter's marker written on any declaration of the function is
+source as well.  A conditional *source* whose arms disagree -- one
+initialized, one uninitialized -- is rejected for either target (P4222R2
+§4.9: mixing requires suppression).  A parameter's marker written on any declaration of the function is
 inherited by the parameter's later redeclarations, so a header's marker
 carries to the source file's definition (the §7.2 header/source split); the
 definition keeps its read-through checking and call sites after the

@@ -1058,16 +1058,25 @@ void SemaProfiles::addKnownInitLifecycleAttributes(FunctionDecl *FD) {
 // analysis and no type-system tracking. Uninitialized storage is only ever
 // introduced by an explicit [[uninit]] / [[ref_to_uninit]] marker.
 //
-// The classification is tri-state: a recognized form is Initialized or
-// Uninitialized, while an unrecognized one (pointer arithmetic, an
-// integer-to-pointer cast, a call through a function pointer) is Unknown rather
-// than assumed Initialized. Callers wanting a plain "is it uninitialized?"
-// answer (the read-through and subobject-write checks) treat Unknown as not
+// A recognized form is Initialized or Uninitialized; an unrecognized one
+// (pointer arithmetic, an integer-to-pointer cast, a call through a function
+// pointer) is Unknown rather than assumed Initialized; and a conditional whose
+// arms are Initialized and Uninitialized is Mixed (P4222R2 §4.9: mixing
+// initialized and uninitialized memory in one expression requires
+// suppression), which both binding directions reject and which the
+// read-through, subobject-write, and destroy checks treat as Uninitialized.
+// Callers wanting a plain "is it uninitialized?" answer treat Unknown as not
 // uninitialized.
 //
 // How the classified expression is being accessed is carried by
 // UninitAccessOpts below.
-enum class UninitStorage { Initialized, Uninitialized, Unknown };
+enum class UninitStorage { Initialized, Uninitialized, Unknown, Mixed };
+
+/// True for the states a "may be uninitialized" consumer acts on:
+/// Uninitialized, and Mixed (one arm is).
+static bool isUninitializedOrMixed(UninitStorage S) {
+  return S == UninitStorage::Uninitialized || S == UninitStorage::Mixed;
+}
 
 // How an expression is being used, for the uninit recognizers.
 //
@@ -1194,14 +1203,20 @@ constexpr UninitAccessOpts UninitReadAccess{/*DropTopLevelUninit=*/true};
 constexpr UninitAccessOpts UninitWriteAccess{/*DropTopLevelUninit=*/true,
                                              /*TrustRefToUninit=*/true};
 
-// Combine the arms of a conditional: Uninitialized dominates (either arm may be
-// taken), then Unknown, else Initialized.
+// Combine the arms of a conditional: equal arms keep their state; Mixed
+// absorbs everything; Initialized with Uninitialized is Mixed (P4222R2 §4.9);
+// Uninitialized with Unknown is Uninitialized (either arm may be taken and one
+// is known bad); Initialized with Unknown is Unknown.
 static UninitStorage combineArms(UninitStorage A, UninitStorage B) {
-  if (A == UninitStorage::Uninitialized || B == UninitStorage::Uninitialized)
-    return UninitStorage::Uninitialized;
-  if (A == UninitStorage::Unknown || B == UninitStorage::Unknown)
-    return UninitStorage::Unknown;
-  return UninitStorage::Initialized;
+  if (A == B)
+    return A;
+  if (A == UninitStorage::Mixed || B == UninitStorage::Mixed)
+    return UninitStorage::Mixed;
+  if (A == UninitStorage::Unknown)
+    return B == UninitStorage::Uninitialized ? B : UninitStorage::Unknown;
+  if (B == UninitStorage::Unknown)
+    return A == UninitStorage::Uninitialized ? A : UninitStorage::Unknown;
+  return UninitStorage::Mixed;
 }
 
 static UninitStorage
@@ -1950,10 +1965,11 @@ static bool bindingTargetCanCarryMarker(SemaProfiles::InitBindingKind Kind) {
 /// The verdict step of the binding funnel: diagnose binding a source in
 /// \p SrcState to a target whose marking is \p TargetMarked, in \p Kind's
 /// wording. A marked target rejects an affirmatively Initialized source and
-/// an unmarked one an affirmatively Uninitialized source; an Unknown source
-/// (pointer arithmetic, an integer-to-pointer cast, a call through a
-/// function pointer) fires in neither direction. \p Subject is the entity
-/// the ByRefCapture and ObjectArgument wordings name.
+/// an unmarked one an affirmatively Uninitialized source; a Mixed source is
+/// rejected by both (P4222R2 §4.9), and an Unknown source (pointer
+/// arithmetic, an integer-to-pointer cast, a call through a function pointer)
+/// by neither. \p Subject is the entity the ByRefCapture and ObjectArgument
+/// wordings name.
 static void diagnoseBindingVerdict(SemaProfiles &SP,
                                    SemaProfiles::InitBindingKind Kind,
                                    SourceLocation Loc, bool TargetMarked,
@@ -1962,12 +1978,13 @@ static void diagnoseBindingVerdict(SemaProfiles &SP,
   using K = SemaProfiles::InitBindingKind;
   static constexpr StringRef Profile = "std::init";
   if (TargetMarked) {
-    if (SrcState == UninitStorage::Initialized)
+    if (SrcState == UninitStorage::Initialized ||
+        SrcState == UninitStorage::Mixed)
       SP.Diag(Loc, diag::err_init_ref_to_uninit_requires_uninit)
           << Profile << (IsReference ? 1 : 0);
     return;
   }
-  if (SrcState != UninitStorage::Uninitialized)
+  if (!isUninitializedOrMixed(SrcState))
     return;
   switch (Kind) {
   case K::ByRefCapture:
@@ -2104,11 +2121,10 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
                Checkable &&
                shouldEmitProfileViolation(diag::err_init_destroy_uninit, Loc,
                                           D) &&
-               classifyUninitSource(
+               isUninitializedOrMixed(classifyUninitSource(
                    getASTContext(), Src, T->isReferenceType(),
                    UninitBindAccess.withCredit(this, InitCreditStrength::Maybe)
-                       .withThisUnderConstruction(thisIsUnderConstruction())) ==
-                   UninitStorage::Uninitialized)
+                       .withThisUnderConstruction(thisIsUnderConstruction()))))
       Diag(Loc, diag::err_init_destroy_uninit) << "std::init";
   } else {
     judgeInitProfileBinding(Kind, Loc, TargetMarked, T, Src, D);
@@ -2623,10 +2639,10 @@ void SemaProfiles::checkInitProfileReadThrough(SourceLocation Loc,
     return;
   if (!shouldEmitProfileViolation(diag::err_init_uninit_read_through, Loc))
     return;
-  if (glvalueDenotesUninitStorage(
+  if (!isUninitializedOrMixed(glvalueDenotesUninitStorage(
           getASTContext(), Glvalue,
           UninitReadAccess.withCredit(this).withThisUnderConstruction(
-              thisIsUnderConstruction())) != UninitStorage::Uninitialized)
+              thisIsUnderConstruction()))))
     return;
   Diag(Loc, diag::err_init_uninit_read_through)
       << "std::init" << (isMemberChainOfUninitObject(Glvalue) ? 1 : 0);
@@ -2647,10 +2663,10 @@ void SemaProfiles::checkInitProfileSubobjectWrite(SourceLocation Loc,
     return;
   if (!shouldEmitProfileViolation(diag::err_init_uninit_subobject_write, Loc))
     return;
-  if (glvalueDenotesUninitStorage(
+  if (!isUninitializedOrMixed(glvalueDenotesUninitStorage(
           getASTContext(), LHS,
           UninitWriteAccess.withCredit(this).withThisUnderConstruction(
-              thisIsUnderConstruction())) != UninitStorage::Uninitialized)
+              thisIsUnderConstruction()))))
     return;
   // The provenance phrase: a member chain of a named [[uninit]] object
   // renders exactly as before the marked/allocator arms existed (arm 0);
