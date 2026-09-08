@@ -4268,11 +4268,12 @@ void Sema::ActOnFinishCXXInClassMemberInitializer(Decl *D,
   Profiles().checkInitProfileUninitWithInitializer(FD,
                                                    FD->getInClassInitializer());
 
-  // std::init / ref_to_uninit (paper §5): a pointer or reference data member
-  // with a default member initializer must be bound consistently with its
-  // [[ref_to_uninit]] marking.
-  Profiles().checkInitProfileRefToUninitBinding(
-      FD->getLocation(), FD, FD->getType(), FD->getInClassInitializer(), FD);
+  // std::init / ref_to_uninit (P4222R2 §4.2-§4.3): a pointer or reference
+  // data member with a default member initializer must be bound consistently
+  // with its [[ref_to_uninit]] marking.
+  Profiles().checkInitProfileBinding(SemaProfiles::InitBindingKind::DataMember,
+                                     FD->getLocation(), FD, FD->getType(),
+                                     FD->getInClassInitializer(), FD);
 }
 
 /// Find the direct and/or virtual base specifiers that
@@ -4724,8 +4725,9 @@ Sema::BuildMemberInitializer(ValueDecl *Member, Expr *Init,
     const ValueDecl *MarkerTarget =
         IndirectMember ? IndirectMember->getAnonField() : Member;
     if (auto *Ctor = dyn_cast<CXXConstructorDecl>(CurContext))
-      Profiles().checkInitProfileRefToUninitBinding(
-          IdLoc, MarkerTarget, MarkerTarget->getType(), Init, Ctor);
+      Profiles().checkInitProfileBinding(
+          SemaProfiles::InitBindingKind::DataMember, IdLoc, MarkerTarget,
+          MarkerTarget->getType(), Init, Ctor);
   }
 
   if (DirectMember) {
