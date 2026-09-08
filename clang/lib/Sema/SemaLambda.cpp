@@ -1508,8 +1508,8 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
   // enclosing stmt tree) can recover them.
   if (getLangOpts().Profiles)
     for (const auto &E : Profiles().ProfileSuppressStack)
-      Method->addAttr(Profiles().makeImplicitProfilesSuppressAttr(E.ProfileName,
-                                                                  E.RuleName));
+      Method->addAttr(
+          Profiles().makeImplicitProfilesSuppressAttr(E.Profile, E.Rule));
 
   if (Context.getTargetInfo().getTriple().isAArch64())
     ARM().CheckSMEFunctionDefAttributes(Method);

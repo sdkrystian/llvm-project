@@ -257,17 +257,8 @@ SemaProfiles::makeImplicitProfilesSuppressAttr(StringRef ProfileName,
 bool SemaProfiles::isProfileSuppressed(StringRef ProfileName,
                                        StringRef RuleName,
                                        SourceLocation Loc) const {
-  const SourceManager &SM = getASTContext().getSourceManager();
-  for (const auto &E : ProfileSuppressStack) {
-    if (!profiles::suppressionMatches(E.ProfileName, E.RuleName, ProfileName,
-                                      RuleName))
-      continue;
-    // Dominion check; see ProfilesFrameworkInternals.rst, "Suppression
-    // Dominion Mechanics".
-    if (profiles::dominionCovers(SourceRange(E.Begin, E.End), Loc, SM))
-      return true;
-  }
-  return false;
+  return profiles::anyEntryCovers(ProfileSuppressStack, ProfileName, RuleName,
+                                  Loc, getASTContext().getSourceManager());
 }
 
 bool SemaProfiles::isProfileSuppressed(StringRef ProfileName,
@@ -356,7 +347,7 @@ void SemaProfiles::ProfileSuppressScope::push(StringRef ProfileName,
                                               SourceLocation Begin,
                                               SourceLocation End) {
   S.Profiles().ProfileSuppressStack.push_back(
-      {ProfileName, RuleName, Begin, End});
+      {ProfileName, RuleName, SourceRange(Begin, End)});
   ++Count;
 }
 

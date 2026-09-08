@@ -78,6 +78,15 @@ bool profiles::dominionCovers(SourceRange Dominion, SourceLocation Loc,
           (End.isInvalid() || !SM.isBeforeInTranslationUnit(End, Loc)));
 }
 
+bool profiles::anyEntryCovers(llvm::ArrayRef<SuppressionEntry> Entries,
+                              llvm::StringRef Profile, llvm::StringRef Rule,
+                              SourceLocation Loc, const SourceManager &SM) {
+  return llvm::any_of(Entries, [&](const SuppressionEntry &E) {
+    return suppressionMatches(E.Profile, E.Rule, Profile, Rule) &&
+           dominionCovers(E.Dominion, Loc, SM);
+  });
+}
+
 bool profiles::isSuppressedFor(const Decl *D, llvm::StringRef Profile,
                                llvm::StringRef Rule) {
   return forEachSuppression(D, /*WalkLexicalParents=*/true,

@@ -26,7 +26,8 @@ void CodeGenFunction::ProfileSuppressionScope::addFromStmt(const Stmt *S) {
   profiles::forEachSuppression(
       S, [&](const Decl *Owner, const ProfilesSuppressAttr &A) {
         CGF.ProfileStmtSuppressions.push_back(
-            {&A, Owner ? profiles::declaratorDominion(*Owner) : SourceRange()});
+            {A.getProfileName(), A.getRule(),
+             Owner ? profiles::declaratorDominion(*Owner) : SourceRange()});
         return false;
       });
 }
@@ -42,7 +43,8 @@ void CodeGenFunction::ProfileSuppressionScope::addFromDecl(const Decl *D) {
       D, /*WalkLexicalParents=*/false,
       [&](const Decl &Owner, const ProfilesSuppressAttr &A) {
         CGF.ProfileStmtSuppressions.push_back(
-            {&A, profiles::declaratorDominion(Owner)});
+            {A.getProfileName(), A.getRule(),
+             profiles::declaratorDominion(Owner)});
         return false;
       });
 }
@@ -52,14 +54,11 @@ bool CodeGenFunction::isProfileSuppressionActive(StringRef Profile,
                                                  SourceLocation Loc) const {
   assert(ProfileSuppressionFloor <= ProfileStmtSuppressions.size() &&
          "suppression floor points past the end of the stack");
-  const SourceManager &SM = getContext().getSourceManager();
-  for (const ProfileStmtSuppression &E :
-       llvm::ArrayRef(ProfileStmtSuppressions)
-           .drop_front(ProfileSuppressionFloor))
-    if (profiles::suppressionMatches(E.Attr->getProfileName(),
-                                     E.Attr->getRule(), Profile, Rule) &&
-        profiles::dominionCovers(E.OwnerDominion, Loc, SM))
-      return true;
+  if (profiles::anyEntryCovers(llvm::ArrayRef(ProfileStmtSuppressions)
+                                   .drop_front(ProfileSuppressionFloor),
+                               Profile, Rule, Loc,
+                               getContext().getSourceManager()))
+    return true;
   // The declaration side rides the shared lexical-chain walk, off the anchor
   // when one is set (the code being emitted belongs to that declaration's
   // construct, not to the function hosting the emission) and off CurCodeDecl

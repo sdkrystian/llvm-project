@@ -18,6 +18,7 @@
 
 #include "clang/Basic/Profiles.h"
 #include "clang/Basic/SourceLocation.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/StringRef.h"
 
@@ -71,6 +72,15 @@ SourceRange declaratorDominion(const Decl &D);
 /// "Suppression Dominion Mechanics".
 bool dominionCovers(SourceRange Dominion, SourceLocation Loc,
                     const SourceManager &SM);
+
+/// True if an entry of \p Entries (innermost last) suppresses \p Rule of
+/// \p Profile at \p Loc: the entry matches (suppressionMatches) and its
+/// dominion covers \p Loc (dominionCovers). The one stack loop shared by
+/// Sema's parse-time suppress stack and CodeGen's statement-suppression
+/// stack.
+bool anyEntryCovers(llvm::ArrayRef<SuppressionEntry> Entries,
+                    llvm::StringRef Profile, llvm::StringRef Rule,
+                    SourceLocation Loc, const SourceManager &SM);
 
 /// True if \p D or a lexical parent carries a [[profiles::suppress]]
 /// matching \p Profile / \p Rule.

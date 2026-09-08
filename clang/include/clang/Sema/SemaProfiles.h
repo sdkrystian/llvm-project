@@ -43,22 +43,12 @@ public:
   /// propagate the bit.
   bool TUPrecededByNonEmptyDecl = false;
 
-  struct ProfileSuppressEntry {
-    StringRef ProfileName;
-    StringRef RuleName;
-    /// Begin location of the construct the suppression appertains to (the
-    /// declaration or statement, not the attribute). The entry's dominion
-    /// starts here (P3589R2 §2.4p3).
-    SourceLocation Begin;
-    /// End location of the construct, recorded only when the construct was
-    /// fully parsed at push time; invalid otherwise, leaving the dominion's
-    /// end bounded by the ProfileSuppressScope's lifetime (exact mid-parse;
-    /// see ProfilesFrameworkInternals.rst, "Suppression Dominion Mechanics").
-    SourceLocation End;
-  };
   /// The live parse-time suppress entries, innermost last; pushed and popped
-  /// by ProfileSuppressScope guards.
-  SmallVector<ProfileSuppressEntry, 4> ProfileSuppressStack;
+  /// by ProfileSuppressScope guards. An entry's dominion begins at its
+  /// construct (the declaration or statement, not the attribute) and ends at
+  /// the construct's end when that was known at push time, invalid otherwise
+  /// (exact mid-parse; the guard's lifetime bounds it).
+  SmallVector<profiles::SuppressionEntry, 4> ProfileSuppressStack;
 
   /// Thin wrapper over ASTContext::isProfileEnforced (the enforcement state
   /// lives on the ASTContext).

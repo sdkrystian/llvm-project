@@ -33,6 +33,7 @@
 #include "clang/Basic/CapturedStmt.h"
 #include "clang/Basic/CodeGenOptions.h"
 #include "clang/Basic/OpenMPKinds.h"
+#include "clang/Basic/Profiles.h"
 #include "clang/Basic/TargetInfo.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
@@ -625,23 +626,17 @@ public:
   /// True if the current statement has noconvergent attribute.
   bool InNoConvergentAttributedStmt = false;
 
-  /// One statement-carried [[profiles::suppress]] entry: the attribute and,
-  /// for a DeclStmt or local-variable entry, its owning declarator's dominion
-  /// (profiles::declaratorDominion). The range is invalid for an
-  /// AttributedStmt entry -- statement scoping already bounds those.
-  struct ProfileStmtSuppression {
-    const ProfilesSuppressAttr *Attr;
-    SourceRange OwnerDominion;
-  };
-
   /// The [[profiles::suppress]] entries of the statements enclosing the
   /// code being emitted, innermost last -- pushed by the AttributedStmt,
-  /// DeclStmt, and local-variable emission hooks. Entries at indices below
+  /// DeclStmt, and local-variable emission hooks. A DeclStmt or
+  /// local-variable entry's dominion is its owning declarator's
+  /// (profiles::declaratorDominion); an AttributedStmt entry's is invalid,
+  /// since statement scoping already bounds it. Entries at indices below
   /// ProfileSuppressionFloor belong to an enclosing construct whose tokens do
   /// not cover the code being emitted (emitting an NSDMI, a default argument,
   /// or an inlined inherited constructor raises the floor; P3589R2's
   /// suppression dominion) and are not consulted.
-  SmallVector<ProfileStmtSuppression, 4> ProfileStmtSuppressions;
+  SmallVector<profiles::SuppressionEntry, 4> ProfileStmtSuppressions;
   size_t ProfileSuppressionFloor = 0;
 
   /// When non-null, the declaration whose lexical chain carries the

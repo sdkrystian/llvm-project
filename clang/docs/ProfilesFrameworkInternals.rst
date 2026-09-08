@@ -373,7 +373,9 @@ deserialized from an AST file that was never parsed in this compilation.
 ``CodeGenFunction`` therefore mirrors the post-parse walker's two-part
 structure over the AST it is emitting:
 
-- A *statement-suppression stack* (``ProfileStmtSuppressions``), pushed and
+- A *statement-suppression stack* (``ProfileStmtSuppressions``, of the same
+  ``profiles::SuppressionEntry`` element type as Sema's parse-time stack,
+  consulted through the same ``profiles::anyEntryCovers`` loop), pushed and
   popped by ``ProfileSuppressionScope`` RAII guards in every
   statement-emission path that can carry ``[[profiles::suppress]]``:
   ``EmitAttributedStmt``, ``EmitDeclStmt``, and the local-variable arm of
