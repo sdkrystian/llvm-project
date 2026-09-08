@@ -445,7 +445,9 @@ best-effort: enforcements are inherited only when the interface's BMI is
 already resident, and it is never force-loaded nor its absence diagnosed --
 a missed diagnostic, never a wrong one.
 ``[[profiles::enforce]]`` on a *non-interface* module-declaration is recorded
-only translation-unit-locally and is invisible to importers.
+only translation-unit-locally and is invisible to importers.  A designator
+written on an implementation unit's module-declaration is checked against the
+inherited enforcements, so a conflicting one is reported at that attribute.
 
 Serialization is automatic for every profile, through four records.
 The TU's enforcements are written to every AST file as ``ENFORCED_PROFILES``

@@ -62,6 +62,7 @@
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/impl_empty_enforce.cpp -fmodule-file=RedeclPlainMod=%t/redecl_plain_mod.pcm -verify
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/impl_empty_enforce_same.cpp -fmodule-file=TestMod=%t/mod_enforced.pcm -verify
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/impl_empty_enforce_mismatch.cpp -fmodule-file=TestMod=%t/mod_enforced.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/impl_attr_mismatch.cpp -fmodule-file=TestMod=%t/mod_enforced.pcm -verify
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/impl_import_then_enforce.cpp -fmodule-file=RedeclPlainMod=%t/redecl_plain_mod.pcm -fmodule-file=MultiMod=%t/mod_multi.pcm -verify
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/part_impl_empty_enforce.cppm -verify
 
@@ -543,6 +544,11 @@ void impl_same_func() {
 //--- impl_empty_enforce_mismatch.cpp
 module TestMod; // expected-note {{previous attribute is here}}
 [[profiles::enforce(test::type_cast(strict: true))]]; // expected-error {{repeated enforcement of profile 'test::type_cast' with different designator}}
+
+// A designator on an implementation unit's module-declaration that differs
+// from the interface's is the usual mismatch, anchored at the attribute.
+//--- impl_attr_mismatch.cpp
+module TestMod [[profiles::enforce(test::type_cast(strict: true))]]; // expected-error {{repeated enforcement of profile 'test::type_cast' with different designator}} expected-note {{previous attribute is here}}
 
 // A written import before the enforce is a non-empty declaration and still
 // blocks it.

@@ -459,6 +459,28 @@ Sema::DeclGroupPtrTy Sema::ActOnModuleDecl(
   TU->setModuleOwnershipKind(Decl::ModuleOwnershipKind::ReachableWhenImported);
   TU->setLocalOwningModule(Mod);
 
+  // P3589R2 [decl.attr.enforce]p4: an implementation unit inherits its
+  // interface's enforcements. They are recorded before the unit's own
+  // attribute so that a conflicting designator there is reported at that
+  // attribute, with the inherited enforcement anchored at ModuleLoc.
+  if (getLangOpts().Profiles) {
+    if (Interface) {
+      for (const auto &EP : Interface->AdvertisedProfiles)
+        Profiles().addProfileEnforcement(EP.ProfileName, EP.Designator,
+                                         ModuleLoc);
+    } else if (MDK == ModuleDeclKind::PartitionImplementation) {
+      // A partition implementation unit does not implicitly import the primary
+      // interface, so inheriting the interface's enforcements is best-effort,
+      // only when its BMI is already resident. See "Modules and Serialization"
+      // in ProfilesFrameworkInternals.rst.
+      if (Module *Primary = PP.getHeaderSearchInfo().getModuleMap().findModule(
+              Mod->getPrimaryModuleInterfaceName()))
+        for (const auto &EP : Primary->AdvertisedProfiles)
+          Profiles().addProfileEnforcement(EP.ProfileName, EP.Designator,
+                                           ModuleLoc);
+    }
+  }
+
   {
     Module *ExportMod = (MDK == ModuleDeclKind::Interface ||
                          MDK == ModuleDeclKind::PartitionInterface)
@@ -475,25 +497,6 @@ Sema::DeclGroupPtrTy Sema::ActOnModuleDecl(
   ImportState = ModuleImportState::ImportAllowed;
 
   getASTContext().setCurrentNamedModule(Mod);
-
-  // P3589R2 [decl.attr.enforce]p4: propagate interface's enforced profiles to
-  // implementation unit.
-  if (Interface) {
-    for (const auto &EP : Interface->AdvertisedProfiles)
-      Profiles().addProfileEnforcement(EP.ProfileName, EP.Designator,
-                                       ModuleLoc);
-  } else if (getLangOpts().Profiles &&
-             MDK == ModuleDeclKind::PartitionImplementation) {
-    // A partition implementation unit does not implicitly import the primary
-    // interface, so inheriting the interface's enforcements is best-effort,
-    // only when its BMI is already resident. See "Modules and Serialization"
-    // in ProfilesFrameworkInternals.rst.
-    if (Module *Primary = PP.getHeaderSearchInfo().getModuleMap().findModule(
-            Mod->getPrimaryModuleInterfaceName()))
-      for (const auto &EP : Primary->AdvertisedProfiles)
-        Profiles().addProfileEnforcement(EP.ProfileName, EP.Designator,
-                                         ModuleLoc);
-  }
 
   // We already potentially made an implicit import (in the case of a module
   // implementation unit importing its interface).  Make this module visible
