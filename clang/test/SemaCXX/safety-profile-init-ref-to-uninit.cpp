@@ -190,6 +190,35 @@ void test_conditional_reference(bool c) {
   (void)r1; (void)r2; (void)r3; (void)r4;
 }
 
+// `this` denotes the current object: initialized in a member function, so a
+// marked pointer or reference to an initialized member is rejected (the
+// P4222R2 §4.5 accessor mirror), and under construction -- unclassified -- in
+// a constructor body, a mem-initializer, or a default member initializer,
+// through a lambda as well.
+struct ThisObject {
+  int x = 1;
+  int y [[uninit]];
+  int *nsd [[ref_to_uninit]] = &x; // OK: under construction
+  int *ptr [[ref_to_uninit]];
+  ThisObject() : ptr{&x} {} // OK: under construction
+  ThisObject(int) : ptr{&y} {
+    int *p [[ref_to_uninit]] = &x; // OK: under construction
+    auto l = [this] { int *q [[ref_to_uninit]] = &x; (void)q; }; // OK: under construction
+    (void)p; (void)l;
+  }
+  int &f1 [[ref_to_uninit]] () { return x; }         // expected-error {{reference marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int *f2 [[ref_to_uninit]] () { return &x; }        // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int *f3 [[ref_to_uninit]] () { return &this->x; }  // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int &f4 [[ref_to_uninit]] () { return (*this).x; } // expected-error {{reference marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int &f5 [[ref_to_uninit]] () { return y; }         // OK: y is [[uninit]]
+  int &f6() { return y; }                            // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  void g() {
+    int *p [[ref_to_uninit]] = &x; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+    auto l = [this] { int *q [[ref_to_uninit]] = &x; (void)q; }; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+    (void)p; (void)l;
+  }
+};
+
 // A reference to a *const* pointer, or an rvalue reference to a pointer, is a
 // read-only alias bound by the pointer's value: it needs the marker exactly as
 // a pointer copy does, and a materialized pointer temporary is bound by value
