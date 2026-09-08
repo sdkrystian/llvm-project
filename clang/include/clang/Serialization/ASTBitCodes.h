@@ -895,6 +895,10 @@ enum SubmoduleRecordTypes {
 
   /// Specifies enforced profile designators (P3589R2).
   SUBMODULE_ENFORCED_PROFILES = 20,
+
+  /// Specifies one profile name of the writing translation unit's enforcement
+  /// dominion (P3589R2 [decl.attr.enforce]p5); see Module::DominionProfiles.
+  SUBMODULE_DOMINION_PROFILES = 21,
 };
 
 /// Record types used within a comments block.

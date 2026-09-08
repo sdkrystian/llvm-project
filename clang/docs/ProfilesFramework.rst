@@ -249,7 +249,8 @@ units:
 ``-fprofiles-enforce=`` is local to the translation unit it is given to: a
 module interface or header unit built with it advertises nothing for
 ``[[profiles::require]]``, and an implementation unit does not inherit it --
-each unit that is to be enforced is given the option.
+each unit that is to be enforced is given the option.  It does count as the
+unit's enforcement for redeclaration compatibility (below).
 
 A declaration and its redeclarations must appear under mutually *compatible*
 profiles (P3589R2 [decl.attr.enforce]p5): redeclaring an entity from a module

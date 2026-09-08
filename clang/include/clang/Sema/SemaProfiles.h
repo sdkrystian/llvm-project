@@ -156,8 +156,8 @@ public:
   /// appear in the dominions of mutually compatible profiles. Called from
   /// \c Sema::CheckRedeclarationInModule when \p New redeclares \p Old. Only
   /// a previous declaration from another module unit (a named module or a
-  /// header unit) can carry a different dominion; that TU's dominion is
-  /// approximated by the module's exported designator set. Profiles are
+  /// header unit) can carry a different dominion; that TU's dominion is its
+  /// recorded enforcement set, \c Module::DominionProfiles. Profiles are
   /// compatible by name, with all std:: profiles mutually compatible.
   /// Diagnose-only: the redeclaration is not invalidated.
   void checkRedeclarationProfileCompatibility(const NamedDecl *New,

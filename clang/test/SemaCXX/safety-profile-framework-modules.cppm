@@ -12,6 +12,11 @@
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fsyntax-only %t/require_gmf_ok.cpp -fmodule-file=GmfMod=%t/mod_gmf_enforce.pcm -verify
 // RUN: %clang_cc1 -std=c++20 -fprofiles -emit-module-interface %t/mod_gmf_only_enforce.cppm -o %t/mod_gmf_only_enforce.pcm -verify
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fsyntax-only %t/require_gmf_only_fail.cpp -fmodule-file=GmfOnlyMod=%t/mod_gmf_only_enforce.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/redecl_gmf_only_same.cpp -fmodule-file=GmfOnlyMod=%t/mod_gmf_only_enforce.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/redecl_gmf_only_none.cpp -fmodule-file=GmfOnlyMod=%t/mod_gmf_only_enforce.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -emit-module-interface %t/mod_enforce_after.cppm -o %t/mod_enforce_after.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/redecl_enf_after_same.cpp -fmodule-file=EnfAfter=%t/mod_enforce_after.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/redecl_enf_after_none.cpp -fmodule-file=EnfAfter=%t/mod_enforce_after.pcm -verify
 // RUN: %clang_cc1 -std=c++20 -fprofiles -emit-module-interface %t/part_iface.cppm -o %t/part_iface.pcm -verify
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fsyntax-only %t/part_primary_require_ok.cppm -fmodule-file=PartMod:part=%t/part_iface.pcm -verify
 // RUN: %clang_cc1 -std=c++20 -fprofiles -fsyntax-only %t/part_primary_require_fail.cppm -fmodule-file=PartMod:part=%t/part_iface.pcm -verify
@@ -149,9 +154,42 @@ module;
 export module GmfOnlyMod;
 
 export void gmf_only_func();
+extern "C++" void gmf_only_api(int);
 
 //--- require_gmf_only_fail.cpp
 import GmfOnlyMod [[profiles::require(test::type_cast)]]; // expected-error {{required profile 'test::type_cast' is not enforced by imported module}}
+
+// An enforcement the interface unit does not advertise is still that unit's
+// dominion for redeclaration compatibility: written before the
+// module-declaration ...
+//--- redecl_gmf_only_same.cpp
+// expected-no-diagnostics
+[[profiles::enforce(test::type_cast)]];
+import GmfOnlyMod;
+void gmf_only_api(int);
+
+//--- redecl_gmf_only_none.cpp
+import GmfOnlyMod;
+void gmf_only_api(int); // expected-error {{redeclaration of 'gmf_only_api' is not in the dominion of a profile compatible with 'test::type_cast', which module 'GmfOnlyMod' enforces where 'gmf_only_api' was previously declared}}
+// expected-note@mod_gmf_only_enforce.cppm:* {{previous declaration is here}}
+
+// ... or on an empty-declaration after it.
+//--- mod_enforce_after.cppm
+// expected-no-diagnostics
+export module EnfAfter;
+[[profiles::enforce(test::type_cast)]];
+extern "C++" void enf_after_api(int);
+
+//--- redecl_enf_after_same.cpp
+// expected-no-diagnostics
+[[profiles::enforce(test::type_cast)]];
+import EnfAfter;
+void enf_after_api(int);
+
+//--- redecl_enf_after_none.cpp
+import EnfAfter;
+void enf_after_api(int); // expected-error {{redeclaration of 'enf_after_api' is not in the dominion of a profile compatible with 'test::type_cast', which module 'EnfAfter' enforces where 'enf_after_api' was previously declared}}
+// expected-note@mod_enforce_after.cppm:* {{previous declaration is here}}
 
 // Partition interface with enforce: the profile is exported via the
 // partition module, so require on partition import succeeds, and
@@ -414,18 +452,18 @@ export inline void use_gmf() { redecl_gmf_api(1); }
 
 //--- redecl_gmf_skip.cpp
 // A declaration in the module's *explicit* global module fragment precedes
-// the module declaration, so the exported enforcement does not cover it, and
-// its TU's empty-declaration enforces are not serialized: its dominion is
-// unknown and the check skips it (a missed diagnostic, never a wrong one).
+// the module declaration, so an enforcement written there does not cover it
+// while one written before the fragment's declarations does; the recorded
+// dominion set cannot tell the two apart, so the check skips it (a missed
+// diagnostic, never a wrong one).
 // expected-no-diagnostics
 import RedeclGmfMod;
 void redecl_gmf_api(int);
 
 //--- redecl_impl_extra.cpp
 // An implementation unit may add TU-local enforcement; entities of its own
-// module family are skipped (the exported set under-approximates the
-// interface TU's dominion, and the interface's enforcement is inherited
-// here anyway).
+// module family are skipped (this unit inherits the interface's enforcements,
+// and its additional TU-local enforcements do not obligate the interface).
 // expected-no-diagnostics
 module RedeclMod [[profiles::enforce(test::other)]];
 extern "C++" void redecl_api(int);

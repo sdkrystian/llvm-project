@@ -173,12 +173,21 @@ void SemaProfiles::checkRedeclarationProfileCompatibility(
   if (M->isExplicitGlobalModule())
     return;
   Module *Top = M->getTopLevelModule();
-  // Same module family: the exported set under-approximates the interface
-  // TU's dominion, which this unit inherits anyway.
+  // A previous declaration from the same module family is skipped: this unit
+  // inherits the interface's enforcements, and an implementation unit's
+  // additional TU-local enforcements do not obligate the interface.
   if (Module *Current = SemaRef.getCurrentModule())
     if (Current->getTopLevelModule()->getPrimaryModuleInterfaceName() ==
         Top->getPrimaryModuleInterfaceName())
       return;
+
+  // Both dominions as profile names: the previous unit's recorded enforcement
+  // set and this TU's.
+  SmallVector<StringRef, 4> There(Top->DominionProfiles.begin(),
+                                  Top->DominionProfiles.end());
+  SmallVector<StringRef, 4> Here;
+  for (const auto &EP : getASTContext().enforced_profiles())
+    Here.push_back(EP.ProfileName);
 
   // A gated-off test:: profile is inert in this compilation, on either side.
   auto IsActive = [&](StringRef Name) {
@@ -187,14 +196,13 @@ void SemaProfiles::checkRedeclarationProfileCompatibility(
   };
   // First active profile in Enforced with no compatible counterpart in
   // Covering; empty if fully covered.
-  auto FindUncovered = [&](const auto &Enforced,
-                           const auto &Covering) -> StringRef {
-    for (const auto &EP : Enforced) {
-      StringRef Name = EP.ProfileName;
+  auto FindUncovered = [&](ArrayRef<StringRef> Enforced,
+                           ArrayRef<StringRef> Covering) -> StringRef {
+    for (StringRef Name : Enforced) {
       if (!IsActive(Name))
         continue;
-      if (llvm::none_of(Covering, [&](const auto &Other) {
-            return profiles::areProfilesCompatible(Name, Other.ProfileName);
+      if (llvm::none_of(Covering, [&](StringRef Other) {
+            return profiles::areProfilesCompatible(Name, Other);
           }))
         return Name;
     }
@@ -204,10 +212,8 @@ void SemaProfiles::checkRedeclarationProfileCompatibility(
   // The rule is symmetric: every profile whose dominion covers one
   // declaration must have a compatible counterpart covering the other.
   // Report the first violation in each direction.
-  StringRef MissingHere = FindUncovered(Top->AdvertisedProfiles,
-                                        getASTContext().enforced_profiles());
-  StringRef MissingThere = FindUncovered(getASTContext().enforced_profiles(),
-                                         Top->AdvertisedProfiles);
+  StringRef MissingHere = FindUncovered(There, Here);
+  StringRef MissingThere = FindUncovered(Here, There);
   if (MissingHere.empty() && MissingThere.empty())
     return;
   if (!MissingHere.empty())

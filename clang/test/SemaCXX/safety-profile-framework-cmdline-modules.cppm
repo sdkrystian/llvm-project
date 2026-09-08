@@ -1,7 +1,8 @@
 // A -fprofiles-enforce= enforcement is local to the translation unit it is
 // given to: it covers the whole unit, global module fragment included, but a
 // module interface or header unit built with it advertises nothing for
-// [[profiles::require]], and an implementation unit does not inherit it.
+// [[profiles::require]], and an implementation unit does not inherit it. It is
+// the unit's enforcement for redeclaration compatibility.
 
 // RUN: rm -rf %t
 // RUN: mkdir -p %t
@@ -14,6 +15,9 @@
 // RUN: %clang_cc1 -std=c++20 -fprofiles-test-profiles -fprofiles-enforce=test::type_cast -fsyntax-only %t/impl.cpp -fmodule-file=CmdMod=%t/iface.pcm -verify=enforced
 // RUN: %clang_cc1 -std=c++20 -fprofiles-test-profiles -fprofiles-enforce=test::type_cast -emit-header-unit -xc++-user-header %t/hu.h -o %t/hu.pcm
 // RUN: %clang_cc1 -std=c++20 -fprofiles -Wno-experimental-header-units -fsyntax-only %t/require_hu.cpp -fmodule-file=%t/hu.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/redecl_cmd_same.cpp -fmodule-file=CmdMod=%t/iface.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -fsyntax-only %t/redecl_cmd_none.cpp -fmodule-file=CmdMod=%t/iface.pcm -verify
+// RUN: %clang_cc1 -std=c++20 -fprofiles -fprofiles-test-profiles -Wno-experimental-header-units -fsyntax-only %t/redecl_hu_same.cpp -fmodule-file=%t/hu.pcm -verify
 
 //--- gmf.cppm
 // The global module fragment lies inside the option's dominion, unlike the
@@ -27,6 +31,7 @@ int *purview = reinterpret_cast<int*>(0); // expected-error {{'reinterpret_cast'
 // expected-no-diagnostics
 export module CmdMod;
 export int f();
+extern "C++" void cmd_api(int);
 
 //--- require.cpp
 // The interface was built with -fprofiles-enforce=test::type_cast, which
@@ -48,3 +53,23 @@ int hu_decl();
 // The header unit was built with -fprofiles-enforce=test::type_cast, which
 // advertises nothing.
 import "hu.h" [[profiles::require(test::type_cast)]]; // expected-error {{required profile 'test::type_cast' is not enforced by imported module}}
+
+//--- redecl_cmd_same.cpp
+// A -fprofiles-enforce= enforcement is the interface unit's dominion for
+// redeclaration compatibility.
+// expected-no-diagnostics
+[[profiles::enforce(test::type_cast)]];
+import CmdMod;
+void cmd_api(int);
+
+//--- redecl_cmd_none.cpp
+import CmdMod;
+void cmd_api(int); // expected-error {{redeclaration of 'cmd_api' is not in the dominion of a profile compatible with 'test::type_cast', which module 'CmdMod' enforces where 'cmd_api' was previously declared}}
+// expected-note@iface.cppm:* {{previous declaration is here}}
+
+//--- redecl_hu_same.cpp
+// The same for a header unit built with the option.
+// expected-no-diagnostics
+[[profiles::enforce(test::type_cast)]];
+import "hu.h";
+int hu_decl();

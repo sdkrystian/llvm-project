@@ -1009,6 +1009,7 @@ void ASTWriter::WriteBlockInfoBlock() {
   RECORD(SUBMODULE_EXPORT_AS);
   RECORD(SUBMODULE_CHILD);
   RECORD(SUBMODULE_ENFORCED_PROFILES);
+  RECORD(SUBMODULE_DOMINION_PROFILES);
 
   // Comments Block.
   BLOCK(COMMENTS_BLOCK);
@@ -3108,6 +3109,11 @@ void ASTWriter::WriteSubmodules(Module *WritingModule, ASTContext *Context) {
   unsigned EnforcedProfilesAbbrev =
       createEnforcedProfileAbbrev(Stream, SUBMODULE_ENFORCED_PROFILES);
 
+  Abbrev = std::make_shared<BitCodeAbbrev>();
+  Abbrev->Add(BitCodeAbbrevOp(SUBMODULE_DOMINION_PROFILES));
+  Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Blob)); // Profile name
+  unsigned DominionProfilesAbbrev = Stream.EmitAbbrev(std::move(Abbrev));
+
   SmallVector<uint64_t> SubmoduleOffsets;
   uint64_t SubmoduleOffsetBase = Stream.GetCurrentBitNo();
 
@@ -3299,10 +3305,20 @@ void ASTWriter::WriteSubmodules(Module *WritingModule, ASTContext *Context) {
       Stream.EmitRecordWithBlob(ChildAbbrev, Record, Child->Name);
     }
 
-    // Emit enforced profile designators (P3589R2).
+    // Emit the advertised profile designators (P3589R2 [decl.attr.require]p2).
     for (const auto &EP : Mod->AdvertisedProfiles)
       emitEnforcedProfile(*this, Stream, EnforcedProfilesAbbrev,
                           SUBMODULE_ENFORCED_PROFILES, EP, SourceLocation());
+
+    // Emit the TU's enforcement dominion for the module being built, one
+    // profile name per record; the redeclaration-compatibility check reads it
+    // back as Module::DominionProfiles.
+    if (Mod == WritingModule && Context)
+      for (const auto &EP : Context->enforced_profiles()) {
+        RecordData::value_type Record[] = {SUBMODULE_DOMINION_PROFILES};
+        Stream.EmitRecordWithBlob(DominionProfilesAbbrev, Record,
+                                  EP.ProfileName);
+      }
 
     // Emit the sentinel signifying the end of this submodule.
     {

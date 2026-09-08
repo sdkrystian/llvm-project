@@ -447,7 +447,7 @@ a missed diagnostic, never a wrong one.
 ``[[profiles::enforce]]`` on a *non-interface* module-declaration is recorded
 only translation-unit-locally and is invisible to importers.
 
-Serialization is automatic for every profile, through three records.
+Serialization is automatic for every profile, through four records.
 The TU's enforcements are written to every AST file as ``ENFORCED_PROFILES``
 records, and the reader restores them only when the file is the
 compilation's own textual prefix or main input -- a PCH, a preamble, or the
@@ -465,6 +465,11 @@ consuming it (a mismatch is the usual language-option error), while an
 imported explicit module may differ.
 ``Module::AdvertisedProfiles`` is written to a BMI as
 ``SUBMODULE_ENFORCED_PROFILES`` records within each submodule block.
+``Module::DominionProfiles`` -- the names of every profile the unit enforced
+anywhere -- is written for the module being built as
+``SUBMODULE_DOMINION_PROFILES`` records, one name each, from the TU's
+enforcement list at the end of the unit; the redeclaration-compatibility
+check below reads it, ``[[profiles::require]]`` never does.
 ``PROFILES_TU_HAS_NONEMPTY_DECL`` records whether a PCH contributed a
 non-empty top-level declaration, so the empty-declaration placement check
 works across a PCH boundary without deserializing the PCH's declarations; it
@@ -488,13 +493,18 @@ merges).  Two profiles are compatible if they have the same name (designator
 arguments configure a profile without changing its identity) or if both are
 standard ``std::``-prefixed profiles.
 
-The previous declaration's dominion is approximated by its top-level module's
-exported designators, which is exact for declarations in the module purview.
-Two cases have an *unknown* dominion and are skipped rather than guessed at
-(a missed diagnostic, never a wrong one): a declaration in an explicit global
-module fragment (the exported set does not cover it), and a previous
-declaration from the same module family (the exported set under-approximates
-the interface TU's dominion, which the current unit inherits anyway).  A
+The previous declaration's dominion is its translation unit's recorded
+enforcement set -- every profile enforced there by attribute, by
+``-fprofiles-enforce=``, or by inheritance -- carried on the module as
+``Module::DominionProfiles`` (``SUBMODULE_DOMINION_PROFILES``).  It is
+distinct from the advertised set that ``[[profiles::require]]`` reads.
+Two cases are skipped rather than guessed at (a missed diagnostic, never a
+wrong one): a declaration in an explicit global module fragment (an
+enforcement written on the module-declaration does not cover it while one
+written before the fragment's declarations does, and the recorded set cannot
+tell the two apart), and a previous declaration from the same module family
+(this unit inherits the interface's enforcements, and an implementation
+unit's additional TU-local enforcements do not obligate the interface).  A
 previous declaration owned by a module-map module (a Clang header module,
 ``-fmodules``) is not checked at all: that is textual inclusion wearing an
 AST file, not a separate TU in the standard's model, so it has no dominion of

@@ -6710,6 +6710,10 @@ Module *ASTReader::getSubmodule(uint32_t GlobalID) {
       CurrentModule->AdvertisedProfiles.push_back(
           readEnforcedProfile(Record, Blob));
       break;
+
+    case SUBMODULE_DOMINION_PROFILES:
+      CurrentModule->DominionProfiles.push_back(Blob.str());
+      break;
     }
   }
 }
