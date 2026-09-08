@@ -778,3 +778,18 @@ void sub_access_pointer_member_escapes() {
   int d = x.m; // OK: a member holding a pointer may reach m
   (void)d;
 }
+
+// A comma or conditional lvalue reads whichever member the chosen arm names.
+struct CommaBuf {
+  int n [[uninit]]; // expected-note 2 {{member 'n' declared here}}
+};
+void comma_read(bool c) {
+  CommaBuf b;
+  int r = ((void)c, b.n); // expected-error {{member 'n' is read before initialization under profile 'std::init'}}
+  (void)r;
+}
+void cond_read(bool c) {
+  CommaBuf b;
+  int r = c ? b.n : b.n; // expected-error {{member 'n' is read before initialization under profile 'std::init'}}
+  (void)r;
+}
