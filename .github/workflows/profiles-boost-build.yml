@@ -79,7 +79,6 @@ jobs:
           tar xzf "clang-dl/$CLANG_ARTIFACT.tar.gz" -C "$RUNNER_TEMP/clang"
           "$RUNNER_TEMP/clang/bin/clang++" --version
           echo "PROFILES_CLANGXX=$RUNNER_TEMP/clang/bin/clang++" >> "$GITHUB_ENV"
-          echo "PROFILES_PRELUDE=$GITHUB_WORKSPACE/clang/utils/profiles-boost/prelude.hpp" >> "$GITHUB_ENV"
           mkdir -p "$GITHUB_WORKSPACE/crash"
           echo "PROFILES_CRASH_DIR=$GITHUB_WORKSPACE/crash" >> "$GITHUB_ENV"
 
