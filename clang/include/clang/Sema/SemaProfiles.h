@@ -94,6 +94,11 @@ public:
   bool processProfilesEnforceAttr(const ParsedAttr &AL, Module *Mod,
                                   SmallVectorImpl<StringRef> *NewNames,
                                   SmallVectorImpl<StringRef> *NewDesignators);
+  /// Validate each designator of a [[profiles::require]] on \p ImportDecl
+  /// against the imported module's advertised set ([decl.attr.require]p2); a
+  /// require on anything but a module-import-declaration is an error.
+  void processProfilesRequireAttr(Decl *ImportDecl,
+                                  const ParsedAttributesView &Attrs);
 
   /// Build a ProfilesSuppressAttr from a parsed [[profiles::suppress]];
   /// returns null if the attribute carries no profile name (parse error).

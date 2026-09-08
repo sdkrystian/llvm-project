@@ -2484,7 +2484,7 @@ Decl *Parser::ParseModuleImport(SourceLocation AtLoc,
   MaybeParseCXX11Attributes(Attrs);
 
   // Reject non-profile attributes on the import-declaration. Profile
-  // attributes are handled by ActOnModuleImportAttrs.
+  // attributes are handled by SemaProfiles::processProfilesRequireAttr.
   ProhibitModuleAttributesExcept(Attrs, ParsedAttr::AT_ProfilesRequire,
                                  diag::err_attribute_not_import_attr,
                                  diag::err_keyword_not_import_attr);
@@ -2568,7 +2568,7 @@ Decl *Parser::ParseModuleImport(SourceLocation AtLoc,
   if (Import.isInvalid())
     return nullptr;
 
-  Actions.ActOnModuleImportAttrs(Import.get(), Attrs);
+  Actions.Profiles().processProfilesRequireAttr(Import.get(), Attrs);
 
   // Using '@import' in framework headers requires modules to be enabled so that
   // the header is parseable. Emit a warning to make the user aware.

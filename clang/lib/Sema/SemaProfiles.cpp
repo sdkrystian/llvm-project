@@ -110,6 +110,44 @@ bool SemaProfiles::processProfilesEnforceAttr(
   return true;
 }
 
+void SemaProfiles::processProfilesRequireAttr(
+    Decl *ImportDecl, const ParsedAttributesView &Attrs) {
+  if (!ImportDecl)
+    return;
+
+  auto *ID = dyn_cast<clang::ImportDecl>(ImportDecl);
+  Module *ImportedMod = ID ? ID->getImportedModule() : nullptr;
+
+  for (const auto &AL : Attrs) {
+    if (AL.getKind() != ParsedAttr::AT_ProfilesRequire)
+      continue;
+    if (!AL.diagnoseLangOpts(SemaRef))
+      continue;
+
+    if (!ImportedMod) {
+      Diag(AL.getLoc(), diag::err_profiles_require_not_on_import);
+      continue;
+    }
+
+    ArrayRef<detail::ProfileDesignator> Designators =
+        AL.getProfileDesignators();
+    if (Designators.empty()) {
+      Diag(AL.getLoc(), diag::err_attribute_too_few_arguments) << AL << 1;
+      continue;
+    }
+
+    for (const auto &Desig : Designators) {
+      StringRef Spelling = Desig.Spelling;
+      bool Found = llvm::any_of(ImportedMod->EnforcedProfileDesignators,
+                                [&](const Module::EnforcedProfile &EP) {
+                                  return EP.Designator == Spelling;
+                                });
+      if (!Found)
+        Diag(AL.getLoc(), diag::err_profiles_require_not_enforced) << Spelling;
+    }
+  }
+}
+
 void SemaProfiles::checkRedeclarationProfileCompatibility(
     const NamedDecl *New, const NamedDecl *Old) {
   if (!getLangOpts().Profiles)

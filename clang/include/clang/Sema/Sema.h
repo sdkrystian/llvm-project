@@ -10032,9 +10032,6 @@ public:
                                SourceLocation ImportLoc, Module *M,
                                ModuleIdPath Path = {});
 
-  void ActOnModuleImportAttrs(Decl *ImportDecl,
-                              const ParsedAttributesView &Attrs);
-
   /// The parser has processed a module import translated from a
   /// #include or similar preprocessing directive.
   void ActOnAnnotModuleInclude(SourceLocation DirectiveLoc, Module *Mod);
