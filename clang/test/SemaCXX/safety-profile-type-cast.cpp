@@ -51,8 +51,8 @@ void test_suppress_stmt_with_nonmatching_rule() {
   }
 }
 
-// P3589R2 [decl.attr.enforce]p2: static semantics applied after translation
-// phase 7 -- no diagnostic in template definition, only at instantiation.
+// A dependent reinterpret_cast is checked at instantiation only, never on the
+// template pattern (P3589R2 §1.1: static semantics apply after phase 7).
 template <typename T>
 void template_cast(T x) {
   auto *p = reinterpret_cast<int*>(x); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
@@ -951,3 +951,20 @@ struct [[profiles::suppress(test::type_cast)]] MidParseDeferred {
   template <typename T> static T *f() { return reinterpret_cast<T*>(0); }
   static inline int *x = f<int>();
 };
+
+int *cast_source();
+// A non-dependent reinterpret_cast in a never-instantiated template fires at
+// the definition.
+template <typename T>
+long cast_never_instantiated() { return reinterpret_cast<long>(cast_source()); } // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+
+// A dependent reinterpret_cast fires once per instantiation.
+template <typename T>
+long cast_dependent(T *p) { return reinterpret_cast<long>(p); } // expected-error 2 {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+long use_cast_dependent() { return cast_dependent<int>(nullptr) + cast_dependent<long>(nullptr); } // expected-note 2 {{in instantiation of function template specialization}}
+
+// A non-dependent reinterpret_cast wrapping a call is rebuilt at each
+// instantiation: reported at the definition and once per instantiation.
+template <typename T>
+long cast_rebuilt() { return reinterpret_cast<long>(cast_source()); } // expected-error 3 {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+long use_cast_rebuilt() { return cast_rebuilt<int>() + cast_rebuilt<long>(); } // expected-note 2 {{in instantiation of function template specialization}}

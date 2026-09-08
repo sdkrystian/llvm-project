@@ -28,9 +28,12 @@ Profiles do not change the meaning of well-formed programs with no undefined
 behavior.  Their effects are conceptually applied only after translation
 phase 7: a profile cannot change the outcome of overload resolution or
 template instantiation, and it is not possible to SFINAE on a profile
-violation.  One deviation: a violation in a template that does not depend on
-the template's parameters is diagnosed when the template is *defined*, even
-if it is never instantiated (see :doc:`ProfilesFrameworkInternals`).
+violation.  A rule that needs a declaration, a completed class or
+constructor, or whole-function analysis is applied once per template
+instantiation and never to an uninstantiated template.  A rule checked at a
+single expression is applied to a template as written when the expression
+does not depend on the template's parameters, and once per instantiation
+otherwise (see :doc:`ProfilesFrameworkInternals`).
 
 Profile names are open-ended: standard (``std::``-prefixed),
 implementation-defined, and third-party profiles are all requested with the

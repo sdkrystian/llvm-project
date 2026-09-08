@@ -73,6 +73,13 @@ struct Tmpl {
 };
 template struct Tmpl<int>; // expected-note {{in instantiation of member function 'Tmpl<int>::Tmpl' requested here}}
 
+// A constructor rule is never applied to an uninstantiated class template.
+template <typename T>
+struct NeverInstantiatedCtor {
+  int a;
+  NeverInstantiatedCtor() {}
+};
+
 // Suppression on the constructor.
 struct SuppressedCtor {
   // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}

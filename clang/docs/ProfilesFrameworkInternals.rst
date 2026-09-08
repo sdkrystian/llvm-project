@@ -102,25 +102,26 @@ parse-time rungs -- a templated declaration, an unevaluated context, and a
 discarded statement never fire.  Every pattern's check site goes through
 that one gate.  ``test::type_cast`` is the in-tree example.
 
-Inside a template, parse-time checks follow one unified model.  A
-*non-dependent* construct is checked on the template pattern, at definition
-time: instantiation may reuse such a node unchanged, so deferring would
-silently lose the diagnostic.  This deliberately trades strict "as-if after
-phase 7" purity (P3589R2 §1.1) for reuse-proof diagnostics.  An
-*instantiation-dependent* construct is always rebuilt at instantiation, where
-the re-run check sees the substituted form, once per specialization.  A
-non-dependent construct that happens to be rebuilt anyway repeats its
-definition-time diagnostic with an ``in instantiation of ...`` note -- an
-accepted duplication.  Under ``-fdelayed-template-parsing`` the body of a
-never-instantiated template is never parsed, so definition-time diagnosis of
-non-dependent violations does not occur in that mode.
-
-A ``Decl``-carrying check consults the shared gate, which skips templated
-entities so the rule fires on the instantiation only.  An expression-level
-check site passes no ``Decl``, so it must defer in a dependent context from
-its own wrapper.  The ``reinterpret_cast`` check does neither and is not
-re-run at instantiation: it fires once at parse time, pattern or not -- a
-known gap.
+Inside a template, a profile rule is checked on phase-7 entities only where
+it depends on a declaration, a completed class or constructor, or a function
+body: those checks pass their ``Decl`` (or run from the post-parse dispatch)
+and fire once per instantiation, never on a template pattern -- the gate's
+templated-declaration rung and the CFG dispatch's dependent-context skip
+enforce it.  An expression-level check has no such anchor: it fires on the
+pattern for an operand that is not instantiation-dependent (TreeTransform
+reuses such a node, so an instantiation could not re-check it) and once per
+instantiation for a dependent operand, which is rebuilt there; each such
+check site defers in a dependent context from its own wrapper.  A
+non-dependent operand that is rebuilt anyway -- a call, or an operand that
+names a parameter or a sibling that changed -- is reported again at that
+instantiation, with the ``in instantiation of ...`` note; an operand the
+instantiation reuses is not.  The pattern-time half is the one place the
+framework departs from P3589R2 §1.1's "as-if after phase 7" model, in
+exchange for reuse-proof diagnostics.  Under ``-fdelayed-template-parsing``
+the body of a never-instantiated template is never parsed, so pattern-time
+diagnosis does not occur in that mode.  ``test::type_cast`` follows the
+expression policy exactly: a ``reinterpret_cast`` of a non-dependent operand
+fires at the definition, of a dependent operand once per instantiation.
 
 
 Pattern 2: Post-Parse / CFG-Based

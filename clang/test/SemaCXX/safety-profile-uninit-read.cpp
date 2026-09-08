@@ -133,6 +133,13 @@ void instantiate_template_uninit() {
   template_uninit<int>(); // expected-note {{in instantiation of function template specialization 'template_uninit<int>' requested here}}
 }
 
+// A CFG rule is never applied to an uninstantiated template.
+template <typename T>
+int never_instantiated_read() {
+  int y;
+  return y;
+}
+
 void test_self_init_with_use() {
   int x = x; // expected-error {{variable 'x' is read before initialization under profile 'test::uninit_read'}} \
              // expected-note {{variable 'x' is declared here}}
