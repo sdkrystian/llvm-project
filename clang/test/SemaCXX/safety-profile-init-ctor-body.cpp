@@ -1,14 +1,14 @@
-// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -std=c++23 -Wno-uninitialized %s
-// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -Wno-uninitialized %s
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -std=c++23 -Wno-uninitialized -fexceptions -fcxx-exceptions %s
+// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -Wno-uninitialized -fexceptions -fcxx-exceptions %s
 // The ERROR run adds a leading unrelated error so every later function is
 // analyzed through the post-error path; the same constructor-body diagnostics
 // must still fire there.
-// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -std=c++23 -Wno-uninitialized -DLEADING_ERROR %s
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -std=c++23 -Wno-uninitialized -DLEADING_ERROR -fexceptions -fcxx-exceptions %s
 // -Wunreachable-code makes the main path build a fully linearized CFG
 // (setAllAlwaysAdd); the pass must recover the same events from it (the
 // linearized-CFG invariant at addNonLinearizedAlwaysAddClasses). The
 // post-error rerun is always non-linearized, so this axis is clean-only.
-// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -std=c++23 -Wno-uninitialized -Wunreachable-code %s
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -std=c++23 -Wno-uninitialized -Wunreachable-code -fexceptions -fcxx-exceptions %s
 
 // no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
 [[profiles::enforce(std::init)]];
@@ -1071,5 +1071,31 @@ struct Dia2 : DiaL, DiaR {
     DiaR::bm = 2;
     int r = DiaL::bm + DiaR::bm; // OK
     (void)r;
+  }
+};
+
+// A call inside a try block may transfer to the handler before the
+// assignment after it.
+int try_source();
+void try_sink(int);
+struct TryCtor {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  TryCtor() {
+    try {
+      m = try_source();
+    } catch (...) {
+      try_sink(m); // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    }
+  }
+};
+struct TryCtorOk {
+  int m [[uninit]];
+  TryCtorOk() {
+    m = 0;
+    try {
+      m = try_source();
+    } catch (...) {
+      try_sink(m); // OK
+    }
   }
 };
