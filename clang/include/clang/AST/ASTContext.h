@@ -1032,6 +1032,11 @@ public:
   /// enforcement into system-header code.
   bool isProfileExemptSystemHeaderLoc(SourceLocation Loc) const;
 
+  /// True if \p ProfileName is enforced at \p Loc and \p Loc is not
+  /// system-header-exempt: the enforcement half of the one violation gate,
+  /// profiles::shouldEmitProfileViolation (clang/AST/Profiles.h).
+  bool isProfileActiveAt(StringRef ProfileName, SourceLocation Loc) const;
+
   DiagnosticsEngine &getDiagnostics() const;
 
   FullSourceLoc getFullLoc(SourceLocation Loc) const {

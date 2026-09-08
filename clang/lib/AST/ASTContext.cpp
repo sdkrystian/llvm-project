@@ -939,6 +939,12 @@ bool ASTContext::isProfileExemptSystemHeaderLoc(SourceLocation Loc) const {
          getSourceManager().isInSystemHeader(Loc);
 }
 
+bool ASTContext::isProfileActiveAt(StringRef ProfileName,
+                                   SourceLocation Loc) const {
+  return isProfileEnforcedAt(ProfileName, Loc) &&
+         !isProfileExemptSystemHeaderLoc(Loc);
+}
+
 TargetCXXABI::Kind ASTContext::getCXXABIKind() const {
   auto Kind = getTargetInfo().getCXXABI().getKind();
   return getLangOpts().CXXABI.value_or(Kind);

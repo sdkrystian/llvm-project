@@ -24,6 +24,7 @@
 
 namespace clang {
 
+class ASTContext;
 class Decl;
 class ParentMap;
 class ProfilesSuppressAttr;
@@ -114,6 +115,15 @@ struct SuppressionQuery {
 bool isSuppressed(const SuppressionQuery &Q, llvm::StringRef Profile,
                   llvm::StringRef Rule, SourceLocation Loc,
                   const SourceManager &SM);
+
+/// The one enforce/exempt/suppress ladder: true if \p Profile is enforced at
+/// \p Loc and not system-header-exempt there (ASTContext::isProfileActiveAt)
+/// and \p Rule is not suppressed under \p Q. CodeGen's runtime-check emission
+/// runs it as is; SemaProfiles::shouldEmitProfileViolation adds the
+/// parse-time rungs.
+bool shouldEmitProfileViolation(const ASTContext &Ctx, llvm::StringRef Profile,
+                                llvm::StringRef Rule, SourceLocation Loc,
+                                const SuppressionQuery &Q);
 
 } // namespace profiles
 } // namespace clang

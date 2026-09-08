@@ -49,9 +49,7 @@ void CodeGenFunction::ProfileSuppressionScope::addFromDecl(const Decl *D) {
       });
 }
 
-bool CodeGenFunction::isProfileSuppressionActive(StringRef Profile,
-                                                 StringRef Rule,
-                                                 SourceLocation Loc) const {
+profiles::SuppressionQuery CodeGenFunction::profileSuppressionQuery() const {
   assert(ProfileSuppressionFloor <= ProfileStmtSuppressions.size() &&
          "suppression floor points past the end of the stack");
   // The declaration side of the query is the anchor when one is set (the code
@@ -61,11 +59,9 @@ bool CodeGenFunction::isProfileSuppressionActive(StringRef Profile,
   // attributes, so the chain walk recovers statement-level suppression around
   // a lambda; a null CurCodeDecl (a synthesized helper such as a block
   // copy/dispose function) carries none.
-  return profiles::isSuppressed(
-      {llvm::ArrayRef(ProfileStmtSuppressions)
-           .drop_front(ProfileSuppressionFloor),
-       ProfileSuppressionAnchor ? ProfileSuppressionAnchor : CurCodeDecl},
-      Profile, Rule, Loc, getContext().getSourceManager());
+  return {llvm::ArrayRef(ProfileStmtSuppressions)
+              .drop_front(ProfileSuppressionFloor),
+          ProfileSuppressionAnchor ? ProfileSuppressionAnchor : CurCodeDecl};
 }
 
 void CodeGenFunction::EmitProfileRuntimeCheck(
@@ -73,13 +69,11 @@ void CodeGenFunction::EmitProfileRuntimeCheck(
     llvm::function_ref<llvm::Value *()> BuildPassed) {
   if (!getLangOpts().Profiles)
     return;
-  // Enforcement first, so a TU that does not enforce the profile never pays
-  // the suppression walk. The location-aware query keeps code before the
-  // enforcement -- global-module-fragment functions emitted after the purview
-  // is parsed, or from a BMI -- outside the dominion.
-  if (!getContext().isProfileEnforcedAt(Profile, Loc) ||
-      getContext().isProfileExemptSystemHeaderLoc(Loc) ||
-      isProfileSuppressionActive(Profile, Rule, Loc))
+  // The location-aware gate keeps code before the enforcement --
+  // global-module-fragment functions emitted after the purview is parsed, or
+  // from a BMI -- outside the dominion.
+  if (!profiles::shouldEmitProfileViolation(getContext(), Profile, Rule, Loc,
+                                            profileSuppressionQuery()))
     return;
   // The check fires: only now build the site's "no violation" predicate, so
   // an inactive site emits no IR at all.

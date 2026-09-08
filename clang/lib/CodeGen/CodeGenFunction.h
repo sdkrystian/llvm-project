@@ -25,6 +25,7 @@
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/ExprObjC.h"
 #include "clang/AST/ExprOpenMP.h"
+#include "clang/AST/Profiles.h"
 #include "clang/AST/StmtOpenACC.h"
 #include "clang/AST/StmtOpenMP.h"
 #include "clang/AST/StmtSYCL.h"
@@ -33,7 +34,6 @@
 #include "clang/Basic/CapturedStmt.h"
 #include "clang/Basic/CodeGenOptions.h"
 #include "clang/Basic/OpenMPKinds.h"
-#include "clang/Basic/Profiles.h"
 #include "clang/Basic/TargetInfo.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
@@ -645,17 +645,17 @@ public:
   /// argument, is emitted inline in another function's body.
   const Decl *ProfileSuppressionAnchor = nullptr;
 
-  /// True if an active [[profiles::suppress]] for \p Profile / \p Rule covers
-  /// the code being emitted at \p Loc: consults the statement-suppression
-  /// stack above the floor (an entry with a valid dominion matches only when
-  /// it contains \p Loc), then the lexical declaration chain of the
-  /// suppression anchor (or, absent one, of CurCodeDecl -- null in
-  /// synthesized helpers such as block copy/dispose functions, which carry no
-  /// suppressions). Queried lazily at each check site rather than seeded
-  /// per-function because the current declaration can change mid-function
-  /// without a StartFunction (inlined inheriting constructors).
-  bool isProfileSuppressionActive(StringRef Profile, StringRef Rule,
-                                  SourceLocation Loc) const;
+  /// The suppression sources for the code being emitted, for the shared
+  /// violation gate (profiles::shouldEmitProfileViolation): the
+  /// statement-suppression stack above the floor (an entry with a valid
+  /// dominion matches only when it contains the check site) and the lexical
+  /// declaration chain of the suppression anchor (or, absent one, of
+  /// CurCodeDecl -- null in synthesized helpers such as block copy/dispose
+  /// functions, which carry no suppressions). Built lazily at each check site
+  /// rather than seeded per-function because the current declaration can
+  /// change mid-function without a StartFunction (inlined inheriting
+  /// constructors).
+  profiles::SuppressionQuery profileSuppressionQuery() const;
 
   /// RAII bounding the lifetime of statement-carried [[profiles::suppress]]
   /// entries on ProfileStmtSuppressions: entries added through it are popped

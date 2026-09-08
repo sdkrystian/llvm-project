@@ -28,13 +28,13 @@ at its semantic check sites.
 
 The enforced-profile list itself is stored on the ``ASTContext`` (recorded
 through ``addEnforcedProfile``; queried through ``isProfileEnforced`` /
-``isProfileEnforcedAt`` / ``getProfileEnforcement`` /
-``isProfileExemptSystemHeaderLoc`` / ``enforced_profiles``) rather than
+``isProfileEnforcedAt`` / ``isProfileActiveAt`` / ``getProfileEnforcement``
+/ ``isProfileExemptSystemHeaderLoc`` / ``enforced_profiles``) rather than
 on ``Sema``: the ASTReader restores a PCH's ``ENFORCED_PROFILES`` records
 directly into it, so a consumer that never sees a Sema -- e.g. code
 generation directly from an AST file -- observes the same enforcement state.
-``SemaProfiles`` records enforcements into that list (through its delegating
-wrappers) and owns the attribute's diagnostics.
+``SemaProfiles`` records enforcements into that list and owns the
+attribute's diagnostics.
 
 ``-fprofiles-enforce=`` is the second Sema-free seed: the ``ASTContext``
 constructor records each name in ``LangOptions::ProfilesEnforce`` with an
@@ -94,9 +94,13 @@ implementation is one call at that site:
    checkProfileViolation("my::profile", "my_rule", Loc,
                          diag::err_my_profile_rule);
 
-The call checks that the profile is enforced and not suppressed (via the
-parse-time suppress stack) and skips unevaluated and discarded-statement
-contexts.  ``test::type_cast`` is the in-tree example.
+The call runs the single violation gate,
+``SemaProfiles::shouldEmitProfileViolation``: the shared
+enforce/exempt/suppress ladder ``profiles::shouldEmitProfileViolation``
+(``clang/AST/Profiles.h``; CodeGen's runtime checks run it as is) plus the
+parse-time rungs -- a templated declaration, an unevaluated context, and a
+discarded statement never fire.  Every pattern's check site goes through
+that one gate.  ``test::type_cast`` is the in-tree example.
 
 Inside a template, parse-time checks follow one unified model.  A
 *non-dependent* construct is checked on the template pattern, at definition
@@ -133,10 +137,10 @@ profile's name.  ``test::uninit_read`` is the in-tree example:
        {"my::profile", /*Rule=*/"", diag::err_my_profile_rule},
    };
 
-The analysis's diagnostic reporter walks the table calling
-``shouldEmitProfileViolation(Name, Rule, Stmt, AnalysisDeclContext)`` per use
-site, emitting the entry's diagnostic (and skipping the default warning) when
-it returns true.
+The analysis's diagnostic reporter walks the table calling the single gate
+as ``shouldEmitProfileViolation(Name, Rule, Loc, /*D=*/nullptr, Stmt,
+&AnalysisDeclContext)`` per use site, emitting the entry's diagnostic (and
+skipping the default warning) when it returns true.
 
 A row may additionally install up to three optional hooks; a null column
 costs nothing:
@@ -209,9 +213,9 @@ filter out dependent entities (the hooks re-fire on each instantiation),
 invalid ones, lambdas (pattern 3), and delegating constructors (pattern 4)
 before the shared dispatcher runs the enforced callbacks; a filter that is
 one profile's policy rather than the pattern's contract lives in that
-profile's callback.  Each callback gates its diagnostics on the decl-aware
-``shouldEmitProfileViolation`` overload, which walks the finalized
-declaration and its lexical parents for a suppression.
+profile's callback.  Each callback gates its diagnostics on
+``shouldEmitProfileViolation`` with the finalized declaration, whose lexical
+chain is walked for a suppression.
 
 The split between the two patterns matters: class finalization runs *before
 any constructor body or member-initializer list has been parsed*, so a
@@ -398,11 +402,13 @@ structure over the AST it is emitting:
   lambda call operators as implicit attributes, the chain walk also recovers
   statement-level suppression around a lambda body.
 
-``CodeGenFunction::isProfileSuppressionActive`` builds the same
-``profiles::SuppressionQuery`` as the Sema gates *lazily at each check
-site*: the stack above its floor, and the chain from the suppression anchor
-or, absent one, from ``CurCodeDecl`` (it has no statement to walk; the
-emitting scopes' stack stands in for that source).  Whatever code is
+``CodeGenFunction::profileSuppressionQuery`` builds the same
+``profiles::SuppressionQuery`` as the Sema gate *lazily at each check
+site*, and ``EmitProfileRuntimeCheck`` runs the shared ladder
+``profiles::shouldEmitProfileViolation`` over it: the stack above its floor,
+and the chain from the suppression anchor or, absent one, from
+``CurCodeDecl`` (it has no statement to walk; the emitting scopes' stack
+stands in for that source).  Whatever code is
 being emitted -- a function, lambda, global dynamic initializer, coroutine
 body, or OpenMP captured region -- ``CurCodeDecl`` is the declaration whose
 chain carries its suppressions.  A null ``CurCodeDecl`` (synthesized

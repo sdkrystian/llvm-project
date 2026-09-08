@@ -33,19 +33,9 @@ bool SemaProfiles::isProfileEnforced(StringRef ProfileName) const {
   return getASTContext().isProfileEnforced(ProfileName);
 }
 
-bool SemaProfiles::isProfileEnforcedAt(StringRef ProfileName,
-                                       SourceLocation Loc) const {
-  return getASTContext().isProfileEnforcedAt(ProfileName, Loc);
-}
-
-const profiles::ProfileEnforcement *
-SemaProfiles::getProfileEnforcement(StringRef ProfileName) const {
-  return getASTContext().getProfileEnforcement(ProfileName);
-}
-
 bool SemaProfiles::addProfileEnforcement(StringRef Name, StringRef Designator,
                                          SourceLocation Loc) {
-  if (const auto *Existing = getProfileEnforcement(Name)) {
+  if (const auto *Existing = getASTContext().getProfileEnforcement(Name)) {
     if (Existing->Designator != Designator) {
       Diag(Loc, diag::err_profiles_enforce_mismatch) << Name;
       if (llvm::is_contained(getLangOpts().ProfilesEnforce, Name))
@@ -90,7 +80,7 @@ bool SemaProfiles::processProfilesEnforceAttr(
     // filters gated-off test:: names (and -fprofiles off), which would make
     // every repetition of such a profile look new and re-append its
     // designator to the attribute's argument arrays.
-    bool IsNew = !getProfileEnforcement(Name);
+    bool IsNew = !getASTContext().getProfileEnforcement(Name);
     if (!addProfileEnforcement(Name, Spelling, AL.getLoc()))
       continue;
 
@@ -166,7 +156,7 @@ void SemaProfiles::checkRedeclarationProfileCompatibility(
     return;
   // The system-header exemption stopgap covers the previous declaration's
   // dominion too.
-  if (isProfileExemptSystemHeaderLoc(Old->getLocation()))
+  if (getASTContext().isProfileExemptSystemHeaderLoc(Old->getLocation()))
     return;
   // An explicit global-module-fragment declaration's dominion is unknown;
   // skip rather than guess.
@@ -254,30 +244,24 @@ SemaProfiles::makeImplicitProfilesSuppressAttr(StringRef ProfileName,
       /*RawArgumentKinds=*/nullptr, /*RawArgumentKindsSize=*/0);
 }
 
-bool SemaProfiles::isProfileExemptSystemHeaderLoc(SourceLocation Loc) const {
-  return getASTContext().isProfileExemptSystemHeaderLoc(Loc);
-}
-
 bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
                                               StringRef RuleName,
-                                              SourceLocation Loc) {
-  return shouldEmitProfileViolation(ProfileName, RuleName, Loc, /*D=*/nullptr);
-}
-
-bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
-                                              StringRef RuleName,
-                                              SourceLocation Loc,
-                                              const Decl *D) {
-  if (!isProfileEnforcedAt(ProfileName, Loc))
-    return false;
-  if (getASTContext().isProfileExemptSystemHeaderLoc(Loc))
-    return false;
-  // Honor [[profiles::suppress]] from the parse-time stack (dominion-checked;
-  // see ProfilesFrameworkInternals.rst) and, when a Decl is available, from
-  // the declaration and its lexical parents -- the latter survives the parse
-  // scope's teardown, so finalization checks still respect suppression.
-  if (profiles::isSuppressed({ProfileSuppressStack, D}, ProfileName, RuleName,
-                             Loc, getASTContext().getSourceManager()))
+                                              SourceLocation Loc, const Decl *D,
+                                              const Stmt *UseStmt,
+                                              AnalysisDeclContext *AC) {
+  // The suppression sources: the live parse-time stack (a function can be
+  // analyzed while an enclosing construct is still mid-parse -- a local
+  // class's method body -- and the consult is dominion-checked, so an
+  // unrelated live scope never matches), the checked declaration's lexical
+  // chain (it survives the parse scope's teardown, so finalization checks
+  // still respect suppression), and for a post-parse site the use statement's
+  // enclosing statements and the analyzed declaration's chain. See
+  // ProfilesFrameworkInternals.rst, "Suppression Dominion Mechanics".
+  profiles::SuppressionQuery Q{ProfileSuppressStack,
+                               D ? D : (AC ? AC->getDecl() : nullptr), UseStmt,
+                               AC ? &AC->getParentMap() : nullptr};
+  if (!profiles::shouldEmitProfileViolation(getASTContext(), ProfileName,
+                                            RuleName, Loc, Q))
     return false;
   // A templated entity is not a phase-7 entity (P3589R2 §1.1), so a profile
   // rule fires only on the instantiation, never on the pattern (checking the
@@ -286,32 +270,15 @@ bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
   // from its own wrapper; see ProfilesFrameworkInternals.rst, "Pattern 1".
   if (D && D->isTemplated())
     return false;
+  // The evaluation-context rungs are parse-time facts; a post-parse site has
+  // no evaluation context of its own.
+  if (AC)
+    return true;
   if (SemaRef.isUnevaluatedContext())
     return false;
   if (SemaRef.currentEvaluationContext().isDiscardedStatementContext())
     return false;
   return true;
-}
-
-bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
-                                              StringRef RuleName,
-                                              const Stmt *UseStmt,
-                                              AnalysisDeclContext &AC) const {
-  SourceLocation Loc =
-      UseStmt ? UseStmt->getBeginLoc() : AC.getDecl()->getLocation();
-  if (!isProfileEnforcedAt(ProfileName, Loc))
-    return false;
-  if (getASTContext().isProfileExemptSystemHeaderLoc(Loc))
-    return false;
-  // The query walks upward from UseStmt through AC's parent map and the
-  // analyzed declaration's lexical chain, and consults the live parse-time
-  // stack too: a function can be analyzed while an enclosing construct is
-  // still mid-parse (a local class's method body), and the stack consult is
-  // dominion-checked, so an unrelated live scope never matches (see
-  // ProfilesFrameworkInternals.rst).
-  return !profiles::isSuppressed(
-      {ProfileSuppressStack, AC.getDecl(), UseStmt, &AC.getParentMap()},
-      ProfileName, RuleName, Loc, getASTContext().getSourceManager());
 }
 
 bool SemaProfiles::checkProfileViolation(StringRef ProfileName,
@@ -463,8 +430,8 @@ constexpr FinalizationProfile<CXXConstructorDecl>
 
 /// Run the enforced finalization-profile callbacks in \p Table for \p D; the
 /// per-node filter (dependent, lambda, delegating, ...) stays at each call
-/// site. Each callback consults the Decl-aware shouldEmitProfileViolation,
-/// which honors [[profiles::suppress]] on \p D or a lexical parent, so the
+/// site. Each callback consults shouldEmitProfileViolation with \p D, which
+/// honors [[profiles::suppress]] on \p D or a lexical parent, so the
 /// dispatcher needs no suppress scope of its own.
 template <class Node, std::size_t N>
 void dispatchFinalizationProfiles(Sema &S, Node *D,

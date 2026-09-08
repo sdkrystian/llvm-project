@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/AST/Profiles.h"
+#include "clang/AST/ASTContext.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclBase.h"
@@ -119,4 +120,15 @@ bool profiles::isSuppressed(const SuppressionQuery &Q, llvm::StringRef Profile,
     if (isSuppressedFor(Cur, Profile, Rule, Loc, SM))
       return true;
   return isSuppressedFor(Q.ChainAnchor, Profile, Rule);
+}
+
+bool profiles::shouldEmitProfileViolation(const ASTContext &Ctx,
+                                          llvm::StringRef Profile,
+                                          llvm::StringRef Rule,
+                                          SourceLocation Loc,
+                                          const SuppressionQuery &Q) {
+  // Enforcement first, so a TU that does not enforce the profile never pays
+  // the suppression walk.
+  return Ctx.isProfileActiveAt(Profile, Loc) &&
+         !isSuppressed(Q, Profile, Rule, Loc, Ctx.getSourceManager());
 }
