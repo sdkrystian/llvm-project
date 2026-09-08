@@ -1913,16 +1913,28 @@ static const Expr *peelBaseCasts(const Expr *E, BasePath &Path) {
 }
 
 /// One flow-tracked std::init storage entity of the analyzed body: an
-/// [[uninit]] scalar member of the current object (a constructor body) or of
-/// a directly named local or by-value parameter.
+/// [[uninit]] scalar member of the current object or of a directly named
+/// local or by-value parameter, an [[uninit]] local or parameter as a whole,
+/// or the referent of a [[ref_to_uninit]] local pointer or reference
+/// (parameters included).
 struct TrackedEntity {
-  enum class Kind { CurrentObjectMember, LocalMember };
+  enum class Kind { CurrentObjectMember, LocalMember, WholeLocal, Pointee };
   Kind K;
-  /// The local (LocalMember); null for the current object.
+  /// The local (LocalMember: the object; WholeLocal: the entity; Pointee:
+  /// the pointer or reference); null for the current object.
   const VarDecl *Base;
-  /// The derived-to-base path from the object's class to Field's class.
+  /// The derived-to-base path from the object's class to Field's class
+  /// (member kinds).
   BasePath Path;
-  const FieldDecl *Field;
+  /// The member (member kinds); null otherwise.
+  const FieldDecl *Field = nullptr;
+  /// Read events are extracted for this entity (a constructor body's or a
+  /// default-initialized constructor-less local's members).
+  bool TrackReads = true;
+  /// The entity belongs to an enclosing function (a variable a lambda body
+  /// reaches by capture): its entry state is unknown -- assigned on some
+  /// path, on no path definitely -- rather than unassigned.
+  bool UnknownEntry = false;
 };
 
 /// True if \p T transitively holds a pointer, reference, or member pointer
@@ -1958,8 +1970,10 @@ static bool typeHoldsPointerOrReference(
 /// covers a range.
 struct TrackedStorage {
   SmallVector<TrackedEntity, 8> Entities;
-  /// The contiguous entity range of each tracked local.
+  /// The contiguous entity range of each tracked local's members.
   llvm::DenseMap<const VarDecl *, std::pair<unsigned, unsigned>> LocalRange;
+  /// The WholeLocal or Pointee entity of a marked local or parameter.
+  llvm::DenseMap<const VarDecl *, unsigned> LocalEntity;
   /// The current object's range (a constructor body); empty otherwise.
   std::pair<unsigned, unsigned> CurrentObjectRange{0, 0};
   /// The tracked local a tracked copy was copy- or move-constructed from,
@@ -1982,6 +1996,11 @@ struct TrackedStorage {
   /// range is recorded only when non-empty.
   std::pair<unsigned, unsigned> addObject(Sema &S, const VarDecl *Base,
                                           const CXXRecordDecl *RD);
+
+  /// Append the WholeLocal or Pointee entity of the marked local or
+  /// parameter \p V (once); returns its index.
+  unsigned addLocalEntity(TrackedEntity::Kind K, const VarDecl *V,
+                          bool UnknownEntry);
 
   /// The entity of member \p F reached through \p Path in the object
   /// \p Base (null: the current object), if tracked.
@@ -2040,6 +2059,18 @@ TrackedStorage::addObject(Sema &S, const VarDecl *Base,
   else if (Range.first != Range.second)
     LocalRange[Base] = Range;
   return Range;
+}
+
+unsigned TrackedStorage::addLocalEntity(TrackedEntity::Kind K, const VarDecl *V,
+                                        bool UnknownEntry) {
+  auto It = LocalEntity.find(V);
+  if (It != LocalEntity.end())
+    return It->second;
+  TrackedEntity E{K, V, BasePath(), nullptr};
+  E.TrackReads = false;
+  E.UnknownEntry = UnknownEntry;
+  Entities.push_back(std::move(E));
+  return LocalEntity[V] = Entities.size() - 1;
 }
 
 std::optional<unsigned>
@@ -2145,93 +2176,308 @@ TrackedStorage::Resolution TrackedStorage::resolve(const Expr *E) const {
   return R;
 }
 
-// Per-block ordered events recovered from the linearized CFG by the
-// definite-assignment passes: a value load of tracked entity Idx is a Read;
-// an assignment is a Write that marks it assigned after the RHS is
-// evaluated; a compound assignment or built-in ++/-- both reads and then
-// writes it; a Copy makes entity Idx's state the source entity SrcIdx's at
-// that point (the local pass's tracked-copy transfer); a Kill clears the
-// assigned bit -- destruction makes the storage uninitialized again
-// ("Lifetimes", p4222r2.md:922-927) -- and never reports by itself.
-enum class DefAssignEventKind { Read, Write, ReadWrite, Copy, Kill };
+/// Per-block ordered events recovered from the CFG by the std::init dataflow
+/// engine and replayed over a FlowState in element order. Read: a value load
+/// of entity Idx (read-tracked members). Write: Idx is assigned. ReadWrite: a
+/// compound assignment or built-in ++/--, a Read then a Write. MayWrite: a
+/// store whose target names Idx on one of several arms. Copy: Idx takes
+/// entity Aux's state (the tracked-copy transfer). Kill: a storage release
+/// (free, operator delete, a delete-expression) leaves Idx unassigned.
+/// Destroy: a [[now_uninit]] destruction of Idx, judged by the destroy rules,
+/// then unassigned and destroyed until stored again. Reseat: marked pointer
+/// Idx is reassigned, retiring every fact about its pointee. Escape: a
+/// mutable alias of marked pointer Idx is handed out, so its pointee is no
+/// longer definitely assigned nor destroyed. Binding: a pointer or reference
+/// binding whose source has a tracked leaf (BindingSites[Aux]), judged by
+/// the binding rule. ReadThrough / SubobjectWrite: a read through, or a store
+/// below, the storage of Idx, judged by uninit_read / uninit_write. Every
+/// event carries the anchor expression the diagnostic and the suppression
+/// walk use.
+enum class DefAssignEventKind {
+  Read,
+  Write,
+  ReadWrite,
+  MayWrite,
+  Copy,
+  Kill,
+  Destroy,
+  Reseat,
+  Escape,
+  Binding,
+  ReadThrough,
+  SubobjectWrite
+};
 struct DefAssignEvent {
   DefAssignEventKind Kind;
   unsigned Idx;
   const Expr *E;
-  unsigned SrcIdx = 0; // Copy only: the source entity.
+  /// Copy: the source entity. Binding: the BindingSite index. Destroy: 1 if
+  /// exempt from destroy_uninit (a reinitializer, or a parameter carrying
+  /// [[ref_to_uninit]]). ReadThrough and SubobjectWrite: the diagnostic's
+  /// provenance select.
+  unsigned Aux = 0;
+  /// SubobjectWrite: the diagnostic's "not a member access" flag.
+  bool Flag = false;
 };
 
-// Replay a block's events over State: the definite-assignment engine's one
-// block-level transfer function, shared by the fixpoint and the reporting
-// replay so the two can never disagree. When Offending is non-null, a read
-// of an entity not definitely assigned at its program point is collected.
+/// The form classification of a binding leaf: the parse-time recognizers'
+/// verdict for a leaf no entity tracks, or the flow state's for a tracked
+/// one.
+enum class LeafState { Initialized, Uninitialized, Unknown, Mixed };
+
+/// Combine two leaves' states as the recognizers combine conditional arms:
+/// equal states keep; Mixed absorbs; Initialized with Uninitialized is
+/// Mixed (P4222R2 §4.9); Unknown yields to Uninitialized and absorbs
+/// Initialized.
+static LeafState combineLeafStates(LeafState A, LeafState B) {
+  if (A == B)
+    return A;
+  if (A == LeafState::Mixed || B == LeafState::Mixed)
+    return LeafState::Mixed;
+  if (A == LeafState::Unknown)
+    return B == LeafState::Uninitialized ? B : LeafState::Unknown;
+  if (B == LeafState::Unknown)
+    return A == LeafState::Uninitialized ? A : LeafState::Unknown;
+  return LeafState::Mixed;
+}
+
+/// One leaf of a binding source: the tracked entity it names (judged by
+/// that entity's flow state; Subobject when the leaf reaches storage below
+/// the entity) or, for a leaf no entity tracks, its form classification.
+struct BindingLeaf {
+  std::optional<unsigned> Entity;
+  bool Subobject = false;
+  LeafState State = LeafState::Unknown;
+};
+
+/// A ref_to_uninit binding site derived from a CFG element: the construct's
+/// kind and wording, the target's marking, the bound type's reference-ness,
+/// and the source's leaves.
+struct BindingSite {
+  SemaProfiles::InitBindingKind Kind;
+  SourceLocation Loc;
+  bool TargetMarked;
+  bool IsReference;
+  /// The entity a kind-specific wording names (the called method, the
+  /// captured variable).
+  const NamedDecl *Subject = nullptr;
+  SmallVector<BindingLeaf, 2> Leaves;
+};
+
+/// The dataflow state of every tracked entity at a program point: assigned
+/// on every path (Must), on some path (May), escaped as a local aggregate on
+/// every path (Esc: the read leniency for locals, ProfilesFramework.rst,
+/// "Limitations"), and destroyed on every path and not stored since
+/// (Destroyed). The join of predecessors intersects Must, Esc, and
+/// Destroyed and unites May.
+struct FlowState {
+  llvm::BitVector Must, May, Esc, Destroyed;
+  /// \p Top is the identity of the join: all-assigned, may-assigned on no
+  /// path, escaped, destroyed -- the state of an unreached predecessor.
+  FlowState(unsigned N, bool Top)
+      : Must(N, Top), May(N, false), Esc(N, Top), Destroyed(N, Top) {}
+  void meet(const FlowState &O) {
+    Must &= O.Must;
+    May |= O.May;
+    Esc &= O.Esc;
+    Destroyed &= O.Destroyed;
+  }
+  bool operator==(const FlowState &O) const {
+    return Must == O.Must && May == O.May && Esc == O.Esc &&
+           Destroyed == O.Destroyed;
+  }
+  bool operator!=(const FlowState &O) const { return !(*this == O); }
+};
+
+/// A violation the reporting replay collected, emitted through the shared
+/// gate once the replay is complete.
+struct PendingViolation {
+  unsigned DiagID;
+  SourceLocation Loc;
+  const Expr *Anchor;
+  /// Binding: the pointer/reference select; ReadThrough and SubobjectWrite:
+  /// the provenance select.
+  unsigned Select = 0;
+  /// SubobjectWrite: the "not a member access" flag.
+  bool Flag = false;
+  /// The entity a kind-specific binding wording names; null for the generic
+  /// wordings.
+  const NamedDecl *Subject = nullptr;
+};
+
+/// The state of one binding leaf under \p St.
+static LeafState leafState(const BindingLeaf &L, const FlowState &St) {
+  if (!L.Entity)
+    return L.State;
+  if (St.Must.test(*L.Entity))
+    return LeafState::Initialized;
+  if (!St.May.test(*L.Entity))
+    return LeafState::Uninitialized;
+  return LeafState::Unknown;
+}
+
+/// Judge a binding site against \p St with the funnel's verdict rule: a
+/// marked target rejects a source that is initialized (on every path) or
+/// Mixed, an unmarked one a source that is uninitialized (on every path) or
+/// Mixed; an Unknown source fires in neither direction.
+static void judgeBindingSite(const BindingSite &Site, const FlowState &St,
+                             SmallVectorImpl<PendingViolation> &Out) {
+  using K = SemaProfiles::InitBindingKind;
+  if (Site.Leaves.empty())
+    return;
+  LeafState Acc = leafState(Site.Leaves.front(), St);
+  for (const BindingLeaf &L : llvm::drop_begin(Site.Leaves))
+    Acc = combineLeafStates(Acc, leafState(L, St));
+  if (Site.TargetMarked) {
+    if (Acc == LeafState::Initialized || Acc == LeafState::Mixed)
+      Out.push_back({diag::err_init_ref_to_uninit_requires_uninit,
+                     Site.Loc, nullptr,
+                     Site.IsReference ? 1u : 0u});
+    return;
+  }
+  if (Acc != LeafState::Uninitialized && Acc != LeafState::Mixed)
+    return;
+  unsigned DiagID = diag::err_init_uninit_requires_ref_to_uninit;
+  const NamedDecl *Subject = nullptr;
+  if (Site.Kind == K::ByRefCapture) {
+    DiagID = diag::err_init_uninit_ref_capture;
+    Subject = Site.Subject;
+  } else if (Site.Kind == K::ObjectArgument) {
+    DiagID = diag::err_init_member_call_on_uninit;
+    Subject = Site.Subject;
+  }
+  Out.push_back({DiagID, Site.Loc, nullptr,
+                 Site.IsReference ? 1u : 0u, false, Subject});
+}
+
+/// Replay a block's events over \p St: the engine's one block-level transfer
+/// function, shared by the fixpoint and the reporting replay so the two can
+/// never disagree. With \p Offending and \p Violations non-null (the
+/// reporting replay), a read of a read-tracked entity that is not definitely
+/// assigned nor escaped is collected, and every judged event's verdict is
+/// taken against the state at its program point.
 static void
 applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
-                     llvm::BitVector &State,
-                     std::vector<SmallVector<const Expr *, 2>> *Offending) {
+                     ArrayRef<BindingSite> Sites, FlowState &St,
+                     std::vector<SmallVector<const Expr *, 2>> *Offending,
+                     SmallVectorImpl<PendingViolation> *Violations) {
+  auto Write = [&](unsigned I) {
+    St.Must.set(I);
+    St.May.set(I);
+    St.Destroyed.reset(I);
+  };
   for (const DefAssignEvent &Ev : BlockEvents) {
     switch (Ev.Kind) {
     case DefAssignEventKind::Read:
-      if (Offending && !State.test(Ev.Idx))
+      if (Offending && !St.Must.test(Ev.Idx) && !St.Esc.test(Ev.Idx))
         (*Offending)[Ev.Idx].push_back(Ev.E);
       break;
     case DefAssignEventKind::Write:
-      State.set(Ev.Idx);
+      Write(Ev.Idx);
       break;
     case DefAssignEventKind::ReadWrite:
-      if (Offending && !State.test(Ev.Idx))
+      if (Offending && !St.Must.test(Ev.Idx) && !St.Esc.test(Ev.Idx))
         (*Offending)[Ev.Idx].push_back(Ev.E);
-      State.set(Ev.Idx);
+      Write(Ev.Idx);
+      break;
+    case DefAssignEventKind::MayWrite:
+      St.May.set(Ev.Idx);
       break;
     case DefAssignEventKind::Copy:
-      if (State.test(Ev.SrcIdx))
-        State.set(Ev.Idx);
-      else
-        State.reset(Ev.Idx);
+      St.Must[Ev.Idx] = St.Must.test(Ev.Aux);
+      St.May[Ev.Idx] = St.May.test(Ev.Aux);
+      St.Esc[Ev.Idx] = St.Esc.test(Ev.Aux);
+      St.Destroyed[Ev.Idx] = St.Destroyed.test(Ev.Aux);
       break;
     case DefAssignEventKind::Kill:
-      State.reset(Ev.Idx);
+      St.Must.reset(Ev.Idx);
+      St.May.reset(Ev.Idx);
+      St.Esc.reset(Ev.Idx);
+      break;
+    case DefAssignEventKind::Destroy:
+      if (Violations) {
+        if (St.Destroyed.test(Ev.Idx))
+          Violations->push_back({diag::err_init_double_destroy,
+                                 Ev.E->getExprLoc(), Ev.E});
+        else if (!(Ev.Aux & 1) && !St.May.test(Ev.Idx))
+          Violations->push_back({diag::err_init_destroy_uninit,
+                                 Ev.E->getExprLoc(), Ev.E});
+      }
+      St.Must.reset(Ev.Idx);
+      St.May.reset(Ev.Idx);
+      St.Esc.reset(Ev.Idx);
+      St.Destroyed.set(Ev.Idx);
+      break;
+    case DefAssignEventKind::Reseat:
+      St.Must.reset(Ev.Idx);
+      St.May.reset(Ev.Idx);
+      St.Destroyed.reset(Ev.Idx);
+      break;
+    case DefAssignEventKind::Escape:
+      St.Must.reset(Ev.Idx);
+      St.Destroyed.reset(Ev.Idx);
+      break;
+    case DefAssignEventKind::Binding:
+      if (Violations) {
+        size_t Before = Violations->size();
+        judgeBindingSite(Sites[Ev.Aux], St, *Violations);
+        for (PendingViolation &V : llvm::drop_begin(*Violations, Before))
+          V.Anchor = Ev.E;
+      }
+      break;
+    case DefAssignEventKind::ReadThrough:
+      if (Violations && !St.May.test(Ev.Idx))
+        Violations->push_back({diag::err_init_uninit_read_through,
+                               Ev.E->getExprLoc(), Ev.E,
+                               Ev.Aux});
+      break;
+    case DefAssignEventKind::SubobjectWrite:
+      if (Violations && !St.May.test(Ev.Idx))
+        Violations->push_back({diag::err_init_uninit_subobject_write,
+                               Ev.E->getExprLoc(), Ev.E, Ev.Aux,
+                               Ev.Flag});
       break;
     }
   }
 }
 
-// The forward "definitely assigned" dataflow under both member passes:
-// nothing is assigned at function entry; a block's entry is the
-// intersection over its predecessors' exits (an entity is definitely
-// assigned at a point only if assigned on every incoming path, the paper's
-// all-branches rule, §1.2/§1.3) -- so a Kill on any incoming path clears
-// the bit at the join: destruction is may-kill under the same rule.
-// A block's transfer is the event replay
-// above -- the same replay the reporting pass uses, and a caller-supplied
-// transfer is deliberately not offered: a new event kind is added here,
-// once, instead of re-opening the fixpoint/replay divergence class.
-// Unprocessed (unreachable) predecessors keep the all-assigned top, so
-// unreachable code is never flagged. The transfer is monotone *as a
-// function* (a larger input state yields a larger output state:
-// Read/Write/ReadWrite only set bits, Copy projects the source bit, and
-// Kill is a constant function of its bit -- constants are monotone),
-// not set-only -- Copy and Kill can clear a bit -- so termination follows
-// from every
-// block's exit only ever descending from the all-assigned top in the finite
-// lattice. Returns, per tracked entity, the reads at program points where
-// the entity is not definitely assigned.
+/// The forward dataflow of the std::init engine: nothing is assigned at
+/// function entry (an entity of an enclosing function is may-assigned), a
+/// block's entry is the join of its predecessors' exits (an entity is
+/// definitely assigned at a point only if assigned on every incoming path,
+/// the paper's all-branches rule, P4222R2 §1.3), and a block's transfer is
+/// the event replay above -- the same replay the reporting pass uses. Every
+/// transfer is monotone in each lattice (Read, Write, ReadWrite, and
+/// MayWrite only set bits, Copy projects the source's bits, Kill, Destroy,
+/// Reseat, and Escape are constant functions of their bits), so a block's
+/// exit only ever descends from the join identity in a finite lattice and
+/// the iteration terminates. Unprocessed (unreachable) predecessors keep the
+/// join identity, so unreachable code is never flagged. Returns, per
+/// read-tracked entity, the reads at program points where the entity is not
+/// definitely assigned nor escaped, and appends every other rule's
+/// violations to \p Violations.
 static std::vector<SmallVector<const Expr *, 2>>
-runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC, unsigned NumTracked,
-                      ArrayRef<SmallVector<DefAssignEvent, 4>> Events) {
+runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
+                      const TrackedStorage &Storage,
+                      ArrayRef<SmallVector<DefAssignEvent, 4>> Events,
+                      ArrayRef<BindingSite> Sites,
+                      SmallVectorImpl<PendingViolation> &Violations) {
+  const unsigned NumTracked = Storage.Entities.size();
   const unsigned NumBlocks = cfg.getNumBlockIDs();
-  std::vector<llvm::BitVector> EntryState(NumBlocks,
-                                          llvm::BitVector(NumTracked, true));
-  std::vector<llvm::BitVector> ExitState(NumBlocks,
-                                         llvm::BitVector(NumTracked, true));
+  std::vector<FlowState> EntryState(NumBlocks, FlowState(NumTracked, true));
+  std::vector<FlowState> ExitState(NumBlocks, FlowState(NumTracked, true));
+  FlowState FunctionEntry(NumTracked, false);
+  for (unsigned I = 0; I != NumTracked; ++I)
+    if (Storage.Entities[I].UnknownEntry)
+      FunctionEntry.May.set(I);
   const CFGBlock &CFGEntry = cfg.getEntry();
   ForwardDataflowWorklist Worklist(cfg, AC);
   Worklist.enqueueBlock(&CFGEntry);
   llvm::BitVector Visited(NumBlocks, false);
   while (const CFGBlock *B = Worklist.dequeue()) {
-    llvm::BitVector In(NumTracked, true);
+    FlowState In(NumTracked, true);
     if (B == &CFGEntry) {
-      In = llvm::BitVector(NumTracked, false);
+      In = FunctionEntry;
     } else {
       bool First = true;
       for (const CFGBlock *Pred : B->preds()) {
@@ -2241,31 +2487,28 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC, unsigned NumTracked,
           In = ExitState[Pred->getBlockID()];
           First = false;
         } else {
-          In &= ExitState[Pred->getBlockID()];
+          In.meet(ExitState[Pred->getBlockID()]);
         }
       }
     }
     EntryState[B->getBlockID()] = In;
-    applyDefAssignEvents(Events[B->getBlockID()], In, /*Offending=*/nullptr);
-    // Enqueue-skip subtlety: ExitState starts at the all-assigned top, and a
+    applyDefAssignEvents(Events[B->getBlockID()], Sites, In,
+                         /*Offending=*/nullptr, /*Violations=*/nullptr);
+    // Enqueue-skip subtlety: ExitState starts at the join identity, and a
     // block whose computed exit *equals* its stored exit enqueues no
-    // successors. Before Kill existed every transfer mapped top to top
-    // (Read/Write/ReadWrite set bits; Copy projects a bit that is set at
-    // top), so a block reached only through all-top exits genuinely had a
-    // top exit and skipping it forever was sound. Kill breaks that
-    // property -- a kill block entered at top exits *below* top -- so a
+    // successors. A transfer that drops a bit (Kill, Destroy, Reseat,
+    // Escape) makes a block entered at the identity exit *below* it, so a
     // reachable block's first visit must propagate even when its computed
-    // exit equals the stored top (the Visited disjunct below) -- which also
-    // makes Visited mean exactly "reachable from the entry". Unreachable
-    // blocks are still never enqueued (only successors of dequeued blocks
-    // are), so they keep the all-assigned top: an unreachable destroy
-    // spoils no reachable join. The reporting replay below walks only the
-    // visited blocks: walking the unreachable ones from top used to be a
-    // harmless no-op (no transfer could drop below top), but a Kill
-    // followed by a read inside one would now flag unreachable code.
-    // Lowering the initial ExitState, seeding EntryState differently,
-    // or replaying unvisited blocks would each break the others'
-    // assumption; change them together or not at all.
+    // exit equals the stored identity (the Visited disjunct below) -- which
+    // also makes Visited mean exactly "reachable from the entry".
+    // Unreachable blocks are never enqueued (only successors of dequeued
+    // blocks are), so they keep the identity: an unreachable destroy spoils
+    // no reachable join. The reporting replay below walks only the visited
+    // blocks: a destroy followed by a read inside an unreachable block would
+    // otherwise flag unreachable code. Lowering the initial ExitState,
+    // seeding EntryState differently, or replaying unvisited blocks would
+    // each break the others' assumption; change them together or not at
+    // all.
     bool FirstVisit = !Visited[B->getBlockID()];
     Visited[B->getBlockID()] = true;
     if (FirstVisit || In != ExitState[B->getBlockID()]) {
@@ -2275,22 +2518,23 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC, unsigned NumTracked,
   }
 
   // Replay each visited (reachable) block from its fixpoint entry state and
-  // collect reads of an entity that is not yet definitely assigned at that
-  // point.
+  // collect the reads of a not-yet-assigned entity and every judged event's
+  // verdict at its program point.
   std::vector<SmallVector<const Expr *, 2>> Offending(NumTracked);
   for (const CFGBlock *B : cfg) {
     if (!Visited[B->getBlockID()])
       continue;
-    llvm::BitVector Assigned = EntryState[B->getBlockID()];
-    applyDefAssignEvents(Events[B->getBlockID()], Assigned, &Offending);
+    FlowState St = EntryState[B->getBlockID()];
+    applyDefAssignEvents(Events[B->getBlockID()], Sites, St, &Offending,
+                         &Violations);
   }
   return Offending;
 }
 
-// Report at the first offending read (in source order) that is not
-// suppressed, once per tracked entity, mirroring the local-variable
-// reporter. The profile name and rule arrive from the std::init CFGProfiles
-// row.
+/// Report at the first offending read (in source order) that is not
+/// suppressed, once per read-tracked entity, mirroring the local-variable
+/// reporter. The profile name and rule arrive from the std::init CFGProfiles
+/// row.
 static void reportMemberReadsBeforeInit(
     Sema &S, AnalysisDeclContext &AC,
     MutableArrayRef<SmallVector<const Expr *, 2>> Offending,
@@ -2314,6 +2558,33 @@ static void reportMemberReadsBeforeInit(
           << F->getDeclName();
       break;
     }
+  }
+}
+
+/// Emit the collected binding, destroy, read-through, and subobject-write
+/// violations in source order, each through the shared gate with its own
+/// anchor for the suppression walk.
+static void reportFlowViolations(Sema &S, AnalysisDeclContext &AC,
+                                 MutableArrayRef<PendingViolation> Violations,
+                                 StringRef Name) {
+  llvm::stable_sort(
+      Violations, [&](const PendingViolation &A, const PendingViolation &B) {
+        return S.SourceMgr.isBeforeInTranslationUnit(A.Loc, B.Loc);
+      });
+  for (const PendingViolation &V : Violations) {
+    if (!S.Profiles().shouldEmitProfileViolation(V.DiagID, V.Loc,
+                                                 /*D=*/nullptr,
+                                                 /*PostParse=*/true))
+      continue;
+    if (V.Subject)
+      S.Diag(V.Loc, V.DiagID) << Name << V.Subject;
+    else if (V.DiagID == diag::err_init_uninit_subobject_write)
+      S.Diag(V.Loc, V.DiagID) << Name << V.Flag << V.Select;
+    else if (V.DiagID == diag::err_init_double_destroy ||
+             V.DiagID == diag::err_init_destroy_uninit)
+      S.Diag(V.Loc, V.DiagID) << Name;
+    else
+      S.Diag(V.Loc, V.DiagID) << Name << V.Select;
   }
 }
 
@@ -2440,7 +2711,8 @@ static void appendThisCaptureLambdaReadEvents(
     for (unsigned I = Storage.CurrentObjectRange.first,
                   N = Storage.CurrentObjectRange.second;
          I != N; ++I)
-      BlockEvents.push_back({DefAssignEventKind::Read, I, At});
+      if (Storage.Entities[I].TrackReads)
+        BlockEvents.push_back({DefAssignEventKind::Read, I, At});
   };
   std::optional<LambdaCaptureKind> Kind = GetThisCaptureKind(LE);
   if (!Kind)
@@ -2475,7 +2747,9 @@ static void appendThisCaptureLambdaReadEvents(
     if (G)
       if (std::optional<unsigned> Idx = Storage.resolve(G).Entity;
           Idx &&
-          Storage.Entities[*Idx].K == TrackedEntity::Kind::CurrentObjectMember)
+          Storage.Entities[*Idx].K ==
+              TrackedEntity::Kind::CurrentObjectMember &&
+          Storage.Entities[*Idx].TrackReads)
         BlockEvents.push_back(
             {DefAssignEventKind::Read, *Idx, cast<Expr>(Cur)});
     for (const Stmt *Child : Cur->children())
@@ -2531,7 +2805,8 @@ static void collectCtorBodyStmts(const CXXConstructorDecl *Ctor,
 static void
 extractStdInitEvents(const CFG &cfg, const TrackedStorage &Storage,
                      const CXXConstructorDecl *Ctor, bool StarThisCopyTrusted,
-                     std::vector<SmallVector<DefAssignEvent, 4>> &Events) {
+                     std::vector<SmallVector<DefAssignEvent, 4>> &Events,
+                     SmallVectorImpl<BindingSite> &Sites) {
   llvm::SmallPtrSet<const Stmt *, 32> BodyStmts;
   if (Ctor)
     collectCtorBodyStmts(Ctor, BodyStmts);
@@ -2602,11 +2877,12 @@ extractStdInitEvents(const CFG &cfg, const TrackedStorage &Storage,
         Leaves.push_back(R.Entity);
       });
     };
-    // One Read per distinct resolved leaf.
+    // One Read per distinct resolved, read-tracked leaf.
     auto AppendReads = [&](const Expr *At) {
       SmallVector<unsigned, 4> Seen;
       for (std::optional<unsigned> Idx : Leaves)
-        if (Idx && Admit(*Idx, At) && !llvm::is_contained(Seen, *Idx)) {
+        if (Idx && Storage.Entities[*Idx].TrackReads && Admit(*Idx, At) &&
+            !llvm::is_contained(Seen, *Idx)) {
           Seen.push_back(*Idx);
           BlockEvents.push_back({DefAssignEventKind::Read, *Idx, At});
         }
@@ -2620,9 +2896,11 @@ extractStdInitEvents(const CFG &cfg, const TrackedStorage &Storage,
             return Idx == Leaves.front();
           })) {
         if (Admit(*Leaves.front(), At))
-          BlockEvents.push_back({ReadsFirst ? DefAssignEventKind::ReadWrite
-                                            : DefAssignEventKind::Write,
-                                 *Leaves.front(), At});
+          BlockEvents.push_back(
+              {ReadsFirst && Storage.Entities[*Leaves.front()].TrackReads
+                   ? DefAssignEventKind::ReadWrite
+                   : DefAssignEventKind::Write,
+               *Leaves.front(), At});
         return;
       }
       if (ReadsFirst)
@@ -2824,14 +3102,29 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
   // initializes the parameter object directly, and the mere presence gates
   // so that getDefaultArg() is never called on an unparsed or
   // uninstantiated default).
+  // A marked local or parameter is tracked as a whole ([[uninit]]) or by
+  // its referent ([[ref_to_uninit]] pointer or reference).
+  auto HarvestMarked = [&](const VarDecl *V, bool UnknownEntry) {
+    if (V->isInvalidDecl() || !V->hasLocalStorage())
+      return;
+    if (V->hasAttr<UninitAttr>())
+      Storage.addLocalEntity(TrackedEntity::Kind::WholeLocal, V, UnknownEntry);
+    else if (V->hasAttr<RefToUninitAttr>() &&
+             (V->getType()->isPointerType() || V->getType()->isReferenceType()))
+      Storage.addLocalEntity(TrackedEntity::Kind::Pointee, V, UnknownEntry);
+  };
   if (const auto *FD = dyn_cast<FunctionDecl>(D))
     for (const ParmVarDecl *P : FD->parameters()) {
+      HarvestMarked(P, /*UnknownEntry=*/false);
       if (P->isInvalidDecl() || P->hasAttr<UninitAttr>() || P->hasDefaultArg())
         continue;
       if (const CXXRecordDecl *RD = getTrackableSlotClass(P->getType()))
         HarvestVar(P, RD);
     }
   SmallVector<const DeclStmt *, 8> DeclStmts;
+  // Marked variables of an enclosing function the body reaches by capture:
+  // tracked from an unknown entry state.
+  SmallVector<const VarDecl *, 4> Captured;
   {
     SmallVector<const Stmt *, 32> Stack;
     if (const Stmt *Body = D->getBody())
@@ -2842,6 +3135,12 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
         continue;
       if (const auto *DS = dyn_cast<DeclStmt>(Cur))
         DeclStmts.push_back(DS);
+      if (const auto *DRE = dyn_cast<DeclRefExpr>(Cur))
+        if (const auto *V = dyn_cast<VarDecl>(DRE->getDecl());
+            V && V->hasLocalStorage() &&
+            V->getDeclContext() != dyn_cast<DeclContext>(D) &&
+            (V->hasAttr<UninitAttr>() || V->hasAttr<RefToUninitAttr>()))
+          Captured.push_back(V);
       if (const auto *LE = dyn_cast<LambdaExpr>(Cur)) {
         for (const Expr *Init : llvm::reverse(LE->capture_inits()))
           Stack.push_back(Init);
@@ -2858,11 +3157,16 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
   for (const DeclStmt *DS : DeclStmts)
     for (const Decl *Dcl : DS->decls()) {
       const auto *V = dyn_cast<VarDecl>(Dcl);
-      if (!V || Storage.LocalRange.count(V))
+      if (!V)
+        continue;
+      HarvestMarked(V, /*UnknownEntry=*/false);
+      if (Storage.LocalRange.count(V))
         continue;
       if (const CXXRecordDecl *RD = getTrackedLocalAggregate(V))
         AnyLocal |= HarvestVar(V, RD);
     }
+  for (const VarDecl *V : Captured)
+    HarvestMarked(V, /*UnknownEntry=*/true);
   // The copy harvest only chains from an already-tracked local.
   if (!AnyLocal && Storage.LocalRange.empty())
     return;
@@ -2940,14 +3244,17 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
   if (!cfg)
     return;
   std::vector<SmallVector<DefAssignEvent, 4>> Events(cfg->getNumBlockIDs());
-  extractStdInitEvents(*cfg, Storage, Ctor, StarThisCopyTrusted, Events);
+  SmallVector<BindingSite, 8> Sites;
+  extractStdInitEvents(*cfg, Storage, Ctor, StarThisCopyTrusted, Events, Sites);
   // Nothing is assigned at function entry: written initializers write at
   // their CFGInitializer elements, a tracked local cannot be referenced
-  // before its DeclStmt, and a by-value parameter starts unassigned by
-  // design.
+  // before its DeclStmt, a by-value parameter starts unassigned by design,
+  // and a marked local's marker asserts it.
+  SmallVector<PendingViolation, 8> Violations;
   std::vector<SmallVector<const Expr *, 2>> Offending =
-      runDefiniteAssignment(*cfg, InitAC, Storage.Entities.size(), Events);
+      runDefiniteAssignment(*cfg, InitAC, Storage, Events, Sites, Violations);
   reportMemberReadsBeforeInit(S, InitAC, Offending, Storage, Entry.Name);
+  reportFlowViolations(S, InitAC, Violations, Entry.Name);
 }
 
 class UninitValsDiagReporter : public UninitVariablesHandler {
