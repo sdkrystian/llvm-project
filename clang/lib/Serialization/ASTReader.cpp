@@ -357,6 +357,14 @@ static bool checkLanguageOptions(const LangOptions &LangOpts,
                                                ModuleFilename);
   }
 
+  // Compatible, like LangOptions::Profiles: a PCH shares its consumer's
+  // enforcement dominion, a module does not.
+  if (!AllowCompatibleDifferences &&
+      ExistingLangOpts.ProfilesEnforce != LangOpts.ProfilesEnforce) {
+    return diagnoseLanguageOptionValueMismatch(Diags, "enforced profiles",
+                                               ModuleFilename);
+  }
+
   if (ExistingLangOpts.ObjCRuntime != LangOpts.ObjCRuntime) {
     return diagnoseLanguageOptionValueMismatch(
         Diags, "target Objective-C runtime", ModuleFilename);
@@ -6730,6 +6738,9 @@ bool ASTReader::ParseLanguageOptions(const RecordData &Record,
 
   for (unsigned N = Record[Idx++]; N; --N)
     LangOpts.ModuleFeatures.push_back(ReadString(Record, Idx));
+
+  for (unsigned N = Record[Idx++]; N; --N)
+    LangOpts.ProfilesEnforce.push_back(ReadString(Record, Idx));
 
   ObjCRuntime::Kind runtimeKind = (ObjCRuntime::Kind) Record[Idx++];
   VersionTuple runtimeVersion = ReadVersionTuple(Record, Idx);

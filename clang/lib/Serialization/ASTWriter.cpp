@@ -1626,6 +1626,10 @@ void ASTWriter::WriteControlBlock(Preprocessor &PP, StringRef isysroot) {
   for (StringRef Feature : LangOpts.ModuleFeatures)
     AddString(Feature, Record);
 
+  Record.push_back(LangOpts.ProfilesEnforce.size());
+  for (StringRef Profile : LangOpts.ProfilesEnforce)
+    AddString(Profile, Record);
+
   Record.push_back((unsigned) LangOpts.ObjCRuntime.getKind());
   AddVersionTuple(LangOpts.ObjCRuntime.getVersion(), Record);
 

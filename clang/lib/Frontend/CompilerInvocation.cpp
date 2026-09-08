@@ -5269,6 +5269,7 @@ std::string CompilerInvocation::computeContextHash() const {
   HBuilder.addRangeElements(LanguageOptionValues);
 
   HBuilder.addRange(getLangOpts().ModuleFeatures);
+  HBuilder.addRange(getLangOpts().ProfilesEnforce);
 
   HBuilder.add(getLangOpts().ObjCRuntime);
   HBuilder.addRange(getLangOpts().CommentOpts.BlockCommandNames);

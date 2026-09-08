@@ -456,6 +456,13 @@ from an import, whatever its module kind.  The no-leak invariant therefore
 lives in the reader's kind gate: it keeps "importing an enforcing module does
 not enforce its profiles in the importer" true while a BMI compiled to object
 code still emits its own pattern-5 checks, TU-local enforcements included.
+Command-line enforcements are written with the rest and dedup on restore
+against the consumer's own constructor seed.  ``LangOptions::ProfilesEnforce``
+is a Compatible language option, carried in ``LANGUAGE_OPTIONS`` and hashed
+into the implicit-module signature: a PCH, a preamble, or a BMI compiled to
+object code must have been built under the same list as the compilation
+consuming it (a mismatch is the usual language-option error), while an
+imported explicit module may differ.
 ``Module::EnforcedProfileDesignators`` is written to a BMI as
 ``SUBMODULE_ENFORCED_PROFILES`` records within each submodule block.
 ``PROFILES_TU_HAS_NONEMPTY_DECL`` records whether a PCH contributed a
