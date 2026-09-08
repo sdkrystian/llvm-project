@@ -219,6 +219,26 @@ struct ThisObject {
   }
 };
 
+// A structured binding names the member or element it decomposes, marker
+// included.
+struct MarkedPair {
+  int *p;
+  int *q [[ref_to_uninit]];
+};
+void test_structured_binding_marker() {
+  MarkedPair sp{&g_init, &g_uninit};
+  auto [x1, y1] = sp;
+  int *z1 = y1;                   // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  int *z2 [[ref_to_uninit]] = y1; // OK
+  int *z3 = x1;                   // OK
+  auto &[x2, y2] = sp;
+  int *z4 = y2;                   // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  int *z5 [[ref_to_uninit]] = y2; // OK
+  y2 = &g_uninit;                 // OK: the marked field q's own reseat
+  y2 = &g_init;                   // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)z1; (void)z2; (void)z3; (void)z4; (void)z5;
+}
+
 // A reference to a *const* pointer, or an rvalue reference to a pointer, is a
 // read-only alias bound by the pointer's value: it needs the marker exactly as
 // a pointer copy does, and a materialized pointer temporary is bound by value
