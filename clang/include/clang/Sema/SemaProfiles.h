@@ -444,12 +444,13 @@ private:
   /// The classify-and-judge half of checkInitProfileBinding, shared with the
   /// derive steps that resolve the target's marking themselves (a conditional
   /// assignment target, a member call's implicit object parameter): defer,
-  /// gate, classify \p Src once, and diagnose the verdict in \p Kind's
-  /// wording. \p Subject is the entity a kind-specific wording names (the
-  /// called method).
+  /// gate, classify \p Src once as bound to \p T -- a reference to a pointer
+  /// aliases the source glvalue (classifyPointerGlvalue) -- and diagnose the
+  /// verdict in \p Kind's wording. \p Subject is the entity a kind-specific
+  /// wording names (the called method).
   void judgeInitProfileBinding(InitBindingKind Kind, SourceLocation Loc,
-                               bool TargetMarked, bool IsReference,
-                               const Expr *Src, const Decl *D,
+                               bool TargetMarked, QualType T, const Expr *Src,
+                               const Decl *D,
                                const NamedDecl *Subject = nullptr);
 
   /// The binding funnel's recorder tail: after the binding is judged

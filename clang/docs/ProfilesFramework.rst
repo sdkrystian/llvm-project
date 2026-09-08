@@ -700,10 +700,17 @@ Positions that cannot carry the marker -- a variadic argument, a parameter of
 a function called through a function pointer, the implicit object parameter,
 a pointer element of an array in aggregate initialization
 -- are checked as unmarked targets; suppress at the call site if the flow is
-intended.  An assignment whose target is a conditional, comma, or GNU ``?:``
+intended.  A reference to a *const* pointer, or an rvalue reference to a
+pointer, is bound by the pointer's value: ``int *const &r = &u`` needs the
+marker exactly as ``int *r = &u`` does.  A reference to a *non-const*
+pointer aliases the pointer object itself and is neither checked nor
+tracked.  An assignment whose target is a conditional, comma, or GNU ``?:``
 expression stores to whichever pointer the chosen arm names: arms that agree
 on their marking are checked under it, and arms of mixed marking accept
-either source (any one answer would reject a legal combination).  A parameter's marker written on any declaration of the function is
+either source (any one answer would reject a legal combination); a target
+that does not directly name a pointer declaration -- a reference to a
+pointer, ``*pp``, an array element -- has unknown marking and accepts either
+source as well.  A parameter's marker written on any declaration of the function is
 inherited by the parameter's later redeclarations, so a header's marker
 carries to the source file's definition (the §7.2 header/source split); the
 definition keeps its read-through checking and call sites after the
@@ -1162,6 +1169,8 @@ those entries never cause a rejection.
   initialized by the most-derived class).
 - A read of a tracked member inside another member's default initializer is
   not detected.
+- A store through an alias of a pointer object (``int *&r = p; r = &u;``,
+  ``*pp = &u``) is not checked: the alias cannot carry the target's marking.
 - ``[[uninit]]`` on a type whose default constructor is explicitly defaulted
   *after* its first declaration is accepted only once the ``= default``
   definition has been parsed: a marker written between the class definition

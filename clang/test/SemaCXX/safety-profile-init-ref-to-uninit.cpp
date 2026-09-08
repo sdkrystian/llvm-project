@@ -190,6 +190,47 @@ void test_conditional_reference(bool c) {
   (void)r1; (void)r2; (void)r3; (void)r4;
 }
 
+// A reference to a *const* pointer, or an rvalue reference to a pointer, is a
+// read-only alias bound by the pointer's value: it needs the marker exactly as
+// a pointer copy does, and a materialized pointer temporary is bound by value
+// too.
+void take_ptr_rref(int *&&);
+void take_ptr_cref(int *const &);
+void take_ptr_cref_marked(int *const &r [[ref_to_uninit]]);
+template <typename T> void forward_ptr(T &&);
+void test_pointer_alias_read_only() {
+  int *mp [[ref_to_uninit]] = &g_uninit;
+  int *ip = &g_init;
+  int *&&r1 = &g_uninit;                       // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  const int *const &r2 = &g_uninit;            // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  int *const &r3 = mp;                         // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  int *const &r4 [[ref_to_uninit]] = mp;       // OK
+  const int *const &r5 [[ref_to_uninit]] = mp; // OK
+  int *const &r6 [[ref_to_uninit]] = ip;       // expected-error {{reference marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  take_ptr_rref(&g_uninit);                    // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  take_ptr_cref(mp);                           // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  take_ptr_cref_marked(mp);                    // OK
+  take_ptr_cref_marked(ip);                    // expected-error {{reference marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  forward_ptr(&g_uninit);                      // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)r1; (void)r2; (void)r3; (void)r4; (void)r5; (void)r6;
+}
+
+// A reference to a *non-const* pointer is a mutable alias of the pointer
+// object, whose marking it cannot carry: neither the binding nor a store
+// through the alias is checked, and neither is a store through an unnamed
+// lvalue.
+void test_pointer_alias_mutable() {
+  int *mp [[ref_to_uninit]] = &g_uninit;
+  int *&rm = mp;  // OK: aliases the pointer object
+  rm = &g_uninit; // OK: unknown target marking
+  rm = &g_init;   // OK: unknown target marking
+  int **pp = &mp; // OK: points to the pointer object
+  *pp = &g_uninit; // OK: unknown target marking
+  *pp = &g_init;   // OK: unknown target marking
+  forward_ptr(mp); // OK: T&& deduces int *&, a mutable alias
+  (void)rm; (void)pp;
+}
+
 // The GNU `a ?: b` form classifies like the equivalent plain conditional:
 // the common operand doubles as the true arm. Named pointers keep the
 // conditions free of always-true address-of warnings; an unmarked pointer
@@ -244,20 +285,19 @@ void test_assignment() {
 }
 
 // Assignment through indirection: the assigned-to pointer is reached by
-// dereference or subscript, so it cannot carry a local [[ref_to_uninit]]
-// marker. It is the default unmarked pointer and must not be bound to
-// uninitialized memory, exactly as a directly-named pointer would be.
+// dereference or subscript and names no declaration, so its marking is
+// unknown and neither direction is checked.
 void test_assignment_indirect() {
   int *p = nullptr;
   int **pp = &p;
-  *pp = &g_uninit;   // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  *pp = &g_uninit;   // OK: unknown target marking
   *pp = &g_init;     // OK
-  (*pp) = &g_uninit; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
-  *pp = new int;     // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (*pp) = &g_uninit; // OK: unknown target marking
+  *pp = new int;     // OK: unknown target marking
   *pp = new int(0);  // OK
 
   int *arr[3] = {};
-  arr[0] = &g_uninit; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  arr[0] = &g_uninit; // OK: unknown target marking
   arr[1] = &g_init;   // OK
   (void)pp; (void)arr;
 }

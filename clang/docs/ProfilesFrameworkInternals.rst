@@ -604,7 +604,9 @@ patterns.  Its rules map to mechanisms as follows:
        for every binding site (variable and member initialization, call
        arguments, returns, aggregate elements, pointer assignments, throws,
        new-initializers, variadic arguments, captures, object arguments);
-       a defaulted argument is checked once at ``CXXDefaultArgExpr``
+       ``classifyPointerGlvalue`` judges a reference-to-pointer binding by
+       the pointer's value (a read-only alias) or not at all (a mutable
+       alias); a defaulted argument is checked once at ``CXXDefaultArgExpr``
        creation, in
        ``Sema::BuildCXXDefaultArgExpr``, whatever call form reaches it --
        speculative creations (a SFINAE-trapped candidate, an elided-copy

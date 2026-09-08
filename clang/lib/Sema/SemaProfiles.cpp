@@ -1105,14 +1105,24 @@ enum class UninitStorage { Initialized, Uninitialized, Unknown };
 // a credited entity classifies as Initialized. Null in the constexpr
 // presets; the checking entry points attach it via withCredit, choosing the
 // Strength every consult below passes to the credit queries.
+//
+// Alias: how a binding aliases a glvalue *of pointer type* (P4222R2 §4.3),
+// set by the binding funnel from the bound type. A read-only alias (T *const
+// &, T *&&) denotes whatever the pointer's value points to; a mutable alias
+// (T *&) denotes the pointer object, whose marking the alias cannot carry, so
+// it classifies Unknown. None everywhere else, including every recursion below
+// the top level. See classifyPointerGlvalue.
 using InitCreditStrength = SemaProfiles::InitCreditStrength;
 
 struct UninitAccessOpts {
+  enum class PointerAlias { None, ReadOnly, Mutable };
+
   bool DropTopLevelUninit = false;
   bool TrustRefToUninit = false;
   bool SubscriptBase = false;
   const SemaProfiles *Credit = nullptr;
   InitCreditStrength Strength = InitCreditStrength::Maybe;
+  PointerAlias Alias = PointerAlias::None;
 
   // Copy-then-mutate, so each helper names only the field it changes and
   // adding a field cannot silently drop out of a positional rebuild.
@@ -1141,7 +1151,28 @@ struct UninitAccessOpts {
     O.Strength = St;
     return O;
   }
+  UninitAccessOpts withAlias(PointerAlias A) const {
+    UninitAccessOpts O = *this;
+    O.Alias = A;
+    return O;
+  }
 };
+
+/// The alias kind a bound type gives a pointer glvalue source (P4222R2
+/// §4.3): a reference whose referent is a pointer is a read-only alias when
+/// the referent is const-qualified or the reference is an rvalue reference,
+/// a mutable alias otherwise; any other bound type aliases nothing.
+static UninitAccessOpts::PointerAlias pointerAliasOf(QualType T) {
+  using PointerAlias = UninitAccessOpts::PointerAlias;
+  if (T.isNull() || !T->isReferenceType())
+    return PointerAlias::None;
+  QualType Referent = T->getPointeeType();
+  if (!Referent->isPointerType())
+    return PointerAlias::None;
+  return Referent.isConstQualified() || T->isRValueReferenceType()
+             ? PointerAlias::ReadOnly
+             : PointerAlias::Mutable;
+}
 
 // Presets: a binding source (markers count everywhere), a value read (the
 // top-level drop applies), and a scalar store (additionally, storage reached
@@ -1688,6 +1719,21 @@ static const Expr *ignoreParenImpCastsKeepMTE(const Expr *E) {
   });
 }
 
+/// A glvalue of pointer type bound as a read-only alias (T *const &, T *&&,
+/// or a materialized pointer temporary) denotes whatever its value points
+/// to, so it classifies as that value; a mutable alias (T *&) denotes the
+/// pointer object, whose marking the alias cannot carry: Unknown (P4222R2
+/// §4.3). The alias applies to this glvalue only, so the value
+/// classification runs alias-free.
+static UninitStorage classifyPointerGlvalue(ASTContext &Ctx, const Expr *E,
+                                            UninitAccessOpts Opts) {
+  using PointerAlias = UninitAccessOpts::PointerAlias;
+  if (Opts.Alias == PointerAlias::Mutable)
+    return UninitStorage::Unknown;
+  return pointerRefersToUninitStorage(Ctx, E,
+                                      Opts.withAlias(PointerAlias::None));
+}
+
 // \p E is a glvalue. Classifies whether it denotes uninitialized storage.
 static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
                                                  UninitAccessOpts Opts) {
@@ -1695,17 +1741,21 @@ static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
     return UninitStorage::Unknown;
   E = ignoreParenImpCastsKeepMTE(E);
 
+  // A pointer glvalue bound as an alias is classified by the alias kind.
+  if (Opts.Alias != UninitAccessOpts::PointerAlias::None)
+    return classifyPointerGlvalue(Ctx, E, Opts);
+
   // A materialized temporary is a fresh object initialized from its
   // subexpression's *value*: whatever storage that value was loaded from, the
   // temporary itself is initialized (e.g. `const long &r = u;` binds a new
   // long temporary, not `u`). A *pointer-typed* temporary is the exception:
-  // its value still refers to the same storage, so an unmarked copy of a
-  // marked pointer value (`const int *const &rp = alloc();`) must keep
-  // classifying by the pointee -- recurse as if the MTE were stripped, the
-  // pre-MTE-arm status quo.
+  // its value still refers to the same storage, so it is a read-only alias of
+  // whatever the value points to (`const int *const &rp = alloc();`).
   if (const auto *MTE = dyn_cast<MaterializeTemporaryExpr>(E)) {
     if (MTE->getType()->isPointerType())
-      return glvalueDenotesUninitStorage(Ctx, MTE->getSubExpr(), Opts);
+      return classifyPointerGlvalue(
+          Ctx, MTE->getSubExpr(),
+          Opts.withAlias(UninitAccessOpts::PointerAlias::ReadOnly));
     return UninitStorage::Initialized;
   }
 
@@ -1718,7 +1768,9 @@ static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
   // A named entity denotes uninitialized storage if it is [[uninit]], or
   // if it is a reference marked [[ref_to_uninit]] (the glvalue is its referent,
   // which is uninitialized). A [[ref_to_uninit]] *pointer* named here denotes
-  // the pointer object itself -- which is initialized -- so it does not count.
+  // the pointer object itself -- which is initialized -- so it does not count
+  // (a pointer glvalue bound as an alias was classified by
+  // classifyPointerGlvalue above and never reaches this arm).
   // Under the top-level drop the [[uninit]] arm is skipped: a value access of
   // a directly named [[uninit]] object is the flow-based passes' territory, so
   // only a [[ref_to_uninit]] reference (or indirection, handled below) still
@@ -1893,9 +1945,10 @@ static void diagnoseBindingVerdict(SemaProfiles &SP,
 
 void SemaProfiles::judgeInitProfileBinding(InitBindingKind Kind,
                                            SourceLocation Loc,
-                                           bool TargetMarked, bool IsReference,
+                                           bool TargetMarked, QualType T,
                                            const Expr *Src, const Decl *D,
                                            const NamedDecl *Subject) {
+  bool IsReference = T->isReferenceType();
   // A RecoveryExpr is a placeholder for an initialization that already failed,
   // not a source the user wrote, so it must not drive this rule.
   if (!Src || isa<RecoveryExpr>(Src->IgnoreParens()))
@@ -1913,7 +1966,7 @@ void SemaProfiles::judgeInitProfileBinding(InitBindingKind Kind,
   // provably have run) and none at all while instantiating, where a
   // re-walked statement would see credit it recorded itself. See
   // "Parse-Order Store Credit" in ProfilesFrameworkInternals.rst.
-  UninitAccessOpts Opts = UninitBindAccess;
+  UninitAccessOpts Opts = UninitBindAccess.withAlias(pointerAliasOf(T));
   if (!TargetMarked)
     Opts = Opts.withCredit(this, InitCreditStrength::Maybe);
   else if (!SemaRef.inTemplateInstantiation())
@@ -2007,8 +2060,7 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
                    UninitStorage::Uninitialized)
       Diag(Loc, diag::err_init_destroy_uninit) << "std::init";
   } else {
-    judgeInitProfileBinding(Kind, Loc, TargetMarked, T->isReferenceType(), Src,
-                            D);
+    judgeInitProfileBinding(Kind, Loc, TargetMarked, T, Src, D);
   }
   recordLifecycleArguments(Roles, Target, T, Src);
 }
@@ -2403,11 +2455,15 @@ void SemaProfiles::checkInitProfileObjectArgument(const Expr *Object,
   if (Method->isStatic())
     return;
   // An arrow call's object argument arrives as the pointer expression, a dot
-  // call's as the object glvalue.
+  // call's as the object glvalue; the implicit object parameter's type is the
+  // pointer, or a reference to the object.
+  QualType ObjectTy = Object->getType();
+  QualType T = ObjectTy->isPointerType()
+                   ? ObjectTy
+                   : getASTContext().getLValueReferenceType(ObjectTy);
   judgeInitProfileBinding(InitBindingKind::ObjectArgument, Object->getExprLoc(),
-                          /*TargetMarked=*/false,
-                          /*IsReference=*/!Object->getType()->isPointerType(),
-                          Object, /*D=*/nullptr, Method);
+                          /*TargetMarked=*/false, T, Object, /*D=*/nullptr,
+                          Method);
 }
 
 // The read-through diagnostic distinguishes indirection through a
@@ -2555,15 +2611,16 @@ void SemaProfiles::checkInitProfileSubobjectWrite(SourceLocation Loc,
               : (uninitWriteChainSeesMarker(LHS) ? 1 : 2));
 }
 
-/// The [[ref_to_uninit]] marking of the pointer entity an assignment target
-/// names: true/false for a directly named marked/unmarked entity -- any
-/// other lvalue (e.g. *pp, arr[i]) cannot carry a local marker, so it is
-/// the default unmarked pointer (paper §4.3) -- and std::nullopt for a
-/// conditional whose arms disagree, where neither direction of the binding
-/// check is sound. Peels transparent casts and walks the pass-through
-/// target shapes ((c ? p : q) = e assigns whichever arm is chosen, comma
-/// yields its right operand, the GNU form's written common operand doubles
-/// as the true arm -- mirroring classifyUninitPassThrough's OVE avoidance).
+/// The [[ref_to_uninit]] marking of the pointer object an assignment target
+/// names: true/false for a directly named marked/unmarked pointer
+/// declaration, std::nullopt when the marking is unknown -- a reference to a
+/// pointer aliases an object whose marking it cannot carry, any other lvalue
+/// (*pp, arr[i]) names no declaration at all, and a conditional's arms may
+/// disagree -- where neither direction of the binding check is sound
+/// (P4222R2 §4.3). Peels transparent casts and walks the pass-through target
+/// shapes ((c ? p : q) = e assigns whichever arm is chosen, comma yields its
+/// right operand, the GNU form's written common operand doubles as the true
+/// arm -- mirroring classifyUninitPassThrough's OVE avoidance).
 static std::optional<bool> resolveAssignTargetMarking(const Expr *E) {
   E = SemaProfiles::ignoreTransparentCasts(E);
   if (const auto *CO = dyn_cast<ConditionalOperator>(E)) {
@@ -2579,7 +2636,9 @@ static std::optional<bool> resolveAssignTargetMarking(const Expr *E) {
   if (const auto *BO = dyn_cast<BinaryOperator>(E); BO && BO->isCommaOp())
     return resolveAssignTargetMarking(BO->getRHS());
   const ValueDecl *VD = SemaProfiles::getDirectlyNamedDecl(E);
-  return VD && VD->hasAttr<RefToUninitAttr>();
+  if (!VD || VD->getType()->isReferenceType())
+    return std::nullopt;
+  return VD->hasAttr<RefToUninitAttr>();
 }
 
 void SemaProfiles::checkInitProfilePointerAssignment(Expr *LHS, Expr *RHS,
@@ -2596,12 +2655,12 @@ void SemaProfiles::checkInitProfilePointerAssignment(Expr *LHS, Expr *RHS,
   // marker must judge q), like every other marker read.
   if (LHS->isInstantiationDependent())
     return;
-  // Mixed-marking conditional targets check neither direction: the source
-  // must be acceptable to whichever arm is chosen, and either marking
-  // answer would reject one legal combination.
+  // A target of unknown marking -- an alias of a pointer object, an unnamed
+  // lvalue, a conditional whose arms disagree -- checks neither direction:
+  // either marking answer would reject a legal store.
   if (std::optional<bool> Marked = resolveAssignTargetMarking(LHS))
     judgeInitProfileBinding(InitBindingKind::PointerAssignment, OpLoc, *Marked,
-                            /*IsReference=*/false, RHS, /*D=*/nullptr);
+                            LHS->getType(), RHS, /*D=*/nullptr);
   // An assignment can hand out a mutable alias of a marked pointer object
   // (pp = &p) exactly like a binding does; the withdrawal mirrors the
   // funnel's recorder tail.
