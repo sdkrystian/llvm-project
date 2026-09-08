@@ -561,7 +561,9 @@ as initialized (see `Binding Pointers and References`_):
    };
 
 A member (each base-class copy of a member separately) or variable counts as
-assigned only when every path to the read assigns it (§1.3), and a compound
+assigned only when every path to the read assigns it (§1.3), exception paths
+included: a call inside a ``try`` block may transfer control to the handler
+before the assignment that follows it.  A compound
 assignment (``x += 1``) or an increment or
 decrement reads the old value first, so it is diagnosed like a read.  A
 comma or conditional lvalue reads (or assigns) whichever member the chosen

@@ -205,12 +205,12 @@ likewise keeps dispatching per-function analysis after a TU error when such
 a profile is enforced; without this, the first error would disable the
 profile for every later function.
 
-``std::init`` installs all three hook columns: ``VarExempt`` exempts
-``std::byte`` variables (P4222R2 §4), ``ConfigureCFG`` always-adds lambda
-expressions for the constructor-body events, and ``ExtraPass`` runs the
-member read-before-init engine (``runStdInitMemberReadChecks``: one
-``TrackedStorage`` entity table, ``extractStdInitEvents``,
-``runDefiniteAssignment``, one report).  The row threads the profile's
+``std::init`` installs two hook columns: ``VarExempt`` exempts ``std::byte``
+variables (P4222R2 §4) and ``ExtraPass`` runs the member read-before-init
+engine (``runStdInitMemberReadChecks``: one ``TrackedStorage`` entity table,
+``extractStdInitEvents``, ``runDefiniteAssignment``, one report, over a CFG
+of its own built with exception edges and every expression as an element,
+so the shape contract above does not bind it).  The row threads the profile's
 *identity* -- its name and its uninitialized-read diagnostic -- through the
 engine and its reporter, not its semantics: the tracked-member vocabulary
 the passes implement
@@ -565,7 +565,9 @@ patterns.  Its rules map to mechanisms as follows:
        locals' ``[[uninit]]`` scalar members), one ``extractStdInitEvents``
        loop whose arms resolve every lvalue through
        ``TrackedStorage::resolve`` and distribute comma, conditional, and GNU
-       ``?:`` shapes to their leaves, and one definite-assignment run; the
+       ``?:`` shapes to their leaves, and one definite-assignment run over a
+       CFG of its own, built with exception edges over a fully linearized
+       shape (the shared CFG the other analyses see is untouched); the
        ``CallExpr`` arm turns a ``[[now_init]]`` call into a ``Gen`` bit for
        the storage bound to the callee's marked parameters (P4222R2 §6.2)
        and a ``[[now_uninit]]`` call into a ``Kill`` that clears the
