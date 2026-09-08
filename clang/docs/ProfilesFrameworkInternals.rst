@@ -600,17 +600,19 @@ patterns.  Its rules map to mechanisms as follows:
        uninitialized, once per class at the ``using``-declaration
    * - ``ref_to_uninit``
      - 1
-     - ``checkInitProfileRefToUninit`` behind per-site wrappers (variable
-       and member initialization, call arguments, returns, throws,
-       new-initializers, captures, object arguments); a defaulted argument
-       is checked once at ``CXXDefaultArgExpr`` creation, in
+     - ``checkInitProfileBinding``, one funnel keyed on ``InitBindingKind``
+       for every binding site (variable and member initialization, call
+       arguments, returns, aggregate elements, pointer assignments, throws,
+       new-initializers, variadic arguments, captures, object arguments);
+       a defaulted argument is checked once at ``CXXDefaultArgExpr``
+       creation, in
        ``Sema::BuildCXXDefaultArgExpr``, whatever call form reaches it --
        speculative creations (a SFINAE-trapped candidate, an elided-copy
        probe, an MS-ABI ctor closure) opt out per call site
    * - ``double_destroy``, ``destroy_uninit``
      - 1
-     - the destroy arm of ``checkInitProfileRefToUninitBinding`` (the
-       parameter-binding funnel): ``storageIsDestroyed`` answers the
+     - the destroy arm of ``checkInitProfileBinding`` (its Parameter and
+       DefaultArgument kinds): ``storageIsDestroyed`` answers the
        destroyed state, and ``classifyUninitSource`` -- run exactly as for
        an unmarked binding target (``Maybe`` credit) -- the uninitialized
        one
@@ -621,9 +623,10 @@ patterns.  Its rules map to mechanisms as follows:
        glvalue recognizer clears the trust, so subobject writes below the
        marker classify uninitialized)
 
-Two helpers are shared across the rules.  ``refersToUninitializedMemory``
-classifies an expression as referring to initialized, uninitialized, or
-unknown storage purely from its syntactic form (parse-order store credit
+Two helpers are shared across the rules.  ``classifyUninitSource`` -- the
+pointer and glvalue recognizers -- classifies an expression as referring to
+initialized, uninitialized, or unknown storage purely from its syntactic
+form (parse-order store credit
 refines it, recorded by ``recordInitProfileStore`` and by the
 ``recordNowInitArgument`` / ``recordNowUninitArgument`` pair, which share
 one argument-shape walk to add or withdraw the credit of storage a
@@ -710,6 +713,18 @@ lambda body from definitely crediting an enclosing function's local; the
 enclosing function is resolved from the context chain directly, so a store
 inside a *block* body -- which ``getCurFunctionDecl`` would skip -- stays
 ``Maybe`` too.  Everything else records ``Maybe``.
+
+**The requires-uninitialized direction consults no credit while
+instantiating.**  Parse-order credit is recorded once and never rewound, so
+when an instantiation re-walks a statement the pattern already checked, the
+re-check runs against post-pattern state -- including credit that very
+statement recorded (a reused ``[[now_init]]`` argument, a this-member store
+keyed to the pattern) -- which would turn the pattern's pass into a false
+"must refer to uninitialized memory".  A violation established only by
+credit in fully dependent code is therefore a missed diagnostic, never a
+false positive; direct classification (an initialized global, a marked
+entity) is unaffected, and the accepting direction keeps credit everywhere,
+since a deferred binding needs the instantiation-time record to pass.
 
 **Recording is not gated on enforcement or suppression.**  A suppressed
 store still initializes, and failing to credit it would turn suppression

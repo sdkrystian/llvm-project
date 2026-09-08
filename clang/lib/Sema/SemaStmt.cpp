@@ -3783,8 +3783,9 @@ StmtResult Sema::ActOnCapScopeReturnStmt(SourceLocation ReturnLoc,
     } else if (const auto *BSI = dyn_cast<BlockScopeInfo>(CurCap)) {
       ScopeDecl = BSI->TheDecl;
     }
-    Profiles().checkInitProfileRefToUninitBinding(
-        RetValExp->getExprLoc(), Target, FnRetType, RetValExp, ScopeDecl);
+    Profiles().checkInitProfileBinding(SemaProfiles::InitBindingKind::Return,
+                                       RetValExp->getExprLoc(), Target,
+                                       FnRetType, RetValExp, ScopeDecl);
   }
 
   // Otherwise, verify that this result type matches the previous one.  We are
@@ -4198,16 +4199,17 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp,
       }
     }
   }
-  // std::init / ref_to_uninit (paper §5): the returned pointer or reference
-  // must match the function's [[ref_to_uninit]] return marking. AllowLambda
+  // std::init / ref_to_uninit (P4222R2 §4.2-§4.3): the returned pointer or
+  // reference must match the function's return marking. AllowLambda
   // keeps a lambda call operator's body -- should it ever reach this
   // non-capturing path -- checked against its own marker rather than the
   // enclosing function's (returns inside lambdas normally take the capturing
   // branch above, at parse and at instantiation alike).
   if (RetValExp && getLangOpts().Profiles)
     if (const FunctionDecl *FD = getCurFunctionDecl(/*AllowLambda=*/true))
-      Profiles().checkInitProfileRefToUninitBinding(RetValExp->getExprLoc(), FD,
-                                                    FnRetType, RetValExp);
+      Profiles().checkInitProfileBinding(SemaProfiles::InitBindingKind::Return,
+                                         RetValExp->getExprLoc(), FD, FnRetType,
+                                         RetValExp);
 
   const VarDecl *NRVOCandidate = getCopyElisionCandidate(NRInfo, FnRetType);
 

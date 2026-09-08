@@ -253,54 +253,73 @@ public:
   /// see through exactly the same casts.
   static const Expr *ignoreTransparentCasts(const Expr *E);
 
-  /// std::init / ref_to_uninit (paper §5): true only if \p E is affirmatively
-  /// recognized as referring to (for a pointer source) or, when
-  /// \p IsReference, denoting (for a glvalue source) uninitialized storage.
-  /// Recognized purely locally from the expression's syntactic form -- the
-  /// address of, or a subobject of, a [[uninit]] entity; a value of a
-  /// [[ref_to_uninit]] pointer/reference or array; a dereference of such a
-  /// pointer; a cast of such a pointer to another pointer type, or of such a
-  /// glvalue to another reference; a call to a [[ref_to_uninit]]-returning
-  /// function or to a known uninitialized-returning allocator (the malloc
-  /// and alloca builtin families and raw replaceable ::operator new calls;
-  /// calloc's result is initialized, realloc's
-  /// unknown); or a new-expression whose default-initialization leaves the
-  /// allocated object indeterminate (e.g. new int). A trusted-initialized
-  /// source and an unrecognized (unknown) source both return false (no flow
-  /// analysis).
-  bool refersToUninitializedMemory(const Expr *E, bool IsReference) const;
+  /// The construct a pointer or reference binding belongs to, selecting
+  /// which declaration can carry [[ref_to_uninit]] and which diagnostic
+  /// wording applies (see checkInitProfileBinding).
+  enum class InitBindingKind : unsigned {
+    /// A variable's initializer, an init-capture included; the target is the
+    /// VarDecl.
+    Variable,
+    /// A data member's initializer -- NSDMI, mem-initializer, or an
+    /// aggregate's field element; the target is the FieldDecl.
+    DataMember,
+    /// A call argument's parameter copy-initialization; the target is the
+    /// ParmVarDecl, null for a call with no declared callee.
+    Parameter,
+    /// A defaulted argument, checked on the CXXDefaultArgExpr; the target is
+    /// the ParmVarDecl.
+    DefaultArgument,
+    /// A return statement; the target is the function (its return type's
+    /// marker) or the lambda call operator.
+    Return,
+    /// An array, vector, or complex element of an aggregate initializer: no
+    /// declaration carries the marker.
+    AggregateElement,
+    /// A built-in pointer assignment; the target's marking is resolved from
+    /// the left operand (checkInitProfilePointerAssignment).
+    PointerAssignment,
+    /// A thrown pointer copy-initializing the exception object, which cannot
+    /// carry the marker.
+    Throw,
+    /// The written initializer of a scalar new-expression allocating a
+    /// pointer; a heap pointer object cannot carry the marker.
+    NewInitializer,
+    /// A pointer promoted through a `...` parameter, which cannot carry the
+    /// marker. Checked from the two C++ promotion loops
+    /// (Sema::GatherArgumentsForCall, Sema::BuildCallToObjectOfClassType),
+    /// not from Sema::DefaultVariadicArgumentPromotion, whose other callers
+    /// re-promote arguments or match ObjC methods and would double-fire.
+    VariadicArgument,
+    /// A by-copy lambda capture of a pointer into a closure field, which
+    /// cannot carry the marker.
+    ByCopyCapture,
+    /// A by-reference lambda capture (checkInitProfileRefCapture); the
+    /// closure's reference cannot carry the marker.
+    ByRefCapture,
+    /// A member call's implicit object parameter
+    /// (checkInitProfileObjectArgument), which cannot carry the marker.
+    ObjectArgument
+  };
 
-  /// std::init / ref_to_uninit (paper §5): check that the initialization of a
-  /// pointer or reference is consistent with its [[ref_to_uninit]] marking --
-  /// a marked target must refer to uninitialized memory, and an unmarked
-  /// target must not. Shared by the variable, data-member, assignment,
-  /// argument, and return check sites; gated by shouldEmitProfileViolation.
-  /// A Decl-less call defers only on an instantiation-dependent \p Src --
-  /// such a construct is always rebuilt at instantiation, re-running this
-  /// funnel with the substituted source -- and otherwise fires at definition
-  /// time; if the construct is rebuilt at instantiation anyway (a local
-  /// operand, a call argument, a return), the same diagnostic repeats there
-  /// (accepted for now). A Decl-carrying call instead defers via the
-  /// D->isTemplated() check in shouldEmitProfileViolation and fires on the
-  /// instantiated declaration.
-  void checkInitProfileRefToUninit(SourceLocation Loc, bool TargetIsRefToUninit,
-                                   bool IsReference, const Expr *Src,
-                                   const Decl *D = nullptr);
-
-  /// std::init / ref_to_uninit (paper §5): check that binding \p Src to
-  /// \p Target (a variable, data member, parameter, or function) is
-  /// consistent with the target's [[ref_to_uninit]] marking. A null \p Target
-  /// is a binding with no declaration to carry the marker (a parameter of a
-  /// call through a function pointer) and is checked as unmarked. \p T is the
-  /// bound type -- the target's type, or the return type when \p Target is a
-  /// function. No-op unless \p T is a non-dependent pointer or reference (a
-  /// dependent type defers to instantiation, where the check site re-runs
-  /// with the concrete type). \p D, when available, is the declaration used
-  /// for suppression lookup and template-pattern deferral.
-  void checkInitProfileRefToUninitBinding(SourceLocation Loc,
-                                          const ValueDecl *Target, QualType T,
-                                          const Expr *Src,
-                                          const Decl *D = nullptr);
+  /// std::init / ref_to_uninit (P4222R2 §4.2-§4.3): judge binding \p Src as
+  /// \p T to \p Target -- null for a construct with no declaration to carry
+  /// the marker -- against the target's marking: a marked target must refer
+  /// to uninitialized memory, an unmarked one must not. The one binding
+  /// funnel: every host passes its \p Kind, and a kind whose construct cannot
+  /// carry the marker is judged unmarked whatever \p Target is. No-op unless
+  /// \p T is a non-dependent pointer or reference. \p D, when available,
+  /// anchors suppression and template deferral: with it the rule fires on
+  /// the instantiation only; without it an instantiation-dependent \p Src
+  /// defers to the rebuild and a non-dependent one is judged on the pattern
+  /// and again at each instantiation that rebuilds the construct
+  /// (ProfilesFrameworkInternals.rst, "Pattern 1"). A Parameter or
+  /// DefaultArgument binding of a [[now_uninit]] or storage-release callee
+  /// runs the destroy rules instead, and every kind's tail records the
+  /// callee's lifecycle effects and any mutable-alias escape of a marked
+  /// pointer object.
+  void checkInitProfileBinding(InitBindingKind Kind, SourceLocation Loc,
+                               const ValueDecl *Target, QualType T,
+                               const Expr *Src, const Decl *D = nullptr);
 
   /// std::init / uninit_read (paper §4.5): diagnose a read *through* a
   /// [[ref_to_uninit]] pointer or reference, whose result is itself
@@ -313,10 +332,9 @@ public:
   /// their LHS promotion already funnels through the chokepoint). Reuses the
   /// ref_to_uninit recognizer with its read access preset, so a direct read
   /// of a named [[uninit]] object is left to the flow-based uninit_read
-  /// pass. A std::byte read is exempt (paper §4.5). Defers only on an
-  /// instantiation-dependent \p Glvalue (rebuilt at instantiation, where the
-  /// check re-runs); a non-dependent read fires at definition time and may
-  /// repeat if the read is rebuilt at instantiation anyway (accepted).
+  /// pass. A std::byte read is exempt (P4222R2 §4.6). Template deferral
+  /// follows the expression-check policy (ProfilesFrameworkInternals.rst,
+  /// "Pattern 1").
   void checkInitProfileReadThrough(SourceLocation Loc, const Expr *Glvalue,
                                    QualType ValueType);
 
@@ -330,57 +348,41 @@ public:
   /// entity is its initialization (paper §4.5), and storage reached through
   /// [[ref_to_uninit]] is trusted (the deferred construct_at slice), so only
   /// a below-top-level [[uninit]] marker fires. A std::byte store is exempt
-  /// (paper §4.5). Defers only on an instantiation-dependent \p LHS (rebuilt
-  /// at instantiation, where the check re-runs); a non-dependent store fires
-  /// at definition time and may repeat if the assignment is rebuilt at
-  /// instantiation anyway (accepted).
+  /// (P4222R2 §4.6). Template deferral follows the expression-check policy
+  /// (ProfilesFrameworkInternals.rst, "Pattern 1").
   void checkInitProfileSubobjectWrite(SourceLocation Loc, const Expr *LHS);
 
-  /// std::init / ref_to_uninit (paper §5): a pointer argument passed through
-  /// a variadic `...` parameter, which cannot carry [[ref_to_uninit]], is
-  /// checked as an unmarked target. Called with the promoted argument from
-  /// the C++ variadic promotion loops (Sema::GatherArgumentsForCall and
-  /// Sema::BuildCallToObjectOfClassType); a non-pointer argument is a no-op
-  /// (its value read is the lvalue-to-rvalue chokepoint's).
-  void checkInitProfileVariadicArgument(const Expr *Arg);
-
-  /// std::init / ref_to_uninit (paper §4.3): a by-reference lambda capture of
-  /// \p Var binds a reference to its storage, and a capture cannot carry
-  /// [[ref_to_uninit]], so capturing an entity that denotes uninitialized
-  /// storage -- an [[uninit]] variable, or a [[ref_to_uninit]] reference --
-  /// is always the unmarked-direction violation. Called from
-  /// \c Sema::BuildLambdaExpr for each by-reference non-init variable capture
-  /// (init-captures are checked at \c createLambdaInitCaptureVarDecl); defers
-  /// only when the captured variable's type is instantiation-dependent.
-  /// TreeTransform always rebuilds a lambda at instantiation, so a deferred
-  /// capture re-processes there -- and a definition-time fire repeats there
-  /// (accepted).
+  /// The ByRefCapture derive step of checkInitProfileBinding: a by-reference
+  /// lambda capture of \p Var binds the closure's unmarked reference to the
+  /// variable's storage, which denotes uninitialized memory when \p Var is
+  /// [[uninit]] or a [[ref_to_uninit]] reference (parse-order store credit
+  /// clears both). Called from \c Sema::BuildLambdaExpr for each by-reference
+  /// non-init variable capture (init-captures are Variable bindings at
+  /// \c createLambdaInitCaptureVarDecl). There is no source expression, so
+  /// the deferral keys on an instantiation-dependent captured type.
   void checkInitProfileRefCapture(SourceLocation Loc, const ValueDecl *Var);
 
-  /// std::init / ref_to_uninit (paper §7.2): a member call binds its implicit
-  /// object parameter to \p Object, and that parameter can never carry
-  /// [[ref_to_uninit]], so a call on an object recognized as uninitialized
-  /// storage is always the unmarked-direction violation. Called from
-  /// \c Sema::PerformImplicitObjectArgumentInitialization, the funnel every
-  /// member-call flavor's object argument converts through -- dot and arrow
-  /// calls, member operators, functor operator(), operator->, and conversion
-  /// operators. Explicit-object member functions initialize their object as an
-  /// ordinary parameter and are already checked there; a destructor call is
-  /// skipped (destruction of uninitialized storage is the deferred destroy_at
-  /// slice), as is a static call operator (no implicit object parameter, like
-  /// a static member call). Defers only on an instantiation-dependent
-  /// \p Object -- the call
-  /// is rebuilt at instantiation, re-running the funnel -- and otherwise fires
-  /// at definition time, repeating if the call is rebuilt anyway (accepted).
+  /// The ObjectArgument derive step of checkInitProfileBinding: a member call
+  /// binds its implicit object parameter, which cannot carry the marker, to
+  /// \p Object. Called from \c
+  /// Sema::PerformImplicitObjectArgumentInitialization, the funnel every
+  /// member-call flavor's object argument converts through
+  /// -- dot and arrow calls, member operators, functor operator(),
+  /// operator->, and conversion operators. Explicit-object member functions
+  /// initialize their object as an ordinary parameter and are checked there;
+  /// a destructor call is skipped (destruction of uninitialized storage is
+  /// the deferred destroy_at slice), as is a static call operator (no
+  /// implicit object parameter, like a static member call).
   void checkInitProfileObjectArgument(const Expr *Object,
                                       const CXXMethodDecl *Method);
 
-  /// std::init / ref_to_uninit (paper §4.3): assigning to a pointer must
-  /// respect the assigned-to pointer's [[ref_to_uninit]] marking; a no-op for
-  /// a non-pointer LHS. Hosts the cluster from Sema::CreateBuiltinBinOp's
-  /// BO_Assign arm. An instantiation-dependent LHS defers to the
-  /// instantiation rebuild (its marker cannot be read yet); the source's
-  /// dependence is the shared funnel's to defer on.
+  /// The PointerAssignment derive step of checkInitProfileBinding: assigning
+  /// to a pointer must respect the assigned-to pointer's [[ref_to_uninit]]
+  /// marking, resolved from the left operand through transparent casts and
+  /// conditional, comma, and GNU ?: target shapes; a no-op for a non-pointer
+  /// LHS. Hosts the cluster from Sema::CreateBuiltinBinOp's BO_Assign arm.
+  /// An instantiation-dependent LHS defers to the instantiation rebuild (its
+  /// marker cannot be read yet); the source's deferral is the funnel's.
   void checkInitProfilePointerAssignment(Expr *LHS, Expr *RHS,
                                          SourceLocation OpLoc);
 
@@ -413,8 +415,8 @@ public:
   void recordInitProfileStore(const Expr *LHS);
 
   /// What a direct callee does to the storage bound to its parameters,
-  /// derived once per binding by the funnel
-  /// (checkInitProfileRefToUninitBinding) from the callee's lifetime
+  /// derived once per binding by the funnel (checkInitProfileBinding) from
+  /// the callee's lifetime
   /// attributes and the allocator-callee table. Each consumer reads only
   /// the bits its direction may rely on: binding *acceptance* (which never
   /// diagnoses) reads the union of the destroy and release bits, credit
@@ -439,6 +441,17 @@ public:
   };
 
 private:
+  /// The classify-and-judge half of checkInitProfileBinding, shared with the
+  /// derive steps that resolve the target's marking themselves (a conditional
+  /// assignment target, a member call's implicit object parameter): defer,
+  /// gate, classify \p Src once, and diagnose the verdict in \p Kind's
+  /// wording. \p Subject is the entity a kind-specific wording names (the
+  /// called method).
+  void judgeInitProfileBinding(InitBindingKind Kind, SourceLocation Loc,
+                               bool TargetMarked, bool IsReference,
+                               const Expr *Src, const Decl *D,
+                               const NamedDecl *Subject = nullptr);
+
   /// The binding funnel's recorder tail: after the binding is judged
   /// against the *pre-call* state, apply what the callee promises to do to
   /// the bound storage -- withdraw first, then credit, so a callee carrying
@@ -906,9 +919,10 @@ public:
   InitStoreCreditMap StoreCredit;
 
   /// Enumerate the lvalue leaves the assignment target or lifecycle argument
-  /// \p E can name: peel transparent casts, walk conditional arms (\p
-  /// ConditionalArm set for each, since the chosen arm is not known) and
-  /// comma right operands, and hand each leaf to \p F with its arm flag. The
+  /// \p E can name: peel transparent casts and single-element braced
+  /// initializers, walk conditional arms (\p ConditionalArm set for each,
+  /// since the chosen arm is not known) and comma right operands, and hand
+  /// each leaf to \p F with its arm flag. The
   /// one target-shape walk shared by the store recorder and the
   /// lifecycle-argument consumers, so a wrapped argument affects credit
   /// exactly like its leaf form at the arm's certainty.
@@ -921,22 +935,6 @@ public:
   /// strength on a conditional arm and currentStoreStrength otherwise,
   /// resolving each leaf through resolveTrackedGlvalue.
   void recordStoreTarget(const Expr *E, bool ConditionalArm);
-
-  /// std::init / ref_to_uninit (paper §5): a thrown pointer copy-initializes
-  /// the exception object, which cannot carry [[ref_to_uninit]]; a no-op for
-  /// a non-pointer exception object. Hosts the cluster from
-  /// Sema::BuildCXXThrow.
-  void checkInitProfileThrowOperand(const Expr *Operand);
-
-  /// std::init / ref_to_uninit (paper §5): a written initializer for an
-  /// allocated pointer binds it like a variable initialization, and a heap
-  /// pointer object cannot carry [[ref_to_uninit]]. \p Init is the single
-  /// written initializer expression, or null when there is none (a no-op).
-  /// Hosts the cluster from Sema::BuildCXXNew, which calls it for scalar
-  /// allocations only: an array new's written elements are each checked by
-  /// the aggregate element hooks instead. An instantiation-dependent
-  /// allocated type defers to the instantiation rebuild.
-  void checkInitProfileNewInitializer(QualType AllocType, Expr *Init);
 
   /// std::init / pointer_marker + union_marker (paper §4.1, §5.6): diagnose
   /// [[uninit]] placed on a pointer, a union variable, or a union member.

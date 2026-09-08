@@ -14990,10 +14990,11 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
 
   Profiles().checkInitProfileUninitWithInitializer(var, var->getInit());
 
-  // std::init / ref_to_uninit (paper §5): a pointer or reference variable
-  // must be bound consistently with its [[ref_to_uninit]] marking.
-  Profiles().checkInitProfileRefToUninitBinding(
-      var->getLocation(), var, var->getType(), var->getInit(), var);
+  // std::init / ref_to_uninit (P4222R2 §4.2-§4.3): a pointer or reference
+  // variable must be bound consistently with its [[ref_to_uninit]] marking.
+  Profiles().checkInitProfileBinding(SemaProfiles::InitBindingKind::Variable,
+                                     var->getLocation(), var, var->getType(),
+                                     var->getInit(), var);
 
   CUDA().MaybeAddConstantAttr(var);
 

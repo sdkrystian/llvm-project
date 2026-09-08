@@ -1062,9 +1062,8 @@ void SemaProfiles::addKnownInitLifecycleAttributes(FunctionDecl *FD) {
 // Uninitialized, while an unrecognized one (pointer arithmetic, an
 // integer-to-pointer cast, a call through a function pointer) is Unknown rather
 // than assumed Initialized. Callers wanting a plain "is it uninitialized?"
-// answer (SemaProfiles::refersToUninitializedMemory, the read-through check)
-// treat
-// Unknown as not uninitialized.
+// answer (the read-through and subobject-write checks) treat Unknown as not
+// uninitialized.
 //
 // How the classified expression is being accessed is carried by
 // UninitAccessOpts below.
@@ -1830,85 +1829,109 @@ classifyUninitSource(ASTContext &Ctx, const Expr *E, bool IsReference,
                      : pointerRefersToUninitStorage(Ctx, E, Opts);
 }
 
-bool SemaProfiles::refersToUninitializedMemory(const Expr *E,
-                                               bool IsReference) const {
-  return classifyUninitSource(getASTContext(), E, IsReference,
-                              UninitBindAccess.withCredit(this)) ==
-         UninitStorage::Uninitialized;
+/// True for the binding kinds whose target declaration can carry
+/// [[ref_to_uninit]]; every other kind reaching the funnel is judged
+/// unmarked. PointerAssignment, ByRefCapture, and ObjectArgument resolve
+/// their marking in their own derive steps and never reach the funnel.
+static bool bindingTargetCanCarryMarker(SemaProfiles::InitBindingKind Kind) {
+  using K = SemaProfiles::InitBindingKind;
+  switch (Kind) {
+  case K::Variable:
+  case K::DataMember:
+  case K::Parameter:
+  case K::DefaultArgument:
+  case K::Return:
+    return true;
+  case K::AggregateElement:
+  case K::PointerAssignment:
+  case K::Throw:
+  case K::NewInitializer:
+  case K::VariadicArgument:
+  case K::ByCopyCapture:
+  case K::ByRefCapture:
+  case K::ObjectArgument:
+    return false;
+  }
+  llvm_unreachable("unknown InitBindingKind");
 }
 
-void SemaProfiles::checkInitProfileRefToUninit(SourceLocation Loc,
-                                               bool TargetIsRefToUninit,
-                                               bool IsReference,
-                                               const Expr *Src, const Decl *D) {
+/// The verdict step of the binding funnel: diagnose binding a source in
+/// \p SrcState to a target whose marking is \p TargetMarked, in \p Kind's
+/// wording. A marked target rejects an affirmatively Initialized source and
+/// an unmarked one an affirmatively Uninitialized source; an Unknown source
+/// (pointer arithmetic, an integer-to-pointer cast, a call through a
+/// function pointer) fires in neither direction. \p Subject is the entity
+/// the ByRefCapture and ObjectArgument wordings name.
+static void diagnoseBindingVerdict(SemaProfiles &SP,
+                                   SemaProfiles::InitBindingKind Kind,
+                                   SourceLocation Loc, bool TargetMarked,
+                                   bool IsReference, UninitStorage SrcState,
+                                   const NamedDecl *Subject) {
+  using K = SemaProfiles::InitBindingKind;
+  static constexpr StringRef Profile = "std::init";
+  if (TargetMarked) {
+    if (SrcState == UninitStorage::Initialized)
+      SP.Diag(Loc, diag::err_init_ref_to_uninit_requires_uninit)
+          << Profile << (IsReference ? 1 : 0);
+    return;
+  }
+  if (SrcState != UninitStorage::Uninitialized)
+    return;
+  switch (Kind) {
+  case K::ByRefCapture:
+    SP.Diag(Loc, diag::err_init_uninit_ref_capture) << Profile << Subject;
+    return;
+  case K::ObjectArgument:
+    SP.Diag(Loc, diag::err_init_member_call_on_uninit) << Profile << Subject;
+    return;
+  default:
+    SP.Diag(Loc, diag::err_init_uninit_requires_ref_to_uninit)
+        << Profile << (IsReference ? 1 : 0);
+    return;
+  }
+}
+
+void SemaProfiles::judgeInitProfileBinding(InitBindingKind Kind,
+                                           SourceLocation Loc,
+                                           bool TargetMarked, bool IsReference,
+                                           const Expr *Src, const Decl *D,
+                                           const NamedDecl *Subject) {
   // A RecoveryExpr is a placeholder for an initialization that already failed,
   // not a source the user wrote, so it must not drive this rule.
   if (!Src || isa<RecoveryExpr>(Src->IgnoreParens()))
     return;
-  // An instantiation-dependent source cannot be classified yet; its construct
-  // is always rebuilt at instantiation, re-running this funnel with the
-  // substituted source. A non-dependent source is checked here, at definition
-  // time; if the construct is rebuilt at instantiation anyway (a local
-  // operand, a call argument, a return), the same diagnostic repeats there --
-  // accepted for now. Decl-carrying callers are exempt: they defer via the
-  // D->isTemplated() check in shouldEmitProfileViolation and fire on the
-  // instantiated declaration.
+  // The expression-check template policy (ProfilesFrameworkInternals.rst,
+  // "Pattern 1"): without a Decl an instantiation-dependent source defers to
+  // the rebuild; with one, the gate's templated rung defers instead.
   if (!D && Src->isInstantiationDependent())
     return;
-  static constexpr StringRef Profile = "std::init";
-  if (!shouldEmitProfileViolation(diag::err_init_uninit_requires_ref_to_uninit,
-                                  Loc, D))
+  if (!shouldEmitProfileViolation(diag::err_init_uninit_requires_ref_to_uninit, Loc, D))
     return;
-  // Credit is asymmetric between the two directions. For an unmarked
-  // target, credit only ever *suppresses* the diagnostic, so any store
-  // earlier in parse order suffices: Maybe. For a marked target the
-  // diagnostic *fires on* credit ("must refer to uninitialized memory"),
-  // which is only sound when the store provably ran, so the consult is
-  // Definite: an unconditional store in the entity's own function. A store
-  // under an if/loop/lambda earns only Maybe credit and cannot reject a
-  // legal marked binding on the untaken path -- never a false positive.
-  //
-  // While instantiating, the requires-uninit direction classifies without
-  // credit entirely: parse-order credit is recorded once and never rewound,
-  // so when an instantiation re-walks a statement the pattern already
-  // checked, the re-check runs against post-pattern state -- including
-  // credit this very statement recorded (a reused [[now_init]] argument, a
-  // this-member store keyed to the pattern), which would turn the pattern's
-  // pass into a false "must refer to uninitialized memory". The reverse
-  // direction diagnoses at definition time, and a violation established
-  // only by credit in fully dependent code is a missed diagnostic -- the
-  // usual parse-order trade, never a false positive. Direct classification
-  // (an initialized global, a marked entity) is unaffected, so credit-free
-  // reverse violations still repeat per instantiation, and the accepting
-  // direction keeps credit everywhere (a deferred binding needs the
-  // instantiation-time record to pass).
+  // Credit is asymmetric between the two directions: an unmarked target
+  // consults Maybe credit (any earlier store suppresses), a marked target
+  // Definite credit (the diagnostic fires on credit, so the store must
+  // provably have run) and none at all while instantiating, where a
+  // re-walked statement would see credit it recorded itself. See
+  // "Parse-Order Store Credit" in ProfilesFrameworkInternals.rst.
   UninitAccessOpts Opts = UninitBindAccess;
-  if (!TargetIsRefToUninit)
+  if (!TargetMarked)
     Opts = Opts.withCredit(this, InitCreditStrength::Maybe);
   else if (!SemaRef.inTemplateInstantiation())
     Opts = Opts.withCredit(this, InitCreditStrength::Definite);
-  UninitStorage SrcState =
-      classifyUninitSource(getASTContext(), Src, IsReference, Opts);
-  unsigned IsRef = IsReference ? 1 : 0;
-  // A marked target is a violation only against an affirmatively Initialized
-  // source: an Unknown one (pointer arithmetic, an integer-to-pointer cast, a
-  // call through a function pointer) cannot be proven initialized, so rejecting
-  // it would be a false positive. An unmarked target is diagnosed only against
-  // an affirmatively Uninitialized source (Unknown stays a missed diagnostic).
-  if (TargetIsRefToUninit && SrcState == UninitStorage::Initialized)
-    Diag(Loc, diag::err_init_ref_to_uninit_requires_uninit) << Profile << IsRef;
-  else if (!TargetIsRefToUninit && SrcState == UninitStorage::Uninitialized)
-    Diag(Loc, diag::err_init_uninit_requires_ref_to_uninit) << Profile << IsRef;
+  diagnoseBindingVerdict(
+      *this, Kind, Loc, TargetMarked, IsReference,
+      classifyUninitSource(getASTContext(), Src, IsReference, Opts), Subject);
 }
 
-void SemaProfiles::checkInitProfileRefToUninitBinding(SourceLocation Loc,
-                                                      const ValueDecl *Target,
-                                                      QualType T,
-                                                      const Expr *Src,
-                                                      const Decl *D) {
+void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
+                                           SourceLocation Loc,
+                                           const ValueDecl *Target, QualType T,
+                                           const Expr *Src, const Decl *D) {
   if (!getLangOpts().Profiles || T.isNull() || T->isDependentType() ||
       (!T->isPointerType() && !T->isReferenceType()))
     return;
+  bool TargetMarked = Target && Target->hasAttr<RefToUninitAttr>() &&
+                      bindingTargetCanCarryMarker(Kind);
   const auto *Parm = dyn_cast_or_null<ParmVarDecl>(Target);
   const auto *Callee =
       Parm ? dyn_cast<FunctionDecl>(Parm->getDeclContext()) : nullptr;
@@ -1965,7 +1988,7 @@ void SemaProfiles::checkInitProfileRefToUninitBinding(SourceLocation Loc,
     // credit), so a suppressed double destroy must stay silent rather
     // than fall through to a swapped destroy_uninit error. An
     // instantiation-dependent source defers exactly like
-    // checkInitProfileRefToUninit's.
+    // judgeInitProfileBinding's.
     bool Checkable = Src && !isa<RecoveryExpr>(Src->IgnoreParens()) &&
                      (D || !Src->isInstantiationDependent());
     bool Destroyed =
@@ -1974,8 +1997,8 @@ void SemaProfiles::checkInitProfileRefToUninitBinding(SourceLocation Loc,
       if (shouldEmitProfileViolation(diag::err_init_double_destroy, Loc, D))
         Diag(Loc, diag::err_init_double_destroy) << "std::init";
     } else if (Roles.DestroysPointerParams &&
-               !Roles.InitializesRefToUninitParams &&
-               !(Target && Target->hasAttr<RefToUninitAttr>()) && Checkable &&
+               !Roles.InitializesRefToUninitParams && !TargetMarked &&
+               Checkable &&
                shouldEmitProfileViolation(diag::err_init_destroy_uninit, Loc,
                                           D) &&
                classifyUninitSource(getASTContext(), Src, T->isReferenceType(),
@@ -1984,12 +2007,8 @@ void SemaProfiles::checkInitProfileRefToUninitBinding(SourceLocation Loc,
                    UninitStorage::Uninitialized)
       Diag(Loc, diag::err_init_destroy_uninit) << "std::init";
   } else {
-    // A null Target is a binding site with no declaration to carry the
-    // marker (a parameter of a call through a function pointer): always
-    // unmarked.
-    checkInitProfileRefToUninit(Loc,
-                                Target && Target->hasAttr<RefToUninitAttr>(),
-                                T->isReferenceType(), Src, D);
+    judgeInitProfileBinding(Kind, Loc, TargetMarked, T->isReferenceType(), Src,
+                            D);
   }
   recordLifecycleArguments(Roles, Target, T, Src);
 }
@@ -2334,43 +2353,19 @@ bool SemaProfiles::storageIsDestroyed(QualType T, const Expr *Src) const {
   return AnyLeaf && AllDestroyed;
 }
 
-void SemaProfiles::checkInitProfileVariadicArgument(const Expr *Arg) {
-  // std::init / ref_to_uninit (paper §5): a variadic argument never reaches
-  // parameter copy-initialization, and a `...` parameter cannot carry
-  // [[ref_to_uninit]], so a pointer passed through it is checked as an
-  // unmarked target (paper §7.2: passing uninitialized memory needs an
-  // appropriately declared callee). Value reads of the promoted argument
-  // already funnel through the lvalue-to-rvalue chokepoint; the pointer
-  // binding is the only direction added here. Called from the two C++
-  // variadic promotion loops -- Sema::GatherArgumentsForCall and
-  // Sema::BuildCallToObjectOfClassType (functors, variadic lambdas) -- not
-  // from Sema::DefaultVariadicArgumentPromotion itself, whose other callers
-  // re-promote already-promoted arguments (the os_log builtin check) or
-  // promote during ObjC method matching, where a check would double-fire.
-  if (!getLangOpts().Profiles || !Arg || !Arg->getType()->isPointerType())
-    return;
-  checkInitProfileRefToUninit(Arg->getExprLoc(), /*TargetIsRefToUninit=*/false,
-                              /*IsReference=*/false, Arg);
-}
-
 void SemaProfiles::checkInitProfileRefCapture(SourceLocation Loc,
                                               const ValueDecl *Var) {
   if (!getLangOpts().Profiles)
     return;
   // A by-reference capture of a mutable marked *pointer* escapes it to the
-  // closure, which can reseat it -- withdraw the Definite pointee credit
-  // like `T **pp = &p` would (the overload's own gates limit this to that
-  // shape). Recorded before the diagnostic early-returns below: a marked
-  // non-reference pointer is not this check's to diagnose and returns early,
-  // but its escape must still be recorded (recorders never gate).
+  // closure, which can reseat it; recorded before any early return below
+  // (recorders never gate on the verdict).
   recordInitProfilePointerAliasEscape(Var);
-  // Mirrors the glvalue recognizer's named-entity arm: the captured variable
-  // denotes uninitialized storage if it is [[uninit]], or if it is a
-  // [[ref_to_uninit]] reference (the capture binds to its referent) -- in
-  // both cases unless parse-order store credit says it has been initialized
-  // (u = 5; then a by-ref capture of u is accepted, symmetric with &u). A
-  // copy capture is not this check's: it reads the variable in the enclosing
-  // function's CFG, which is the flow-based uninit_read pass's territory.
+  // Derive the captured storage's state as the glvalue recognizer's
+  // named-entity arm does: an [[uninit]] variable or a [[ref_to_uninit]]
+  // reference, unless parse-order store credit initialized it. A copy capture
+  // reads the variable in the enclosing function's CFG instead, which is the
+  // flow-based uninit_read pass's territory.
   bool UninitNoCredit =
       Var->hasAttr<UninitAttr>() &&
       !hasWholeObjectStoreCredit(Var, InitCreditStrength::Maybe);
@@ -2379,23 +2374,20 @@ void SemaProfiles::checkInitProfileRefCapture(SourceLocation Loc,
                      !hasPointeeStoreCredit(Var, InitCreditStrength::Maybe);
   if (!UninitNoCredit && !RefNoCredit)
     return;
-  // The only Expr-less deferral here: an instantiation-dependent captured
-  // type defers to instantiation, where TreeTransform's unconditional lambda
-  // rebuild re-processes the capture. A concrete capture fires at definition
-  // time and repeats on that same rebuild -- accepted for now.
+  // No source expression: the deferral keys on the captured type; the lambda
+  // is rebuilt at instantiation, re-processing the capture.
   if (Var->getType()->isInstantiationDependentType())
     return;
   if (!shouldEmitProfileViolation(diag::err_init_uninit_ref_capture, Loc))
     return;
-  Diag(Loc, diag::err_init_uninit_ref_capture) << "std::init" << Var;
+  diagnoseBindingVerdict(*this, InitBindingKind::ByRefCapture, Loc,
+                         /*TargetMarked=*/false, /*IsReference=*/true,
+                         UninitStorage::Uninitialized, Var);
 }
 
 void SemaProfiles::checkInitProfileObjectArgument(const Expr *Object,
                                                   const CXXMethodDecl *Method) {
-  // A RecoveryExpr is a placeholder for an expression that already failed, not
-  // an object argument the user wrote, so it must not drive this rule.
-  if (!getLangOpts().Profiles || !Object ||
-      isa<RecoveryExpr>(Object->IgnoreParens()))
+  if (!getLangOpts().Profiles || !Object)
     return;
   // Destroying uninitialized storage is the deferred destroy_at slice (the
   // paper models destruction, like construct_at, as a lifetime operation);
@@ -2410,22 +2402,12 @@ void SemaProfiles::checkInitProfileObjectArgument(const Expr *Object,
   // argument for static call operators all the same, so skip them here.
   if (Method->isStatic())
     return;
-  // An instantiation-dependent object argument cannot be classified yet; its
-  // call is always rebuilt at instantiation, re-running this funnel with the
-  // substituted object. A non-dependent call fires at definition time and
-  // repeats if the call is rebuilt at instantiation anyway -- accepted.
-  if (Object->isInstantiationDependent())
-    return;
-  if (!shouldEmitProfileViolation(diag::err_init_member_call_on_uninit,
-                                  Object->getExprLoc()))
-    return;
   // An arrow call's object argument arrives as the pointer expression, a dot
-  // call's as the object glvalue; dispatch the recognizer accordingly.
-  bool IsPointer = Object->getType()->isPointerType();
-  if (!refersToUninitializedMemory(Object, /*IsReference=*/!IsPointer))
-    return;
-  Diag(Object->getExprLoc(), diag::err_init_member_call_on_uninit)
-      << "std::init" << Method;
+  // call's as the object glvalue.
+  judgeInitProfileBinding(InitBindingKind::ObjectArgument, Object->getExprLoc(),
+                          /*TargetMarked=*/false,
+                          /*IsReference=*/!Object->getType()->isPointerType(),
+                          Object, /*D=*/nullptr, Method);
 }
 
 // The read-through diagnostic distinguishes indirection through a
@@ -2525,13 +2507,11 @@ void SemaProfiles::checkInitProfileReadThrough(SourceLocation Loc,
   // a read the user wrote, so it must not drive this rule.
   if (!Glvalue || isa<RecoveryExpr>(Glvalue->IgnoreParens()))
     return;
-  // An instantiation-dependent glvalue cannot be classified yet; its read is
-  // always rebuilt at instantiation, where this check re-runs with the
-  // substituted operand. A non-dependent read fires at definition time and
-  // repeats if the read is rebuilt at instantiation anyway -- accepted.
+  // The expression-check template policy (ProfilesFrameworkInternals.rst,
+  // "Pattern 1").
   if (Glvalue->isInstantiationDependent())
     return;
-  // Paper §4.5: reading an uninitialized std::byte is permitted.
+  // P4222R2 §4.6: reading an uninitialized std::byte is permitted.
   if (getASTContext().getBaseElementType(ValueType)->isStdByteType())
     return;
   if (!shouldEmitProfileViolation(diag::err_init_uninit_read_through, Loc))
@@ -2550,14 +2530,11 @@ void SemaProfiles::checkInitProfileSubobjectWrite(SourceLocation Loc,
   // a store the user wrote, so it must not drive this rule.
   if (!LHS || isa<RecoveryExpr>(LHS->IgnoreParens()))
     return;
-  // An instantiation-dependent store target cannot be classified yet; its
-  // assignment is always rebuilt at instantiation, where this check re-runs
-  // with the substituted LHS. A non-dependent store fires at definition time
-  // and repeats if the assignment is rebuilt at instantiation anyway --
-  // accepted.
+  // The expression-check template policy (ProfilesFrameworkInternals.rst,
+  // "Pattern 1").
   if (LHS->isInstantiationDependent())
     return;
-  // Paper §4.5: an uninitialized std::byte may be manipulated freely.
+  // P4222R2 §4.6: an uninitialized std::byte may be manipulated freely.
   if (getASTContext().getBaseElementType(LHS->getType())->isStdByteType())
     return;
   if (!shouldEmitProfileViolation(diag::err_init_uninit_subobject_write, Loc))
@@ -2623,7 +2600,8 @@ void SemaProfiles::checkInitProfilePointerAssignment(Expr *LHS, Expr *RHS,
   // must be acceptable to whichever arm is chosen, and either marking
   // answer would reject one legal combination.
   if (std::optional<bool> Marked = resolveAssignTargetMarking(LHS))
-    checkInitProfileRefToUninit(OpLoc, *Marked, /*IsReference=*/false, RHS);
+    judgeInitProfileBinding(InitBindingKind::PointerAssignment, OpLoc, *Marked,
+                            /*IsReference=*/false, RHS, /*D=*/nullptr);
   // An assignment can hand out a mutable alias of a marked pointer object
   // (pp = &p) exactly like a binding does; the withdrawal mirrors the
   // funnel's recorder tail.
@@ -2777,6 +2755,13 @@ void SemaProfiles::forEachTargetLeaf(
     forEachTargetLeaf(BO->getRHS(), ConditionalArm, F);
     return;
   }
+  // A single-element braced initializer names its element, as it does for
+  // the recognizers (classifyUninitPassThrough).
+  if (const auto *ILE = dyn_cast<InitListExpr>(E);
+      ILE && ILE->getNumInits() == 1) {
+    forEachTargetLeaf(ILE->getInit(0), ConditionalArm, F);
+    return;
+  }
   F(E, ConditionalArm);
 }
 
@@ -2834,42 +2819,6 @@ bool SemaProfiles::hasPointeeStoreCredit(const ValueDecl *VD,
 bool SemaProfiles::hasMemberStoreCredit(const Decl *Base, const FieldDecl *F,
                                         InitCreditStrength Strength) const {
   return Base && F && StoreCredit.hasMemberStored(Base, F, Strength);
-}
-
-void SemaProfiles::checkInitProfileThrowOperand(const Expr *Operand) {
-  // A thrown pointer copy-initializes the exception object, which cannot
-  // carry [[ref_to_uninit]], so throwing a pointer to uninitialized memory is
-  // always the unmarked-direction violation. (Reads like `throw *p` funnel
-  // through the read-through check instead.)
-  QualType ExceptionObjectTy =
-      getASTContext().getExceptionObjectType(Operand->getType());
-  if (!ExceptionObjectTy->isPointerType())
-    return;
-  checkInitProfileRefToUninit(Operand->getExprLoc(),
-                              /*TargetIsRefToUninit=*/false,
-                              /*IsReference=*/false, Operand);
-}
-
-void SemaProfiles::checkInitProfileNewInitializer(QualType AllocType,
-                                                  Expr *Init) {
-  // A written initializer for an allocated pointer binds it like a variable
-  // initialization -- but a heap pointer object cannot carry
-  // [[ref_to_uninit]], so binding it to uninitialized memory is always the
-  // unmarked-direction violation. A braced `new T*{&x}` presents the
-  // InitListExpr, which the recognizer's single-element pass-through looks
-  // through -- which is why the caller invokes this for scalar allocations
-  // only: for an array new, AllocType is the element type and the lone
-  // initializer of `new T*[k]{&x}` would be peeled to the same binding the
-  // aggregate element hooks already diagnose. An instantiation-dependent
-  // allocated type (note that a dependent-pointee `T*` still passes
-  // isPointerType) defers to the instantiation rebuild, which re-runs this
-  // check with the concrete type.
-  if (!AllocType->isPointerType() ||
-      AllocType->isInstantiationDependentType() || !Init)
-    return;
-  checkInitProfileRefToUninit(Init->getExprLoc(),
-                              /*TargetIsRefToUninit=*/false,
-                              /*IsReference=*/false, Init);
 }
 
 namespace {
