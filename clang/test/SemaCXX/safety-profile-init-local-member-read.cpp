@@ -739,3 +739,42 @@ int test_destroy_conditional_argument(bool c) {
   destroy_at(c ? &a.m : &b.m);
   return a.m; // OK: unresolved destroy argument -- the escape credit stands
 }
+
+// A sub-access below a class or array member whose type holds no pointer or
+// reference is not an escape.
+struct PlainInner {
+  int v = 0;
+};
+struct OuterPlain {
+  PlainInner in;
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+};
+void sub_access_plain_class() {
+  OuterPlain x;
+  int c = x.in.v;
+  int d = x.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+  (void)c; (void)d;
+}
+struct OuterArray {
+  int arr[2] = {};
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+};
+void sub_access_array() {
+  OuterArray x;
+  x.arr[0] = 1;
+  int d = x.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+  (void)d;
+}
+struct PointerInner {
+  int *p = nullptr;
+};
+struct OuterPointer {
+  PointerInner in;
+  int m [[uninit]];
+};
+void sub_access_pointer_member_escapes() {
+  OuterPointer x;
+  *x.in.p = 1;
+  int d = x.m; // OK: a member holding a pointer may reach m
+  (void)d;
+}
