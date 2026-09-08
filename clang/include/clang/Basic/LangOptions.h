@@ -540,6 +540,10 @@ public:
   /// This list is sorted.
   std::vector<std::string> ModuleFeatures;
 
+  /// The profiles -fprofiles-enforce= enforces on the whole translation unit,
+  /// as profile names. Sorted and unique.
+  std::vector<std::string> ProfilesEnforce;
+
   /// Options for parsing comments.
   CommentOptions CommentOpts;
 

@@ -36,6 +36,16 @@ generation directly from an AST file -- observes the same enforcement state.
 ``SemaProfiles`` records enforcements into that list (through its delegating
 wrappers) and owns the attribute's diagnostics.
 
+``-fprofiles-enforce=`` is the second Sema-free seed: the ``ASTContext``
+constructor records each name in ``LangOptions::ProfilesEnforce`` with an
+invalid location, which ``isProfileEnforcedAt`` reads as "whole translation
+unit".  The constructor is the one point every consumer passes through -- a
+source compile, a PCH or BMI build, code generation from an AST file.
+``CompilerInvocation`` validates the names
+against the profile-name production only (``profiles::isValidProfileName``),
+sorts and dedups the list, and sets ``LangOptions::Profiles`` when it is
+non-empty.
+
 Profile-rule diagnostics are defined with the ``ProfileRuleError`` diagnostic
 class rather than plain ``Error``.  It marks them SFINAE-suppressed: they do not
 count as substitution failures and cannot change overload resolution, but

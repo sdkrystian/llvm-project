@@ -14365,6 +14365,8 @@ def err_profiles_enforce_after_decl : Error<
   "non-empty declarations">;
 def err_profiles_enforce_mismatch : Error<
   "repeated enforcement of profile '%0' with different designator">;
+def note_profiles_enforced_on_command_line : Note<
+  "profile '%0' is enforced by '-fprofiles-enforce='">;
 def err_profiles_require_not_on_import : Error<
   "'profiles::require' attribute only allowed on module-import-declarations">;
 def err_profiles_require_not_enforced : Error<

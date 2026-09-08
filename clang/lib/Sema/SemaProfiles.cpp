@@ -48,7 +48,10 @@ bool SemaProfiles::addProfileEnforcement(StringRef Name, StringRef Designator,
   if (const auto *Existing = getProfileEnforcement(Name)) {
     if (Existing->Designator != Designator) {
       Diag(Loc, diag::err_profiles_enforce_mismatch) << Name;
-      Diag(Existing->EnforceLoc, diag::note_previous_attribute);
+      if (llvm::is_contained(getLangOpts().ProfilesEnforce, Name))
+        Diag(Loc, diag::note_profiles_enforced_on_command_line) << Name;
+      else
+        Diag(Existing->EnforceLoc, diag::note_previous_attribute);
       return false;
     }
     return true;

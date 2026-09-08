@@ -43,11 +43,12 @@ Usage
 =====
 
 The framework is gated on the C++-only ``-fprofiles`` flag, which defaults to
-off:
+off; ``-fprofiles-enforce=`` (see `Enforcing Profiles`_) implies it:
 
 .. code-block:: console
 
    clang++ -std=c++23 -fprofiles example.cpp
+   clang++ -std=c++23 -fprofiles-enforce=std::safety example.cpp
 
 Despite the similar spelling, the ``-fprofiles`` family of flags is
 unrelated to the ``-fprofile-*`` profile-guided-optimization and coverage
@@ -104,6 +105,27 @@ enforcement placed after another declaration:
                                                          // different designator
    int x;
    [[profiles::enforce(std::safety)]];  // error: does not precede 'x'
+
+The same enforcement can be requested from the command line.
+``-fprofiles-enforce=`` takes a comma-separated list of profile *names* (no
+designator arguments) and may be repeated; it implies ``-fprofiles``, and
+``-fno-profiles`` disables the framework together with any enforcement
+requested this way:
+
+.. code-block:: console
+
+   clang++ -std=c++23 -fprofiles-enforce=std::safety,acme::hardened example.cpp
+
+A command-line enforcement covers the entire translation unit -- there is no
+attribute for code to precede, so a global module fragment is checked too --
+and otherwise behaves like an enforcement written first in the source:
+repeating it in source has no effect, a designator that names the same
+profile with arguments is the mismatch error above (the note names the
+option), and other profiles may be enforced in source alongside it.  As in
+source, a name the implementation does not know is accepted and enforces
+nothing; only the spelling is checked (identifiers joined by ``::``).  The
+enforcement is local to the translation unit it is given to (see `Profiles
+and Modules`_).
 
 
 Suppressing Enforcement
@@ -223,6 +245,11 @@ units:
   best-effort basis, because the interface's BMI is usually not built yet
   when the partition is compiled.  Repeat the ``[[profiles::enforce]]`` there
   for guaranteed enforcement.
+
+``-fprofiles-enforce=`` is local to the translation unit it is given to: a
+module interface or header unit built with it advertises nothing for
+``[[profiles::require]]``, and an implementation unit does not inherit it --
+each unit that is to be enforced is given the option.
 
 A declaration and its redeclarations must appear under mutually *compatible*
 profiles (P3589R2 [decl.attr.enforce]p5): redeclaring an entity from a module

@@ -6636,7 +6636,8 @@ The ``[[profiles::enforce]]`` attribute requests enforcement of one or more
 C++ profiles (P3589R2) for the remainder of the translation unit. It may
 appear on an empty-declaration at translation-unit scope that precedes every
 non-empty declaration, or on a module-declaration. It has effect only under
-``-fprofiles``.
+``-fprofiles``. ``-fprofiles-enforce=`` requests the same enforcement from the
+command line.
 
 .. code-block:: c++
 

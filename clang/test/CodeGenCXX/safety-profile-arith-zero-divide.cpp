@@ -6,6 +6,9 @@
 // Enforced: checks are emitted, honoring [[profiles::suppress]].
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -DENFORCE -fprofiles -fprofiles-test-profiles -std=c++23 -emit-llvm -o - %s | FileCheck %s
 //
+// The same enforcement from the command line, which needs no -fprofiles.
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fprofiles-enforce=test::arith -fprofiles-test-profiles -std=c++23 -emit-llvm -o - %s | FileCheck %s
+//
 // Not enforced, no -fprofiles, or test:: profiles not activated: no checks.
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fprofiles -fprofiles-test-profiles -std=c++23 -emit-llvm -o - %s | FileCheck %s --check-prefix=NONE
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -DENFORCE -fprofiles -std=c++23 -emit-llvm -o - %s | FileCheck %s --check-prefix=NONE

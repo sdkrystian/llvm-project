@@ -21,6 +21,7 @@
 #include "clang/Basic/LangOptions.h"
 #include "clang/Basic/LangStandard.h"
 #include "clang/Basic/ObjCRuntime.h"
+#include "clang/Basic/Profiles.h"
 #include "clang/Basic/Sanitizers.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/TargetOptions.h"
@@ -4298,6 +4299,25 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
     Opts.setDefaultFPContractMode(LangOptions::FPM_Fast);
 
   llvm::sort(Opts.ModuleFeatures);
+
+  // -fprofiles-enforce= takes profile names (P3589R2 [decl.attr.grammar]); the
+  // list is canonicalized so AST-file comparisons are order-insensitive. Gated
+  // on C++ like the option's marshalling, so the generated arguments round-trip
+  // in every language mode.
+  if (Opts.CPlusPlus) {
+    for (const Arg *A : Args.filtered(OPT_fprofiles_enforce_EQ))
+      for (StringRef Name : A->getValues())
+        if (!profiles::isValidProfileName(Name)) {
+          Diags.Report(diag::err_drv_invalid_value)
+              << A->getAsString(Args) << Name;
+          llvm::erase(Opts.ProfilesEnforce, Name);
+        }
+    llvm::sort(Opts.ProfilesEnforce);
+    Opts.ProfilesEnforce.erase(llvm::unique(Opts.ProfilesEnforce),
+                               Opts.ProfilesEnforce.end());
+    if (!Opts.ProfilesEnforce.empty())
+      Opts.Profiles = true;
+  }
 
   // -mrtd option
   if (Arg *A = Args.getLastArg(OPT_mrtd)) {

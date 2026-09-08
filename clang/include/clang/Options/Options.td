@@ -1807,6 +1807,13 @@ defm profiles_exempt_system_headers
   NegFlag<SetFalse, [], [ClangOption, CC1Option],
           "Enforce C++ profiles in system-header code too">>,
   ShouldParseIf<cplusplus.KeyPath>;
+def fprofiles_enforce_EQ : CommaJoined<["-"], "fprofiles-enforce=">,
+  Group<f_Group>, Visibility<[ClangOption, CC1Option]>,
+  MetaVarName<"<profile>">,
+  HelpText<"Enforce the named C++ profiles (comma-separated) for the whole "
+           "translation unit; implies -fprofiles">,
+  MarshallingInfoStringVector<LangOpts<"ProfilesEnforce">>,
+  ShouldParseIf<cplusplus.KeyPath>;
 
 defm coro_aligned_allocation : BoolFOption<"coro-aligned-allocation",
   LangOpts<"CoroAlignedAllocation">, DefaultFalse,

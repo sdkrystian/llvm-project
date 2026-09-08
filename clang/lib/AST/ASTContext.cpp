@@ -1015,6 +1015,12 @@ ASTContext::ASTContext(LangOptions &LOpts, SourceManager &SM,
       Comments(SM), CommentCommandTraits(BumpAlloc, LOpts.CommentOpts),
       CompCategories(this_()), LastSDM(nullptr, 0) {
   addTranslationUnitDecl();
+
+  // A -fprofiles-enforce= enforcement records no location, which
+  // isProfileEnforcedAt reads as the whole translation unit.
+  for (const std::string &Name : LangOpts.ProfilesEnforce)
+    if (!getProfileEnforcement(Name))
+      addEnforcedProfile(Name, Name, SourceLocation());
 }
 
 void ASTContext::cleanup() {

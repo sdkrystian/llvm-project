@@ -6699,6 +6699,14 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   Args.addOptInFlag(CmdArgs, options::OPT_fprofiles, options::OPT_fno_profiles);
 
+  // -fprofiles-enforce= implies -fprofiles in -cc1; a winning -fno-profiles
+  // turns the framework off and leaves the enforcements unclaimed, so they are
+  // reported as unused.
+  if (Arg *A =
+          Args.getLastArg(options::OPT_fprofiles, options::OPT_fno_profiles);
+      !A || A->getOption().matches(options::OPT_fprofiles))
+    Args.AddAllArgs(CmdArgs, options::OPT_fprofiles_enforce_EQ);
+
   Args.addOptOutFlag(CmdArgs, options::OPT_fprofiles_exempt_system_headers,
                      options::OPT_fno_profiles_exempt_system_headers);
 

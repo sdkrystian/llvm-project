@@ -15,7 +15,10 @@
 #ifndef LLVM_CLANG_BASIC_PROFILES_H
 #define LLVM_CLANG_BASIC_PROFILES_H
 
+#include "clang/Basic/CharInfo.h"
 #include "clang/Basic/SourceLocation.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
 #include <string>
@@ -67,6 +70,15 @@ inline bool suppressionMatches(llvm::StringRef EntryProfile,
                                llvm::StringRef EntryRule,
                                llvm::StringRef Profile, llvm::StringRef Rule) {
   return EntryProfile == Profile && (EntryRule.empty() || EntryRule == Rule);
+}
+
+/// True if \p Name spells a profile-name (P3589R2 [decl.attr.grammar]:
+/// identifiers joined by "::"), the form -fprofiles-enforce= accepts.
+inline bool isValidProfileName(llvm::StringRef Name) {
+  llvm::SmallVector<llvm::StringRef, 4> Parts;
+  Name.split(Parts, "::");
+  return llvm::all_of(
+      Parts, [](llvm::StringRef Part) { return isValidAsciiIdentifier(Part); });
 }
 
 /// True if the profile named \p Name is inert in this compilation: the
