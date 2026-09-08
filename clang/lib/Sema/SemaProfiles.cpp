@@ -254,25 +254,6 @@ SemaProfiles::makeImplicitProfilesSuppressAttr(StringRef ProfileName,
       /*RawArgumentKinds=*/nullptr, /*RawArgumentKindsSize=*/0);
 }
 
-bool SemaProfiles::isProfileSuppressed(StringRef ProfileName,
-                                       StringRef RuleName,
-                                       SourceLocation Loc) const {
-  return profiles::anyEntryCovers(ProfileSuppressStack, ProfileName, RuleName,
-                                  Loc, getASTContext().getSourceManager());
-}
-
-bool SemaProfiles::isProfileSuppressed(StringRef ProfileName,
-                                       StringRef RuleName, const Stmt *S,
-                                       AnalysisDeclContext &AC) const {
-  const SourceManager &SM = getASTContext().getSourceManager();
-  SourceLocation UseLoc = S ? S->getBeginLoc() : SourceLocation();
-  ParentMap &PM = AC.getParentMap();
-  for (const Stmt *Cur = S; Cur; Cur = PM.getParent(Cur))
-    if (profiles::isSuppressedFor(Cur, ProfileName, RuleName, UseLoc, SM))
-      return true;
-  return profiles::isSuppressedFor(AC.getDecl(), ProfileName, RuleName);
-}
-
 bool SemaProfiles::isProfileExemptSystemHeaderLoc(SourceLocation Loc) const {
   return getASTContext().isProfileExemptSystemHeaderLoc(Loc);
 }
@@ -295,8 +276,8 @@ bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
   // see ProfilesFrameworkInternals.rst) and, when a Decl is available, from
   // the declaration and its lexical parents -- the latter survives the parse
   // scope's teardown, so finalization checks still respect suppression.
-  if (isProfileSuppressed(ProfileName, RuleName, Loc) ||
-      profiles::isSuppressedFor(D, ProfileName, RuleName))
+  if (profiles::isSuppressed({ProfileSuppressStack, D}, ProfileName, RuleName,
+                             Loc, getASTContext().getSourceManager()))
     return false;
   // A templated entity is not a phase-7 entity (P3589R2 §1.1), so a profile
   // rule fires only on the instantiation, never on the pattern (checking the
@@ -322,15 +303,15 @@ bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
     return false;
   if (getASTContext().isProfileExemptSystemHeaderLoc(Loc))
     return false;
-  if (isProfileSuppressed(ProfileName, RuleName, UseStmt, AC))
-    return false;
-  // A function can be analyzed while an enclosing construct is still
-  // mid-parse (e.g. a local class's method body), so consult the live
-  // parse-time stack too; the consult is dominion-checked, so an unrelated
-  // live scope never matches (see ProfilesFrameworkInternals.rst).
-  if (isProfileSuppressed(ProfileName, RuleName, Loc))
-    return false;
-  return true;
+  // The query walks upward from UseStmt through AC's parent map and the
+  // analyzed declaration's lexical chain, and consults the live parse-time
+  // stack too: a function can be analyzed while an enclosing construct is
+  // still mid-parse (a local class's method body), and the stack consult is
+  // dominion-checked, so an unrelated live scope never matches (see
+  // ProfilesFrameworkInternals.rst).
+  return !profiles::isSuppressed(
+      {ProfileSuppressStack, AC.getDecl(), UseStmt, &AC.getParentMap()},
+      ProfileName, RuleName, Loc, getASTContext().getSourceManager());
 }
 
 bool SemaProfiles::checkProfileViolation(StringRef ProfileName,

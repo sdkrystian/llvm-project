@@ -54,21 +54,18 @@ bool CodeGenFunction::isProfileSuppressionActive(StringRef Profile,
                                                  SourceLocation Loc) const {
   assert(ProfileSuppressionFloor <= ProfileStmtSuppressions.size() &&
          "suppression floor points past the end of the stack");
-  if (profiles::anyEntryCovers(llvm::ArrayRef(ProfileStmtSuppressions)
-                                   .drop_front(ProfileSuppressionFloor),
-                               Profile, Rule, Loc,
-                               getContext().getSourceManager()))
-    return true;
-  // The declaration side rides the shared lexical-chain walk, off the anchor
-  // when one is set (the code being emitted belongs to that declaration's
-  // construct, not to the function hosting the emission) and off CurCodeDecl
-  // otherwise. Lambda call operators carry their enclosing scopes'
-  // suppressions as implicit attributes, so the chain walk recovers
-  // statement-level suppression around a lambda; a null CurCodeDecl (a
-  // synthesized helper such as a block copy/dispose function) carries none.
-  return profiles::isSuppressedFor(
-      ProfileSuppressionAnchor ? ProfileSuppressionAnchor : CurCodeDecl,
-      Profile, Rule);
+  // The declaration side of the query is the anchor when one is set (the code
+  // being emitted belongs to that declaration's construct, not to the
+  // function hosting the emission) and CurCodeDecl otherwise. Lambda call
+  // operators carry their enclosing scopes' suppressions as implicit
+  // attributes, so the chain walk recovers statement-level suppression around
+  // a lambda; a null CurCodeDecl (a synthesized helper such as a block
+  // copy/dispose function) carries none.
+  return profiles::isSuppressed(
+      {llvm::ArrayRef(ProfileStmtSuppressions)
+           .drop_front(ProfileSuppressionFloor),
+       ProfileSuppressionAnchor ? ProfileSuppressionAnchor : CurCodeDecl},
+      Profile, Rule, Loc, getContext().getSourceManager());
 }
 
 void CodeGenFunction::EmitProfileRuntimeCheck(

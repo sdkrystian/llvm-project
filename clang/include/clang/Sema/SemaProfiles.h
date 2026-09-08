@@ -100,19 +100,6 @@ public:
   ProfilesSuppressAttr *makeImplicitProfilesSuppressAttr(StringRef ProfileName,
                                                          StringRef RuleName);
 
-  /// True if a live parse-time suppress entry for \p ProfileName /
-  /// \p RuleName covers \p Loc, i.e. \p Loc falls within the entry's
-  /// dominion (see ProfilesFrameworkInternals.rst, "Suppression Dominion
-  /// Mechanics").
-  bool isProfileSuppressed(StringRef ProfileName, StringRef RuleName,
-                           SourceLocation Loc) const;
-  /// The post-parse counterpart of the parse-time stack: walk the AST upward
-  /// from \p S -- enclosing statement nodes via the ParentMap, then the
-  /// analyzed declaration's lexical chain -- for a matching suppression,
-  /// via the shared walks in clang/AST/Profiles.h.
-  bool isProfileSuppressed(StringRef ProfileName, StringRef RuleName,
-                           const Stmt *S, AnalysisDeclContext &AC) const;
-
   /// True if \p Loc is exempt from profile enforcement under the temporary
   /// system-header stopgap (on by default; disabled by
   /// -fno-profiles-exempt-system-headers). Exposed for the analysis-based

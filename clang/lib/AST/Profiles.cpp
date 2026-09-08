@@ -15,6 +15,7 @@
 #include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclBase.h"
+#include "clang/AST/ParentMap.h"
 #include "clang/AST/Stmt.h"
 #include "clang/Basic/SourceManager.h"
 
@@ -106,4 +107,16 @@ bool profiles::isSuppressedFor(const Stmt *S, llvm::StringRef Profile,
           return false;
         return !Owner || dominionCovers(declaratorDominion(*Owner), UseLoc, SM);
       });
+}
+
+bool profiles::isSuppressed(const SuppressionQuery &Q, llvm::StringRef Profile,
+                            llvm::StringRef Rule, SourceLocation Loc,
+                            const SourceManager &SM) {
+  if (anyEntryCovers(Q.Stack, Profile, Rule, Loc, SM))
+    return true;
+  for (const Stmt *Cur = Q.UseStmt; Cur;
+       Cur = Q.Parents ? Q.Parents->getParent(Cur) : nullptr)
+    if (isSuppressedFor(Cur, Profile, Rule, Loc, SM))
+      return true;
+  return isSuppressedFor(Q.ChainAnchor, Profile, Rule);
 }

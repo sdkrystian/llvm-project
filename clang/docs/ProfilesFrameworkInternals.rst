@@ -341,16 +341,22 @@ by redeclarations (``mergeDeclAttribute`` skips it): each redeclaration's
 tokens form their own dominion, so a suppression written on a previous
 declaration does not cover the definition.
 
-The post-parse violation gate used by the CFG passes consults two
-complementary sources: an AST walk (the analyzed function's enclosing
-statements via the ``ParentMap``, then its lexical declaration chain), which
-covers only the function's own interior, and the live parse-time stack, which
-covers enclosing constructs still mid-parse.  The latter matters because a
-function can be analyzed before its enclosing construct finishes parsing -- a
-local class's method body runs its CFG passes at the end of the method, while
-the ``ProfileSuppressScope`` of the statement the class is declared in is
-still live.  The stack consult is dominion-checked as above, so an unrelated
-live scope never matches.
+Every consumer of suppression state builds one ``profiles::SuppressionQuery``
+-- a stack of live entries, a statement walked upward through a
+``ParentMap``, and a declaration whose lexical chain is walked -- and
+``profiles::isSuppressed`` composes the sources; the composition order
+(stack, then statement walk, then chain) is the query's, not the caller's,
+and is not observable, since any match suppresses.  The parse-time gate
+queries the live stack and the checked declaration.  The post-parse gate
+used by the CFG passes adds the two sources that cover the analyzed
+function's own interior -- the use statement's enclosing statements and the
+function's lexical declaration chain -- and keeps the live parse-time stack,
+which covers enclosing constructs still mid-parse.  The latter matters
+because a function can be analyzed before its enclosing construct finishes
+parsing -- a local class's method body runs its CFG passes at the end of the
+method, while the ``ProfileSuppressScope`` of the statement the class is
+declared in is still live.  The stack consult is dominion-checked as above,
+so an unrelated live scope never matches.
 
 The AST walk reconstructs the same positional rule for a ``DeclStmt``: a
 suppression there is attached to a ``VarDecl``, so the walk bounds it to that
@@ -392,9 +398,11 @@ structure over the AST it is emitting:
   lambda call operators as implicit attributes, the chain walk also recovers
   statement-level suppression around a lambda body.
 
-``CodeGenFunction::isProfileSuppressionActive`` composes the two *lazily at
-each check site*: the stack above its floor, then the chain from the
-suppression anchor or, absent one, from ``CurCodeDecl``.  Whatever code is
+``CodeGenFunction::isProfileSuppressionActive`` builds the same
+``profiles::SuppressionQuery`` as the Sema gates *lazily at each check
+site*: the stack above its floor, and the chain from the suppression anchor
+or, absent one, from ``CurCodeDecl`` (it has no statement to walk; the
+emitting scopes' stack stands in for that source).  Whatever code is
 being emitted -- a function, lambda, global dynamic initializer, coroutine
 body, or OpenMP captured region -- ``CurCodeDecl`` is the declaration whose
 chain carries its suppressions.  A null ``CurCodeDecl`` (synthesized

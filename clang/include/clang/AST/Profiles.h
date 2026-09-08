@@ -25,6 +25,7 @@
 namespace clang {
 
 class Decl;
+class ParentMap;
 class ProfilesSuppressAttr;
 class SourceManager;
 class Stmt;
@@ -94,6 +95,25 @@ bool isSuppressedFor(const Decl *D, llvm::StringRef Profile,
 bool isSuppressedFor(const Stmt *S, llvm::StringRef Profile,
                      llvm::StringRef Rule, SourceLocation UseLoc,
                      const SourceManager &SM);
+
+/// The sources a violation's suppression is looked up in: a stack of live
+/// entries (anyEntryCovers), a statement walked upward through \p Parents
+/// (each node via isSuppressedFor), and a declaration whose lexical chain is
+/// walked (isSuppressedFor). Any member may be empty; a null \p Parents walks
+/// \p UseStmt alone.
+struct SuppressionQuery {
+  llvm::ArrayRef<SuppressionEntry> Stack;
+  const Decl *ChainAnchor = nullptr;
+  const Stmt *UseStmt = nullptr;
+  ParentMap *Parents = nullptr;
+};
+
+/// True if a source of \p Q suppresses \p Rule of \p Profile at \p Loc. Any
+/// match suppresses, so the composition order (stack, statement walk,
+/// declaration chain) is not observable.
+bool isSuppressed(const SuppressionQuery &Q, llvm::StringRef Profile,
+                  llvm::StringRef Rule, SourceLocation Loc,
+                  const SourceManager &SM);
 
 } // namespace profiles
 } // namespace clang
