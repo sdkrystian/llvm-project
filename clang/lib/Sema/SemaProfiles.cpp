@@ -94,11 +94,11 @@ bool SemaProfiles::processProfilesEnforceAttr(
     if (!addProfileEnforcement(Name, Spelling, AL.getLoc()))
       continue;
 
-    if (Mod && !llvm::any_of(Mod->EnforcedProfileDesignators,
-                             [&](const Module::EnforcedProfile &EP) {
+    if (Mod && !llvm::any_of(Mod->AdvertisedProfiles,
+                             [&](const profiles::EnforcedProfile &EP) {
                                return EP.ProfileName == Name;
                              }))
-      Mod->EnforcedProfileDesignators.push_back({Name.str(), Spelling.str()});
+      Mod->AdvertisedProfiles.push_back({Name.str(), Spelling.str()});
 
     if (IsNew) {
       if (NewNames)
@@ -138,8 +138,8 @@ void SemaProfiles::processProfilesRequireAttr(
 
     for (const auto &Desig : Designators) {
       StringRef Spelling = Desig.Spelling;
-      bool Found = llvm::any_of(ImportedMod->EnforcedProfileDesignators,
-                                [&](const Module::EnforcedProfile &EP) {
+      bool Found = llvm::any_of(ImportedMod->AdvertisedProfiles,
+                                [&](const profiles::EnforcedProfile &EP) {
                                   return EP.Designator == Spelling;
                                 });
       if (!Found)
@@ -204,10 +204,10 @@ void SemaProfiles::checkRedeclarationProfileCompatibility(
   // The rule is symmetric: every profile whose dominion covers one
   // declaration must have a compatible counterpart covering the other.
   // Report the first violation in each direction.
-  StringRef MissingHere = FindUncovered(Top->EnforcedProfileDesignators,
+  StringRef MissingHere = FindUncovered(Top->AdvertisedProfiles,
                                         getASTContext().enforced_profiles());
   StringRef MissingThere = FindUncovered(getASTContext().enforced_profiles(),
-                                         Top->EnforcedProfileDesignators);
+                                         Top->AdvertisedProfiles);
   if (MissingHere.empty() && MissingThere.empty())
     return;
   if (!MissingHere.empty())

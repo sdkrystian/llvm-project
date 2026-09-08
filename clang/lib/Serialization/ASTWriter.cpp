@@ -2992,9 +2992,9 @@ static unsigned createEnforcedProfileAbbrev(llvm::BitstreamWriter &Stream,
 
 /// Emit one enforced-profile record with the abbrev built by
 /// createEnforcedProfileAbbrev. \p Loc is the enforcement's location for the
-/// TU's own ENFORCED_PROFILES records; a module's advertisement set has no
-/// dominion, so the SUBMODULE_ENFORCED_PROFILES site passes an invalid
-/// location.
+/// TU's own ENFORCED_PROFILES records; a module's advertised set
+/// (Module::AdvertisedProfiles) has no dominion, so the
+/// SUBMODULE_ENFORCED_PROFILES site passes an invalid location.
 static void emitEnforcedProfile(ASTWriter &W, llvm::BitstreamWriter &Stream,
                                 unsigned AbbrevID, unsigned RecordCode,
                                 const profiles::EnforcedProfile &EP,
@@ -3300,7 +3300,7 @@ void ASTWriter::WriteSubmodules(Module *WritingModule, ASTContext *Context) {
     }
 
     // Emit enforced profile designators (P3589R2).
-    for (const auto &EP : Mod->EnforcedProfileDesignators)
+    for (const auto &EP : Mod->AdvertisedProfiles)
       emitEnforcedProfile(*this, Stream, EnforcedProfilesAbbrev,
                           SUBMODULE_ENFORCED_PROFILES, EP, SourceLocation());
 

@@ -6707,7 +6707,7 @@ Module *ASTReader::getSubmodule(uint32_t GlobalID) {
     }
 
     case SUBMODULE_ENFORCED_PROFILES:
-      CurrentModule->EnforcedProfileDesignators.push_back(
+      CurrentModule->AdvertisedProfiles.push_back(
           readEnforcedProfile(Record, Blob));
       break;
     }

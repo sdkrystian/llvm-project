@@ -479,7 +479,7 @@ Sema::DeclGroupPtrTy Sema::ActOnModuleDecl(
   // P3589R2 [decl.attr.enforce]p4: propagate interface's enforced profiles to
   // implementation unit.
   if (Interface) {
-    for (const auto &EP : Interface->EnforcedProfileDesignators)
+    for (const auto &EP : Interface->AdvertisedProfiles)
       Profiles().addProfileEnforcement(EP.ProfileName, EP.Designator,
                                        ModuleLoc);
   } else if (getLangOpts().Profiles &&
@@ -490,7 +490,7 @@ Sema::DeclGroupPtrTy Sema::ActOnModuleDecl(
     // in ProfilesFrameworkInternals.rst.
     if (Module *Primary = PP.getHeaderSearchInfo().getModuleMap().findModule(
             Mod->getPrimaryModuleInterfaceName()))
-      for (const auto &EP : Primary->EnforcedProfileDesignators)
+      for (const auto &EP : Primary->AdvertisedProfiles)
         Profiles().addProfileEnforcement(EP.ProfileName, EP.Designator,
                                          ModuleLoc);
   }

@@ -658,10 +658,11 @@ public:
   /// module depends.
   llvm::SmallVector<ModuleRef, 2> Imports;
 
-  using EnforcedProfile = profiles::EnforcedProfile;
-  /// The profiles enforced on this module's declaration (P3589R2), with the
-  /// designator spellings that enforced them.
-  SmallVector<EnforcedProfile, 0> EnforcedProfileDesignators;
+  /// The profiles this module advertises (P3589R2 [decl.attr.require]p2):
+  /// those enforced on a module interface's module-declaration or a header
+  /// unit's empty-declaration, with the designator spellings that enforced
+  /// them. Read by [[profiles::require]] on an import.
+  SmallVector<profiles::EnforcedProfile, 0> AdvertisedProfiles;
 
   /// The set of top-level modules that affected the compilation of this module,
   /// but were not imported.

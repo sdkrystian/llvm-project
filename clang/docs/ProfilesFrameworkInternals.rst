@@ -434,7 +434,7 @@ Modules and Serialization
 
 ``[[profiles::enforce]]`` on a module interface declaration *advertises* the
 enforced designators: they are recorded on
-``Module::EnforcedProfileDesignators``, which is what
+``Module::AdvertisedProfiles``, which is what
 ``[[profiles::require]]`` on an import validates against.  A header unit
 advertises the same way from the empty-declaration form P3589R2 prescribes
 for headers.  A non-partition implementation unit inherits the
@@ -463,7 +463,7 @@ into the implicit-module signature: a PCH, a preamble, or a BMI compiled to
 object code must have been built under the same list as the compilation
 consuming it (a mismatch is the usual language-option error), while an
 imported explicit module may differ.
-``Module::EnforcedProfileDesignators`` is written to a BMI as
+``Module::AdvertisedProfiles`` is written to a BMI as
 ``SUBMODULE_ENFORCED_PROFILES`` records within each submodule block.
 ``PROFILES_TU_HAS_NONEMPTY_DECL`` records whether a PCH contributed a
 non-empty top-level declaration, so the empty-declaration placement check
