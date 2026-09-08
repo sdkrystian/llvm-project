@@ -910,14 +910,13 @@ VarDecl *Sema::createLambdaInitCaptureVarDecl(
   NewVD->markUsed(Context);
   NewVD->setInit(Init);
 
-  // std::init / ref_to_uninit (paper §5): an init-capture binds like a
-  // variable initialization but never reaches AddInitializerToDecl /
-  // CheckCompleteVariableDeclaration, so check the binding here. A capture
-  // cannot carry [[ref_to_uninit]], so only the unmarked-target direction can
-  // fire. Passing NewVD defers on a templated pattern; TreeTransform re-runs
-  // this path at instantiation.
-  Profiles().checkInitProfileRefToUninitBinding(Loc, NewVD, NewVD->getType(),
-                                                Init, NewVD);
+  // std::init / ref_to_uninit (P4222R2 §4.2-§4.3): an init-capture binds like
+  // a variable initialization but never reaches AddInitializerToDecl /
+  // CheckCompleteVariableDeclaration, so check the binding here. Passing
+  // NewVD defers on a templated pattern; TreeTransform re-runs this path at
+  // instantiation.
+  Profiles().checkInitProfileBinding(SemaProfiles::InitBindingKind::Variable,
+                                     Loc, NewVD, NewVD->getType(), Init, NewVD);
 
   if (NewVD->isParameterPack())
     getCurLambda()->LocalPacks.push_back(NewVD);
@@ -2272,8 +2271,8 @@ ExprResult Sema::BuildLambdaExpr(SourceLocation StartLoc,
         assert(From.isVariableCapture() && "unknown kind of capture");
         ValueDecl *Var = From.getVariable();
         LambdaCaptureKind Kind = From.isCopyCapture() ? LCK_ByCopy : LCK_ByRef;
-        // std::init / ref_to_uninit (paper §4.3): a by-reference capture binds
-        // an unmarked reference to the captured variable's storage. An
+        // std::init / ref_to_uninit (P4222R2 §4.3): a by-reference capture
+        // binds an unmarked reference to the captured variable's storage. An
         // init-capture was already checked when its variable was created
         // (createLambdaInitCaptureVarDecl).
         if (Kind == LCK_ByRef && !From.isInitCapture())
@@ -2286,20 +2285,16 @@ ExprResult Sema::BuildLambdaExpr(SourceLocation StartLoc,
     // Form the initializer for the capture field.
     ExprResult Init = BuildCaptureInit(From, ImplicitCaptureLoc);
 
-    // std::init / ref_to_uninit (paper §4.3): a by-copy capture copies the
-    // variable's value into a closure field, which can never carry
-    // [[ref_to_uninit]] -- copying a marked pointer into one is the
-    // unmarked-direction rejection, exactly like `int *q = p;`. Null Target
-    // is the established "no declaration can carry the marker" convention
-    // (function-pointer calls, variadics); the funnel's own type gate limits
-    // this to pointer-typed captures. By-ref captures are checked above,
-    // init-captures at createLambdaInitCaptureVarDecl. Deliberately hooked
-    // here rather than in BuildCaptureInit, which also serves OpenMP
-    // captured statements.
+    // std::init / ref_to_uninit (P4222R2 §4.3): a by-copy capture copies the
+    // variable's value into a closure field (see
+    // SemaProfiles::InitBindingKind); the funnel's own type gate limits this
+    // to pointer-typed captures. By-ref captures are checked above,
+    // init-captures at createLambdaInitCaptureVarDecl. BuildCaptureInit also
+    // serves OpenMP captured statements, so the check sits here.
     if (From.isVariableCapture() && From.isCopyCapture() &&
         !From.isInitCapture() && Init.isUsable())
-      Profiles().checkInitProfileRefToUninitBinding(
-          From.getLocation(),
+      Profiles().checkInitProfileBinding(
+          SemaProfiles::InitBindingKind::ByCopyCapture, From.getLocation(),
           /*Target=*/nullptr, From.getCaptureType(), Init.get());
 
     // FIXME: Skip this capture if the capture is not used, the initializer

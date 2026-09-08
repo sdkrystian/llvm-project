@@ -6348,9 +6348,8 @@ ExprResult Sema::PerformImplicitObjectArgumentInitialization(
            << From->getSourceRange();
   }
 
-  // std::init / ref_to_uninit (paper §7.2): the implicit object parameter can
-  // never carry [[ref_to_uninit]], so a member call on an object recognized
-  // as uninitialized storage is the unmarked-direction violation.
+  // std::init / ref_to_uninit (P4222R2 §4.2): the implicit object parameter
+  // binding; see SemaProfiles::InitBindingKind.
   if (getLangOpts().Profiles)
     Profiles().checkInitProfileObjectArgument(From, Method);
 
@@ -16864,10 +16863,13 @@ Sema::BuildCallToObjectOfClassType(Scope *S, Expr *Obj,
       ExprResult Arg = DefaultVariadicArgumentPromotion(
           Args[i], VariadicCallType::Method, nullptr);
       IsError |= Arg.isInvalid();
-      // std::init / ref_to_uninit (paper §5): a `...` parameter cannot carry
-      // the marker, so a pointer argument is checked as an unmarked target.
+      // std::init / ref_to_uninit: a variadic argument binding; see
+      // SemaProfiles::InitBindingKind.
       if (!Arg.isInvalid())
-        Profiles().checkInitProfileVariadicArgument(Arg.get());
+        Profiles().checkInitProfileBinding(
+            SemaProfiles::InitBindingKind::VariadicArgument,
+            Arg.get()->getExprLoc(), /*Target=*/nullptr, Arg.get()->getType(),
+            Arg.get());
       MethodArgs.push_back(Arg.get());
     }
   }

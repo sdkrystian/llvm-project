@@ -1783,6 +1783,40 @@ void test_alias_escape_ternary_source(int *p [[ref_to_uninit]], bool c) {
   (void)pp; (void)m;
 }
 
+// A variadic, thrown, or new-initializer binding of &p hands out a mutable
+// alias of the marked pointer like any other binding.
+void reseat_va(int, ...);
+void test_alias_escape_variadic(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  reseat_va(0, &p);
+  int *m [[ref_to_uninit]] = p; // OK: the callee may have reseated p
+  (void)m;
+}
+void test_alias_escape_new_paren(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  int ***hp = new (int **)(&p);
+  alias_by_ptr(*hp);
+  int *m [[ref_to_uninit]] = p; // OK: the callee may have reseated p
+  (void)m;
+}
+void test_alias_escape_new_brace(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  int ***hp = new int **{&p};
+  alias_by_ptr(*hp);
+  int *m [[ref_to_uninit]] = p; // OK: the callee may have reseated p
+  (void)m;
+}
+void test_alias_escape_throw(int *p [[ref_to_uninit]]) {
+  *p = 5;
+  try {
+    throw &p;
+  } catch (int **pp) {
+    alias_by_ptr(pp);
+  }
+  int *m [[ref_to_uninit]] = p; // OK: the handler may have reseated p
+  (void)m;
+}
+
 // A lambda capturing the marked pointer by reference holds the same mutable
 // alias as `pp = &p` above and withdraws the same way: the Definite firing
 // basis goes, the suppressing Maybe credit survives.

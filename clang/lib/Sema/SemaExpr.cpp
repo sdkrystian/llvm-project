@@ -5881,16 +5881,17 @@ ExprResult Sema::BuildCXXDefaultArgExpr(SourceLocation CallLoc,
   auto *DAE =
       CXXDefaultArgExpr::Create(Context, InitializationContext->Loc, Param,
                                 Init, InitializationContext->Context);
-  // std::init / ref_to_uninit (paper §5): a defaulted pointer or reference
-  // argument must match the parameter's [[ref_to_uninit]] marking. A default
+  // std::init / ref_to_uninit (P4222R2 §4.2-§4.3): a defaulted pointer or
+  // reference argument must match the parameter's marking. A default
   // argument does not re-run copy-initialization at the use site, so the
   // shared hook in PerformCopyInitialization never sees it; check the
   // underlying expression on the freshly created node instead (the
   // recognizers don't see through the CXXDefaultArgExpr wrapper), once per
   // use, whatever call form reached it.
   if (CheckInitProfile && getLangOpts().Profiles)
-    Profiles().checkInitProfileRefToUninitBinding(
-        DAE->getExprLoc(), Param, Param->getType(), DAE->getExpr());
+    Profiles().checkInitProfileBinding(
+        SemaProfiles::InitBindingKind::DefaultArgument, DAE->getExprLoc(),
+        Param, Param->getType(), DAE->getExpr());
   return DAE;
 }
 
@@ -6401,11 +6402,13 @@ bool Sema::GatherArgumentsForCall(SourceLocation CallLoc, FunctionDecl *FDecl,
       for (Expr *A : Args.slice(ArgIx)) {
         ExprResult Arg = DefaultVariadicArgumentPromotion(A, CallType, FDecl);
         Invalid |= Arg.isInvalid();
-        // std::init / ref_to_uninit (paper §5): a `...` parameter cannot
-        // carry the marker, so a pointer argument is checked as an unmarked
-        // target.
+        // std::init / ref_to_uninit: a variadic argument binding; see
+        // SemaProfiles::InitBindingKind.
         if (!Arg.isInvalid())
-          Profiles().checkInitProfileVariadicArgument(Arg.get());
+          Profiles().checkInitProfileBinding(
+              SemaProfiles::InitBindingKind::VariadicArgument,
+              Arg.get()->getExprLoc(), /*Target=*/nullptr, Arg.get()->getType(),
+              Arg.get());
         AllArgs.push_back(Arg.get());
       }
     }
@@ -15659,8 +15662,8 @@ ExprResult Sema::CreateBuiltinBinOp(SourceLocation OpLoc,
       DiagnoseSelfAssignment(*this, LHS.get(), RHS.get(), OpLoc, true);
       DiagnoseSelfMove(LHS.get(), RHS.get(), OpLoc);
 
-      // std::init / ref_to_uninit (paper §5): assigning a pointer must respect
-      // the [[ref_to_uninit]] marking of the assigned-to pointer.
+      // std::init / ref_to_uninit (P4222R2 §4.3): assigning a pointer must
+      // respect the [[ref_to_uninit]] marking of the assigned-to pointer.
       if (getLangOpts().Profiles)
         Profiles().checkInitProfilePointerAssignment(LHS.get(), RHS.get(),
                                                      OpLoc);

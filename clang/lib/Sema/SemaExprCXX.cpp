@@ -911,12 +911,12 @@ ExprResult Sema::BuildCXXThrow(SourceLocation OpLoc, Expr *Ex,
     if (Res.isInvalid())
       return ExprError();
 
-    // std::init / ref_to_uninit (paper §5): throwing a pointer to
-    // uninitialized memory. The Decl-less wrapper defers only on an
-    // instantiation-dependent operand, rebuilt at instantiation; a
-    // non-dependent throw is checked at definition time.
+    // std::init / ref_to_uninit: the thrown pointer copy-initializes the
+    // exception object; see SemaProfiles::InitBindingKind.
     if (getLangOpts().Profiles)
-      Profiles().checkInitProfileThrowOperand(Ex);
+      Profiles().checkInitProfileBinding(SemaProfiles::InitBindingKind::Throw,
+                                         Ex->getExprLoc(), /*Target=*/nullptr,
+                                         ExceptionObjectTy, Ex);
 
     Ex = Res.get();
   }
@@ -2630,20 +2630,17 @@ ExprResult Sema::BuildCXXNew(SourceRange Range, bool UseGlobal,
 
     Initializer = FullInit.get();
 
-    // std::init / ref_to_uninit (paper §5): a written initializer for an
-    // allocated pointer binds it like a variable initialization. Scalar
-    // allocations only: for an array new AllocType is the *element* type,
-    // and each written element -- including the lone initializer of
-    // `new T*[k]{p}` or `new T*[k](p)` -- is already checked by the
-    // aggregate element hooks (InitListChecker::CheckSubElementType and
-    // TryOrBuildParenListInitialization), so checking it here too would
-    // diagnose it twice. The Decl-less wrapper defers only on an
-    // instantiation-dependent allocated type or initializer, rebuilt at
-    // instantiation; a non-dependent new-expression is checked at
-    // definition time.
-    if (getLangOpts().Profiles && !ArraySize)
-      Profiles().checkInitProfileNewInitializer(
-          AllocType, Exprs.size() == 1 ? Exprs[0] : nullptr);
+    // std::init / ref_to_uninit: the written initializer of a scalar
+    // allocation binds the allocated pointer; see
+    // SemaProfiles::InitBindingKind. For an array new AllocType is the
+    // *element* type, and each written element -- including the lone
+    // initializer of `new T*[k]{p}` or `new T*[k](p)` -- is already checked
+    // by the aggregate element hooks (InitListChecker::CheckSubElementType
+    // and TryOrBuildParenListInitialization).
+    if (getLangOpts().Profiles && !ArraySize && Exprs.size() == 1)
+      Profiles().checkInitProfileBinding(
+          SemaProfiles::InitBindingKind::NewInitializer, Exprs[0]->getExprLoc(),
+          /*Target=*/nullptr, AllocType, Exprs[0]);
 
     // FIXME: If we have a KnownArraySize, check that the array bound of the
     // initializer is no greater than that constant value.
