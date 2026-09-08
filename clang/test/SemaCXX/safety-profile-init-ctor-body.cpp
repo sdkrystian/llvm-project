@@ -1013,3 +1013,40 @@ struct NamedUnionMember {
     (void)y;
   }
 };
+
+// A comma or conditional lvalue reads whichever member the chosen arm names;
+// an assignment through a conditional assigns only when every arm names the
+// same member.
+struct CommaRead {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  CommaRead(bool c) {
+    int r = ((void)c, m); // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    m = 1;
+    (void)r;
+  }
+};
+struct CondRead {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  CondRead(bool c) {
+    int r = c ? m : m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    m = 1;
+    (void)r;
+  }
+};
+struct CondWriteSame {
+  int m [[uninit]];
+  CondWriteSame(bool c) {
+    (c ? m : m) = 1;
+    int r = m; // OK: every arm names m
+    (void)r;
+  }
+};
+struct CondWriteMixed {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  int n [[uninit]];
+  CondWriteMixed(bool c) {
+    (c ? m : n) = 1;
+    int r = m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    (void)r;
+  }
+};
