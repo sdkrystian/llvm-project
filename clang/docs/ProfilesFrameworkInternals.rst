@@ -207,13 +207,15 @@ profile for every later function.
 
 ``std::init`` installs all three hook columns: ``VarExempt`` exempts
 ``std::byte`` variables (P4222R2 §4), ``ConfigureCFG`` always-adds lambda
-expressions for the constructor-body pass, and ``ExtraPass`` runs the member
-read-before-init passes (``checkInitProfileCtorBody`` and
-``checkInitProfileLocalMembers``).  The row threads the profile's *identity*
--- its name and its uninitialized-read diagnostic -- through the passes and
-their shared reporter, not its semantics: the tracked-member vocabulary the
-passes implement (``[[uninit]]`` scalar members of constructor-less
-aggregates) and the member diagnostic are ``std::init``'s own.
+expressions for the constructor-body events, and ``ExtraPass`` runs the
+member read-before-init engine (``runStdInitMemberReadChecks``: one
+``TrackedStorage`` entity table, ``extractStdInitEvents``,
+``runDefiniteAssignment``, one report).  The row threads the profile's
+*identity* -- its name and its uninitialized-read diagnostic -- through the
+engine and its reporter, not its semantics: the tracked-member vocabulary
+the passes implement
+(``[[uninit]]`` scalar members of constructor-less aggregates) and the
+member diagnostic are ``std::init``'s own.
 
 
 Patterns 3 and 4: Class and Constructor Finalization
@@ -557,16 +559,18 @@ patterns.  Its rules map to mechanisms as follows:
      - Primary entry points
    * - ``uninit_read``
      - 2 and 1
-     - ``CFGProfiles`` row for local variables;
-       ``checkInitProfileCtorBody`` and ``checkInitProfileLocalMembers``,
-       run for the same row through its ``ExtraPass`` hook
-       (definite-assignment dataflow over ``[[uninit]]`` members; the
-       ctor-body pass's ``CallExpr`` arm turns a ``[[now_init]]`` call into a
-       ``Gen`` bit for the current-object storage bound to the callee's
-       marked parameters (P4222R2 §6.2) and a ``[[now_uninit]]`` call into
-       a ``Kill`` that clears the assigned bit again; the local-member
-       pass's ``CallExpr`` arm kills the same way, while its escape credit
-       already subsumes ``[[now_init]]``.  A "destroyed here"
+     - ``CFGProfiles`` row for local variables; ``runStdInitMemberReadChecks``
+       for the same row through its ``ExtraPass`` hook: one
+       ``TrackedStorage`` entity table (the current object's and tracked
+       locals' ``[[uninit]]`` scalar members), one ``extractStdInitEvents``
+       loop whose arms resolve every lvalue through
+       ``TrackedStorage::resolve`` and distribute comma, conditional, and GNU
+       ``?:`` shapes to their leaves, and one definite-assignment run; the
+       ``CallExpr`` arm turns a ``[[now_init]]`` call into a ``Gen`` bit for
+       the storage bound to the callee's marked parameters (P4222R2 §6.2)
+       and a ``[[now_uninit]]`` call into a ``Kill`` that clears the
+       assigned bit again (a local's escape credit already subsumes
+       ``[[now_init]]``).  A "destroyed here"
        note on the read is deferred -- a kill witness would have to be
        carried per bit through the meet and both engine replays, roughly
        doubling the engine state and touching the enqueue-skip invariant);

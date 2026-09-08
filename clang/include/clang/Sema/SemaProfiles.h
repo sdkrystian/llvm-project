@@ -930,13 +930,14 @@ public:
   /// \p E can name: peel transparent casts and single-element braced
   /// initializers, walk conditional arms (\p ConditionalArm set for each,
   /// since the chosen arm is not known) and comma right operands, and hand
-  /// each leaf to \p F with its arm flag. The
-  /// one target-shape walk shared by the store recorder and the
-  /// lifecycle-argument consumers, so a wrapped argument affects credit
-  /// exactly like its leaf form at the arm's certainty.
-  void forEachTargetLeaf(
+  /// each leaf to \p F with its arm flag. The one target-shape walk shared
+  /// by the store recorder, the lifecycle-argument consumers, and the CFG
+  /// member passes' event extraction (AnalysisBasedWarnings.cpp), so a
+  /// wrapped lvalue affects credit and flow state exactly like its leaf
+  /// form.
+  static void forEachTargetLeaf(
       const Expr *E, bool ConditionalArm,
-      llvm::function_ref<void(const Expr *Leaf, bool ConditionalArm)> F) const;
+      llvm::function_ref<void(const Expr *Leaf, bool ConditionalArm)> F);
 
   /// The leaf-credit tail of recordInitProfileStore: record the store's
   /// credit (or reseat) for every leaf of forEachTargetLeaf, at Maybe

@@ -2861,7 +2861,7 @@ void SemaProfiles::recordInitProfileStore(const Expr *LHS) {
 
 void SemaProfiles::forEachTargetLeaf(
     const Expr *E, bool ConditionalArm,
-    llvm::function_ref<void(const Expr *, bool)> F) const {
+    llvm::function_ref<void(const Expr *, bool)> F) {
   E = ignoreTransparentCasts(E);
   // A conditional or comma shape names whichever lvalue the chosen arm
   // does: walk each named arm. The Maybe cap is explicit because

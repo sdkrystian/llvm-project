@@ -562,7 +562,10 @@ as initialized (see `Binding Pointers and References`_):
 
 A member or variable counts as assigned only when every path to the read
 assigns it (§1.3), and a compound assignment (``x += 1``) or an increment or
-decrement reads the old value first, so it is diagnosed like a read.  Inside
+decrement reads the old value first, so it is diagnosed like a read.  A
+comma or conditional lvalue reads (or assigns) whichever member the chosen
+arm names; an assignment through a conditional whose arms name different
+members assigns neither for the purpose of a later read.  Inside
 a constructor body only that plain whole-member assignment earns credit:
 passing ``&m`` to a function (even one whose parameter is marked
 ``[[ref_to_uninit]]``), binding a reference to the member, calling a member
@@ -586,10 +589,11 @@ marked pointers and references (§4.3), not by-value slots -- and
 ``[[profiles::suppress]]`` is the remedy where the by-value flow is
 intended.  Members of an object initialized by a *user-provided*
 constructor are trusted (§5.1) and not flow-tracked; only the defining
-constructor itself is checked.  A *union's* own constructor is not
-flow-analyzed at all: its members are mutually exclusive, so whether the
-active member is set is deferred (§5.6), matching ``ctor_uninit_member``'s
-union exemption.
+constructor itself is checked, and a *delegating* constructor's body is not:
+its target initializes the members first (§5.1).  A *union's* own
+constructor is not flow-analyzed at all: its members are mutually exclusive,
+so whether the active member is set is deferred (§5.6), matching
+``ctor_uninit_member``'s union exemption.
 
 
 Writes to Subobjects of Uninitialized Objects
@@ -1178,6 +1182,9 @@ those entries never cause a rejection.
   initialized by the most-derived class).
 - A read of a tracked member inside another member's default initializer is
   not detected.
+- A backward ``goto`` across a tracked local's declaration
+  default-initializes the object again, which the member dataflow does not
+  model: a member assigned before the jump still counts as assigned after it.
 - A store through an alias of a pointer object (``int *&r = p; r = &u;``,
   ``*pp = &u``) is not checked: the alias cannot carry the target's marking.
 - ``[[uninit]]`` on a type whose default constructor is explicitly defaulted
