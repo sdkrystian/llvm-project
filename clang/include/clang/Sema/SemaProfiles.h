@@ -441,6 +441,13 @@ public:
   };
 
 private:
+  /// True if `this` in the current context denotes an object under
+  /// construction -- the enclosing non-lambda function is a constructor, or
+  /// the context is a class (a default member initializer) -- so the
+  /// recognizers classify it Unknown rather than Initialized: its members may
+  /// not be initialized yet.
+  bool thisIsUnderConstruction() const;
+
   /// The classify-and-judge half of checkInitProfileBinding, shared with the
   /// derive steps that resolve the target's marking themselves (a conditional
   /// assignment target, a member call's implicit object parameter): defer,

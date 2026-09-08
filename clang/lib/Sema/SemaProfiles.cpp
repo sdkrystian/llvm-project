@@ -1112,6 +1112,12 @@ enum class UninitStorage { Initialized, Uninitialized, Unknown };
 // (T *&) denotes the pointer object, whose marking the alias cannot carry, so
 // it classifies Unknown. None everywhere else, including every recursion below
 // the top level. See classifyPointerGlvalue.
+//
+// ThisUnderConstruction: `this` denotes an object under construction (the
+// classification runs in a constructor body, a mem-initializer, or a default
+// member initializer), so the current object's members may not be initialized
+// yet and `this` classifies Unknown; otherwise `this` is Initialized. Set by
+// the checking entry points from SemaProfiles::thisIsUnderConstruction.
 using InitCreditStrength = SemaProfiles::InitCreditStrength;
 
 struct UninitAccessOpts {
@@ -1123,6 +1129,7 @@ struct UninitAccessOpts {
   const SemaProfiles *Credit = nullptr;
   InitCreditStrength Strength = InitCreditStrength::Maybe;
   PointerAlias Alias = PointerAlias::None;
+  bool ThisUnderConstruction = false;
 
   // Copy-then-mutate, so each helper names only the field it changes and
   // adding a field cannot silently drop out of a positional rebuild.
@@ -1154,6 +1161,11 @@ struct UninitAccessOpts {
   UninitAccessOpts withAlias(PointerAlias A) const {
     UninitAccessOpts O = *this;
     O.Alias = A;
+    return O;
+  }
+  UninitAccessOpts withThisUnderConstruction(bool B) const {
+    UninitAccessOpts O = *this;
+    O.ThisUnderConstruction = B;
     return O;
   }
 };
@@ -1673,6 +1685,13 @@ pointerRefersToUninitStorage(ASTContext &Ctx, const Expr *E,
     return Opts.TrustRefToUninit ? UninitStorage::Unknown
                                  : UninitStorage::Uninitialized;
   }
+  // `this` is the current object: Initialized in a member function, so a
+  // marked pointer or reference to an initialized member is rejected (P4222R2
+  // §4.5: a marked accessor returning `x` is legal only if `x` is [[uninit]]);
+  // Unknown while the object is under construction (see UninitAccessOpts).
+  if (isa<CXXThisExpr>(E))
+    return Opts.ThisUnderConstruction ? UninitStorage::Unknown
+                                      : UninitStorage::Initialized;
   if (const auto *CE = dyn_cast<CallExpr>(E))
     return classifyRefToUninitCallee(CE, Opts);
 
@@ -1943,6 +1962,14 @@ static void diagnoseBindingVerdict(SemaProfiles &SP,
   }
 }
 
+bool SemaProfiles::thisIsUnderConstruction() const {
+  // The enclosing non-lambda context: a constructor (body or
+  // mem-initializer), or the class itself while a default member initializer
+  // is parsed or instantiated.
+  return isa<CXXConstructorDecl, CXXRecordDecl>(
+      SemaRef.getFunctionLevelDeclContext());
+}
+
 void SemaProfiles::judgeInitProfileBinding(InitBindingKind Kind,
                                            SourceLocation Loc,
                                            bool TargetMarked, QualType T,
@@ -1966,7 +1993,9 @@ void SemaProfiles::judgeInitProfileBinding(InitBindingKind Kind,
   // provably have run) and none at all while instantiating, where a
   // re-walked statement would see credit it recorded itself. See
   // "Parse-Order Store Credit" in ProfilesFrameworkInternals.rst.
-  UninitAccessOpts Opts = UninitBindAccess.withAlias(pointerAliasOf(T));
+  UninitAccessOpts Opts =
+      UninitBindAccess.withAlias(pointerAliasOf(T))
+          .withThisUnderConstruction(thisIsUnderConstruction());
   if (!TargetMarked)
     Opts = Opts.withCredit(this, InitCreditStrength::Maybe);
   else if (!SemaRef.inTemplateInstantiation())
@@ -2054,9 +2083,10 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
                Checkable &&
                shouldEmitProfileViolation(diag::err_init_destroy_uninit, Loc,
                                           D) &&
-               classifyUninitSource(getASTContext(), Src, T->isReferenceType(),
-                                    UninitBindAccess.withCredit(
-                                        this, InitCreditStrength::Maybe)) ==
+               classifyUninitSource(
+                   getASTContext(), Src, T->isReferenceType(),
+                   UninitBindAccess.withCredit(this, InitCreditStrength::Maybe)
+                       .withThisUnderConstruction(thisIsUnderConstruction())) ==
                    UninitStorage::Uninitialized)
       Diag(Loc, diag::err_init_destroy_uninit) << "std::init";
   } else {
@@ -2572,9 +2602,10 @@ void SemaProfiles::checkInitProfileReadThrough(SourceLocation Loc,
     return;
   if (!shouldEmitProfileViolation(diag::err_init_uninit_read_through, Loc))
     return;
-  if (glvalueDenotesUninitStorage(getASTContext(), Glvalue,
-                                  UninitReadAccess.withCredit(this)) !=
-      UninitStorage::Uninitialized)
+  if (glvalueDenotesUninitStorage(
+          getASTContext(), Glvalue,
+          UninitReadAccess.withCredit(this).withThisUnderConstruction(
+              thisIsUnderConstruction())) != UninitStorage::Uninitialized)
     return;
   Diag(Loc, diag::err_init_uninit_read_through)
       << "std::init" << (isMemberChainOfUninitObject(Glvalue) ? 1 : 0);
@@ -2595,9 +2626,10 @@ void SemaProfiles::checkInitProfileSubobjectWrite(SourceLocation Loc,
     return;
   if (!shouldEmitProfileViolation(diag::err_init_uninit_subobject_write, Loc))
     return;
-  if (glvalueDenotesUninitStorage(getASTContext(), LHS,
-                                  UninitWriteAccess.withCredit(this)) !=
-      UninitStorage::Uninitialized)
+  if (glvalueDenotesUninitStorage(
+          getASTContext(), LHS,
+          UninitWriteAccess.withCredit(this).withThisUnderConstruction(
+              thisIsUnderConstruction())) != UninitStorage::Uninitialized)
     return;
   // The provenance phrase: a member chain of a named [[uninit]] object
   // renders exactly as before the marked/allocator arms existed (arm 0);

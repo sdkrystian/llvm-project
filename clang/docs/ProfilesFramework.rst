@@ -720,7 +720,10 @@ marked and unmarked targets alike (§4.3, §8: the marker means "zero or more
 uninitialized objects"); a *parameter* with a null default argument is not a
 null source (callers may pass any pointer).  A source whose form the recognizer cannot classify
 (pointer arithmetic, an integer-to-pointer cast) is likewise accepted for
-either target.
+either target.  ``this`` outside a constructor is initialized, so a marked
+pointer or reference to an initialized member of the current object is
+rejected; inside a constructor body, mem-initializer, or default member
+initializer it is unclassified.
 
 The parse-order refinement: a *whole-entity store* credits its target as
 initialized (§4.2, §4.5).  After ``u = 5;`` the ``[[uninit]]`` variable
