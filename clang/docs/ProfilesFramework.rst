@@ -1031,9 +1031,11 @@ those entries never cause a rejection.
   ``now_init`` (§6.2); the remedy for an intended flow is ``[[now_init]]``
   on the callee or ``[[profiles::suppress]]``.  For *locals*, by contrast,
   the local-aggregate pass and the plain-local analysis conservatively treat
-  any escape of the variable as an assignment (member accesses -- including
-  through anonymous aggregates -- are not escapes) -- there the omission is
-  a missed diagnostic, never a false positive.  That escape-crediting is an
+  any escape of the variable as an assignment (member accesses are not
+  escapes, including accesses through anonymous aggregates and below a class
+  or array member whose type holds no pointer or reference; an access through
+  a member that does hold one is an escape) -- there the omission is a
+  missed diagnostic, never a false positive.  That escape-crediting is an
   interim leniency relative to the paper (which credits only ``now_init``);
   tightening it to ``[[now_init]]`` callees alone is future work.
 - A by-value *parameter* of a tracked class is a copy of the caller's

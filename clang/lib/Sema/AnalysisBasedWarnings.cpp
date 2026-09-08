@@ -1865,21 +1865,6 @@ static bool isCurrentObjectBase(const Expr *E) {
              SemaProfiles::ignoreTransparentCasts(UO->getSubExpr()));
 }
 
-// If E names a non-static data member of the current object (`this->m`, the
-// implicit `m`, or the equivalent `(*this).m`), return that field; otherwise
-// null. Access through any other object (e.g. `other.m`) is not the current
-// object's member. Transparent casts are peeled at both the member and base
-// positions -- `(int &)m` denotes the same storage as `m` (paper §4.3), and
-// the parse-order credit already sees through them -- so a store through a
-// reference cast credits and a read through one is detected.
-static const FieldDecl *getCurrentObjectMember(const Expr *E) {
-  const auto *ME =
-      dyn_cast<MemberExpr>(SemaProfiles::ignoreTransparentCasts(E));
-  if (!ME || !isCurrentObjectBase(ME->getBase()))
-    return nullptr;
-  return dyn_cast<FieldDecl>(ME->getMemberDecl());
-}
-
 // A class with a user-provided constructor is trusted (paper §5.1): its
 // constructor body may have assigned a member, which local analysis cannot
 // see, so its members are not flow-tracked.
@@ -1909,18 +1894,100 @@ static void forEachCandidateUninitField(const CXXRecordDecl *RD, Fn Visit) {
   }
 }
 
-// Collect the flow-trackable members of RD into Members/Index: [[uninit]]
-// built-in scalar (arithmetic or enum) members whose assignment counts as
-// initialization (§4.5), including those inherited from non-virtual,
-// constructor-less bases -- nothing can have assigned them before the
-// containing object's user code runs, so tracking them is sound. std::byte
-// is exempt (§4.5), matching R1/R2. Class-type and array members (which
-// would need construct_at flow modeling) and pointers (banned with
-// [[uninit]] by R8) are out of scope.
-static void collectTrackedUninitMembers(
-    Sema &S, const CXXRecordDecl *RD,
-    SmallVectorImpl<const FieldDecl *> &Members,
-    llvm::DenseMap<const FieldDecl *, unsigned> &Index) {
+/// One flow-tracked std::init storage entity of the analyzed body: an
+/// [[uninit]] scalar member of the current object (a constructor body) or of
+/// a directly named local or by-value parameter.
+struct TrackedEntity {
+  enum class Kind { CurrentObjectMember, LocalMember };
+  Kind K;
+  /// The local (LocalMember); null for the current object.
+  const VarDecl *Base;
+  const FieldDecl *Field;
+};
+
+/// True if \p T transitively holds a pointer, reference, or member pointer
+/// -- through record fields, bases, and array elements -- so storage of that
+/// type may denote a tracked member; an incomplete or dependent type may.
+static bool typeHoldsPointerOrReference(
+    QualType T, llvm::SmallPtrSetImpl<const RecordDecl *> &Visited) {
+  if (T->isDependentType() || T->isAnyPointerType() || T->isReferenceType() ||
+      T->isMemberPointerType() || T->isBlockPointerType())
+    return true;
+  if (const ArrayType *AT = T->getAsArrayTypeUnsafe())
+    return typeHoldsPointerOrReference(AT->getElementType(), Visited);
+  const RecordDecl *RD = T->getAsRecordDecl();
+  if (!RD)
+    return false;
+  RD = RD->getDefinition();
+  if (!RD)
+    return true;
+  if (!Visited.insert(RD).second)
+    return false;
+  for (const FieldDecl *F : RD->fields())
+    if (typeHoldsPointerOrReference(F->getType(), Visited))
+      return true;
+  if (const auto *CRD = dyn_cast<CXXRecordDecl>(RD))
+    for (const CXXBaseSpecifier &BS : CRD->bases())
+      if (typeHoldsPointerOrReference(BS.getType(), Visited))
+        return true;
+  return false;
+}
+
+/// The entity table of one analyzed body and the one lvalue-shape resolver
+/// over it. Each object's entities are contiguous, so a whole-object event
+/// covers a range.
+struct TrackedStorage {
+  SmallVector<TrackedEntity, 8> Entities;
+  /// The contiguous entity range of each tracked local.
+  llvm::DenseMap<const VarDecl *, std::pair<unsigned, unsigned>> LocalRange;
+  /// The current object's range (a constructor body); empty otherwise.
+  std::pair<unsigned, unsigned> CurrentObjectRange{0, 0};
+
+  /// Append one entity per flow-trackable member of \p RD -- an [[uninit]]
+  /// built-in scalar (arithmetic or enum) member with no default member
+  /// initializer, std::byte excepted (P4222R2 §4.6), including those of its
+  /// non-virtual, constructor-less bases, which nothing can have assigned
+  /// before the containing object's user code runs -- for the object
+  /// \p Base (null: the current object). Class-type and array members (which
+  /// would need construct_at flow modeling) and pointers (rejected under
+  /// [[uninit]]) are out of scope. Returns the appended range; a local's
+  /// range is recorded only when non-empty.
+  std::pair<unsigned, unsigned> addObject(Sema &S, const VarDecl *Base,
+                                          const CXXRecordDecl *RD);
+
+  /// The entity of member \p F of the object \p Base (null: the current
+  /// object), if tracked.
+  std::optional<unsigned> find(const VarDecl *Base, const FieldDecl *F) const;
+
+  /// What resolving a glvalue found: the tracked entity it names, or -- for
+  /// an access that reaches a tracked local without naming a tracked member
+  /// -- the consumed base and whether the access is benign: it cannot reach
+  /// a tracked member (an untracked scalar sibling, or a sub-access below a
+  /// member whose type holds no pointer, reference, or member pointer), so
+  /// the base does not escape.
+  struct Resolution {
+    std::optional<unsigned> Entity;
+    const DeclRefExpr *LocalBase = nullptr;
+    bool Benign = false;
+  };
+  /// Resolve the glvalue \p E: this->m, the implicit m, or (*this).m on the
+  /// current object, or V.m on a directly named tracked local, each through
+  /// the transparent casts the parse-order credit sees through and through
+  /// anonymous-record member steps; a sub-access below a named class or
+  /// array member (x.in.v, x.arr[0]) names no entity and is benign or an
+  /// escape by that member's type.
+  Resolution resolve(const Expr *E) const;
+
+  /// The range of the object \p E names as a whole -- `this` / `*this`, or
+  /// a tracked local's DeclRefExpr -- empty otherwise.
+  std::pair<unsigned, unsigned> wholeObject(const Expr *E) const;
+};
+
+std::pair<unsigned, unsigned>
+TrackedStorage::addObject(Sema &S, const VarDecl *Base,
+                          const CXXRecordDecl *RD) {
+  unsigned Begin = Entities.size();
+  llvm::SmallPtrSet<const FieldDecl *, 8> Seen;
   forEachCandidateUninitField(RD, [&](const FieldDecl *F) {
     if (!F->hasAttr<UninitAttr>() || !F->getDeclName() ||
         F->hasInClassInitializer())
@@ -1930,11 +1997,112 @@ static void collectTrackedUninitMembers(
       return;
     if (S.Context.getBaseElementType(T)->isStdByteType())
       return;
-    if (Index.count(F))
+    if (!Seen.insert(F).second)
       return;
-    Index[F] = Members.size();
-    Members.push_back(F);
+    Entities.push_back({Base ? TrackedEntity::Kind::LocalMember
+                             : TrackedEntity::Kind::CurrentObjectMember,
+                        Base, F});
   });
+  std::pair<unsigned, unsigned> Range{Begin, (unsigned)Entities.size()};
+  if (!Base)
+    CurrentObjectRange = Range;
+  else if (Range.first != Range.second)
+    LocalRange[Base] = Range;
+  return Range;
+}
+
+std::optional<unsigned> TrackedStorage::find(const VarDecl *Base,
+                                             const FieldDecl *F) const {
+  std::pair<unsigned, unsigned> Range = CurrentObjectRange;
+  if (Base) {
+    auto It = LocalRange.find(Base);
+    if (It == LocalRange.end())
+      return std::nullopt;
+    Range = It->second;
+  }
+  for (unsigned I = Range.first; I != Range.second; ++I)
+    if (Entities[I].Field == F)
+      return I;
+  return std::nullopt;
+}
+
+std::pair<unsigned, unsigned> TrackedStorage::wholeObject(const Expr *E) const {
+  E = SemaProfiles::ignoreTransparentCasts(E);
+  if (isCurrentObjectBase(E))
+    return CurrentObjectRange;
+  if (const auto *DRE = dyn_cast<DeclRefExpr>(E))
+    if (const auto *V = dyn_cast<VarDecl>(DRE->getDecl()))
+      if (auto It = LocalRange.find(V); It != LocalRange.end())
+        return It->second;
+  return {0, 0};
+}
+
+TrackedStorage::Resolution TrackedStorage::resolve(const Expr *E) const {
+  Resolution R;
+  // Walk from the leaf toward the object: named member steps (anonymous
+  // struct/union steps are transparent, as the harvest tracks nothing inside
+  // an anonymous record) and element steps; an arrow reaches the current
+  // object only.
+  SmallVector<const FieldDecl *, 4> Named;
+  bool Subscript = false;
+  const Expr *Cur = SemaProfiles::ignoreTransparentCasts(E);
+  while (true) {
+    if (const auto *ME = dyn_cast<MemberExpr>(Cur)) {
+      const auto *F = dyn_cast<FieldDecl>(ME->getMemberDecl());
+      if (!F)
+        return {};
+      if (!F->isAnonymousStructOrUnion())
+        Named.push_back(F);
+      Cur = SemaProfiles::ignoreTransparentCasts(ME->getBase());
+      if (ME->isArrow()) {
+        if (!isa<CXXThisExpr>(Cur))
+          return {};
+        break;
+      }
+      continue;
+    }
+    if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(Cur)) {
+      Subscript = true;
+      Cur = SemaProfiles::ignoreTransparentCasts(ASE->getBase());
+      continue;
+    }
+    break;
+  }
+  if (Named.empty())
+    return {};
+  std::pair<unsigned, unsigned> Range;
+  if (isCurrentObjectBase(Cur)) {
+    Range = CurrentObjectRange;
+  } else if (const auto *DRE = dyn_cast<DeclRefExpr>(Cur)) {
+    const auto *V = dyn_cast<VarDecl>(DRE->getDecl());
+    auto It = V ? LocalRange.find(V) : LocalRange.end();
+    if (It == LocalRange.end())
+      return {};
+    Range = It->second;
+    R.LocalBase = DRE;
+  } else {
+    return {};
+  }
+  // The member directly on the object.
+  const FieldDecl *Top = Named.back();
+  if (Named.size() == 1 && !Subscript) {
+    for (unsigned I = Range.first; I != Range.second; ++I)
+      if (Entities[I].Field == Top) {
+        R.Entity = I;
+        R.Benign = true;
+        return R;
+      }
+    // An untracked sibling consumes the base without exposing the object
+    // only when it cannot itself reach a tracked member: a pointer or
+    // reference member may denote one, and a class or array member may hold
+    // such a value.
+    QualType FT = Top->getType();
+    R.Benign = FT->isIntegralOrEnumerationType() || FT->isFloatingType();
+    return R;
+  }
+  llvm::SmallPtrSet<const RecordDecl *, 8> Visited;
+  R.Benign = !typeHoldsPointerOrReference(Top->getType(), Visited);
+  return R;
 }
 
 // Per-block ordered events recovered from the linearized CFG by the
@@ -2086,7 +2254,7 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC, unsigned NumTracked,
 static void reportMemberReadsBeforeInit(
     Sema &S, AnalysisDeclContext &AC,
     MutableArrayRef<SmallVector<const Expr *, 2>> Offending,
-    ArrayRef<const FieldDecl *> TrackedFields, StringRef Name) {
+    const TrackedStorage &Storage, StringRef Name) {
   for (unsigned I = 0, N = Offending.size(); I != N; ++I) {
     if (Offending[I].empty())
       continue;
@@ -2099,11 +2267,11 @@ static void reportMemberReadsBeforeInit(
               diag::err_init_member_read_before_init, R->getBeginLoc(),
               /*D=*/nullptr, /*PostParse=*/true))
         continue;
+      const FieldDecl *F = Storage.Entities[I].Field;
       S.Diag(R->getBeginLoc(), diag::err_init_member_read_before_init)
-          << Name << TrackedFields[I]->getDeclName();
-      S.Diag(TrackedFields[I]->getLocation(),
-             diag::note_init_uninit_member_here)
-          << TrackedFields[I]->getDeclName();
+          << Name << F->getDeclName();
+      S.Diag(F->getLocation(), diag::note_init_uninit_member_here)
+          << F->getDeclName();
       break;
     }
   }
@@ -2114,7 +2282,7 @@ static void reportMemberReadsBeforeInit(
 // (§4.3: a cast marked pointer is itself marked), and, through \p Glvalue,
 // a top-level `&`. Returns the peeled argument (`&m`, `m`, `this`); Glvalue
 // is the same expression with the `&` stripped (`m`), the shape
-// getCurrentObjectMember and the local pass's lookups take.
+// TrackedStorage::resolve takes.
 static const Expr *peelLifecycleArgument(const Expr *Arg,
                                          const Expr *&Glvalue) {
   Arg = SemaProfiles::ignoreTransparentCasts(Arg);
@@ -2147,10 +2315,9 @@ static const Expr *peelLifecycleArgument(const Expr *Arg,
 // (free) are deliberately not kills: a release ends no object's lifetime,
 // and the trusted/by-name allocator split stays out of this file. A plain
 // callee earns nothing.
-static void appendLifecycleCallEvents(
-    const CallExpr *CE, unsigned NumMembers,
-    const llvm::DenseMap<const FieldDecl *, unsigned> &Index,
-    SmallVectorImpl<DefAssignEvent> &BlockEvents) {
+static void
+appendLifecycleCallEvents(const CallExpr *CE, const TrackedStorage &Storage,
+                          SmallVectorImpl<DefAssignEvent> &BlockEvents) {
   const FunctionDecl *Callee = CE->getDirectCallee();
   if (!Callee ||
       (!Callee->hasAttr<NowInitAttr>() && !Callee->hasAttr<NowUninitAttr>()))
@@ -2166,26 +2333,28 @@ static void appendLifecycleCallEvents(
     if (const auto *MD = dyn_cast<CXXMethodDecl>(Callee);
         MD && !MD->isExplicitObjectMemberFunction())
       ArgOffset = 1;
-  if (Callee->hasAttr<NowUninitAttr>()) {
+  // The storage an argument names: the resolved entity, or every entity of
+  // the object passed as a whole (`this`, `*this`, `&x`, `x`).
+  auto AppendFor = [&](const Expr *Arg, DefAssignEventKind Kind) {
+    const Expr *G = nullptr;
+    peelLifecycleArgument(Arg, G);
+    if (std::optional<unsigned> Idx = Storage.resolve(G).Entity) {
+      BlockEvents.push_back({Kind, *Idx, CE});
+      return;
+    }
+    std::pair<unsigned, unsigned> Range = Storage.wholeObject(G);
+    for (unsigned Idx = Range.first; Idx != Range.second; ++Idx)
+      BlockEvents.push_back({Kind, Idx, CE});
+  };
+  if (Callee->hasAttr<NowUninitAttr>())
     for (unsigned PI = 0, NP = Callee->getNumParams(); PI != NP; ++PI) {
       if (PI + ArgOffset >= CE->getNumArgs())
         break;
       QualType PT = Callee->getParamDecl(PI)->getType();
       if (!PT->isPointerType() && !PT->isReferenceType())
         continue;
-      const Expr *G = nullptr;
-      const Expr *Arg = peelLifecycleArgument(CE->getArg(PI + ArgOffset), G);
-      if (const FieldDecl *F = getCurrentObjectMember(G)) {
-        auto It = Index.find(F);
-        if (It == Index.end())
-          continue;
-        BlockEvents.push_back({DefAssignEventKind::Kill, It->second, CE});
-      } else if (isCurrentObjectBase(Arg)) {
-        for (unsigned Idx = 0; Idx != NumMembers; ++Idx)
-          BlockEvents.push_back({DefAssignEventKind::Kill, Idx, CE});
-      }
+      AppendFor(CE->getArg(PI + ArgOffset), DefAssignEventKind::Kill);
     }
-  }
   if (!Callee->hasAttr<NowInitAttr>())
     return;
   for (unsigned PI = 0, NP = Callee->getNumParams(); PI != NP; ++PI) {
@@ -2193,17 +2362,7 @@ static void appendLifecycleCallEvents(
       break;
     if (!Callee->getParamDecl(PI)->hasAttr<RefToUninitAttr>())
       continue;
-    const Expr *G = nullptr;
-    const Expr *Arg = peelLifecycleArgument(CE->getArg(PI + ArgOffset), G);
-    if (const FieldDecl *F = getCurrentObjectMember(G)) {
-      auto It = Index.find(F);
-      if (It == Index.end())
-        continue;
-      BlockEvents.push_back({DefAssignEventKind::Write, It->second, CE});
-    } else if (isCurrentObjectBase(Arg)) {
-      for (unsigned Idx = 0; Idx != NumMembers; ++Idx)
-        BlockEvents.push_back({DefAssignEventKind::Write, Idx, CE});
-    }
+    AppendFor(CE->getArg(PI + ArgOffset), DefAssignEventKind::Write);
   }
 }
 
@@ -2228,8 +2387,7 @@ static void appendLifecycleCallEvents(
 // initializers are ordinary CFG elements, already handled by the caller's
 // other arms.
 static void appendThisCaptureLambdaReadEvents(
-    const LambdaExpr *LE,
-    const llvm::DenseMap<const FieldDecl *, unsigned> &Index,
+    const LambdaExpr *LE, const TrackedStorage &Storage,
     bool StarThisCopyTrusted, SmallVectorImpl<DefAssignEvent> &BlockEvents) {
   auto GetThisCaptureKind =
       [](const LambdaExpr *L) -> std::optional<LambdaCaptureKind> {
@@ -2239,8 +2397,9 @@ static void appendThisCaptureLambdaReadEvents(
     return std::nullopt;
   };
   auto AppendWholeObjectReads = [&](const LambdaExpr *At) {
-    // Index's values are exactly 0..size()-1 (collectTrackedUninitMembers).
-    for (unsigned I = 0, N = Index.size(); I != N; ++I)
+    for (unsigned I = Storage.CurrentObjectRange.first,
+                  N = Storage.CurrentObjectRange.second;
+         I != N; ++I)
       BlockEvents.push_back({DefAssignEventKind::Read, I, At});
   };
   std::optional<LambdaCaptureKind> Kind = GetThisCaptureKind(LE);
@@ -2263,22 +2422,22 @@ static void appendThisCaptureLambdaReadEvents(
         continue;
       }
     }
-    const FieldDecl *F = nullptr;
+    const Expr *G = nullptr;
     if (const auto *BodyICE = dyn_cast<ImplicitCastExpr>(Cur);
         BodyICE && BodyICE->getCastKind() == CK_LValueToRValue)
-      F = getCurrentObjectMember(BodyICE->getSubExpr());
+      G = BodyICE->getSubExpr();
     else if (const auto *BodyBO = dyn_cast<BinaryOperator>(Cur);
              BodyBO && BodyBO->isCompoundAssignmentOp())
-      F = getCurrentObjectMember(BodyBO->getLHS());
+      G = BodyBO->getLHS();
     else if (const auto *BodyUO = dyn_cast<UnaryOperator>(Cur);
              BodyUO && BodyUO->isIncrementDecrementOp())
-      F = getCurrentObjectMember(BodyUO->getSubExpr());
-    if (F) {
-      auto It = Index.find(F);
-      if (It != Index.end())
+      G = BodyUO->getSubExpr();
+    if (G)
+      if (std::optional<unsigned> Idx = Storage.resolve(G).Entity;
+          Idx &&
+          Storage.Entities[*Idx].K == TrackedEntity::Kind::CurrentObjectMember)
         BlockEvents.push_back(
-            {DefAssignEventKind::Read, It->second, cast<Expr>(Cur)});
-    }
+            {DefAssignEventKind::Read, *Idx, cast<Expr>(Cur)});
     for (const Stmt *Child : Cur->children())
       Stack.push_back(Child);
   }
@@ -2345,12 +2504,11 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
   // Target members: the shared flow-trackable filter (a base with a
   // user-provided constructor is trusted per paper §5.1; nothing can have
   // assigned a constructor-less base's members before this body runs).
-  SmallVector<const FieldDecl *, 4> Members;
-  llvm::DenseMap<const FieldDecl *, unsigned> Index;
-  collectTrackedUninitMembers(S, Ctor->getParent(), Members, Index);
-  if (Members.empty())
+  TrackedStorage Storage;
+  Storage.addObject(S, /*Base=*/nullptr, Ctor->getParent());
+  if (Storage.Entities.empty())
     return;
-  const unsigned N = Members.size();
+  const unsigned N = Storage.Entities.size();
 
   // A `[*this]` capture copy-constructs the whole object; a user-provided
   // copy constructor is opaque and trusted (paper §5.1's
@@ -2369,10 +2527,10 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
   // CFGInitializer element below, so declaration order decides what an
   // initializer may read. Not covered: an NSDMI's subexpressions. They *are*
   // in the CFG (AddCXXDefaultInitExprInCtors expands the CXXDefaultInitExpr
-  // an unwritten initializer runs), but this filter deliberately keeps them
-  // out, so a read of a tracked member inside another member's default
-  // initializer stays undetected; lifting that gap means whitelisting the
-  // CXXDefaultInitExpr subtrees here, not changing CFG build options.
+  // an unwritten initializer runs), but this filter keeps them out, so a read
+  // of a tracked member inside another member's default initializer stays
+  // undetected; lifting that gap means whitelisting the CXXDefaultInitExpr
+  // subtrees here, not changing CFG build options.
   llvm::SmallPtrSet<const Stmt *, 32> BodyStmts;
   {
     SmallVector<const Stmt *, 32> Stack;
@@ -2399,9 +2557,7 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
     auto &BlockEvents = Events[B->getBlockID()];
     for (const CFGElement &Elem : *B) {
       // A written member initializer assigns its member at this point in
-      // execution order, after its init expression's events above it. (The
-      // former entry-state seeding could not order the initializers' own
-      // reads against these writes.)
+      // execution order, after its init expression's events above it.
       if (auto OptInit = Elem.getAs<CFGInitializer>()) {
         const CXXCtorInitializer *CI = OptInit->getInitializer();
         if (!CI->isWritten())
@@ -2410,11 +2566,9 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
           const FieldDecl *F = CI->getAnyMember();
           if (!F)
             continue;
-          auto It = Index.find(F);
-          if (It == Index.end())
-            continue;
-          BlockEvents.push_back(
-              {DefAssignEventKind::Write, It->second, CI->getInit()});
+          if (std::optional<unsigned> Idx = Storage.find(nullptr, F))
+            BlockEvents.push_back(
+                {DefAssignEventKind::Write, *Idx, CI->getInit()});
         } else if (CI->isBaseInitializer()) {
           // A written base initializer (e.g. `: Base{1}`) gives the tracked
           // members of that constructor-less base subtree their values.
@@ -2423,11 +2577,9 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
             continue;
           forEachCandidateUninitField(
               BRD->getDefinition(), [&](const FieldDecl *F) {
-                auto It = Index.find(F);
-                if (It == Index.end())
-                  return;
-                BlockEvents.push_back(
-                    {DefAssignEventKind::Write, It->second, CI->getInit()});
+                if (std::optional<unsigned> Idx = Storage.find(nullptr, F))
+                  BlockEvents.push_back(
+                      {DefAssignEventKind::Write, *Idx, CI->getInit()});
               });
         }
         continue;
@@ -2441,25 +2593,17 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
       if (const auto *ICE = dyn_cast<ImplicitCastExpr>(St)) {
         if (ICE->getCastKind() != CK_LValueToRValue)
           continue;
-        const FieldDecl *F = getCurrentObjectMember(ICE->getSubExpr());
-        if (!F)
-          continue;
-        auto It = Index.find(F);
-        if (It != Index.end())
-          BlockEvents.push_back({DefAssignEventKind::Read, It->second, ICE});
+        if (std::optional<unsigned> Idx =
+                Storage.resolve(ICE->getSubExpr()).Entity)
+          BlockEvents.push_back({DefAssignEventKind::Read, *Idx, ICE});
       } else if (const auto *BO = dyn_cast<BinaryOperator>(St)) {
         if (!BO->isAssignmentOp())
           continue;
-        const FieldDecl *F = getCurrentObjectMember(BO->getLHS());
-        if (!F)
-          continue;
-        auto It = Index.find(F);
-        if (It == Index.end())
-          continue;
-        BlockEvents.push_back({BO->isCompoundAssignmentOp()
-                                   ? DefAssignEventKind::ReadWrite
-                                   : DefAssignEventKind::Write,
-                               It->second, BO});
+        if (std::optional<unsigned> Idx = Storage.resolve(BO->getLHS()).Entity)
+          BlockEvents.push_back({BO->isCompoundAssignmentOp()
+                                     ? DefAssignEventKind::ReadWrite
+                                     : DefAssignEventKind::Write,
+                                 *Idx, BO});
       } else if (const auto *UO = dyn_cast<UnaryOperator>(St)) {
         // A built-in ++m / m++ / --m / m-- reads the old value and then writes,
         // but unlike -m / !m it carries no lvalue-to-rvalue cast, so the Read
@@ -2467,17 +2611,13 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
         // a ReadWrite that also marks the member assigned.
         if (!UO->isIncrementDecrementOp())
           continue;
-        const FieldDecl *F = getCurrentObjectMember(UO->getSubExpr());
-        if (!F)
-          continue;
-        auto It = Index.find(F);
-        if (It == Index.end())
-          continue;
-        BlockEvents.push_back({DefAssignEventKind::ReadWrite, It->second, UO});
+        if (std::optional<unsigned> Idx =
+                Storage.resolve(UO->getSubExpr()).Entity)
+          BlockEvents.push_back({DefAssignEventKind::ReadWrite, *Idx, UO});
       } else if (const auto *CE = dyn_cast<CallExpr>(St)) {
-        appendLifecycleCallEvents(CE, N, Index, BlockEvents);
+        appendLifecycleCallEvents(CE, Storage, BlockEvents);
       } else if (const auto *LE = dyn_cast<LambdaExpr>(St)) {
-        appendThisCaptureLambdaReadEvents(LE, Index, StarThisCopyTrusted,
+        appendThisCaptureLambdaReadEvents(LE, Storage, StarThisCopyTrusted,
                                           BlockEvents);
       }
     }
@@ -2487,46 +2627,7 @@ static void checkInitProfileCtorBody(Sema &S, const CXXConstructorDecl *Ctor,
   // their writes at their CFGInitializer elements.
   std::vector<SmallVector<const Expr *, 2>> Offending =
       runDefiniteAssignment(*cfg, AC, N, Events);
-  reportMemberReadsBeforeInit(S, AC, Offending, Members, Entry.Name);
-}
-
-// If E (stripped of the transparent casts the parse-order credit sees
-// through -- parens, implicit casts including the derived-to-base cast of an
-// inherited-member access, and explicit glvalue/pointer casts like
-// `(int &)V.m`, which denote the same storage, §4.3) is a member access
-// `V.m` on a directly named variable, return the base DeclRefExpr and the
-// field through \p F. The peel applies at the member and base positions
-// alike, so a cast store credits exactly the accessed member (not a
-// whole-object escape) and a cast read is detected. Anonymous-struct/union
-// steps are peeled: `x.a` on an anonymous-aggregate member is
-// MemberExpr(MemberExpr(x, <anon>), a), and reaching `a` can no more
-// initialize x's other members than reaching a named sibling can, so the
-// leaf flows into the caller's classification unchanged (no tracked member
-// can live inside an anonymous record -- the harvest drops nameless and
-// non-scalar fields -- so a scalar leaf is an untracked sibling and any
-// other leaf stays a conservative escape). An arrow access or an access
-// through any other expression is not a tracked local's member.
-static const DeclRefExpr *getLocalMemberAccess(const Expr *E,
-                                               const FieldDecl *&F) {
-  const auto *ME =
-      dyn_cast<MemberExpr>(SemaProfiles::ignoreTransparentCasts(E));
-  if (!ME || ME->isArrow())
-    return nullptr;
-  const auto *FD = dyn_cast<FieldDecl>(ME->getMemberDecl());
-  if (!FD)
-    return nullptr;
-  const Expr *Base = SemaProfiles::ignoreTransparentCasts(ME->getBase());
-  while (const auto *BME = dyn_cast<MemberExpr>(Base)) {
-    const auto *BFD = dyn_cast<FieldDecl>(BME->getMemberDecl());
-    if (BME->isArrow() || !BFD || !BFD->isAnonymousStructOrUnion())
-      break;
-    Base = SemaProfiles::ignoreTransparentCasts(BME->getBase());
-  }
-  const auto *DRE = dyn_cast<DeclRefExpr>(Base);
-  if (!DRE)
-    return nullptr;
-  F = FD;
-  return DRE;
+  reportMemberReadsBeforeInit(S, AC, Offending, Storage, Entry.Name);
 }
 
 // The type-shape half of the tracked guards: a non-union, non-dependent
@@ -2636,27 +2737,13 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC,
   if (!cfg)
     return;
 
-  // Harvest tracked (local, member) pairs from the CFG's (single-decl)
-  // DeclStmt elements; each variable's pairs are contiguous so an escape can
-  // set a range.
-  SmallVector<const FieldDecl *, 4> PairField;
-  llvm::DenseMap<const FieldDecl *, unsigned> FieldIdxScratch;
-  llvm::DenseMap<const VarDecl *, std::pair<unsigned, unsigned>> VarRange;
-  llvm::DenseMap<std::pair<const VarDecl *, const FieldDecl *>, unsigned>
-      PairIdx;
+  // Harvest the tracked locals from the CFG's (single-decl) DeclStmt
+  // elements into the entity table; each local's entities are contiguous so
+  // an escape can set a range.
+  TrackedStorage Storage;
   auto HarvestVar = [&](const VarDecl *V, const CXXRecordDecl *RD) {
-    SmallVector<const FieldDecl *, 4> Members;
-    FieldIdxScratch.clear();
-    collectTrackedUninitMembers(S, RD, Members, FieldIdxScratch);
-    if (Members.empty())
-      return false;
-    unsigned Begin = PairField.size();
-    for (const FieldDecl *F : Members) {
-      PairIdx[{V, F}] = PairField.size();
-      PairField.push_back(F);
-    }
-    VarRange[V] = {Begin, PairField.size()};
-    return true;
+    std::pair<unsigned, unsigned> Range = Storage.addObject(S, V, RD);
+    return Range.first != Range.second;
   };
 
   // A by-value slot parameter is tracked from an all-unassigned start
@@ -2667,11 +2754,11 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC,
   // slot if it is initialized"), and the paper's way to hand
   // uninitialized-capable storage across a call is a marked pointer or
   // reference (§4.3), not a by-value slot. This is the call-boundary twin
-  // of the ctor-body pass's deliberate strictness: a caller that assigned
-  // the member before the call is rejected here all the same, with escape
-  // crediting (any bare use of the parameter) and [[profiles::suppress]]
-  // as the remedies. Reference parameters alias the caller's own object
-  // and stay untracked.
+  // of the ctor-body pass's strictness: a caller that assigned the member
+  // before the call is rejected here all the same, with escape crediting
+  // (any bare use of the parameter) and [[profiles::suppress]] as the
+  // remedies. Reference parameters alias the caller's own object and stay
+  // untracked.
   if (const auto *EnclosingFD = dyn_cast_or_null<FunctionDecl>(AC.getDecl()))
     for (const ParmVarDecl *P : EnclosingFD->parameters()) {
       if (P->isInvalidDecl() || P->hasAttr<UninitAttr>())
@@ -2700,7 +2787,7 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC,
         continue;
       for (const Decl *Dcl : DS->decls()) {
         const auto *V = dyn_cast<VarDecl>(Dcl);
-        if (!V || VarRange.count(V))
+        if (!V || Storage.LocalRange.count(V))
           continue;
         const CXXRecordDecl *RD = getTrackedLocalAggregate(V);
         if (!RD)
@@ -2711,10 +2798,10 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC,
   }
 
   // Nothing tracked so far means nothing can become tracked: the copy
-  // harvest below only chains from an already-tracked source (it requires
-  // VarRange.count(Src)), so bail out before its repeated whole-CFG walks
-  // -- the common case for a function with no tracked aggregates.
-  if (PairField.empty())
+  // harvest below only chains from an already-tracked source, so bail out
+  // before its repeated whole-CFG walks -- the common case for a function
+  // with no tracked aggregates.
+  if (Storage.Entities.empty())
     return;
 
   // Second harvest: locals copy- or move-constructed from a *tracked* local.
@@ -2738,7 +2825,7 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC,
           continue;
         for (const Decl *Dcl : DS->decls()) {
           const auto *V = dyn_cast<VarDecl>(Dcl);
-          if (!V || VarRange.count(V))
+          if (!V || Storage.LocalRange.count(V))
             continue;
           const CXXRecordDecl *RD = getTrackableLocalClass(V);
           if (!RD)
@@ -2746,7 +2833,7 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC,
           const DeclRefExpr *SrcRef = getLocalCopySourceRef(V);
           const auto *Src =
               SrcRef ? dyn_cast<VarDecl>(SrcRef->getDecl()) : nullptr;
-          if (!Src || !VarRange.count(Src))
+          if (!Src || !Storage.LocalRange.count(Src))
             continue;
           if (!HarvestVar(V, RD))
             continue;
@@ -2757,70 +2844,33 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC,
     }
   }
 
-  const unsigned N = PairField.size();
-
-  // A `V.m` access on a tracked local, classified into one of three named
-  // states. NotMemberAccess: E is not such an access at all (also the
-  // conservative answer for member shapes that must stay escapes, below).
-  // TrackedMember: m is one of the tracked members; Idx is its pair index
-  // and Base the consumed base reference. UntrackedSibling: m is an
-  // untracked sibling of a shape that cannot reach another member, so the
-  // base is consumed (benign) rather than escaping -- the escape arm below
-  // would otherwise credit every tracked member of V and lose the
-  // diagnostic for them.
-  struct TrackedAccess {
-    enum Kind { NotMemberAccess, TrackedMember, UntrackedSibling };
-    Kind K = NotMemberAccess;
-    unsigned Idx = ~0u;                // TrackedMember only.
-    const DeclRefExpr *Base = nullptr; // Null iff NotMemberAccess.
-  };
-  auto LookupPair = [&](const Expr *E) -> TrackedAccess {
-    const FieldDecl *F = nullptr;
-    const DeclRefExpr *DRE = getLocalMemberAccess(E, F);
-    if (!DRE)
-      return {};
-    const auto *V = dyn_cast<VarDecl>(DRE->getDecl());
-    if (!V || !VarRange.count(V))
-      return {};
-    auto It = PairIdx.find({V, F});
-    if (It != PairIdx.end())
-      return {TrackedAccess::TrackedMember, It->second, DRE};
-    // An untracked sibling. Reaching it consumes the base without exposing
-    // the object -- but only for a member that cannot itself reach one: a
-    // pointer or reference member may denote a tracked member (a
-    // [[ref_to_uninit]] member aimed at one by a default member initializer
-    // needs no `&V.m` in the body, so nothing else escapes the object), and a
-    // class or array member can hold such a value. Restricting the benign
-    // shapes to the scalars this pass tracks keeps the escape crediting
-    // conservative, which for locals must stay a missed diagnostic rather
-    // than become a false positive.
-    QualType FT = F->getType();
-    if (!FT->isIntegralOrEnumerationType() && !FT->isFloatingType())
-      return {};
-    return {TrackedAccess::UntrackedSibling, ~0u, DRE};
-  };
+  const unsigned N = Storage.Entities.size();
 
   // First pass: the base DeclRefExprs consumed by a recognized member read or
   // write are benign -- they do not escape the object. A DeclRefExpr element
   // precedes its consuming cast/operator element in a block, so the benign
   // set must be complete before elements are classified.
   llvm::SmallPtrSet<const DeclRefExpr *, 16> Benign;
+  auto NoteBenign = [&](const Expr *Glvalue) {
+    TrackedStorage::Resolution Res = Storage.resolve(Glvalue);
+    if (Res.LocalBase && Res.Benign)
+      Benign.insert(Res.LocalBase);
+  };
   for (const CFGBlock *B : *cfg) {
     for (const CFGElement &Elem : *B) {
       auto CS = Elem.getAs<CFGStmt>();
       if (!CS)
         continue;
       const Stmt *St = CS->getStmt();
-      const DeclRefExpr *Base = nullptr;
       if (const auto *ICE = dyn_cast<ImplicitCastExpr>(St)) {
         if (ICE->getCastKind() == CK_LValueToRValue)
-          Base = LookupPair(ICE->getSubExpr()).Base;
+          NoteBenign(ICE->getSubExpr());
       } else if (const auto *BO = dyn_cast<BinaryOperator>(St)) {
         if (BO->isAssignmentOp())
-          Base = LookupPair(BO->getLHS()).Base;
+          NoteBenign(BO->getLHS());
       } else if (const auto *UO = dyn_cast<UnaryOperator>(St)) {
         if (UO->isIncrementDecrementOp())
-          Base = LookupPair(UO->getSubExpr()).Base;
+          NoteBenign(UO->getSubExpr());
       } else if (const auto *DS = dyn_cast<DeclStmt>(St)) {
         // The source ref of a tracked copy is consumed by the copy's
         // implicit (retention-free) constructor and modeled by the Copy
@@ -2829,10 +2879,9 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC,
         for (const Decl *Dcl : DS->decls())
           if (const auto *V = dyn_cast<VarDecl>(Dcl))
             if (CopySource.count(V))
-              Base = getLocalCopySourceRef(V);
+              if (const DeclRefExpr *Base = getLocalCopySourceRef(V))
+                Benign.insert(Base);
       }
-      if (Base)
-        Benign.insert(Base);
     }
   }
 
@@ -2856,36 +2905,28 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC,
       if (const auto *ICE = dyn_cast<ImplicitCastExpr>(St)) {
         if (ICE->getCastKind() != CK_LValueToRValue)
           continue;
-        TrackedAccess TA = LookupPair(ICE->getSubExpr());
-        if (TA.K == TrackedAccess::TrackedMember)
-          BlockEvents.push_back({DefAssignEventKind::Read, TA.Idx, ICE});
+        if (std::optional<unsigned> Idx =
+                Storage.resolve(ICE->getSubExpr()).Entity)
+          BlockEvents.push_back({DefAssignEventKind::Read, *Idx, ICE});
       } else if (const auto *BO = dyn_cast<BinaryOperator>(St)) {
         if (!BO->isAssignmentOp())
           continue;
-        TrackedAccess TA = LookupPair(BO->getLHS());
-        if (TA.K != TrackedAccess::TrackedMember)
-          continue;
-        BlockEvents.push_back({BO->isCompoundAssignmentOp()
-                                   ? DefAssignEventKind::ReadWrite
-                                   : DefAssignEventKind::Write,
-                               TA.Idx, BO});
+        if (std::optional<unsigned> Idx = Storage.resolve(BO->getLHS()).Entity)
+          BlockEvents.push_back({BO->isCompoundAssignmentOp()
+                                     ? DefAssignEventKind::ReadWrite
+                                     : DefAssignEventKind::Write,
+                                 *Idx, BO});
       } else if (const auto *UO = dyn_cast<UnaryOperator>(St)) {
         if (!UO->isIncrementDecrementOp())
           continue;
-        TrackedAccess TA = LookupPair(UO->getSubExpr());
-        if (TA.K != TrackedAccess::TrackedMember)
-          continue;
-        BlockEvents.push_back({DefAssignEventKind::ReadWrite, TA.Idx, UO});
+        if (std::optional<unsigned> Idx =
+                Storage.resolve(UO->getSubExpr()).Entity)
+          BlockEvents.push_back({DefAssignEventKind::ReadWrite, *Idx, UO});
       } else if (const auto *DRE = dyn_cast<DeclRefExpr>(St)) {
         if (Benign.count(DRE))
           continue;
-        const auto *V = dyn_cast<VarDecl>(DRE->getDecl());
-        if (!V)
-          continue;
-        auto It = VarRange.find(V);
-        if (It == VarRange.end())
-          continue;
-        for (unsigned Idx = It->second.first; Idx != It->second.second; ++Idx)
+        std::pair<unsigned, unsigned> Range = Storage.wholeObject(DRE);
+        for (unsigned Idx = Range.first; Idx != Range.second; ++Idx)
           BlockEvents.push_back({DefAssignEventKind::Write, Idx, DRE});
       } else if (const auto *DS = dyn_cast<DeclStmt>(St)) {
         // A tracked copy: each dest member's state becomes its source
@@ -2903,12 +2944,12 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC,
           auto CopyIt = CopySource.find(V);
           if (CopyIt == CopySource.end())
             continue;
-          auto Range = VarRange.find(V)->second;
+          auto Range = Storage.LocalRange.find(V)->second;
           for (unsigned Idx = Range.first; Idx != Range.second; ++Idx) {
-            auto SrcIt = PairIdx.find({CopyIt->second, PairField[Idx]});
-            if (SrcIt != PairIdx.end())
+            if (std::optional<unsigned> SrcIdx =
+                    Storage.find(CopyIt->second, Storage.Entities[Idx].Field))
               BlockEvents.push_back(
-                  {DefAssignEventKind::Copy, Idx, V->getInit(), SrcIt->second});
+                  {DefAssignEventKind::Copy, Idx, V->getInit(), *SrcIdx});
             else
               BlockEvents.push_back(
                   {DefAssignEventKind::Write, Idx, V->getInit()});
@@ -2923,10 +2964,10 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC,
         // call element in block order (a DeclRefExpr element precedes its
         // consuming call element), so under the escape leniency the
         // siblings keep the escape credit while the destroyed member nets
-        // to killed. Storage-release callees (free) are deliberately not
-        // kills: a release ends no object's lifetime, and the allocator
-        // trust split stays out of this file. (CXXOperatorCallExpr is-a
-        // CallExpr: keep this the chain's only CallExpr arm.)
+        // to killed. Storage-release callees (free) are not kills: a
+        // release ends no object's lifetime, and the allocator trust split
+        // stays out of this file. (CXXOperatorCallExpr is-a CallExpr: keep
+        // this the chain's only CallExpr arm.)
         const FunctionDecl *Callee = CE->getDirectCallee();
         if (!Callee || !Callee->hasAttr<NowUninitAttr>())
           continue;
@@ -2943,21 +2984,12 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC,
             continue;
           const Expr *G = nullptr;
           peelLifecycleArgument(CE->getArg(PI + ArgOffset), G);
-          TrackedAccess TA = LookupPair(G);
-          if (TA.K == TrackedAccess::TrackedMember) {
-            BlockEvents.push_back({DefAssignEventKind::Kill, TA.Idx, CE});
+          if (std::optional<unsigned> Idx = Storage.resolve(G).Entity) {
+            BlockEvents.push_back({DefAssignEventKind::Kill, *Idx, CE});
             continue;
           }
-          const auto *DRE = dyn_cast<DeclRefExpr>(G->IgnoreParenImpCasts());
-          if (!DRE)
-            continue;
-          const auto *V = dyn_cast<VarDecl>(DRE->getDecl());
-          if (!V)
-            continue;
-          auto It = VarRange.find(V);
-          if (It == VarRange.end())
-            continue;
-          for (unsigned Idx = It->second.first; Idx != It->second.second; ++Idx)
+          std::pair<unsigned, unsigned> Range = Storage.wholeObject(G);
+          for (unsigned Idx = Range.first; Idx != Range.second; ++Idx)
             BlockEvents.push_back({DefAssignEventKind::Kill, Idx, CE});
         }
       }
@@ -2969,7 +3001,7 @@ static void checkInitProfileLocalMembers(Sema &S, AnalysisDeclContext &AC,
   // parameter starts all-unassigned by design (above).
   std::vector<SmallVector<const Expr *, 2>> Offending =
       runDefiniteAssignment(*cfg, AC, N, Events);
-  reportMemberReadsBeforeInit(S, AC, Offending, PairField, Entry.Name);
+  reportMemberReadsBeforeInit(S, AC, Offending, Storage, Entry.Name);
 }
 
 class UninitValsDiagReporter : public UninitVariablesHandler {
