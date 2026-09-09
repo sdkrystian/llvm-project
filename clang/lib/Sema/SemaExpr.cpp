@@ -6389,13 +6389,8 @@ bool Sema::GatherArgumentsForCall(SourceLocation CallLoc, FunctionDecl *FDecl,
       for (Expr *A : Args.slice(ArgIx)) {
         ExprResult Arg = DefaultVariadicArgumentPromotion(A, CallType, FDecl);
         Invalid |= Arg.isInvalid();
-        // std::init / ref_to_uninit: a variadic argument binding; see
-        // SemaProfiles::InitBindingKind.
         if (!Arg.isInvalid())
-          Profiles().checkInitProfileBinding(
-              SemaProfiles::InitBindingKind::VariadicArgument,
-              Arg.get()->getExprLoc(), /*Target=*/nullptr, Arg.get()->getType(),
-              Arg.get());
+          Profiles().checkInitProfileVariadicArgument(Arg.get());
         AllArgs.push_back(Arg.get());
       }
     }

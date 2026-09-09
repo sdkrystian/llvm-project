@@ -16859,13 +16859,8 @@ Sema::BuildCallToObjectOfClassType(Scope *S, Expr *Obj,
       ExprResult Arg = DefaultVariadicArgumentPromotion(
           Args[i], VariadicCallType::Method, nullptr);
       IsError |= Arg.isInvalid();
-      // std::init / ref_to_uninit: a variadic argument binding; see
-      // SemaProfiles::InitBindingKind.
       if (!Arg.isInvalid())
-        Profiles().checkInitProfileBinding(
-            SemaProfiles::InitBindingKind::VariadicArgument,
-            Arg.get()->getExprLoc(), /*Target=*/nullptr, Arg.get()->getType(),
-            Arg.get());
+        Profiles().checkInitProfileVariadicArgument(Arg.get());
       MethodArgs.push_back(Arg.get());
     }
   }
