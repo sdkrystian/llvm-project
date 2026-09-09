@@ -1950,6 +1950,28 @@ void SemaProfiles::checkInitProfileBinding(const InitializedEntity &Entity,
     checkInitProfileBinding(InitBindingKind::NewInitializer, Loc,
                             /*Target=*/nullptr, Entity.getType(), Src);
     return;
+  case InitializedEntity::EK_LambdaCapture: {
+    // A variable capture or an init-capture initializes a closure field,
+    // which cannot carry the marker. A by-reference capture of a named
+    // variable keeps its own wording; the capture anchors on the enclosing
+    // context, so one in a templated entity defers to the rebuild at
+    // instantiation.
+    const Decl *D = cast<Decl>(SemaRef.CurContext);
+    if (Entity.getType()->isReferenceType()) {
+      if (const ValueDecl *Var = getDirectlyNamedDecl(Src)) {
+        judgeInitProfileBinding(InitBindingKind::ByRefCapture, Loc,
+                                /*TargetMarked=*/false, Entity.getType(), Src,
+                                D, Var);
+        return;
+      }
+      checkInitProfileBinding(InitBindingKind::Variable, Loc,
+                              /*Target=*/nullptr, Entity.getType(), Src, D);
+      return;
+    }
+    checkInitProfileBinding(InitBindingKind::ByCopyCapture, Loc,
+                            /*Target=*/nullptr, Entity.getType(), Src, D);
+    return;
+  }
   case InitializedEntity::EK_Parameter:
   case InitializedEntity::EK_Parameter_CF_Audited:
     // A call argument, or a default argument at its declaration
@@ -2370,35 +2392,6 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
   } else {
     judgeInitProfileBinding(Kind, Loc, TargetMarked, T, Src, D);
   }
-}
-
-void SemaProfiles::checkInitProfileRefCapture(SourceLocation Loc,
-                                              const ValueDecl *Var) {
-  if (!getLangOpts().Profiles)
-    return;
-  // A capture of a flow-tracked variable -- a marked local of the enclosing
-  // function -- is the CFG pass's (the LambdaExpr arm of its extractor).
-  if (const auto *VD = dyn_cast<VarDecl>(Var);
-      VD && VD->hasLocalStorage() &&
-      (VD->hasAttr<UninitAttr>() || VD->hasAttr<RefToUninitAttr>()) &&
-      insideFunctionBody(SemaRef.CurContext))
-    return;
-  // Derive the captured storage's state as the glvalue recognizer's
-  // named-entity arm does: an [[uninit]] variable or a [[ref_to_uninit]]
-  // reference. A copy capture reads the variable in the enclosing function's
-  // CFG instead, which is the flow-based uninit_read pass's territory.
-  if (!Var->hasAttr<UninitAttr>() &&
-      !(Var->getType()->isReferenceType() && Var->hasAttr<RefToUninitAttr>()))
-    return;
-  // No source expression: the deferral keys on the captured type; the lambda
-  // is rebuilt at instantiation, re-processing the capture.
-  if (Var->getType()->isInstantiationDependentType())
-    return;
-  if (!shouldEmitProfileViolation(diag::err_init_uninit_ref_capture, Loc))
-    return;
-  diagnoseBindingVerdict(*this, InitBindingKind::ByRefCapture, Loc,
-                         /*TargetMarked=*/false, /*IsReference=*/true,
-                         UninitStorage::Uninitialized, Var);
 }
 
 void SemaProfiles::checkInitProfileObjectArgument(const Expr *Object,

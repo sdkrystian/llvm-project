@@ -468,8 +468,8 @@ public:
     /// A by-copy lambda capture of a pointer into a closure field, which
     /// cannot carry the marker.
     ByCopyCapture,
-    /// A by-reference lambda capture (checkInitProfileRefCapture); the
-    /// closure's reference cannot carry the marker.
+    /// A by-reference lambda capture of a named variable; the closure's
+    /// reference cannot carry the marker.
     ByRefCapture,
     /// A member call's implicit object parameter
     /// (checkInitProfileObjectArgument), which cannot carry the marker.
@@ -544,16 +544,6 @@ public:
   /// deferral follows the expression-check policy
   /// (ProfilesFrameworkInternals.rst, "Pattern 1").
   void checkInitProfileSubobjectWrite(SourceLocation Loc, const Expr *LHS);
-
-  /// The ByRefCapture derive step of checkInitProfileBinding: a by-reference
-  /// lambda capture of \p Var binds the closure's unmarked reference to the
-  /// variable's storage, which denotes uninitialized memory when \p Var is
-  /// [[uninit]] or a [[ref_to_uninit]] reference; a flow-tracked variable is
-  /// the CFG pass's. Called from \c Sema::BuildLambdaExpr for each by-reference
-  /// non-init variable capture (init-captures are Variable bindings at
-  /// \c createLambdaInitCaptureVarDecl). There is no source expression, so
-  /// the deferral keys on an instantiation-dependent captured type.
-  void checkInitProfileRefCapture(SourceLocation Loc, const ValueDecl *Var);
 
   /// The ObjectArgument derive step of checkInitProfileBinding: a member call
   /// binds its implicit object parameter, which cannot carry the marker, to
