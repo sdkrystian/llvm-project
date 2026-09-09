@@ -657,7 +657,7 @@ int test_copy_escape() {
 // destroy on any considered-executed path spoils a read at the join
 // ("Static analysis", p4222r2.md:306-312).
 struct DestroyAgg {
-  int m [[uninit]];  // expected-note 5 {{member 'm' declared here}}
+  int m [[uninit]];  // expected-note 6 {{member 'm' declared here}}
   int sm [[uninit]]; // expected-note {{member 'sm' declared here}}
 };
 template <class T> [[now_uninit]] void destroy_at(T *);
@@ -726,18 +726,16 @@ int test_copy_after_destroy() {
   return b.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
 }
 
-// A destroy whose argument is selected at run time (a conditional
-// operator) is not resolved by the argument peel: no kill, and the base
-// DeclRefExprs keep the escape credit -- a missed diagnostic, never a
-// rejection, the same shape limit the [[now_init]] credit resolution has.
-// (Both arms are pre-stored so the parse-time destroy_uninit rule stays
-// silent on the call.)
+// A destroy whose argument is selected at run time (a conditional operator)
+// may have destroyed either arm's storage, so neither is definitely
+// initialized afterwards and the read is rejected. (Both arms are pre-stored
+// so the parse-time destroy_uninit rule stays silent on the call.)
 int test_destroy_conditional_argument(bool c) {
   DestroyAgg a, b;
   a.m = 1;
   b.m = 1;
   destroy_at(c ? &a.m : &b.m);
-  return a.m; // OK: unresolved destroy argument -- the escape credit stands
+  return a.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
 }
 
 // A sub-access below a class or array member whose type holds no pointer or
