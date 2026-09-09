@@ -429,6 +429,12 @@ private:
     /// Add a new latest state point.
     void append(SourceManager &SrcMgr, SourceLocation Loc, DiagState *State);
 
+    /// Add a state point at \p Loc that is not the latest: a transition of
+    /// \p Loc's file, replacing one at the same offset, that leaves the
+    /// current state and the later transitions unchanged. Files included
+    /// within the region the new state covers take it as their entry state.
+    void insert(SourceManager &SrcMgr, SourceLocation Loc, DiagState *State);
+
     /// Look up the diagnostic state at a given source location.
     DiagState *lookup(SourceManager &SrcMgr, SourceLocation Loc) const;
 
@@ -508,19 +514,37 @@ private:
 
     /// Get the diagnostic state information for a file.
     File *getFile(SourceManager &SrcMgr, FileID ID) const;
+
+    /// Make \p State the entry state of the files included into \p F within
+    /// [\p Offset, \p End) whose entry state is \p Old, and of the files they
+    /// include before their own first transition, recursively.
+    void refreshEntryStates(File *F, unsigned Offset, unsigned End,
+                            DiagState *Old, DiagState *State) const;
   };
 
   DiagStateMap DiagStatesByLoc;
 
+  /// A diagnostic state saved by a diagnostic 'push', with the location of
+  /// the push (invalid when restored from an AST file).
+  struct PushedDiagState {
+    DiagState *State;
+    SourceLocation Loc;
+  };
+
   /// Keeps the DiagState that was active during each diagnostic 'push'
   /// so we can get back at it when we 'pop'.
-  std::vector<DiagState *> DiagStateOnPushStack;
+  std::vector<PushedDiagState> DiagStateOnPushStack;
 
   DiagState *GetCurDiagState() const {
     return DiagStatesByLoc.getCurDiagState();
   }
 
   void PushDiagStatePoint(DiagState *State, SourceLocation L);
+
+  /// A new state: a copy of \p Base with \p Mappings applied.
+  DiagState *copyDiagStateWith(
+      const DiagState &Base,
+      ArrayRef<std::pair<diag::kind, DiagnosticMapping>> Mappings);
 
   /// Finds the DiagStatePoint that contains the diagnostic state of
   /// the given source location.
@@ -856,6 +880,30 @@ public:
   bool setSeverityForGroup(diag::Flavor Flavor, diag::Group Group,
                            diag::Severity Map,
                            SourceLocation Loc = SourceLocation());
+
+  /// The mapping of \p Diag in effect at \p Loc.
+  DiagnosticMapping getDiagnosticMappingAt(diag::kind Diag,
+                                           SourceLocation Loc) const;
+
+  /// Install \p Mappings from \p Loc on, as a new state based on the state
+  /// in effect at \p Loc. The new state becomes the current state when
+  /// \p Loc is not before the current state's location; otherwise it is a
+  /// transition of \p Loc's file, and the states after it are left as they
+  /// are. No existing state is modified. States saved by a diagnostic 'push'
+  /// located within \p PushedIn get the mappings too, as copies, so a later
+  /// 'pop' does not restore the mappings this call replaced there.
+  void setDiagnosticMappingsAt(
+      ArrayRef<std::pair<diag::kind, DiagnosticMapping>> Mappings,
+      SourceLocation Loc, SourceRange PushedIn = SourceRange());
+
+  /// Install \p Mappings from \p Loc to the end of the translation unit: in
+  /// a new current state based on the current one -- established at \p Loc,
+  /// or at the current state's location when that is later -- and, as
+  /// copies, in every state saved by a diagnostic 'push', so no later 'pop'
+  /// restores a state without them. No existing state is modified.
+  void setDiagnosticMappingsFrom(
+      ArrayRef<std::pair<diag::kind, DiagnosticMapping>> Mappings,
+      SourceLocation Loc);
 
   /// Set the warning-as-error flag for the given diagnostic group.
   ///

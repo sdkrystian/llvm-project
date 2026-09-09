@@ -449,6 +449,121 @@ TEST_F(SuppressionMappingTest, CanonicalizesSlashesOnWindows) {
 }
 #endif
 
+class PositionalMappingTest : public testing::Test {
+protected:
+  DiagnosticOptions DiagOpts;
+  DiagnosticsEngine Diags{DiagnosticIDs::create(), DiagOpts,
+                          new IgnoringDiagConsumer()};
+  FileManager FM{{},
+                 llvm::makeIntrusiveRefCnt<llvm::vfs::InMemoryFileSystem>()};
+  SourceManager SM{Diags, FM};
+  FileID Main;
+  static constexpr diag::kind W1 = diag::warn_unused_function;
+  static constexpr diag::kind W2 = diag::warn_unused_variable;
+
+  PositionalMappingTest() {
+    Main = SM.createFileID(
+        MemoryBuffer::getMemBuffer(std::string(64, ' '), "main.cpp"));
+    SM.setMainFileID(Main);
+    Diags.setSeverity(W1, diag::Severity::Warning, SourceLocation());
+    Diags.setSeverity(W2, diag::Severity::Warning, SourceLocation());
+  }
+
+  SourceLocation at(unsigned Offset) {
+    return SM.getLocForStartOfFile(Main).getLocWithOffset(Offset);
+  }
+  DiagnosticsEngine::Level levelAt(diag::kind D, SourceLocation Loc) {
+    return Diags.getDiagnosticLevel(D, Loc);
+  }
+  DiagnosticsEngine::Level levelAt(diag::kind D, unsigned Offset) {
+    return levelAt(D, at(Offset));
+  }
+  static std::pair<diag::kind, DiagnosticMapping> map(diag::kind D,
+                                                      diag::Severity S) {
+    return {D, DiagnosticMapping::Make(S, /*IsUser=*/true, /*IsPragma=*/true)};
+  }
+};
+
+TEST_F(PositionalMappingTest, InsertsBeforeTheCurrentState) {
+  Diags.setSeverity(W1, diag::Severity::Error, at(30));
+  Diags.setDiagnosticMappingsAt({map(W1, diag::Severity::Ignored)}, at(10));
+  Diags.setDiagnosticMappingsAt({{W1, Diags.getDiagnosticMappingAt(W1, at(0))}},
+                                at(20));
+  EXPECT_EQ(levelAt(W1, 5), DiagnosticsEngine::Warning);
+  EXPECT_EQ(levelAt(W1, 10), DiagnosticsEngine::Ignored);
+  EXPECT_EQ(levelAt(W1, 15), DiagnosticsEngine::Ignored);
+  EXPECT_EQ(levelAt(W1, 20), DiagnosticsEngine::Warning);
+  EXPECT_EQ(levelAt(W1, 30), DiagnosticsEngine::Error);
+  // A later pragma still builds on the current (latest) state.
+  Diags.setSeverity(W2, diag::Severity::Error, at(40));
+  EXPECT_EQ(levelAt(W1, 45), DiagnosticsEngine::Error);
+  EXPECT_EQ(levelAt(W2, 35), DiagnosticsEngine::Warning);
+  EXPECT_EQ(levelAt(W2, 45), DiagnosticsEngine::Error);
+}
+
+TEST_F(PositionalMappingTest, ReplacesTheStateAtTheSameOffset) {
+  Diags.setSeverity(W1, diag::Severity::Error, at(30));
+  Diags.setDiagnosticMappingsAt({map(W1, diag::Severity::Ignored)}, at(10));
+  Diags.setDiagnosticMappingsAt({map(W1, diag::Severity::Warning)}, at(10));
+  EXPECT_EQ(levelAt(W1, 10), DiagnosticsEngine::Warning);
+  EXPECT_EQ(levelAt(W1, 15), DiagnosticsEngine::Warning);
+  EXPECT_EQ(levelAt(W1, 30), DiagnosticsEngine::Error);
+}
+
+TEST_F(PositionalMappingTest, AppendsInOrder) {
+  Diags.setDiagnosticMappingsAt({map(W1, diag::Severity::Ignored)}, at(10));
+  Diags.setSeverity(W2, diag::Severity::Error, at(20));
+  EXPECT_EQ(levelAt(W1, 25), DiagnosticsEngine::Ignored);
+  EXPECT_EQ(levelAt(W2, 25), DiagnosticsEngine::Error);
+}
+
+TEST_F(PositionalMappingTest, InsertRefreshesIncludedFiles) {
+  Diags.setSeverity(W1, diag::Severity::Error, at(30));
+  FileID Included = SM.createFileID(
+      MemoryBuffer::getMemBuffer(std::string(8, ' '), "inc.h"), SrcMgr::C_User,
+      /*LoadedID=*/0, /*LoadedOffset=*/0, at(15));
+  SourceLocation InIncluded =
+      SM.getLocForStartOfFile(Included).getLocWithOffset(4);
+  EXPECT_EQ(levelAt(W1, InIncluded), DiagnosticsEngine::Warning);
+  Diags.setDiagnosticMappingsAt({map(W1, diag::Severity::Ignored)}, at(10));
+  EXPECT_EQ(levelAt(W1, InIncluded), DiagnosticsEngine::Ignored);
+}
+
+TEST_F(PositionalMappingTest, RestoresPushedStatesInRange) {
+  Diags.setDiagnosticMappingsAt({map(W1, diag::Severity::Ignored)}, at(10));
+  Diags.pushMappings(at(20));
+  Diags.setDiagnosticMappingsAt({map(W1, diag::Severity::Warning)}, at(30),
+                                SourceRange(at(10), at(30)));
+  Diags.popMappings(at(40));
+  EXPECT_EQ(levelAt(W1, 25), DiagnosticsEngine::Ignored);
+  EXPECT_EQ(levelAt(W1, 35), DiagnosticsEngine::Warning);
+  EXPECT_EQ(levelAt(W1, 45), DiagnosticsEngine::Warning);
+}
+
+TEST_F(PositionalMappingTest, LeavesPushedStatesOutsideRange) {
+  Diags.pushMappings(at(5));
+  Diags.setDiagnosticMappingsAt({map(W1, diag::Severity::Ignored)}, at(10));
+  Diags.popMappings(at(20));
+  EXPECT_EQ(levelAt(W1, 15), DiagnosticsEngine::Ignored);
+  EXPECT_EQ(levelAt(W1, 25), DiagnosticsEngine::Warning);
+}
+
+TEST_F(PositionalMappingTest, FromTakesEffectAtALaterCurrentState) {
+  Diags.setSeverity(W2, diag::Severity::Error, at(30));
+  Diags.setDiagnosticMappingsFrom({map(W1, diag::Severity::Error)}, at(10));
+  EXPECT_EQ(levelAt(W1, 20), DiagnosticsEngine::Warning);
+  EXPECT_EQ(levelAt(W1, 30), DiagnosticsEngine::Error);
+  EXPECT_EQ(levelAt(W2, 30), DiagnosticsEngine::Error);
+}
+
+TEST_F(PositionalMappingTest, FromSurvivesPop) {
+  Diags.pushMappings(at(10));
+  Diags.setDiagnosticMappingsFrom({map(W1, diag::Severity::Error)}, at(20));
+  Diags.popMappings(at(30));
+  EXPECT_EQ(levelAt(W1, 25), DiagnosticsEngine::Error);
+  EXPECT_EQ(levelAt(W1, 35), DiagnosticsEngine::Error);
+}
+
 TEST(EscapeSingleCodepointForDiagnosticTest, printableDisplaysQuoted) {
   EXPECT_EQ(EscapeSingleCodepointForDiagnostic(U'A'), "'A'");
   // This test fails when msvc is not using /utf-8.

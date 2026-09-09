@@ -105,16 +105,16 @@ void DiagnosticsEngine::setClient(DiagnosticConsumer *client,
 }
 
 void DiagnosticsEngine::pushMappings(SourceLocation Loc) {
-  DiagStateOnPushStack.push_back(GetCurDiagState());
+  DiagStateOnPushStack.push_back({GetCurDiagState(), Loc});
 }
 
 bool DiagnosticsEngine::popMappings(SourceLocation Loc) {
   if (DiagStateOnPushStack.empty())
     return false;
 
-  if (DiagStateOnPushStack.back() != GetCurDiagState()) {
+  if (DiagStateOnPushStack.back().State != GetCurDiagState()) {
     // State changed at some point between push/pop.
-    PushDiagStatePoint(DiagStateOnPushStack.back(), Loc);
+    PushDiagStatePoint(DiagStateOnPushStack.back().State, Loc);
   }
   DiagStateOnPushStack.pop_back();
   return true;
@@ -190,6 +190,43 @@ void DiagnosticsEngine::DiagStateMap::append(SourceManager &SrcMgr,
     }
 
     F->StateTransitions.push_back({State, Offset});
+  }
+}
+
+void DiagnosticsEngine::DiagStateMap::insert(SourceManager &SrcMgr,
+                                             SourceLocation Loc,
+                                             DiagState *State) {
+  FileIDAndOffset Decomp = SrcMgr.getDecomposedLoc(Loc);
+  File *F = getFile(SrcMgr, Decomp.first);
+  unsigned Offset = Decomp.second;
+  DiagState *Old = F->lookup(Offset);
+  auto &Transitions = F->StateTransitions;
+  auto It = llvm::partition_point(
+      Transitions, [=](const DiagStatePoint &P) { return P.Offset < Offset; });
+  if (It != Transitions.end() && It->Offset == Offset)
+    It->State = State;
+  else
+    It = Transitions.insert(It, DiagStatePoint(State, Offset));
+  F->HasLocalTransitions = true;
+  auto Next = std::next(It);
+  refreshEntryStates(F, Offset, Next != Transitions.end() ? Next->Offset : ~0u,
+                     Old, State);
+}
+
+void DiagnosticsEngine::DiagStateMap::refreshEntryStates(
+    File *F, unsigned Offset, unsigned End, DiagState *Old,
+    DiagState *State) const {
+  for (auto &IDAndFile : Files) {
+    File &Child = IDAndFile.second;
+    if (Child.Parent != F || Child.ParentOffset < Offset ||
+        Child.ParentOffset >= End || Child.StateTransitions[0].State != Old)
+      continue;
+    Child.StateTransitions[0].State = State;
+    refreshEntryStates(&Child, 0,
+                       Child.StateTransitions.size() > 1
+                           ? Child.StateTransitions[1].Offset
+                           : ~0u,
+                       Old, State);
   }
 }
 
@@ -397,6 +434,58 @@ void DiagnosticsEngine::setSeverity(diag::kind Diag, diag::Severity Map,
   DiagStates.push_back(*GetCurDiagState());
   DiagStates.back().setMapping(Diag, Mapping);
   PushDiagStatePoint(&DiagStates.back(), L);
+}
+
+DiagnosticMapping
+DiagnosticsEngine::getDiagnosticMappingAt(diag::kind Diag,
+                                          SourceLocation Loc) const {
+  return GetDiagStateForLoc(Loc)->getOrAddMapping(Diag);
+}
+
+DiagnosticsEngine::DiagState *DiagnosticsEngine::copyDiagStateWith(
+    const DiagState &Base,
+    ArrayRef<std::pair<diag::kind, DiagnosticMapping>> Mappings) {
+  DiagStates.push_back(Base);
+  DiagState *State = &DiagStates.back();
+  for (const auto &[Diag, Mapping] : Mappings)
+    State->setMapping(Diag, Mapping);
+  return State;
+}
+
+void DiagnosticsEngine::setDiagnosticMappingsAt(
+    ArrayRef<std::pair<diag::kind, DiagnosticMapping>> Mappings,
+    SourceLocation Loc, SourceRange PushedIn) {
+  assert(Loc.isValid() && SourceMgr && "positional mapping needs a location");
+  DiagState *State =
+      copyDiagStateWith(*DiagStatesByLoc.lookup(*SourceMgr, Loc), Mappings);
+  SourceLocation CurLoc = DiagStatesByLoc.getCurDiagStateLoc();
+  if (CurLoc.isInvalid() || !SourceMgr->isBeforeInTranslationUnit(Loc, CurLoc))
+    DiagStatesByLoc.append(*SourceMgr, Loc, State);
+  else
+    DiagStatesByLoc.insert(*SourceMgr, Loc, State);
+  if (PushedIn.isInvalid())
+    return;
+  for (PushedDiagState &Pushed : DiagStateOnPushStack)
+    if (Pushed.Loc.isValid() &&
+        !SourceMgr->isBeforeInTranslationUnit(Pushed.Loc,
+                                              PushedIn.getBegin()) &&
+        SourceMgr->isBeforeInTranslationUnit(Pushed.Loc, PushedIn.getEnd()))
+      Pushed.State = copyDiagStateWith(*Pushed.State, Mappings);
+}
+
+void DiagnosticsEngine::setDiagnosticMappingsFrom(
+    ArrayRef<std::pair<diag::kind, DiagnosticMapping>> Mappings,
+    SourceLocation Loc) {
+  assert(Loc.isValid() && SourceMgr && "positional mapping needs a location");
+  // A pragma lexed ahead of the parser may already have established a later
+  // state; the new state then takes effect there.
+  SourceLocation CurLoc = DiagStatesByLoc.getCurDiagStateLoc();
+  if (CurLoc.isValid() && SourceMgr->isBeforeInTranslationUnit(Loc, CurLoc))
+    Loc = CurLoc;
+  DiagStatesByLoc.append(*SourceMgr, Loc,
+                         copyDiagStateWith(*GetCurDiagState(), Mappings));
+  for (PushedDiagState &Pushed : DiagStateOnPushStack)
+    Pushed.State = copyDiagStateWith(*Pushed.State, Mappings);
 }
 
 bool DiagnosticsEngine::setSeverityForGroup(diag::Flavor Flavor,

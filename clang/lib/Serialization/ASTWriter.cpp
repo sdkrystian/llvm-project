@@ -3458,8 +3458,8 @@ void ASTWriter::WritePragmaDiagnosticMappings(const DiagnosticsEngine &Diag,
   // restored when the main file is parsed.  Each entry is a DiagState that
   // was active at the time of a `#pragma diagnostic push`.
   Record.push_back(Diag.DiagStateOnPushStack.size());
-  for (const auto *State : Diag.DiagStateOnPushStack)
-    AddDiagState(State, false);
+  for (const auto &Pushed : Diag.DiagStateOnPushStack)
+    AddDiagState(Pushed.State, false);
 
   Stream.EmitRecord(DIAG_PRAGMA_MAPPINGS, Record);
 }
