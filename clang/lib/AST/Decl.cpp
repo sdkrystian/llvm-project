@@ -3040,6 +3040,21 @@ bool ParmVarDecl::hasDefaultArg() const {
          !Init.isNull();
 }
 
+const ParmVarDecl *ParmVarDecl::getDefaultArgOwningParam() const {
+  // ParmVarDecls form no redeclaration chain of their own; the walk hops
+  // between the owning functions' redeclarations by parameter index.
+  const ParmVarDecl *P = this;
+  while (P->hasInheritedDefaultArg() || (P != this && !P->hasDefaultArg())) {
+    const auto *FD = dyn_cast<FunctionDecl>(P->getDeclContext());
+    const FunctionDecl *Prev = FD ? FD->getPreviousDecl() : nullptr;
+    unsigned Idx = P->getFunctionScopeIndex();
+    if (!Prev || Idx >= Prev->getNumParams())
+      break;
+    P = Prev->getParamDecl(Idx);
+  }
+  return P;
+}
+
 void ParmVarDecl::setParameterIndexLarge(unsigned parameterIndex) {
   getASTContext().setParameterIndex(this, parameterIndex);
   ParmVarDeclBits.ParameterIndex = ParameterIndexSentinel;

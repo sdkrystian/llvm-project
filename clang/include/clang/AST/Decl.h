@@ -1969,6 +1969,13 @@ public:
     ParmVarDeclBits.HasInheritedDefaultArg = I;
   }
 
+  /// The parameter of the redeclaration that wrote this parameter's default
+  /// argument: this parameter itself unless the default argument is inherited
+  /// ([dcl.fct.default]p4 lets a later redeclaration add, not repeat, default
+  /// arguments). Redeclarations in other scopes, which carry no default
+  /// arguments of their own, are walked through.
+  const ParmVarDecl *getDefaultArgOwningParam() const;
+
   QualType getOriginalType() const;
 
   /// Sets the function declaration that owns this

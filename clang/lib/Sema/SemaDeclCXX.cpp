@@ -573,16 +573,11 @@ bool Sema::MergeCXXFunctionDecl(FunctionDecl *New, FunctionDecl *Old,
       Diag(NewParam->getLocation(), DiagDefaultParamID)
         << NewParam->getDefaultArgRange();
 
-      // Look for the function declaration where the default argument was
-      // actually written, which may be a declaration prior to Old.
-      for (auto Older = PrevForDefaultArgs;
-           OldParam->hasInheritedDefaultArg(); /**/) {
-        Older = Older->getPreviousDecl();
-        OldParam = Older->getParamDecl(p);
-      }
-
-      Diag(OldParam->getLocation(), diag::note_previous_definition)
-        << OldParam->getDefaultArgRange();
+      // Point at the declaration where the default argument was actually
+      // written, which may be a declaration prior to Old.
+      const ParmVarDecl *OwningParam = OldParam->getDefaultArgOwningParam();
+      Diag(OwningParam->getLocation(), diag::note_previous_definition)
+          << OwningParam->getDefaultArgRange();
     } else if (OldParamHasDfl) {
       // Merge the old default argument into the new parameter unless the new
       // function is a friend declaration in a template class. In the latter
