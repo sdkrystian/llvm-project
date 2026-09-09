@@ -494,11 +494,8 @@ private:
   void setCustomData(void *Data) { CustomData = Data; }
 
 public:
-  template <typename T> T &getCustomData() {
-    assert(CustomData && "No custom data set");
-    return *static_cast<T *>(CustomData);
-  }
-
+  /// The payload a typed setter attached, as \p T. The attribute must carry
+  /// one; the typed accessors below check the attribute's kind first.
   template <typename T> const T &getCustomData() const {
     assert(CustomData && "No custom data set");
     return *static_cast<const T *>(CustomData);
