@@ -476,25 +476,11 @@ public:
     ObjectArgument
   };
 
-  /// std::init / ref_to_uninit (P4222R2 §4.2-§4.3): judge binding \p Src as
-  /// \p T to \p Target -- null for a construct with no declaration to carry
-  /// the marker -- against the target's marking: a marked target must refer
-  /// to uninitialized memory, an unmarked one must not. The one binding
-  /// funnel: every host passes its \p Kind, and a kind whose construct cannot
-  /// carry the marker is judged unmarked whatever \p Target is. No-op unless
-  /// \p T is a non-dependent pointer or reference. \p D, when available,
-  /// anchors suppression and template deferral: with it the rule fires on
-  /// the instantiation only; without it an instantiation-dependent \p Src
-  /// defers to the rebuild and a non-dependent one is judged on the pattern
-  /// and again at each instantiation that rebuilds the construct
-  /// (ProfilesFrameworkInternals.rst, "Pattern 1"). A Parameter binding of
-  /// a [[now_uninit]] or storage-release callee
-  /// runs the destroy rules instead -- at parse time for a source with no
-  /// flow-tracked leaf, in the CFG pass otherwise
-  /// (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage").
-  void checkInitProfileBinding(InitBindingKind Kind, SourceLocation Loc,
-                               const ValueDecl *Target, QualType T,
-                               const Expr *Src, const Decl *D = nullptr);
+  /// std::init / ref_to_uninit: a pointer promoted through a `...` parameter
+  /// binds an argument that cannot carry the marker (VariadicArgument).
+  /// Called from the two C++ promotion loops, Sema::GatherArgumentsForCall
+  /// and Sema::BuildCallToObjectOfClassType, with the promoted argument.
+  void checkInitProfileVariadicArgument(const Expr *Arg);
 
   /// The entity-driven entry to the binding funnel: judge the binding an
   /// InitializationSequence performs for \p Entity from \p Init, the
@@ -615,6 +601,26 @@ private:
   /// recognizers classify it Unknown rather than Initialized: its members may
   /// not be initialized yet.
   bool thisIsUnderConstruction() const;
+
+  /// std::init / ref_to_uninit (P4222R2 §4.2-§4.3): judge binding \p Src as
+  /// \p T to \p Target -- null for a construct with no declaration to carry
+  /// the marker -- against the target's marking: a marked target must refer
+  /// to uninitialized memory, an unmarked one must not. The one binding
+  /// funnel: every host passes its \p Kind, and a kind whose construct cannot
+  /// carry the marker is judged unmarked whatever \p Target is. No-op unless
+  /// \p T is a non-dependent pointer or reference. \p D, when available,
+  /// anchors suppression and template deferral: with it the rule fires on
+  /// the instantiation only; without it an instantiation-dependent \p Src
+  /// defers to the rebuild and a non-dependent one is judged on the pattern
+  /// and again at each instantiation that rebuilds the construct
+  /// (ProfilesFrameworkInternals.rst, "Pattern 1"). A Parameter binding of
+  /// a [[now_uninit]] or storage-release callee
+  /// runs the destroy rules instead -- at parse time for a source with no
+  /// flow-tracked leaf, in the CFG pass otherwise
+  /// (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage").
+  void checkInitProfileBinding(InitBindingKind Kind, SourceLocation Loc,
+                               const ValueDecl *Target, QualType T,
+                               const Expr *Src, const Decl *D = nullptr);
 
   /// The PointerAssignment derive step of checkInitProfileBinding, from
   /// checkInitProfileAssignmentOperands: assigning to a pointer must respect

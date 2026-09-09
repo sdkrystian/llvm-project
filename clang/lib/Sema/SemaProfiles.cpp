@@ -1872,6 +1872,11 @@ bool SemaProfiles::thisIsUnderConstruction() const {
       SemaRef.getFunctionLevelDeclContext());
 }
 
+void SemaProfiles::checkInitProfileVariadicArgument(const Expr *Arg) {
+  checkInitProfileBinding(InitBindingKind::VariadicArgument, Arg->getExprLoc(),
+                          /*Target=*/nullptr, Arg->getType(), Arg);
+}
+
 void SemaProfiles::checkInitProfileBinding(const InitializedEntity &Entity,
                                            const InitializationKind &Kind,
                                            const Expr *Init) {
