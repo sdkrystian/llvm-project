@@ -1919,6 +1919,24 @@ void SemaProfiles::checkInitProfileBinding(const InitializedEntity &Entity,
     checkInitProfileBinding(InitBindingKind::AggregateElement, Loc,
                             /*Target=*/nullptr, Entity.getType(), Src);
     return;
+  case InitializedEntity::EK_Result: {
+    // The returned value binds against the returning function's own marking
+    // (P4222R2 §8.2): a lambda's call operator carries it, a block cannot
+    // carry one. A block or lambda body anchors on its declaration, so a
+    // call operator in a templated entity defers to the rebuild at
+    // instantiation.
+    const FunctionDecl *Target =
+        SemaRef.getCurBlock()
+            ? nullptr
+            : SemaRef.getCurFunctionDecl(/*AllowLambda=*/true);
+    const Decl *D = nullptr;
+    if (isa<BlockDecl>(SemaRef.CurContext) ||
+        isLambdaCallOperator(SemaRef.CurContext))
+      D = cast<Decl>(SemaRef.CurContext);
+    checkInitProfileBinding(InitBindingKind::Return, Loc, Target,
+                            Entity.getType(), Src, D);
+    return;
+  }
   case InitializedEntity::EK_Parameter:
   case InitializedEntity::EK_Parameter_CF_Audited:
     // A call argument, or a default argument at its declaration
