@@ -5338,8 +5338,9 @@ bool Parser::TryParseProfilesAttribute(
 
   // Without -fprofiles, behave like any ignored standard attribute: accept an
   // arbitrary balanced-token argument clause without profile grammar checking.
-  // The attribute is still created (with empty custom data no consumer reads)
-  // so Sema's warn_attribute_ignored path sees it.
+  // The attribute is still created, without a payload, so that Sema's
+  // language-option check (checkCommonAttributeFeatures, which runs before
+  // any handler reads the payload) emits warn_attribute_ignored for it.
   if (!getLangOpts().Profiles) {
     SourceLocation End = AttrNameLoc;
     if (Tok.is(tok::l_paren)) {
@@ -5350,23 +5351,9 @@ bool Parser::TryParseProfilesAttribute(
     }
     if (EndLoc)
       *EndLoc = End;
-
-    AttributePool &Pool = Attrs.getPool();
-    ArrayRef<detail::ProfileDesignator> *Designators = nullptr;
-    detail::ProfileSuppressArgs *SuppressArgs = nullptr;
-    if (AttrName->isStr("suppress"))
-      SuppressArgs = Pool.make<detail::ProfileSuppressArgs>();
-    else
-      Designators = Pool.make<ArrayRef<detail::ProfileDesignator>>();
-
-    ParsedAttr *PA =
-        Attrs.addNew(AttrName, SourceRange(AttrNameLoc, End),
-                     AttributeScopeInfo(ScopeName, ScopeLoc, CommonScopeLoc),
-                     nullptr, 0, Form);
-    if (SuppressArgs)
-      PA->setProfileSuppressArgs(SuppressArgs);
-    else
-      PA->setProfileDesignators(Designators);
+    Attrs.addNew(AttrName, SourceRange(AttrNameLoc, End),
+                 AttributeScopeInfo(ScopeName, ScopeLoc, CommonScopeLoc),
+                 nullptr, 0, Form);
     return true;
   }
 
