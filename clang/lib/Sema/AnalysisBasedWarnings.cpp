@@ -1848,9 +1848,6 @@ using BasePath = SemaProfiles::BasePath;
 struct TrackedEntity {
   enum class Kind { CurrentObjectMember, LocalMember, WholeLocal, Pointee };
   Kind K;
-  /// The local (LocalMember: the object; WholeLocal: the entity; Pointee:
-  /// the pointer or reference); null for the current object.
-  const VarDecl *Base;
   /// The derived-to-base path from the object's class to Field's class
   /// (member kinds).
   BasePath Path;
@@ -1997,7 +1994,7 @@ TrackedStorage::addObject(Sema &S, const VarDecl *Base, const CXXRecordDecl *RD,
             return;
         TrackedEntity E{Base ? TrackedEntity::Kind::LocalMember
                              : TrackedEntity::Kind::CurrentObjectMember,
-                        Base, Path, F};
+                        Path, F};
         E.TrackReads = TrackReads;
         E.UnknownEntry = UnknownEntry;
         Entities.push_back(std::move(E));
@@ -2015,7 +2012,7 @@ unsigned TrackedStorage::addLocalEntity(TrackedEntity::Kind K, const VarDecl *V,
   auto It = LocalEntity.find(V);
   if (It != LocalEntity.end())
     return It->second;
-  TrackedEntity E{K, V, BasePath(), nullptr};
+  TrackedEntity E{K, BasePath(), nullptr};
   E.TrackReads = false;
   E.UnknownEntry = UnknownEntry;
   Entities.push_back(std::move(E));
@@ -2224,12 +2221,11 @@ static LeafState combineLeafStates(LeafState A, LeafState B) {
   return LeafState::Mixed;
 }
 
-/// One leaf of a binding source: the tracked entity it names (judged by
-/// that entity's flow state; Subobject when the leaf reaches storage below
-/// the entity) or, for a leaf no entity tracks, its form classification.
+/// One leaf of a binding source: the tracked entity it names, judged by that
+/// entity's flow state, or, for a leaf no entity tracks, its form
+/// classification.
 struct BindingLeaf {
   std::optional<unsigned> Entity;
-  bool Subobject = false;
   LeafState State = LeafState::Unknown;
 };
 
@@ -2774,7 +2770,6 @@ static void appendLifecycleCallEvents(
       BindingLeaf Leaf;
       if (L.R.Entity) {
         Leaf.Entity = L.R.Entity;
-        Leaf.Subobject = L.R.Subobject;
         if (!L.R.Subobject)
           Site.Affected.push_back(*L.R.Entity);
       } else {
@@ -3128,7 +3123,6 @@ static void extractStdInitEvents(
           TrackedStorage::Resolution R =
               Storage.resolveFlowLeaf(Leaf, AsPointerValue);
           L.Entity = R.Entity;
-          L.Subobject = R.Subobject;
         }
         if (!L.Entity)
           L.State = formState(S.Profiles().classifyInitBindingLeaf(Leaf, T, D));
@@ -3168,7 +3162,6 @@ static void extractStdInitEvents(
                     K == TrackedEntity::Kind::WholeLocal && R.Subobject;
                 if (UninitObject || (Pointee && (!IsWrite || R.Subobject))) {
                   L.Entity = R.Entity;
-                  L.Subobject = R.Subobject;
                   AnyPointee |= Pointee;
                   AnyUninitObject |= UninitObject;
                 } else {
