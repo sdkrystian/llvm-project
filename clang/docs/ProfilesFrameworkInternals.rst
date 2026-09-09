@@ -280,7 +280,8 @@ emitted a check, for the rare site whose subsequent emission depends on it
 (``std::core_ub``'s ``missing_return`` terminates the fall-off block only
 when something made it unreachable).  When several profiles ride one
 check -- the div/rem site carries both the ``std::core_ub`` and the
-``test::arith`` ``zero_divide`` calls -- each profile makes its own call:
+``test::arith`` ``zero_divide`` calls -- each profile makes its own call,
+with a trap diagnostic of its own (a diagnostic belongs to one rule group):
 the predicate and trap are duplicated per enforced profile (redundant,
 never wrong), and each trap stays attributed to its profile.  Unevaluated
 operands and discarded statements are never emitted at all, so the
