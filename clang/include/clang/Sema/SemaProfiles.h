@@ -476,9 +476,10 @@ public:
   /// and again at each instantiation that rebuilds the construct
   /// (ProfilesFrameworkInternals.rst, "Pattern 1"). A Parameter or
   /// DefaultArgument binding of a [[now_uninit]] or storage-release callee
-  /// runs the destroy rules instead, and every kind's tail records the
-  /// callee's lifecycle effects and any mutable-alias escape of a marked
-  /// pointer object.
+  /// runs the destroy rules instead -- at parse time for a source with no
+  /// flow-tracked leaf, in the CFG pass otherwise
+  /// (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage") -- and every
+  /// kind's tail records the callee's lifecycle effects.
   void checkInitProfileBinding(InitBindingKind Kind, SourceLocation Loc,
                                const ValueDecl *Target, QualType T,
                                const Expr *Src, const Decl *D = nullptr);

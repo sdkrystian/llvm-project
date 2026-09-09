@@ -797,8 +797,8 @@ struct WipeWholeObject {
 
 // Documentation-only pin: on a NEVER-assigned member the read error fires
 // with or without the kill bit, and the destroy line itself is the
-// parse-time destroy_uninit violation -- the kill's regression power comes
-// exclusively from the `m = 1;`-prefixed cases above.
+// destroy_uninit violation -- the kill's regression power comes exclusively
+// from the `m = 1;`-prefixed cases above.
 struct DestroyNeverAssigned {
   int m [[uninit]]; // expected-note {{member 'm' declared here}}
   DestroyNeverAssigned() {

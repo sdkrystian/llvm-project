@@ -798,40 +798,39 @@ recording §4.4 notes is missing for ``destroy_at`` ("the object subjected to
 recording that in the code").  It declares that a function ends the lifetime
 of the storage passed to each of its pointer or reference parameters (which
 are unmarked; apply the attribute only to functions that destroy *every*
-such argument's storage), and a call to one *withdraws* exactly the credit
-the equivalent ``[[now_init]]`` call would have recorded.  A *conditional*
-call -- under an ``if``, a loop, or any of the constructs listed above --
-may or may not have destroyed the storage, so it withdraws only the
-credit's firing strength (a following marked binding is no longer forced,
-while an unmarked binding stays accepted) and records no destroyed state.
-The parameters themselves take storage that is initialized, or at least
-credited by an earlier store: destruction makes an object uninitialized
-(§1), so destroying storage that is still -- or again -- uninitialized is
-itself an access to raw memory, rejected as rule ``destroy_uninit``
-(§4.4: it is an error to uninitialize an object twice).  The rejection
-fires only on affirmatively uninitialized storage (a conditional store
-suppresses, and unknown storage is accepted), a storage-release callee
-keeps any-state acceptance (``free`` takes storage that may never have
-been constructed; see `Limitations`_), a reinitializer (below) is
-exempt, and so is any parameter that itself carries
-``[[ref_to_uninit]]``: the marker declares that the parameter accepts
-uninitialized storage -- the annotation spelling for an unrecognized
-release function.  Never accepted is storage a
-``[[now_uninit]]`` call already destroyed.  That is a double destruction
-(rule ``double_destroy``), definite by construction: only an unconditional
-same-function destroy records the destroyed state, and any store or
-``[[now_init]]`` call retires it.  Clang declares ``std::destroy_at`` this
-way itself -- a ``std::destroy_at`` whose first parameter is of pointer type
-receives ``[[now_uninit]]`` implicitly -- so the construct/destroy/construct
-cycle is legal, a second destruction is rejected, a destroy of
-never-constructed storage is rejected too, and binding the destroyed
-storage to an ordinary pointer or reference is rejected as the
-unmarked-direction violation.  A function may
-carry both attributes -- a reinitializer that destroys and then
-reconstructs its argument's storage -- and models destroy-then-construct:
-the storage bound to its ``[[ref_to_uninit]]`` parameters is initialized
-after the call, and calling it on already-initialized storage is exactly
-its purpose, so it is accepted.
+such argument's storage): after the call the storage is uninitialized again
+-- re-construction is legal, and binding it to an unmarked pointer or
+reference is the unmarked-direction violation -- and destroyed.  The
+parameters themselves take storage that is initialized: destruction makes an
+object uninitialized (§1), so destroying storage that is still -- or again
+-- uninitialized on every path reaching the call is itself an access to raw
+memory, rejected as rule ``destroy_uninit`` (§4.4: it is an error to
+uninitialize an object twice); storage initialized on some path is
+accepted, and so is storage of unknown state.  A storage-release callee
+keeps any-state acceptance (``free`` takes storage that may never have been
+constructed; see `Limitations`_), a reinitializer (below) is exempt, and so
+is any parameter that itself carries ``[[ref_to_uninit]]``: the marker
+declares that the parameter accepts uninitialized storage -- the annotation
+spelling for an unrecognized release function.  Never accepted is storage
+destroyed on every path reaching the call and not stored since: a double
+destruction (rule ``double_destroy``).  A destroy on one path only leaves
+the storage neither definitely initialized nor definitely destroyed: a
+marked binding is not forced, an unmarked binding stays accepted, and a
+second destroy is not a double destroy.  Reseating a marked pointer, or
+handing out a mutable alias of it, retires its pointee's destroyed state
+with the rest of what is known about the pointee.  Clang declares
+``std::destroy_at`` this way itself -- a ``std::destroy_at`` whose first
+parameter is of pointer type receives ``[[now_uninit]]`` implicitly -- so
+the construct/destroy/construct cycle is legal, a second destruction is
+rejected, a destroy of never-constructed storage is rejected too, and
+binding the destroyed storage to an ordinary pointer or reference is
+rejected as the unmarked-direction violation.  A function may carry both
+attributes -- a reinitializer that destroys and then reconstructs its
+argument's storage -- and models destroy-then-construct: the storage bound
+to its ``[[ref_to_uninit]]`` parameters is initialized after the call, and
+calling it on already-initialized storage is exactly its purpose, so it is
+accepted.  Storage outside any function body is judged by its form: a
+destroy of a namespace-scope ``[[uninit]]`` object is ``destroy_uninit``.
 
 The standard storage-release callees are recognized without annotation and
 treated like ``[[now_uninit]]`` at the call: ``free``, ``realloc`` (its
@@ -839,29 +838,30 @@ pointer argument), and replaceable global ``::operator delete`` /
 ``::operator delete[]`` (sized and nothrow forms included; class-specific
 and destroying overloads excluded) accept a pointer in any state -- an
 RAII buffer's ``free(p)`` on a ``[[ref_to_uninit]]`` member is legal
-whether or not the buffer was ever written -- and withdraw the storage's
-credit, so a read through a marked pointer after ``free(p)`` is diagnosed
-again.  A release records no *destroyed* state, though: releasing storage
+whether or not the buffer was ever written -- and end what is known about
+the storage, so a read through a marked pointer after ``free(p)`` is
+diagnosed again.  A release records no *destroyed* state, though: releasing
+storage
 ends no object's lifetime, so both orders relative to a ``[[now_uninit]]``
 call sit outside ``double_destroy``'s scope -- ``destroy_at(p); free(p);``
 is correct (different operations, correctly ordered).  The reverse order,
 ``free(p); destroy_at(p);`` on a *marked* pointer, is the
-``destroy_uninit`` violation: the release withdrew the pointee's credit,
-so the storage is uninitialized again when the destroy takes it.  Through
+``destroy_uninit`` violation: after the release the pointee is uninitialized
+again when the destroy takes it.  Through
 an unmarked pointer the release changes no classification -- post-release
 use stays the invalidation profile's concern -- and only a second
 ``[[now_uninit]]`` destroy of the same storage fires ``double_destroy``.  The ``delete`` and ``delete[]`` *expressions*
-perform the same credit withdrawal, likewise recording no destroyed state
+perform the same release, likewise recording no destroyed state
 -- with no diagnostic on the operand, matching their historical silence --
 so ``delete q;`` and ``::operator delete(q);`` agree on everything that
 follows.  Like the allocator side, trusted ``free``/``realloc`` recognition
 keys on Clang's builtin IDs.  Where those are absent (``-fno-builtin``,
 ``-ffreestanding``) the binding acceptance survives by name -- accepting a
 pointer never diagnoses, and a declared ``free`` should not reject its
-argument just because the ID is gone -- but the credit withdrawal does not:
-it is a diagnostic's firing basis and needs the trusted recognition, so a
-post-release read stays accepted there (a missed diagnostic, never a false
-positive).
+argument just because the ID is gone -- but the release itself does not: it
+is a diagnostic's firing basis and needs the trusted recognition, so a
+post-release read or destroy stays accepted there (a missed diagnostic,
+never a false positive).
 
 
 Constructors
@@ -1042,7 +1042,7 @@ those entries never cause a rejection.
   mark the helper ``[[now_init]]``, store through the marker before the
   destroy, or suppress.
 - Passing ``&u`` to a ``[[ref_to_uninit]]`` parameter of an *ordinary*
-  function earns no credit (see the constructor-body bullet above), so a
+  function initializes nothing (see the constructor-body bullet above), so a
   later ``destroy_at(&u)`` is rejected by ``destroy_uninit`` even if the
   callee filled the storage -- the same strictness, and the same remedies,
   as the unmarked-direction binding after such a call: ``[[now_init]]`` on
@@ -1086,16 +1086,13 @@ those entries never cause a rejection.
   destroy proper is rejected on uninitialized storage (rule
   ``destroy_uninit``).  A destroy of *unknown* storage stays accepted (the
   rule fires only on an affirmative classification), and so does a destroy
-  after a merely *conditional* store: the ``Maybe`` credit suppresses -- a
-  missed diagnostic relative to the paper's "for acceptance all
-  alternatives must provide the desired solution" ("Guarantees",
-  p4222r2.md:1982-1985), the same conservatism the parse-order credit uses
-  elsewhere.  The asymmetry with the member dataflow is deliberate: the
-  dataflow joins pessimistically (a destroy on any considered-executed
-  branch clears the assigned bit, "Static analysis", p4222r2.md:306-312),
-  while parse-order credit is optimistic (a conditional store suppresses);
-  the first governs reads, the second call-site acceptance, and both err
-  away from false positives.  A reinitializer's exemption from ``destroy_uninit`` is
+  after a merely *conditional* store: storage initialized on some path is
+  accepted -- a missed diagnostic relative to the paper's "for acceptance
+  all alternatives must provide the desired solution" ("Guarantees",
+  p4222r2.md:1982-1985).  Reads are stricter: a destroy on any path spoils
+  a read at the join ("Static analysis", p4222r2.md:306-312); acceptance
+  errs away from false positives, reads toward the paper.  A
+  reinitializer's exemption from ``destroy_uninit`` is
   call-wide, so its *unmarked* destroy-only pointer parameters -- whose
   storage the paper requires live -- are exempt too; a parameter that
   itself carries ``[[ref_to_uninit]]`` is exempt per parameter (the

@@ -624,12 +624,15 @@ patterns.  Its rules map to mechanisms as follows:
        speculative creations (a SFINAE-trapped candidate, an elided-copy
        probe, an MS-ABI ctor closure) opt out per call site
    * - ``double_destroy``, ``destroy_uninit``
-     - 1
-     - the destroy arm of ``checkInitProfileBinding`` (its Parameter and
-       DefaultArgument kinds): ``storageIsDestroyed`` answers the
-       destroyed state, and ``classifyUninitSource`` -- run exactly as for
-       an unmarked binding target (``Maybe`` credit) -- the uninitialized
-       one
+     - 2 for flow-tracked sources, 1 otherwise
+     - the Destroy sites of ``extractStdInitEvents`` for a source with a
+       flow-tracked leaf (``judgeDestroySite``: ``double_destroy`` on
+       ``Destroyed``, ``destroy_uninit`` unless ``May``, a reinitializer, or
+       a marked parameter); otherwise the destroy arm of
+       ``checkInitProfileBinding`` (its Parameter and DefaultArgument
+       kinds): ``storageIsDestroyed`` answers the destroyed state, and
+       ``classifyUninitSource`` -- run exactly as for an unmarked binding
+       target (``Maybe`` credit) -- the uninitialized one
    * - ``uninit_write``
      - 1
      - ``checkInitProfileSubobjectWrite`` (its store preset trusts
@@ -690,27 +693,33 @@ a forward dataflow over four bit vectors per entity -- ``Must`` (assigned on
 every path), ``May`` (assigned on some path), ``Esc`` (escaped; read
 leniency for local aggregates), and ``Destroyed`` (destroyed on every path
 and not stored since) -- and reports the ``ref_to_uninit`` judgments of the
-body's bindings at their program points through the shared violation gate.
-The parse-time checks and the pass split the work by one predicate,
-``SemaProfiles::isFlowTrackedLeaf``: a binding source with a tracked leaf is
-the pass's, everything else -- and everything outside a function body -- is
-judged at parse time without flow state.  The pass's resolver
+body's bindings and the ``double_destroy`` / ``destroy_uninit`` judgments
+of its ``[[now_uninit]]`` calls at their program points through the shared
+violation gate.  The parse-time checks and the pass split the work by one
+predicate, ``SemaProfiles::isFlowTrackedLeaf``: a binding or destroy source
+with a tracked leaf is the pass's, everything else -- and everything outside
+a function body -- is judged at parse time without flow state.  The pass's resolver
 (``TrackedStorage::resolve``) and the predicate share one lvalue-shape walk,
 ``SemaProfiles::flowLeafShape``, so no binding falls between the two.  A
 templated body is never analyzed; each instantiation is analyzed on its own
 CFG, in which statements TreeTransform reused from the pattern are ordinary
 elements.  Consumers read the lattices as follows: a marked-target binding
-fires on ``Must``; an unmarked-target binding is suppressed by ``May``.  A
-variable of an enclosing function reached by capture, whose state the
-enclosing body decides, enters with ``May`` set and ``Must`` clear, so
-neither direction fires on it until the body itself stores.  The remaining
-blind spots are listed in :doc:`ProfilesFramework`, "Limitations".
+fires on ``Must`` and ``double_destroy`` on ``Destroyed``; an
+unmarked-target binding and ``destroy_uninit`` are suppressed by ``May``.  A
+destroy or release on one of several arms, like a mutable alias of a marked
+pointer handed out, leaves the entity possibly assigned, not definitely, and
+not destroyed.  A variable of an enclosing function reached by capture,
+whose state the enclosing body decides, enters with ``May`` set and ``Must``
+clear, so neither direction fires on it until the body itself stores.  The
+remaining blind spots are listed in :doc:`ProfilesFramework`,
+"Limitations".
 
 Parse-Order Store Credit (std::init)
 ====================================
 
-The read-through and subobject-write checks and the destroy rules refine the
-recognizers' classification with *parse-order store credit*: the stores and
+The read-through and subobject-write checks, and the destroy rules for a
+source with no flow-tracked leaf, refine the recognizers' classification
+with *parse-order store credit*: the stores and
 lifetime-annotated calls seen earlier in the translation unit.
 ``recordInitProfileStore`` records direct stores; the
 ``recordNowInitArgument`` / ``recordNowUninitArgument`` pair records what a

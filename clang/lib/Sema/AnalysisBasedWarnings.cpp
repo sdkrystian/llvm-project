@@ -2159,14 +2159,16 @@ TrackedStorage::markedPointerObject(const Expr *E) const {
 /// compound assignment or built-in ++/--, a Read then a Write. MayWrite: a
 /// store whose target names Idx on one of several arms. Copy: Idx takes
 /// entity Aux's state (the tracked-copy transfer). Kill: a storage release
-/// (free, realloc, operator delete, a delete-expression) or a [[now_uninit]]
-/// destruction leaves Idx unassigned. Destroy: a [[now_uninit]] destruction
-/// of Idx, judged by the destroy rules, then unassigned and destroyed until
-/// stored again. Reseat: marked pointer Idx is reassigned, retiring every
-/// fact about its pointee. Escape: Idx may have been reseated or destroyed
-/// by something the analysis cannot see -- a mutable alias of marked pointer
+/// (free, realloc, operator delete, a delete-expression) leaves Idx
+/// unassigned. Destroy: a [[now_uninit]] destruction (DestroySites[Aux]),
+/// judged by the destroy rules; its storage is then unassigned and destroyed
+/// until stored again -- or, for an argument naming several storages,
+/// escaped. Reseat: marked pointer Idx is reassigned, retiring every fact
+/// about its pointee. Escape: Idx may have been reseated or destroyed by
+/// something the analysis cannot see -- a mutable alias of marked pointer
 /// Idx handed out, or a destroy or release on one of several arms -- so it
-/// is no longer definitely assigned nor destroyed. AggregateEscape: the
+/// is possibly assigned, not definitely, and not destroyed. AggregateEscape:
+/// the
 /// tracked aggregate local owning member
 /// Idx escapes as a whole (a non-benign DeclRefExpr), so reads of the member
 /// are trusted from here (the local read leniency) while its assignment
@@ -2194,9 +2196,8 @@ struct DefAssignEvent {
   DefAssignEventKind Kind;
   unsigned Idx;
   const Expr *E;
-  /// Copy: the source entity. Binding: the BindingSite index. Destroy: 1 if
-  /// exempt from destroy_uninit (a reinitializer, or a parameter carrying
-  /// [[ref_to_uninit]]). ReadThrough and SubobjectWrite: the diagnostic's
+  /// Copy: the source entity. Binding: the BindingSite index. Destroy: the
+  /// DestroySite index. ReadThrough and SubobjectWrite: the diagnostic's
   /// provenance select.
   unsigned Aux = 0;
   /// SubobjectWrite: the diagnostic's "not a member access" flag.
@@ -2245,6 +2246,30 @@ struct BindingSite {
   /// captured variable).
   const NamedDecl *Subject = nullptr;
   SmallVector<BindingLeaf, 2> Leaves;
+};
+
+/// A [[now_uninit]] destruction site derived from a call element: the
+/// argument's leaves (a tracked entity, judged by its flow state, or a leaf
+/// no entity tracks, classified by form), the entities the destruction
+/// affects, and whether it is exempt from destroy_uninit -- a reinitializer
+/// (both lifecycle attributes: destroy-then-construct on fresh storage is
+/// its purpose, and the exemption is call-wide), or a parameter that itself
+/// carries [[ref_to_uninit]] (the marker declares that the parameter takes
+/// possibly-uninitialized storage: the annotation spelling for an
+/// unrecognized storage-release function). The rules are applied only when a
+/// leaf names tracked storage (Judged), the parse-time funnel having judged
+/// every other destroy; the transfer applies either way.
+struct DestroySite {
+  SourceLocation Loc;
+  bool Exempt = false;
+  bool Judged = false;
+  /// The argument names several storages (a conditional or comma shape):
+  /// each may have been destroyed, none definitely.
+  bool Conditional = false;
+  SmallVector<BindingLeaf, 2> Leaves;
+  /// The entities destroyed: the whole entity each leaf names, or every
+  /// entity of an object destroyed as a whole (`this`, `*this`, `&x`, `x`).
+  SmallVector<unsigned, 2> Affected;
 };
 
 /// The dataflow state of every tracked entity at a program point: assigned
@@ -2333,6 +2358,37 @@ static void judgeBindingSite(const BindingSite &Site, const FlowState &St,
                  Site.IsReference ? 1u : 0u, false, Subject});
 }
 
+/// Judge a destroy site against \p St. Storage destroyed on every path
+/// (every leaf's entity Destroyed; a leaf no entity tracks is never
+/// destroyed) is double_destroy whatever the exemption -- a reinitializer's
+/// destroy half is as invalid on destroyed storage as anyone else's, and
+/// construct_at is the sanctioned recovery path. Otherwise a non-exempt
+/// destroy of storage uninitialized on every path, or of a Mixed combination
+/// of arms (P4222R2 §4.9), is destroy_uninit: destruction makes an object
+/// uninitialized, so a first destroy of never-constructed storage is as much
+/// an access to raw memory as a second one (P4222R2 §4.4).
+static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
+                             SmallVectorImpl<PendingViolation> &Out) {
+  if (Site.Leaves.empty())
+    return;
+  bool AllDestroyed = true;
+  std::optional<LeafState> Acc;
+  for (const BindingLeaf &L : Site.Leaves) {
+    AllDestroyed &= L.Entity && St.Destroyed.test(*L.Entity);
+    LeafState S = leafState(L, St);
+    Acc = Acc ? combineLeafStates(*Acc, S) : S;
+  }
+  if (AllDestroyed) {
+    Out.push_back(
+        {diag::err_init_double_destroy, Site.Loc, nullptr});
+    return;
+  }
+  if (!Site.Exempt &&
+      (*Acc == LeafState::Uninitialized || *Acc == LeafState::Mixed))
+    Out.push_back(
+        {diag::err_init_destroy_uninit, Site.Loc, nullptr});
+}
+
 /// Replay a block's events over \p St: the engine's one block-level transfer
 /// function, shared by the fixpoint and the reporting replay so the two can
 /// never disagree. With \p Offending and \p Violations non-null (the
@@ -2341,7 +2397,8 @@ static void judgeBindingSite(const BindingSite &Site, const FlowState &St,
 /// taken against the state at its program point.
 static void
 applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
-                     ArrayRef<BindingSite> Sites, FlowState &St,
+                     ArrayRef<BindingSite> Sites, ArrayRef<DestroySite> DSites,
+                     FlowState &St,
                      std::vector<SmallVector<const Expr *, 2>> *Offending,
                      SmallVectorImpl<PendingViolation> *Violations) {
   auto Write = [&](unsigned I) {
@@ -2377,20 +2434,27 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       St.May.reset(Ev.Idx);
       St.Esc.reset(Ev.Idx);
       break;
-    case DefAssignEventKind::Destroy:
-      if (Violations) {
-        if (St.Destroyed.test(Ev.Idx))
-          Violations->push_back({diag::err_init_double_destroy,
-                                 Ev.E->getExprLoc(), Ev.E});
-        else if (!(Ev.Aux & 1) && !St.May.test(Ev.Idx))
-          Violations->push_back({diag::err_init_destroy_uninit,
-                                 Ev.E->getExprLoc(), Ev.E});
+    case DefAssignEventKind::Destroy: {
+      const DestroySite &Site = DSites[Ev.Aux];
+      if (Violations && Site.Judged) {
+        size_t Before = Violations->size();
+        judgeDestroySite(Site, St, *Violations);
+        for (PendingViolation &V : llvm::drop_begin(*Violations, Before))
+          V.Anchor = Ev.E;
       }
-      St.Must.reset(Ev.Idx);
-      St.May.reset(Ev.Idx);
-      St.Esc.reset(Ev.Idx);
-      St.Destroyed.set(Ev.Idx);
+      for (unsigned I : Site.Affected) {
+        St.Must.reset(I);
+        if (Site.Conditional) {
+          St.May.set(I);
+          St.Destroyed.reset(I);
+        } else {
+          St.May.reset(I);
+          St.Esc.reset(I);
+          St.Destroyed.set(I);
+        }
+      }
       break;
+    }
     case DefAssignEventKind::Reseat:
       St.Must.reset(Ev.Idx);
       St.May.reset(Ev.Idx);
@@ -2398,6 +2462,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       break;
     case DefAssignEventKind::Escape:
       St.Must.reset(Ev.Idx);
+      St.May.set(Ev.Idx);
       St.Destroyed.reset(Ev.Idx);
       break;
     case DefAssignEventKind::AggregateEscape:
@@ -2447,7 +2512,7 @@ static std::vector<SmallVector<const Expr *, 2>>
 runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
                       const TrackedStorage &Storage,
                       ArrayRef<SmallVector<DefAssignEvent, 4>> Events,
-                      ArrayRef<BindingSite> Sites,
+                      ArrayRef<BindingSite> Sites, ArrayRef<DestroySite> DSites,
                       SmallVectorImpl<PendingViolation> &Violations) {
   const unsigned NumTracked = Storage.Entities.size();
   const unsigned NumBlocks = cfg.getNumBlockIDs();
@@ -2479,7 +2544,7 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
       }
     }
     EntryState[B->getBlockID()] = In;
-    applyDefAssignEvents(Events[B->getBlockID()], Sites, In,
+    applyDefAssignEvents(Events[B->getBlockID()], Sites, DSites, In,
                          /*Offending=*/nullptr, /*Violations=*/nullptr);
     // Enqueue-skip subtlety: ExitState starts at the join identity, and a
     // block whose computed exit *equals* its stored exit enqueues no
@@ -2512,7 +2577,7 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
     if (!Visited[B->getBlockID()])
       continue;
     FlowState St = EntryState[B->getBlockID()];
-    applyDefAssignEvents(Events[B->getBlockID()], Sites, St, &Offending,
+    applyDefAssignEvents(Events[B->getBlockID()], Sites, DSites, St, &Offending,
                          &Violations);
   }
   return Offending;
@@ -2575,6 +2640,22 @@ static void reportFlowViolations(Sema &S, AnalysisDeclContext &AC,
   }
 }
 
+/// The recognizers' form verdict on a binding leaf as the engine's leaf
+/// state.
+static LeafState formState(SemaProfiles::InitSourceState S) {
+  switch (S) {
+  case SemaProfiles::InitSourceState::Initialized:
+    return LeafState::Initialized;
+  case SemaProfiles::InitSourceState::Uninitialized:
+    return LeafState::Uninitialized;
+  case SemaProfiles::InitSourceState::Unknown:
+    return LeafState::Unknown;
+  case SemaProfiles::InitSourceState::Mixed:
+    return LeafState::Mixed;
+  }
+  llvm_unreachable("unknown InitSourceState");
+}
+
 /// The lifecycle effects of the call \p CE on the storage bound to its
 /// parameters (\p Roles, derived by the caller; \p ArgOffset skips a member
 /// operator's object argument). A [[now_init]] callee writes the storage
@@ -2583,52 +2664,109 @@ static void reportFlowViolations(Sema &S, AnalysisDeclContext &AC,
 /// decayed [[uninit]] array, an [[uninit]] local passed as `&u` / `u`, or
 /// every tracked member of an object passed as a whole (`this`, `*this`,
 /// `&x`, `x`); an argument whose arms name several storages may-writes each.
-/// A [[now_uninit]] callee kills the storage bound to each pointer or
+/// A [[now_uninit]] callee destroys the storage bound to each pointer or
 /// reference parameter (no marker key: the attribute's contract covers every
-/// such argument), and so does a trusted storage-release callee (free,
-/// realloc's pointer, a replaceable global operator delete): destruction
-/// makes the storage uninitialized again (P4222R2 §4.4), a kill under a
-/// branch already spoils a read at the join, and a released or destroyed
-/// entity is no longer definitely initialized for a binding; an argument
-/// whose arms name several storages escapes each (the chosen arm is
-/// unknown, so each may have been destroyed). Kills are appended before
-/// writes -- append order is replay order -- so a dual-attributed
-/// reinitializer nets to assigned. A plain callee earns nothing. The
-/// bindings judged at this call precede these effects in the block, so they
-/// see the pre-call state.
-static void
-appendLifecycleCallEvents(const CallExpr *CE, const FunctionDecl *Callee,
-                          const SemaProfiles::CalleeLifecycleRoles &Roles,
-                          unsigned ArgOffset, const TrackedStorage &Storage,
-                          SmallVectorImpl<DefAssignEvent> &BlockEvents) {
-  // The storage an argument leaf names: the resolved whole entity, or every
-  // entity of the object passed as a whole.
+/// such argument) -- a DestroySite judged by the destroy rules, then
+/// destroyed and unassigned: destruction makes the storage uninitialized
+/// again (P4222R2 §4.4), and a destroy under a branch already spoils a read
+/// at the join. A trusted storage-release callee (free, realloc's pointer, a
+/// replaceable global operator delete) kills the same storage without a
+/// judgment: a release ends no object's lifetime, so it records no destroyed
+/// state and takes storage in any state. An argument whose arms name several
+/// storages escapes each (the chosen arm is unknown, so each may have been
+/// destroyed). Destroys and kills are appended before writes -- append order
+/// is replay order -- so a dual-attributed reinitializer nets to assigned. A
+/// plain callee earns nothing. The bindings judged at this call precede
+/// these effects in the block, so they see the pre-call state.
+static void appendLifecycleCallEvents(
+    Sema &S, const Decl *D, const CallExpr *CE, const FunctionDecl *Callee,
+    const SemaProfiles::CalleeLifecycleRoles &Roles, unsigned ArgOffset,
+    const TrackedStorage &Storage, SmallVectorImpl<DefAssignEvent> &BlockEvents,
+    SmallVectorImpl<DestroySite> &DSites) {
+  const auto *DC = cast<DeclContext>(D);
+  // Resolve the leaves of \p Arg, bound to a parameter of type \p ParamTy
+  // (SemaProfiles::bindingSourceOperand decides whether they are pointer
+  // values or glvalues): per leaf, the whole entity it names, the entities of
+  // an object it names as a whole, or nothing; and whether any leaf is
+  // flow-tracked.
+  struct ArgLeaf {
+    const Expr *E;
+    TrackedStorage::Resolution R;
+    std::pair<unsigned, unsigned> Whole{0, 0};
+  };
+  auto ResolveArg = [&](const Expr *Arg, QualType ParamTy,
+                        SmallVectorImpl<ArgLeaf> &Leaves) {
+    bool AsPointerValue;
+    const Expr *Operand =
+        SemaProfiles::bindingSourceOperand(Arg, ParamTy, AsPointerValue);
+    if (!Operand)
+      return false;
+    bool AnyTracked = false;
+    SemaProfiles::forEachTargetLeaf(
+        Operand, /*ConditionalArm=*/false, [&](const Expr *Leaf, bool) {
+          ArgLeaf L{Leaf, Storage.resolveFlowLeaf(Leaf, AsPointerValue)};
+          AnyTracked |= SemaProfiles::isFlowTrackedLeaf(S.Context, Leaf,
+                                                        AsPointerValue, DC);
+          if (!L.R.Entity) {
+            const Expr *G = SemaProfiles::ignoreTransparentCasts(Leaf);
+            if (const auto *AddrOf = dyn_cast<UnaryOperator>(G);
+                AsPointerValue && AddrOf && AddrOf->getOpcode() == UO_AddrOf)
+              G = AddrOf->getSubExpr();
+            L.Whole = Storage.wholeObject(G);
+          }
+          Leaves.push_back(L);
+        });
+    return AnyTracked;
+  };
+  // The storage an argument names, as events of \p Kind: the resolved whole
+  // entity, or every entity of the object passed as a whole.
   auto AppendFor = [&](const Expr *Arg, QualType ParamTy,
                        DefAssignEventKind Kind) {
-    bool AsPointerValue = !ParamTy->isReferenceType();
-    SmallVector<const Expr *, 2> Leaves;
-    SemaProfiles::forEachTargetLeaf(
-        Arg, /*ConditionalArm=*/false,
-        [&](const Expr *Leaf, bool) { Leaves.push_back(Leaf); });
+    SmallVector<ArgLeaf, 2> Leaves;
+    ResolveArg(Arg, ParamTy, Leaves);
     if (Leaves.size() != 1)
       Kind = Kind == DefAssignEventKind::Write ? DefAssignEventKind::MayWrite
                                                : DefAssignEventKind::Escape;
-    for (const Expr *Leaf : Leaves) {
-      TrackedStorage::Resolution R =
-          Storage.resolveFlowLeaf(Leaf, AsPointerValue);
-      if (R.Entity) {
-        if (!R.Subobject)
-          BlockEvents.push_back({Kind, *R.Entity, CE});
+    for (const ArgLeaf &L : Leaves) {
+      if (L.R.Entity) {
+        if (!L.R.Subobject)
+          BlockEvents.push_back({Kind, *L.R.Entity, CE});
         continue;
       }
-      const Expr *G = SemaProfiles::ignoreTransparentCasts(Leaf);
-      if (const auto *AddrOf = dyn_cast<UnaryOperator>(G);
-          AsPointerValue && AddrOf && AddrOf->getOpcode() == UO_AddrOf)
-        G = AddrOf->getSubExpr();
-      std::pair<unsigned, unsigned> Range = Storage.wholeObject(G);
-      for (unsigned Idx = Range.first; Idx != Range.second; ++Idx)
+      for (unsigned Idx = L.Whole.first; Idx != L.Whole.second; ++Idx)
         BlockEvents.push_back({Kind, Idx, CE});
     }
+  };
+  // A [[now_uninit]] parameter's argument: one destroy site.
+  auto AppendDestroy = [&](const ParmVarDecl *P, const Expr *Arg) {
+    QualType PT = P->getType();
+    SmallVector<ArgLeaf, 2> Leaves;
+    DestroySite Site;
+    Site.Loc = Arg->IgnoreImplicit()->getExprLoc();
+    Site.Exempt =
+        Roles.InitializesRefToUninitParams || P->hasAttr<RefToUninitAttr>();
+    Site.Judged = ResolveArg(Arg, PT, Leaves);
+    Site.Conditional = Leaves.size() > 1;
+    for (const ArgLeaf &L : Leaves) {
+      BindingLeaf Leaf;
+      if (L.R.Entity) {
+        Leaf.Entity = L.R.Entity;
+        Leaf.Subobject = L.R.Subobject;
+        if (!L.R.Subobject)
+          Site.Affected.push_back(*L.R.Entity);
+      } else {
+        Leaf.State =
+            formState(S.Profiles().classifyInitBindingLeaf(L.E, PT, D));
+        for (unsigned Idx = L.Whole.first; Idx != L.Whole.second; ++Idx)
+          Site.Affected.push_back(Idx);
+      }
+      Site.Leaves.push_back(Leaf);
+    }
+    if (!Site.Judged && Site.Affected.empty())
+      return;
+    DSites.push_back(std::move(Site));
+    BlockEvents.push_back(
+        {DefAssignEventKind::Destroy, 0, CE, (unsigned)(DSites.size() - 1)});
   };
   auto ForEachParam =
       [&](llvm::function_ref<void(const ParmVarDecl *, const Expr *)> F) {
@@ -2641,7 +2779,11 @@ appendLifecycleCallEvents(const CallExpr *CE, const FunctionDecl *Callee,
   if (Roles.DestroysPointerParams || Roles.ReleasesStorageTrusted)
     ForEachParam([&](const ParmVarDecl *P, const Expr *Arg) {
       QualType PT = P->getType();
-      if (PT->isPointerType() || PT->isReferenceType())
+      if (!PT->isPointerType() && !PT->isReferenceType())
+        return;
+      if (Roles.DestroysPointerParams)
+        AppendDestroy(P, Arg);
+      else
         AppendFor(Arg, PT, DefAssignEventKind::Kill);
     });
   if (Roles.InitializesRefToUninitParams)
@@ -2760,22 +2902,6 @@ static void collectCtorBodyStmts(const CXXConstructorDecl *Ctor,
   }
 }
 
-/// The recognizers' form verdict on a binding leaf as the engine's leaf
-/// state.
-static LeafState formState(SemaProfiles::InitSourceState S) {
-  switch (S) {
-  case SemaProfiles::InitSourceState::Initialized:
-    return LeafState::Initialized;
-  case SemaProfiles::InitSourceState::Uninitialized:
-    return LeafState::Uninitialized;
-  case SemaProfiles::InitSourceState::Unknown:
-    return LeafState::Unknown;
-  case SemaProfiles::InitSourceState::Mixed:
-    return LeafState::Mixed;
-  }
-  llvm_unreachable("unknown InitSourceState");
-}
-
 /// Recover the per-block std::init events of \p cfg over \p Storage: the one
 /// extraction loop of the engine. Every store arm resolves through
 /// TrackedStorage::resolve and distributes a comma, conditional, or GNU ?:
@@ -2798,17 +2924,17 @@ static LeafState formState(SemaProfiles::InitSourceState S) {
 /// exactly those to this pass), its other leaves classified by form; a
 /// binding that hands out a mutable alias of a marked pointer (`T *&` to
 /// `p`, `T **` to `&p`, a by-reference capture) escapes its pointee, and a
-/// delete-expression kills its operand's storage. Current-object events of
-/// a constructor (\p Ctor non-null) come from the constructor body and its
-/// written initializers only. \p cfg is the engine's own, fully linearized
-/// CFG (runStdInitMemberReadChecks), so every statement class has an
-/// element.
-static void
-extractStdInitEvents(Sema &S, const Decl *D, const CFG &cfg,
-                     const TrackedStorage &Storage,
-                     const CXXConstructorDecl *Ctor, bool StarThisCopyTrusted,
-                     std::vector<SmallVector<DefAssignEvent, 4>> &Events,
-                     SmallVectorImpl<BindingSite> &Sites) {
+/// delete-expression kills its operand's storage; a [[now_uninit]] call's
+/// arguments become Destroy sites (appendLifecycleCallEvents). Current-object
+/// events of a constructor (\p Ctor non-null) come from the constructor body
+/// and its written initializers only. \p cfg is the engine's own, fully
+/// linearized CFG (runStdInitMemberReadChecks), so every statement class has
+/// an element.
+static void extractStdInitEvents(
+    Sema &S, const Decl *D, const CFG &cfg, const TrackedStorage &Storage,
+    const CXXConstructorDecl *Ctor, bool StarThisCopyTrusted,
+    std::vector<SmallVector<DefAssignEvent, 4>> &Events,
+    SmallVectorImpl<BindingSite> &Sites, SmallVectorImpl<DestroySite> &DSites) {
   using K = SemaProfiles::InitBindingKind;
   ASTContext &Ctx = S.Context;
   const auto *DC = cast<DeclContext>(D);
@@ -3215,8 +3341,8 @@ extractStdInitEvents(Sema &S, const Decl *D, const CFG &cfg,
           }
         }
         if (Callee)
-          appendLifecycleCallEvents(CE, Callee, Roles, ArgOffset, Storage,
-                                    BlockEvents);
+          appendLifecycleCallEvents(S, D, CE, Callee, Roles, ArgOffset, Storage,
+                                    BlockEvents, DSites);
       } else if (const auto *CCE = dyn_cast<CXXConstructExpr>(St)) {
         // A constructor call's parameter bindings, the copy of a class object
         // out of tracked storage included.
@@ -3581,8 +3707,9 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
 }
 
 /// The std::init flow engine over one body: the member read-before-init rule
-/// (P4222R2 §4.2, §5.1-§5.4) and the judgments of flow-tracked storage
-/// (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage") -- one entity
+/// (P4222R2 §4.2, §5.1-§5.4) and the binding and destroy judgments of
+/// flow-tracked storage (ProfilesFrameworkInternals.rst, "Flow-Tracked
+/// Storage") -- one entity
 /// table, one event extraction, one definite-assignment run, one report,
 /// over a CFG of the engine's own. The current object's members are tracked
 /// in every instance member function body (a lambda's or block's body inside
@@ -3639,15 +3766,16 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
     return;
   std::vector<SmallVector<DefAssignEvent, 4>> Events(cfg->getNumBlockIDs());
   SmallVector<BindingSite, 8> Sites;
+  SmallVector<DestroySite, 4> DSites;
   extractStdInitEvents(S, D, *cfg, Storage, Ctor, StarThisCopyTrusted, Events,
-                       Sites);
+                       Sites, DSites);
   // Nothing is assigned at function entry: written initializers write at
   // their CFGInitializer elements, a tracked local cannot be referenced
   // before its DeclStmt, a by-value parameter starts unassigned by design,
   // and a marked local's marker asserts it.
   SmallVector<PendingViolation, 8> Violations;
-  std::vector<SmallVector<const Expr *, 2>> Offending =
-      runDefiniteAssignment(*cfg, InitAC, Storage, Events, Sites, Violations);
+  std::vector<SmallVector<const Expr *, 2>> Offending = runDefiniteAssignment(
+      *cfg, InitAC, Storage, Events, Sites, DSites, Violations);
   reportMemberReadsBeforeInit(S, InitAC, Offending, Storage, Entry.Name);
   reportFlowViolations(S, InitAC, Violations, Entry.Name);
 }

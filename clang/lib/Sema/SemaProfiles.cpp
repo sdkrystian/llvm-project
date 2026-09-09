@@ -2351,51 +2351,37 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
     // global operator delete), which is [[now_uninit]]-equivalent here --
     // accepts storage in any live state instead of the marker-consistency
     // check: the attribute declares destruction, whose operand is
-    // initialized memory for a plain destructor-like callee, *any* state
+    // initialized memory for a plain destructor-like callee and *any* state
     // for a raw-release one (free takes storage that may never have been
     // constructed; see the Limitations note), and initialized storage is
     // precisely what a dual-attributed reinitializer's destroy half exists
-    // for. Acceptance never diagnoses, so it reads the union of the
-    // release bits -- an untrusted name-only free still relaxes. Two
-    // states a [[now_uninit]] callee must not take, though. Storage
-    // *already destroyed*: a second destruction is P4222R2 §1's
-    // double-destroy error, and the destroyed state is definite by
-    // construction, so it may fire a diagnostic -- that applies to a
-    // reinitializer too, whose destroy half is invalid on destroyed
-    // storage; construct_at (a plain [[now_init]] function with a marked
-    // parameter, whose binding check below is untouched) is the
-    // sanctioned recovery path. And storage still (or again)
-    // *uninitialized*: destruction makes an object uninitialized, so a
-    // first destroy of never-constructed storage is as much an access to
-    // raw memory as a second one ("Lifetimes", p4222r2.md:922-927 -- "it
-    // is an error to uninitialize an object twice"). The argument is
-    // classified exactly like an unmarked binding target
-    // (affirmative-Uninitialized with Maybe credit), so Unknown never
-    // fires and a conditional store suppresses. Both checks key on the
-    // destroy role alone -- a storage-release callee is exempt from both:
-    // destroy_at(p); free(p); is correct (different operations, correctly
-    // ordered), and free takes never-constructed storage by contract. A
-    // reinitializer (dual [[now_init]] [[now_uninit]]) is exempt from
-    // destroy_uninit call-wide: its marked parameter positively legalizes
-    // uninitialized sources (destroy-then-construct on fresh storage is
-    // its purpose), and the exemption also covers its unmarked
-    // destroy-only pointer parameters, whose storage the paper requires
-    // live -- a missed diagnostic, not a rule. A parameter that itself
-    // carries [[ref_to_uninit]] is exempt per parameter, whatever the
-    // callee's other attributes: the marker is the author's declaration
-    // that the parameter takes possibly-uninitialized storage -- the
-    // annotation spelling for an unrecognized storage-release function
-    // (the Limitations workaround for _aligned_free and kin), whose
-    // contract a destroy-of-uninitialized rejection would break for
-    // never-written buffers. The branch below keys on
-    // the STATE, not on diagnostic emission: destroyed storage
-    // re-classifies affirmatively Uninitialized (destruction withdrew its
-    // credit), so a suppressed double destroy must stay silent rather
-    // than fall through to a swapped destroy_uninit error. An
+    // for. Acceptance never diagnoses, so it reads the union of the release
+    // bits -- an untrusted name-only free still relaxes. Two states a
+    // [[now_uninit]] callee must not take: storage already destroyed
+    // (P4222R2 §1's double_destroy, a reinitializer included -- its destroy
+    // half is invalid on destroyed storage; construct_at is the sanctioned
+    // recovery path) and storage still or again uninitialized
+    // (destroy_uninit: destruction makes an object uninitialized, so a first
+    // destroy of never-constructed storage is as much an access to raw
+    // memory as a second one, "Lifetimes", p4222r2.md:922-927). Both key on
+    // the destroy role alone: a storage-release callee is exempt from both
+    // (destroy_at(p); free(p); is correct, and free takes never-constructed
+    // storage by contract), a reinitializer from destroy_uninit call-wide
+    // (its marked parameter positively legalizes uninitialized sources; its
+    // unmarked destroy-only parameters ride along -- a missed diagnostic,
+    // not a rule), and a parameter carrying [[ref_to_uninit]] per parameter
+    // (the annotation spelling for an unrecognized storage-release function,
+    // the Limitations workaround for _aligned_free and kin). A source with a
+    // flow-tracked leaf is the CFG pass's (its Destroy sites judge both
+    // rules against the flow state); the rest is judged here by form and
+    // parse-order credit, keyed on the state rather than on diagnostic
+    // emission, so a suppressed double destroy stays silent rather than
+    // falling through to a swapped destroy_uninit error. An
     // instantiation-dependent source defers exactly like
     // judgeInitProfileBinding's.
     bool Checkable = Src && !isa<RecoveryExpr>(Src->IgnoreParens()) &&
-                     (D || !Src->isInstantiationDependent());
+                     (D || !Src->isInstantiationDependent()) &&
+                     !hasFlowTrackedLeaf(Src, T);
     bool Destroyed =
         Checkable && Roles.DestroysPointerParams && storageIsDestroyed(T, Src);
     if (Destroyed) {
