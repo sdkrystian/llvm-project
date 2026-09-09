@@ -41,8 +41,8 @@ struct StaticDiagInfoRec;
 // platforms. See "How To Write Shared Libraries" by Ulrich Drepper.
 struct StaticDiagInfoDescriptionStringTable {
 #define DIAG(ENUM, CLASS, DEFAULT_SEVERITY, DESC, GROUP, SFINAE, NOWERROR,     \
-             SHOWINSYSHEADER, SHOWINSYSMACRO, DEFERRABLE, CATEGORY, STABLE_ID, \
-             LEGACY_STABLE_IDS)                                                \
+             LATENT, SHOWINSYSHEADER, SHOWINSYSMACRO, DEFERRABLE, CATEGORY,    \
+             STABLE_ID, LEGACY_STABLE_IDS)                                     \
   char ENUM##_desc[sizeof(DESC)];
 #include "clang/Basic/AllDiagnosticKinds.inc"
 #undef DIAG
@@ -50,8 +50,8 @@ struct StaticDiagInfoDescriptionStringTable {
 
 const StaticDiagInfoDescriptionStringTable StaticDiagInfoDescriptions = {
 #define DIAG(ENUM, CLASS, DEFAULT_SEVERITY, DESC, GROUP, SFINAE, NOWERROR,     \
-             SHOWINSYSHEADER, SHOWINSYSMACRO, DEFERRABLE, CATEGORY, STABLE_ID, \
-             LEGACY_STABLE_IDS)                                                \
+             LATENT, SHOWINSYSHEADER, SHOWINSYSMACRO, DEFERRABLE, CATEGORY,    \
+             STABLE_ID, LEGACY_STABLE_IDS)                                     \
   DESC,
 #include "clang/Basic/AllDiagnosticKinds.inc"
 #undef DIAG
@@ -63,8 +63,8 @@ extern const StaticDiagInfoRec StaticDiagInfo[];
 // StaticDiagInfoRec would have extra padding on 64-bit platforms.
 const uint32_t StaticDiagInfoDescriptionOffsets[] = {
 #define DIAG(ENUM, CLASS, DEFAULT_SEVERITY, DESC, GROUP, SFINAE, NOWERROR,     \
-             SHOWINSYSHEADER, SHOWINSYSMACRO, DEFERRABLE, CATEGORY, STABLE_ID, \
-             LEGACY_STABLE_IDS)                                                \
+             LATENT, SHOWINSYSHEADER, SHOWINSYSMACRO, DEFERRABLE, CATEGORY,    \
+             STABLE_ID, LEGACY_STABLE_IDS)                                     \
   offsetof(StaticDiagInfoDescriptionStringTable, ENUM##_desc),
 #include "clang/Basic/AllDiagnosticKinds.inc"
 #undef DIAG
@@ -72,8 +72,8 @@ const uint32_t StaticDiagInfoDescriptionOffsets[] = {
 
 const uint32_t StaticDiagInfoStableIDOffsets[] = {
 #define DIAG(ENUM, CLASS, DEFAULT_SEVERITY, DESC, GROUP, SFINAE, NOWERROR,     \
-             SHOWINSYSHEADER, SHOWINSYSMACRO, DEFERRABLE, CATEGORY, STABLE_ID, \
-             LEGACY_STABLE_IDS)                                                \
+             LATENT, SHOWINSYSHEADER, SHOWINSYSMACRO, DEFERRABLE, CATEGORY,    \
+             STABLE_ID, LEGACY_STABLE_IDS)                                     \
   STABLE_ID,
 #include "clang/Basic/AllDiagnosticKinds.inc"
 #undef DIAG
@@ -81,8 +81,8 @@ const uint32_t StaticDiagInfoStableIDOffsets[] = {
 
 const uint32_t StaticDiagInfoLegacyStableIDStartOffsets[] = {
 #define DIAG(ENUM, CLASS, DEFAULT_SEVERITY, DESC, GROUP, SFINAE, NOWERROR,     \
-             SHOWINSYSHEADER, SHOWINSYSMACRO, DEFERRABLE, CATEGORY, STABLE_ID, \
-             LEGACY_STABLE_IDS)                                                \
+             LATENT, SHOWINSYSHEADER, SHOWINSYSMACRO, DEFERRABLE, CATEGORY,    \
+             STABLE_ID, LEGACY_STABLE_IDS)                                     \
   LEGACY_STABLE_IDS,
 #include "clang/Basic/AllDiagnosticKinds.inc"
 #undef DIAG
@@ -118,6 +118,8 @@ struct StaticDiagInfoRec {
   uint16_t OptionGroupIndex : 15;
   LLVM_PREFERRED_TYPE(bool)
   uint16_t Deferrable : 1;
+  LLVM_PREFERRED_TYPE(bool)
+  uint16_t Latent : 1;
 
   uint16_t DescriptionLen;
 
@@ -190,8 +192,8 @@ VALIDATE_DIAG_SIZE(TRAP)
 const StaticDiagInfoRec StaticDiagInfo[] = {
 // clang-format off
 #define DIAG(ENUM, CLASS, DEFAULT_SEVERITY, DESC, GROUP, SFINAE, NOWERROR,     \
-             SHOWINSYSHEADER, SHOWINSYSMACRO, DEFERRABLE, CATEGORY, STABLE_ID, \
-             LEGACY_STABLE_IDS)                                                \
+             LATENT, SHOWINSYSHEADER, SHOWINSYSMACRO, DEFERRABLE, CATEGORY,    \
+             STABLE_ID, LEGACY_STABLE_IDS)                                     \
   {                                                                            \
       diag::ENUM,                                                              \
       DEFAULT_SEVERITY,                                                        \
@@ -203,6 +205,7 @@ const StaticDiagInfoRec StaticDiagInfo[] = {
       SHOWINSYSMACRO,                                                          \
       GROUP,                                                                   \
 	    DEFERRABLE,                                                              \
+      LATENT,                                                                  \
       STR_SIZE(DESC, uint16_t)},
 #include "clang/Basic/DiagnosticCommonKinds.inc"
 #include "clang/Basic/DiagnosticDriverKinds.inc"
@@ -466,7 +469,13 @@ bool DiagnosticIDs::isExtensionDiag(unsigned DiagID,
 }
 
 bool DiagnosticIDs::isDefaultMappingAsError(unsigned DiagID) const {
-  return getDefaultMapping(DiagID).getSeverity() >= diag::Severity::Error;
+  return getDefaultMapping(DiagID).getSeverity() >= diag::Severity::Error ||
+         isLatent(DiagID);
+}
+
+bool DiagnosticIDs::isLatent(unsigned DiagID) const {
+  const StaticDiagInfoRec *Info = GetDiagInfo(DiagID);
+  return Info && Info->Latent;
 }
 
 /// getDescription - Given a diagnostic ID, return a description of the
@@ -553,10 +562,12 @@ DiagnosticIDs::getDiagnosticSeverity(unsigned DiagID, SourceLocation Loc,
   if (Mapping.getSeverity() != diag::Severity())
     Result = Mapping.getSeverity();
 
-  // Upgrade ignored diagnostics if -Weverything is enabled.
+  // Upgrade ignored diagnostics if -Weverything is enabled; a latent
+  // diagnostic is enabled by its own group only.
   if (State->EnableAllWarnings && Result == diag::Severity::Ignored &&
       !Mapping.isUser() &&
-      (IsCustomDiag || getDiagClass(DiagID) != CLASS_REMARK))
+      (IsCustomDiag || getDiagClass(DiagID) != CLASS_REMARK) &&
+      !isLatent(DiagID))
     Result = diag::Severity::Warning;
 
   // Ignore -pedantic diagnostics inside __extension__ blocks.

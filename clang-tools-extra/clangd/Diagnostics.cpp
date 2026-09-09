@@ -54,8 +54,8 @@ namespace {
 const char *getDiagnosticCode(unsigned ID) {
   switch (ID) {
 #define DIAG(ENUM, CLASS, DEFAULT_MAPPING, DESC, GROPU, SFINAE, NOWERROR,      \
-             SHOWINSYSHEADER, SHOWINSYSMACRO, DEFERRABLE, CATEGORY, STABLE_ID, \
-             LEGACY_STABLE_IDS)                                                \
+             LATENT, SHOWINSYSHEADER, SHOWINSYSMACRO, DEFERRABLE, CATEGORY,    \
+             STABLE_ID, LEGACY_STABLE_IDS)                                     \
   case clang::diag::ENUM:                                                      \
     return #ENUM;
 #include "clang/Basic/DiagnosticASTKinds.inc"

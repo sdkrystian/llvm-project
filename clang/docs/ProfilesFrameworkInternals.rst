@@ -55,10 +55,12 @@ the names against the profile-name production only
 ``LangOptions::Profiles`` when it is non-empty.
 
 Profile-rule diagnostics are defined with the ``ProfileRule`` diagnostic
-class rather than plain ``Error``.  A rule diagnostic is a ``Warning``-class
-diagnostic mapped to an error by default, so that it belongs to a diagnostic
-group (an ``Error`` cannot) while a violation remains an error that ``-w``
-does not silence.  The ``Warning`` class also marks it SFINAE-suppressed:
+class rather than plain ``Error``.  A rule diagnostic is a *latent*
+``Warning``-class diagnostic (``Latent`` in ``Diagnostic.td``): it belongs to
+a diagnostic group (an ``Error`` cannot), is ignored until an enforcement or
+its group maps it, is left alone by ``-Weverything``, and once mapped to an
+error is a genuine error that ``-w`` does not silence.  The ``Warning``
+class also marks it SFINAE-suppressed:
 violations do not count as substitution failures and cannot change overload
 resolution, but selected specializations replay them when actually used.
 Every rule has its own group, ``profile-<profile>-<rule>``, nested in the
@@ -320,11 +322,13 @@ nothing, which is the specified behavior of an unknown profile.  A check
 site with an invalid location sees the initial state, so it is checked
 under command-line enforcement only.
 
-The engine's own rungs then apply: ``-w`` keeps an enforced rule because the
-diagnostic's default mapping is an error, ``-Weverything`` leaves the
-ignored rules alone because their initial ignore is a user mapping
-(``ProcessWarningOptions``), and ``-Wprofile-...`` and the diagnostic pragmas
-move a rule's severity like any other diagnostic's.  Enforcement therefore
+The engine's own rungs then apply: the rule diagnostics are latent, so
+``-w`` keeps an enforced rule, ``-Weverything`` in either form leaves the
+rules alone, and ``-Wprofile-...`` and the diagnostic pragmas move a rule's
+severity like any other diagnostic's.  Nothing is mapped until an
+enforcement or option asks for it, so a translation unit that enforces no
+profile carries no profile state, in its diagnostic pragma record included.
+Enforcement therefore
 travels with the diagnostic state: through a PCH or preamble as the state
 the main file continues from, through a BMI compiled to object code as the
 unit's own file transitions, and through an imported module as transitions

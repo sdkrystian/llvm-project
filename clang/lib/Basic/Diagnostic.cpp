@@ -583,9 +583,9 @@ void DiagnosticsEngine::setSeverityForAll(diag::Flavor Flavor,
   std::vector<diag::kind> AllDiags;
   DiagnosticIDs::getAllDiagnostics(Flavor, AllDiags);
 
-  // Set the mapping.
+  // Set the mapping; a latent diagnostic is enabled by its own group only.
   for (diag::kind Diag : AllDiags)
-    if (Diags->isWarningOrExtension(Diag))
+    if (Diags->isWarningOrExtension(Diag) && !Diags->isLatent(Diag))
       setSeverity(Diag, Map, Loc);
 }
 

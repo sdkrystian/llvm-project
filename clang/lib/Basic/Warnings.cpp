@@ -78,12 +78,6 @@ void clang::ProcessWarningOptions(DiagnosticsEngine &Diags,
   else
     Diags.setExtensionHandlingBehavior(diag::Severity::Ignored);
 
-  // C++ profile rules (P3589R2) are grouped diagnostics that fire only where a
-  // profile enforcement or a -Wprofile-... option maps them: they start
-  // ignored, by a user mapping that -Weverything leaves alone.
-  Diags.setSeverityForGroup(diag::Flavor::WarningOrError, "profiles",
-                            diag::Severity::Ignored);
-
   SmallVector<diag::kind, 10> _Diags;
   const IntrusiveRefCntPtr< DiagnosticIDs > DiagIDs =
     Diags.getDiagnosticIDs();

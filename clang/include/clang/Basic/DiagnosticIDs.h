@@ -345,8 +345,13 @@ public:
   bool isWarningOrExtension(unsigned DiagID) const;
 
   /// Return true if the specified diagnostic is mapped to errors by
-  /// default.
+  /// default, or is latent (an error mapping of it is a genuine error).
   bool isDefaultMappingAsError(unsigned DiagID) const;
+
+  /// Return true if the specified diagnostic is latent: ignored until a
+  /// mapping of its group enables it, untouched by -Weverything, and a
+  /// genuine error when mapped to an error.
+  bool isLatent(unsigned DiagID) const;
 
   /// Get the default mapping for this diagnostic.
   DiagnosticMapping getDefaultMapping(unsigned DiagID) const;

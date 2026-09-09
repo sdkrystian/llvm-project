@@ -14352,13 +14352,15 @@ def err_cuda_device_kernel_launch_require_rdc
 // C++ Profiles framework (P3589R2)
 // A profile rule's diagnostic: Warning class so it lives in the rule's
 // diagnostic group and is mapped per source location (that mapping is how the
-// framework enforces and suppresses the rule); DefaultError so a violation is
-// an error that survives -w and marks the TU uncompilable; ShowInSystemHeader
-// so the engine leaves the system-header exemption to the framework. The
-// Warning class's default SFINAE_Suppress keeps a violation out of overload
-// resolution (P3589R2 §1.1). The framework passes the profile name as %0.
+// framework enforces and suppresses the rule); Latent so it is ignored until
+// an enforcement or its group maps it, -Weverything leaves it alone, and a
+// violation is an error that survives -w and marks the TU uncompilable;
+// ShowInSystemHeader so the engine leaves the system-header exemption to the
+// framework. The Warning class's default SFINAE_Suppress keeps a violation out
+// of overload resolution (P3589R2 §1.1). The framework passes the profile name
+// as %0.
 class ProfileRule<string str, DiagGroup g>
-    : Warning<str>, DefaultError, ShowInSystemHeader, InGroup<g>;
+    : Warning<str>, Latent, ShowInSystemHeader, InGroup<g>;
 
 def err_profiles_enforce_not_empty_decl : Error<
   "'profiles::enforce' attribute only allowed on empty-declarations and "

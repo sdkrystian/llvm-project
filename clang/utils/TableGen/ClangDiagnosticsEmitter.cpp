@@ -1585,8 +1585,8 @@ namespace clang {
 namespace diag {
 enum {
 #define DIAG(ENUM, FLAGS, DEFAULT_MAPPING, DESC, GROUP, SFINAE, NOWERROR,      \
-             SHOWINSYSHEADER, SHOWINSYSMACRO, DEFERRABLE, CATEGORY, STABLE_ID, \
-             LEGACY_STABLE_IDS) \
+             LATENT, SHOWINSYSHEADER, SHOWINSYSMACRO, DEFERRABLE, CATEGORY,    \
+             STABLE_ID, LEGACY_STABLE_IDS) \
   ENUM,
 #define %sSTART
 #include "clang/Basic/Diagnostic%sKinds.inc"
@@ -1894,6 +1894,11 @@ void clang::EmitClangDiagsDefs(const RecordKeeper &Records, raw_ostream &OS,
 
     // Default warning has no Werror bit.
     if (R.getValueAsBit("WarningNoWerror"))
+      OS << ", true";
+    else
+      OS << ", false";
+
+    if (R.getValueAsBit("Latent"))
       OS << ", true";
     else
       OS << ", false";

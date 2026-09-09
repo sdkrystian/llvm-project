@@ -1,14 +1,16 @@
 // Every profile rule diagnostic belongs to its rule's diagnostic group, and
 // enforcement is the group's mapping, so the ordinary diagnostic controls
 // apply to it: the message names the group, -Wprofile-... fires the rules as
-// warnings without an enforcement, -Weverything does not, an enforced rule
-// survives -w and -Wno-profiles, and diagnostic pragmas move a rule's
-// severity while an enforcement outlives a push/pop pair.
+// warnings without an enforcement, -Weverything (as an option or a pragma)
+// does not, an enforced rule survives -w and -Wno-profiles, and diagnostic
+// pragmas move a rule's severity while an enforcement outlives a push/pop
+// pair.
 
 // RUN: not %clang_cc1 -fsyntax-only -fprofiles -fprofiles-test-profiles -std=c++23 %s 2>&1 | FileCheck %s --check-prefix=OPTION
 // RUN: not %clang_cc1 -fsyntax-only -fprofiles -fprofiles-test-profiles -fno-diagnostics-show-option -std=c++23 %s 2>&1 | FileCheck %s --check-prefix=NOOPTION
 // RUN: %clang_cc1 -fsyntax-only -fprofiles -fprofiles-test-profiles -Wprofile-test-type-cast -std=c++23 -DNO_ENFORCE %s 2>&1 | FileCheck %s --check-prefix=WARN
 // RUN: %clang_cc1 -fsyntax-only -fprofiles -fprofiles-test-profiles -Weverything -std=c++23 -DNO_ENFORCE %s 2>&1 | FileCheck %s --check-prefix=NONE --allow-empty
+// RUN: %clang_cc1 -fsyntax-only -fprofiles -fprofiles-test-profiles -std=c++23 -DNO_ENFORCE -DPRAGMA_EVERYTHING %s 2>&1 | FileCheck %s --check-prefix=NONE --allow-empty
 // RUN: not %clang_cc1 -fsyntax-only -fprofiles -fprofiles-test-profiles -w -std=c++23 %s 2>&1 | FileCheck %s --check-prefix=OPTION
 // RUN: not %clang_cc1 -fsyntax-only -fprofiles-test-profiles -fprofiles-enforce=test::type_cast -Wno-profiles -std=c++23 -DNO_ENFORCE %s 2>&1 | FileCheck %s --check-prefix=OPTION
 // RUN: not %clang_cc1 -fsyntax-only -fprofiles -fprofiles-test-profiles -std=c++23 -DPUSH_POP %s 2>&1 | FileCheck %s --check-prefix=OPTION
@@ -16,6 +18,9 @@
 
 #ifndef NO_ENFORCE
 [[profiles::enforce(test::type_cast)]];
+#endif
+#ifdef PRAGMA_EVERYTHING
+#pragma clang diagnostic warning "-Weverything"
 #endif
 #ifdef PUSH_POP
 // A push lexed right behind the enforce declaration saves a state the

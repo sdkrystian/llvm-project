@@ -101,6 +101,7 @@ class Diagnostic<string summary, DiagClass DC, Severity defaultmapping> {
   SFINAEResponse SFINAE = SFINAE_Suppress;
   bit            AccessControl = 0;
   bit            WarningNoWerror = 0;
+  bit            Latent = 0;
   bit            ShowInSystemHeader = 0;
   bit            ShowInSystemMacro = 1;
   bit            Deferrable = 0;
@@ -175,6 +176,15 @@ class DefaultError  { Severity DefaultSeverity = SEV_Error; }
 class DefaultFatal  { Severity DefaultSeverity = SEV_Fatal; }
 class DefaultWarnNoWerror {
   bit WarningNoWerror = 1;
+}
+// A latent diagnostic is ignored until a mapping of its group enables it, and
+// blanket options leave it alone: -Weverything does not enable it. An error
+// mapping of it is a genuine error rather than a promoted warning -- -w does
+// not disregard it and it makes the translation unit uncompilable. For rules
+// whose enabling is a language-level decision, such as C++ profile rules.
+class Latent {
+  Severity DefaultSeverity = SEV_Ignored;
+  bit Latent = 1;
 }
 class DefaultRemark { Severity DefaultSeverity = SEV_Remark; }
 

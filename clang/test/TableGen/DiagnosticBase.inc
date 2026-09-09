@@ -75,6 +75,7 @@ class Diagnostic<string summary, DiagClass DC, Severity defaultmapping> {
   SFINAEResponse SFINAE = SFINAE_Suppress;
   bit            AccessControl = 0;
   bit            WarningNoWerror = 0;
+  bit            Latent = 0;
   bit            ShowInSystemHeader = 0;
   bit            ShowInSystemMacro = 1;
   bit            Deferrable = 0;
