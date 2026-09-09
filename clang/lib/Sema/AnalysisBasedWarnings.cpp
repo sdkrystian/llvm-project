@@ -2746,7 +2746,7 @@ static void appendLifecycleCallEvents(
       return false;
     bool AnyTracked = false;
     SemaProfiles::forEachTargetLeaf(
-        Operand, /*ConditionalArm=*/false, [&](const Expr *Leaf, bool) {
+        Operand, [&](const Expr *Leaf) {
           ArgLeaf L{Leaf, Storage.resolveFlowLeaf(Leaf, AsPointerValue)};
           AnyTracked |= SemaProfiles::isFlowTrackedLeaf(S.Context, Leaf,
                                                         AsPointerValue, DC);
@@ -2991,8 +2991,7 @@ static void extractStdInitEvents(
       [&](const Expr *E,
           llvm::function_ref<void(const TrackedStorage::Resolution &)> F) {
         SemaProfiles::forEachTargetLeaf(
-            E, /*ConditionalArm=*/false,
-            [&](const Expr *Leaf, bool) { F(Storage.resolve(Leaf)); });
+            E, [&](const Expr *Leaf) { F(Storage.resolve(Leaf)); });
       };
 
   // Pass one: the base DeclRefExprs a recognized member read or write
@@ -3089,14 +3088,13 @@ static void extractStdInitEvents(
                 {DefAssignEventKind::MayWrite, *R.Entity, At});
       }
       SmallVector<unsigned, 2> Reseated;
-      SemaProfiles::forEachTargetLeaf(
-          G, /*ConditionalArm=*/false, [&](const Expr *Leaf, bool) {
-            if (std::optional<unsigned> Idx = Storage.markedPointerObject(Leaf);
-                Idx && !llvm::is_contained(Reseated, *Idx)) {
-              Reseated.push_back(*Idx);
-              BlockEvents.push_back({DefAssignEventKind::Reseat, *Idx, At});
-            }
-          });
+      SemaProfiles::forEachTargetLeaf(G, [&](const Expr *Leaf) {
+        if (std::optional<unsigned> Idx = Storage.markedPointerObject(Leaf);
+            Idx && !llvm::is_contained(Reseated, *Idx)) {
+          Reseated.push_back(*Idx);
+          BlockEvents.push_back({DefAssignEventKind::Reseat, *Idx, At});
+        }
+      });
     };
     // The mutable alias a binding of \p Src as \p T hands out (P4222R2
     // §4.3): `p` bound to a `T *&`, or `&p` bound to a `T **`, per leaf. A
@@ -3111,18 +3109,17 @@ static void extractStdInitEvents(
                     !T->getPointeeType().isConstQualified();
       if (!ByRef && !ByAddr)
         return;
-      SemaProfiles::forEachTargetLeaf(
-          Src, /*ConditionalArm=*/false, [&](const Expr *Leaf, bool) {
-            const Expr *G = SemaProfiles::ignoreTransparentCasts(Leaf);
-            if (ByAddr) {
-              const auto *UO = dyn_cast<UnaryOperator>(G);
-              if (!UO || UO->getOpcode() != UO_AddrOf)
-                return;
-              G = UO->getSubExpr();
-            }
-            if (std::optional<unsigned> Idx = Storage.markedPointerObject(G))
-              BlockEvents.push_back({DefAssignEventKind::Escape, *Idx, At});
-          });
+      SemaProfiles::forEachTargetLeaf(Src, [&](const Expr *Leaf) {
+        const Expr *G = SemaProfiles::ignoreTransparentCasts(Leaf);
+        if (ByAddr) {
+          const auto *UO = dyn_cast<UnaryOperator>(G);
+          if (!UO || UO->getOpcode() != UO_AddrOf)
+            return;
+          G = UO->getSubExpr();
+        }
+        if (std::optional<unsigned> Idx = Storage.markedPointerObject(G))
+          BlockEvents.push_back({DefAssignEventKind::Escape, *Idx, At});
+      });
     };
     // A pointer or reference binding of \p Src as \p T, with the parse-time
     // funnel's kind, location, and target marking (SemaProfiles::
@@ -3144,22 +3141,19 @@ static void extractStdInitEvents(
       BindingSite Site{Kind,    Loc, TargetMarked, T->isReferenceType(),
                        Subject, {}};
       bool AnyTracked = false;
-      SemaProfiles::forEachTargetLeaf(
-          Operand, /*ConditionalArm=*/false, [&](const Expr *Leaf, bool) {
-            BindingLeaf L;
-            if (SemaProfiles::isFlowTrackedLeaf(Ctx, Leaf, AsPointerValue,
-                                                DC)) {
-              AnyTracked = true;
-              TrackedStorage::Resolution R =
-                  Storage.resolveFlowLeaf(Leaf, AsPointerValue);
-              L.Entity = R.Entity;
-              L.Subobject = R.Subobject;
-            }
-            if (!L.Entity)
-              L.State =
-                  formState(S.Profiles().classifyInitBindingLeaf(Leaf, T, D));
-            Site.Leaves.push_back(L);
-          });
+      SemaProfiles::forEachTargetLeaf(Operand, [&](const Expr *Leaf) {
+        BindingLeaf L;
+        if (SemaProfiles::isFlowTrackedLeaf(Ctx, Leaf, AsPointerValue, DC)) {
+          AnyTracked = true;
+          TrackedStorage::Resolution R =
+              Storage.resolveFlowLeaf(Leaf, AsPointerValue);
+          L.Entity = R.Entity;
+          L.Subobject = R.Subobject;
+        }
+        if (!L.Entity)
+          L.State = formState(S.Profiles().classifyInitBindingLeaf(Leaf, T, D));
+        Site.Leaves.push_back(L);
+      });
       if (!AnyTracked)
         return;
       Sites.push_back(std::move(Site));
@@ -3180,7 +3174,7 @@ static void extractStdInitEvents(
       Site.Loc = Loc;
       bool AnyTracked = false, AnyPointee = false, AnyUninitObject = false;
       SemaProfiles::forEachTargetLeaf(
-          G, /*ConditionalArm=*/false, [&](const Expr *Leaf, bool) {
+          G, [&](const Expr *Leaf) {
             BindingLeaf L;
             if (SemaProfiles::isFlowTrackedLeaf(Ctx, Leaf,
                                                 /*AsPointerValue=*/false, DC)) {
@@ -3613,8 +3607,8 @@ static void extractStdInitEvents(
         // A delete-expression releases its operand's storage.
         SmallVector<const Expr *, 2> Operands;
         SemaProfiles::forEachTargetLeaf(
-            DE->getArgument(), /*ConditionalArm=*/false,
-            [&](const Expr *Leaf, bool) { Operands.push_back(Leaf); });
+            DE->getArgument(),
+            [&](const Expr *Leaf) { Operands.push_back(Leaf); });
         if (Operands.size() != 1)
           continue;
         TrackedStorage::Resolution R =

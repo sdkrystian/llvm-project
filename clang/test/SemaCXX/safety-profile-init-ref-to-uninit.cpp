@@ -2299,10 +2299,9 @@ void test_now_init_library_pattern_annotated() {
 // R2 §4.5's requested library annotation, verbatim: construct_at takes a
 // [[ref_to_uninit]] pointer and returns a pointer to an initialized object.
 // As a [[now_init]]-annotated declaration the lifecycle *start* works: the
-// argument's whole object is credited and a repeated construct_at is even
-// caught by the reverse-direction rule (a credited source no longer refers
-// to uninitialized memory). The rest of the §4.5 lifecycle -- destroy_at,
-// use-after-destroy -- remains future work.
+// argument's whole object is initialized and a repeated construct_at is
+// even caught by the reverse-direction rule (an initialized source no longer
+// refers to uninitialized memory).
 template <class T, class... A>
 [[now_init]] T *construct_at(T *p [[ref_to_uninit]], A &&...args);
 
@@ -2452,7 +2451,7 @@ void test_destroy_by_reference_never_stored() {
 }
 
 // The escape-strictness shape: a plain callee taking the marked parameter
-// earns no credit (only [[now_init]] does), so the destroy after it is
+// initializes nothing (only [[now_init]] does), so the destroy after it is
 // rejected even if the callee did fill the storage -- the same strictness
 // and remedies as test_plain_callee_no_credit above.
 void test_destroy_after_plain_fill() {
@@ -2552,7 +2551,7 @@ void test_now_init_array_decay_credit() {
   [[uninit]] int arr[8];
   now_init_fill(arr); // OK: marked target, uninitialized source
   ni_sink(arr);       // OK: the callee initialized the array whole
-  int x = arr[0];     // OK: credited
+  int x = arr[0];     // OK: initialized
   (void)x;
 }
 void test_now_init_array_decay_reverse() {
@@ -2601,12 +2600,11 @@ void test_use_after_destroy_binding() {
   (void)q; (void)r;
 }
 
-// The pointee shapes withdraw like the store-credit forms: destroying
-// through the marked pointer clears its pointee credit, so a later read
-// through it is the read-through violation again.
+// Destroying through the marked pointer makes its pointee uninitialized
+// again, so a later read through it is the read-through violation again.
 void test_destroy_pointee(int *p [[ref_to_uninit]]) {
   *p = 5;
-  int x = *p; // OK: credited
+  int x = *p; // OK: initialized
   nu_wipe(p);
   int y = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
   (void)x; (void)y;
@@ -2811,8 +2809,9 @@ void test_escape_retires_destroyed_by_capture(int *p [[ref_to_uninit]]) {
   nu_wipe(p); // OK
 }
 
-// The reverse direction applies through the assignment funnel too: a
-// credited marked pointer refers to initialized memory, so assigning it to
+// The reverse direction applies through the assignment funnel too: a marked
+// pointer whose pointee is initialized refers to initialized memory, so
+// assigning it to
 // another marked pointer is the requires-uninit error -- while an unmarked
 // target now accepts it (paper §4.3: "p no longer refers to uninitialized
 // memory").
@@ -3779,8 +3778,9 @@ void test_call_after_redecl() {
   redecl_fill(&i); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
 }
 
-// [[now_init]] credit survives the redeclaration: the call site resolves to
-// the latest declaration, whose parameter carries the inherited marker.
+// A [[now_init]] call initializes across the redeclaration: the call site
+// resolves to the latest declaration, whose parameter carries the inherited
+// marker.
 [[now_init]] void redecl_now_init_fill(int *p [[ref_to_uninit]]);
 void redecl_now_init_fill(int *p);
 void test_now_init_credit_after_redecl() {

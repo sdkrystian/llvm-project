@@ -193,9 +193,9 @@ int test_escape_placement_new() {
 }
 
 // A transparent reference cast denotes the same storage (paper §4.3), and
-// the pass peels exactly the casts the parse-order credit sees through: a
-// store through `(int &)a.m` is a recognized member write crediting exactly
-// `m` -- not a whole-object escape -- and a read through the cast is
+// the pass peels exactly the casts the recognizers see through: a store
+// through `(int &)a.m` is a recognized member write crediting exactly `m`
+// -- not a whole-object escape -- and a read through the cast is
 // detected. Taking the cast lvalue's address is still an unrecognized use of
 // the base, i.e. an escape crediting every member.
 struct CastAgg {
