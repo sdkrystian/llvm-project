@@ -4322,8 +4322,8 @@ Value *ScalarExprEmitter::EmitDiv(const BinOpInfo &Ops) {
   // divisor.
   if (Ops.Ty->isIntegerType() && Ops.mayHaveIntegerDivisionByZero())
     CGF.EmitProfileRuntimeCheck(
-        "test::arith", "zero_divide", diag::trap_profile_zero_divide,
-        Ops.E->getExprLoc(), [&] {
+        "test::arith", diag::trap_profile_zero_divide, Ops.E->getExprLoc(),
+        [&] {
           return Builder.CreateICmpNE(
               Ops.RHS, llvm::Constant::getNullValue(Ops.RHS->getType()));
         });
@@ -4376,8 +4376,8 @@ Value *ScalarExprEmitter::EmitRem(const BinOpInfo &Ops) {
   // See the same check in EmitDiv.
   if (Ops.Ty->isIntegerType() && Ops.mayHaveIntegerDivisionByZero())
     CGF.EmitProfileRuntimeCheck(
-        "test::arith", "zero_divide", diag::trap_profile_zero_divide,
-        Ops.E->getExprLoc(), [&] {
+        "test::arith", diag::trap_profile_zero_divide, Ops.E->getExprLoc(),
+        [&] {
           return Builder.CreateICmpNE(
               Ops.RHS, llvm::Constant::getNullValue(Ops.RHS->getType()));
         });

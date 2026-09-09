@@ -20,7 +20,7 @@ using namespace clang;
 using namespace clang::CodeGen;
 
 void CodeGenFunction::EmitProfileRuntimeCheck(
-    StringRef Profile, StringRef Rule, unsigned TrapDiagID, SourceLocation Loc,
+    StringRef Profile, unsigned TrapDiagID, SourceLocation Loc,
     llvm::function_ref<llvm::Value *()> BuildPassed) {
   if (!getLangOpts().Profiles)
     return;

@@ -251,11 +251,10 @@ For a rule whose enforcement means emitting a *runtime check* during code
 generation rather than a compile-time diagnostic -- P3589R2 sanctions
 dynamic semantics for profiles (a profile "may have an effect on the runtime
 behavior of a program", e.g. bound checking, §1.1/§2.2.2).  The entire
-profile implementation is one call at the check site -- the runtime
-counterpart of pattern 1's ``checkProfileViolation`` one-liner -- naming the
-profile, the rule, and a trap diagnostic (``Trap`` class,
-``DiagnosticTrapKinds.td``, category "C++ Profiles"), and passing the
-check's "no violation" predicate as a lazily-invoked builder.  The site
+profile implementation is one call at the check site, naming the profile
+and a trap diagnostic (``Trap`` class, ``DiagnosticTrapKinds.td``, category
+"C++ Profiles") whose group identifies the rule, and passing the check's
+"no violation" predicate as a lazily-invoked builder.  The site
 guards on its own applicability conditions; the integer div/rem site is the
 in-tree pilot:
 
@@ -263,8 +262,8 @@ in-tree pilot:
 
    if (Ops.Ty->isIntegerType() && Ops.mayHaveIntegerDivisionByZero())
      CGF.EmitProfileRuntimeCheck(
-         "test::arith", "zero_divide", diag::trap_profile_zero_divide,
-         Ops.E->getExprLoc(), [&] {
+         "test::arith", diag::trap_profile_zero_divide, Ops.E->getExprLoc(),
+         [&] {
            return Builder.CreateICmpNE(
                Ops.RHS, llvm::Constant::getNullValue(Ops.RHS->getType()));
          });
