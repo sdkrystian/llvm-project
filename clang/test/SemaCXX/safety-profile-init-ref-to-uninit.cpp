@@ -1446,9 +1446,9 @@ void test_read_negatives(int *p [[ref_to_uninit]], int &r [[ref_to_uninit]],
   (void)*p;                        // OK: discarded value
   int *ap [[ref_to_uninit]] = &*p; // OK: address-of is not a read
   int &r2 [[ref_to_uninit]] = *p;  // OK: reference binding, not a read
-  *p = 5;                          // OK: write, not a read (and it credits
-                                   // p's pointee, so it stays after the
-                                   // marked bindings above)
+  *p = 5;                          // OK: write, not a read (and it
+                                   // initializes p's pointee, so it stays
+                                   // after the marked bindings above)
   // A subobject write is not a read either -- the error below is
   // uninit_write's (the piecemeal ban), not uninit_read's.
   ptr->m = 5;                      // expected-error {{writing a member of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
@@ -1461,7 +1461,7 @@ void test_read_negatives(int *p [[ref_to_uninit]], int &r [[ref_to_uninit]],
 // initialization of an [[uninit]] object is banned (paper §5.4), so no
 // assignment could have given the member a value. Only the *whole-object*
 // direct read of a named [[uninit]] entity is left to the flow-based
-// uninit_read pass (which credits assignments).
+// uninit_read pass (which tracks assignments).
 struct Pair { int x; int y; };
 struct PairHolder { Pair p; };
 
@@ -1623,8 +1623,8 @@ void test_element_read_byte_exempt() {
   (void)v;
 }
 
-// The dependent element type makes the read instantiation-dependent, so it
-// defers on the pattern and fires once, at instantiation.
+// A read of a flow-tracked subobject is judged on the instantiation's own
+// CFG: once, at instantiation.
 template <typename T>
 void template_element_read_bad() {
   [[uninit]] T a[2];
@@ -1651,26 +1651,22 @@ struct HasAggMember {
   int get() { return agg.x; } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
 };
 
-// A member read with a non-dependent glvalue is reported at the definition
-// and again at each instantiation that rebuilds the read (the local s is
-// remapped).
+// A member read of a flow-tracked local is judged on the instantiation's own
+// CFG, dependent or not: once, at instantiation.
 template <typename T>
 void template_member_read_bad() {
   Pair s [[uninit]];
-  int y = s.x; // expected-error 2 {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  int y = s.x; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
   (void)y;
 }
 template void template_member_read_bad<int>(); // expected-note {{in instantiation of function template specialization 'template_member_read_bad<int>' requested here}}
 
-// A read through a [[ref_to_uninit]] parameter inside a template body with a
-// non-dependent operand is reported at the definition and again at each
-// instantiation that rebuilds the read (the parameter remap does;
-// template_read_nondependent_bad); with a dependent operand it is reported
-// once per instantiation (template_read_dependent_bad). Mirrors the binding
-// template_* cases above.
+// A read through a [[ref_to_uninit]] parameter inside a template body is
+// judged on each instantiation's own CFG, whether its operand depends on the
+// template's parameters or not: once per instantiation.
 template <typename T>
 void template_read_nondependent_bad(int *p [[ref_to_uninit]]) {
-  int y = *p; // expected-error 2 {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  int y = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
   (void)y;
 }
 template void template_read_nondependent_bad<int>(int *); // expected-note {{in instantiation of function template specialization 'template_read_nondependent_bad<int>' requested here}}
@@ -1681,16 +1677,16 @@ T template_read_dependent_bad(T *p [[ref_to_uninit]]) {
 }
 template int template_read_dependent_bad<int>(int *); // expected-note {{in instantiation of function template specialization 'template_read_dependent_bad<int>' requested here}}
 
-// A never-instantiated pattern diagnoses its non-dependent read at definition
-// time, exactly once.
+// A never-instantiated pattern's read of flow-tracked storage is not
+// diagnosed: the pattern's body is never analyzed.
 template <typename T>
 void template_read_never_instantiated(int *p [[ref_to_uninit]]) {
-  int y = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  int y = *p; // not diagnosed: never instantiated
   (void)y;
 }
 
-// An all-global read: the definition-time fire, plus a repeat when the
-// initialization of the local y is rebuilt at instantiation.
+// An all-global read is not flow-tracked: the definition-time fire, plus a
+// repeat when the initialization of the local y is rebuilt at instantiation.
 // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
 [[profiles::suppress(std::init, rule: "static_marker")]] [[uninit]] Pair g_uninit_pair;
 
@@ -1715,9 +1711,9 @@ void template_global_read_never_instantiated() {
 // unmarked pointer's pointee is trusted, and ++ on the marked pointer itself
 // reads the (initialized) pointer object, not through it. Each form gets a
 // fresh marker: a compound form both reads (the error) and stores, and the
-// store credits the pointee for everything after it in parse order (see
-// test_pointee_store_credit) -- except through an element access, which
-// never sees the credit (p[i] below, after *p's store; paper §5.4).
+// store initializes the pointee for the paths after it (see
+// test_pointee_store_credit) -- except through an element access, which is
+// never initialized (p[i] below, after *p's store; paper §5.4).
 void test_compound_read_through(int *p [[ref_to_uninit]], int *q,
                                 int &r [[ref_to_uninit]],
                                 Inner *ptr [[ref_to_uninit]], int i,
@@ -1743,12 +1739,11 @@ void test_compound_read_suppress(int *p [[ref_to_uninit]]) {
   [[profiles::suppress(std::init, rule: "uninit_read")]] { *p += 1; } // OK: rule-targeted suppress
 }
 
-// A compound read with a non-dependent operand is reported at the definition
-// and again at each instantiation that rebuilds the assignment (the parameter
-// remap does).
+// A compound read through a flow-tracked pointer is judged on the
+// instantiation's own CFG: once, at instantiation.
 template <typename T>
 void template_compound_read_bad(int *p [[ref_to_uninit]]) {
-  *p += 1; // expected-error 2 {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  *p += 1; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
 }
 template void template_compound_read_bad<int>(int *); // expected-note {{in instantiation of function template specialization 'template_compound_read_bad<int>' requested here}}
 
@@ -1772,14 +1767,13 @@ void test_pointee_read_before_store(int *p [[ref_to_uninit]]) {
   (void)x;
 }
 
-// The credit is recorded at the tail of the assignment, after the RHS is
-// checked: a self-assignment's RHS read must not be silenced by its own
-// store (the key recording-order regression test).
+// The RHS load precedes the store in the CFG, so a self-assignment's RHS
+// read is judged before its own store initializes the pointee.
 void test_pointee_no_self_credit(int *p [[ref_to_uninit]]) {
   *p = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
 }
 
-// Element stores neither credit nor invalidate (§5.4/§5.5: element-wise
+// Element stores neither initialize nor invalidate (§5.4/§5.5: element-wise
 // state is untrackable by design)...
 void test_subscript_store_no_credit(int *p [[ref_to_uninit]]) {
   p[0] = 1;
@@ -1787,10 +1781,10 @@ void test_subscript_store_no_credit(int *p [[ref_to_uninit]]) {
   (void)x;
 }
 
-// ...and element reads never see pointee credit: `*p = 5;` must not legalize
-// p[1] (the pointee may be an array with only element 0 written). The model
-// is purely syntactic, so even p[0] -- the same storage as *p -- stays an
-// error: only the whole-`*p` form is credited.
+// ...and element reads never see the pointee's state: `*p = 5;` must not
+// legalize p[1] (the pointee may be an array with only element 0 written).
+// The model is purely syntactic, so even p[0] -- the same storage as *p --
+// stays an error: only the whole-`*p` form is tracked.
 void test_subscript_read_not_credited(int *p [[ref_to_uninit]], int i) {
   *p = 5;
   int x = p[i]; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
@@ -1799,7 +1793,7 @@ void test_subscript_read_not_credited(int *p [[ref_to_uninit]], int i) {
 }
 
 // Reseating the pointer -- plain assignment, compound arithmetic, or ++ --
-// clears its pointee credit: the credit described the old pointee.
+// retires its pointee's state: it described the old pointee.
 void test_reseat_clears_credit(int *p [[ref_to_uninit]],
                                int *q [[ref_to_uninit]], int n) {
   *p = 5;
@@ -1831,7 +1825,7 @@ void test_cast_store_fires_reverse() {
 }
 void test_cast_deref_store_credits_pointee(int *p [[ref_to_uninit]]) {
   *(int *)p = 5;
-  int v = *p; // OK: the cast deref store credited the pointee
+  int v = *p; // OK: the cast deref store initialized the pointee
   (void)v;
 }
 void test_cast_reseat_clears(int *p [[ref_to_uninit]],
@@ -1950,12 +1944,11 @@ void test_marked_reference_capture_keeps_credit(int &r [[ref_to_uninit]]) {
   (void)c; (void)m;
 }
 
-// The *pointee* credit map keys on local VarDecls, so a [[ref_to_uninit]]
-// *member* pointer is never credited: a read through it keeps failing even
-// after a store through the exact same lvalue. The per-object *whole-member*
-// credit below deliberately does not extend here: pointee aliasing is
-// per-value, not per-object (a copy of the object shares the pointee), so
-// crediting `(w, p)` would be unsound the moment w is copied.
+// Only a local marked pointer's pointee is flow-tracked, so a
+// [[ref_to_uninit]] *member* pointer's read keeps failing even after a store
+// through the exact same lvalue: pointee aliasing is per-value, not
+// per-object (a copy of the object shares the pointee), so tracking `(w, p)`
+// would be unsound the moment w is copied.
 struct WithMarkedPtrField {
   int *p [[ref_to_uninit]] = &g_uninit;
 };
@@ -1967,7 +1960,8 @@ void test_member_pointer_never_credited(WithMarkedPtrField w) {
 
 // A member store through a marked class-typed pointer is a subobject store:
 // rejected by uninit_write (the piecemeal ban; whole-object construct_at is
-// the remedy) and never crediting, so the member read after it still fails.
+// the remedy) and initializing nothing, so the member read after it still
+// fails.
 void test_member_store_never_credits(Inner *ptr [[ref_to_uninit]]) {
   ptr->m = 5; // expected-error {{writing a member of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
   int y = ptr->m; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
@@ -3144,22 +3138,18 @@ void template_var_binding_never_instantiated() {
   (void)r;
 }
 
-// Store credit is recorded at pattern-parse time too: a non-dependent
-// store-then-read inside a template is checked at the definition and finds
-// the pattern-time credit; instantiations rebuild every DeclRefExpr against
-// fresh declarations and re-record independently.
+// A store-then-read of flow-tracked storage inside a template is judged on
+// the instantiation's own CFG, where the store precedes the read.
 template <typename T>
 void template_store_then_read(int *p [[ref_to_uninit]]) {
   *p = 5;
-  int x = *p; // OK at definition time and at instantiation
+  int x = *p; // OK: judged at instantiation
   (void)x;
 }
 template void template_store_then_read<int>(int *);
 
-// A store in a discarded if-constexpr branch is not instantiated, so the
-// rebuilt read finds no credit at that instantiation -- while the pattern's
-// store did credit the definition-time check (a dependent condition
-// discards nothing at parse).
+// A store in a discarded if-constexpr branch is not instantiated, so that
+// instantiation's CFG has no store before the read.
 template <bool B>
 void template_discarded_store(int *p [[ref_to_uninit]]) {
   if constexpr (B)
@@ -3170,15 +3160,13 @@ void template_discarded_store(int *p [[ref_to_uninit]]) {
 template void template_discarded_store<true>(int *);  // OK: store instantiated
 template void template_discarded_store<false>(int *); // expected-note {{in instantiation of function template specialization 'template_discarded_store<false>' requested here}}
 
-// A store with a *type-dependent RHS* routes through the overloaded-operator
-// path at pattern time and never reaches the built-in assignment funnel, so
-// it earns no pattern-time credit and the following non-dependent read is
-// reported at the definition (a false positive). The instantiation is clean
-// (its rebuilt store re-records first) -- exactly one error total.
+// A store with a *type-dependent RHS* is an ordinary store in the
+// instantiation's CFG, where it precedes the read; the pattern is never
+// analyzed, so nothing fires.
 template <typename T>
 void template_dependent_rhs_store(int *p [[ref_to_uninit]], T t) {
   *p = t;
-  int x = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  int x = *p; // OK: judged at instantiation
   (void)x;
 }
 template void template_dependent_rhs_store<int>(int *, int);
