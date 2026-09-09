@@ -103,7 +103,7 @@ void non_pointer_p0_not_annotated() {
   std::construct_at(u, 5); // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 }
 
-// Calling through an explicit specialization credits the same storage.
+// Calling through an explicit specialization initializes the same storage.
 void explicit_specialization() {
   int u [[uninit]];
   std::construct_at<int>(&u, 5);
@@ -127,7 +127,7 @@ template <class T> void destroy_at(T *p);
 void user() {
   int u [[uninit]];
   std::construct_at(&u, 5);
-  int v = u; // OK: credited
+  int v = u; // OK: initialized
   std::destroy_at(&u);
   std::destroy_at(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
   (void)v;

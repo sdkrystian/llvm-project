@@ -4287,11 +4287,6 @@ Sema::ActOnCXXDelete(SourceLocation StartLoc, bool UseGlobal,
     }
   }
 
-  // C++ profiles: a delete-expression releases its operand's storage like a
-  // call to operator delete, but the operand never passes through the
-  // parameter-binding funnel; record the release's credit withdrawal.
-  Profiles().checkInitProfileDeleteOperand(Ex.get());
-
   CXXDeleteExpr *Result = new (Context) CXXDeleteExpr(
       Context.VoidTy, UseGlobal, ArrayForm, ArrayFormAsWritten,
       UsualArrayDeleteWantsSize, OperatorDelete, Ex.get(), StartLoc);

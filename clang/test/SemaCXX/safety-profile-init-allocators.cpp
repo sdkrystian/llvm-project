@@ -13,9 +13,10 @@
 // then recognized by name but *untrusted* -- unclassified, so neither
 // binding direction diagnoses (not the trusted-initialized default), a
 // release callee still relaxes the binding (acceptance never diagnoses)
-// but no longer withdraws credit (withdrawal is a diagnostic's firing
-// basis and needs trust) -- while the __builtin_* spellings and the
-// operator new/delete families keep their recognition everywhere.
+// but no longer releases the storage in the flow analysis (a release is a
+// diagnostic's firing basis and needs trust) -- while the __builtin_*
+// spellings and the operator new/delete families keep their recognition
+// everywhere.
 
 // no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
 [[profiles::enforce(std::init)]];
@@ -78,13 +79,13 @@ void test_alloca() {
                                        // nobuiltin-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 }
 
-// Allocator sources compose with the existing machinery: a write through the
-// marked pointer is the pointee's initialization (with parse-order credit),
-// and a read before it is the read-through violation.
+// Allocator sources compose with the flow analysis: a write through the
+// marked pointer is the pointee's initialization, and a read before it is
+// the read-through violation.
 void test_write_then_read() {
   int *p [[ref_to_uninit]] = (int *)malloc(4);
   *p = 5;     // OK: initializes the pointee
-  int x = *p; // OK: credited
+  int x = *p; // OK: initialized
 }
 
 void test_read_through() {
@@ -140,8 +141,8 @@ void template_malloc_arg() {
 // release the storage they are handed: the binding accepts a pointer in any
 // state ([[now_uninit]]-equivalent), so deallocating never-written storage
 // is legal -- the RAII buffer below is the motivating shape -- and the
-// storage's credit is withdrawn, so a whole-`*p` read through a marked
-// pointer after the release is the read-through violation again. Like the
+// storage is released, so a whole-`*p` read through a marked pointer after
+// the release is the read-through violation again. Like the
 // allocator side, free/realloc recognition keys on Clang's builtin
 // knowledge (-fno-builtin loses the relaxation, never more).
 struct RAIIBuf {
@@ -165,14 +166,14 @@ void test_operator_delete(int *p [[ref_to_uninit]],
   ::operator delete(p);   // OK: replaceable global deallocation
   ::operator delete[](q); // OK
 }
-// Withdrawal keys on the *trusted* recognition only: in the nobuiltin runs
-// an untrusted free/realloc still relaxes the binding but leaves the credit
-// in place, so the post-release reads stay accepted there (the documented
-// missed-diagnostic direction; withdrawing on an untrusted name could
+// The release keys on the *trusted* recognition only: in the nobuiltin runs
+// an untrusted free/realloc still relaxes the binding but releases nothing,
+// so the post-release reads stay accepted there (the documented
+// missed-diagnostic direction; releasing on an untrusted name could
 // manufacture read-through false positives).
 void test_read_after_free(int *p [[ref_to_uninit]]) {
   *p = 5;
-  int x = *p; // OK: credited
+  int x = *p; // OK: initialized
   free(p);
   int y = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
   (void)x; (void)y;
@@ -234,10 +235,10 @@ void test_destroy_calloc_result() {
 
 // The workaround for an ID-less deallocator (see Limitations): declare it
 // [[now_uninit]] with the pointer parameter marked [[ref_to_uninit]]. The
-// destroy role relaxes the binding and withdraws credit; the parameter
+// destroy role relaxes the binding and destroys the storage; the parameter
 // marker exempts it from destroy_uninit, so releasing a never-written
 // buffer -- a release function's contract -- stays legal in every run,
-// including the RAII-member shape, whose pointee no store can credit.
+// including the RAII-member shape, whose pointee is not flow-tracked.
 [[now_uninit]] void my_aligned_free(void *p [[ref_to_uninit]]);
 void test_annotated_release_never_written() {
   my_aligned_free(malloc(16)); // OK: releasing a never-written buffer
@@ -267,7 +268,7 @@ void test_delete_uninit(int *p [[ref_to_uninit]]) {
 }
 void test_read_after_delete(int *p [[ref_to_uninit]]) {
   *p = 5;
-  int x = *p; // OK: credited
+  int x = *p; // OK: initialized
   delete p;
   int y = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}} \
               // nobuiltin-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
