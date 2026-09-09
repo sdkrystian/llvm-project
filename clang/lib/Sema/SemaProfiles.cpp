@@ -1937,6 +1937,19 @@ void SemaProfiles::checkInitProfileBinding(const InitializedEntity &Entity,
                             Entity.getType(), Src, D);
     return;
   }
+  case InitializedEntity::EK_Exception:
+    // The thrown value copy-initializes the exception object, which cannot
+    // carry the marker.
+    checkInitProfileBinding(InitBindingKind::Throw, Loc, /*Target=*/nullptr,
+                            Entity.getType(), Src);
+    return;
+  case InitializedEntity::EK_New:
+    // The written initializer of a scalar allocation binds the allocated
+    // pointer, which cannot carry the marker; an array allocation is
+    // array-typed here, and its elements arrive as array elements.
+    checkInitProfileBinding(InitBindingKind::NewInitializer, Loc,
+                            /*Target=*/nullptr, Entity.getType(), Src);
+    return;
   case InitializedEntity::EK_Parameter:
   case InitializedEntity::EK_Parameter_CF_Audited:
     // A call argument, or a default argument at its declaration
