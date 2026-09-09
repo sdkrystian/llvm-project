@@ -832,8 +832,6 @@ void CodeGenFunction::EmitAttributedStmt(const AttributedStmt &S) {
   SaveAndRestore save_musttail(MustTailCall, musttail);
   SaveAndRestore save_flattenOrBranch(HLSLControlFlowAttr, flattenOrBranch);
   CGAtomicOptionsRAII AORAII(CGM, AA);
-  ProfileSuppressionScope ProfileScope(*this);
-  ProfileScope.addFromStmt(&S);
   EmitStmt(S.getSubStmt(), S.getAttrs());
 }
 
@@ -1722,11 +1720,6 @@ void CodeGenFunction::EmitDeclStmt(const DeclStmt &S) {
   // have a place to insert here and write the stop point here.
   if (HaveInsertPoint())
     EmitStopPoint(&S);
-
-  // [[profiles::suppress]] on a declared local variable covers the whole
-  // declaration statement, every declaration's initializer included.
-  ProfileSuppressionScope ProfileScope(*this);
-  ProfileScope.addFromStmt(&S);
 
   for (const auto *I : S.decls())
     EmitDecl(*I, /*EvaluateConditionDecl=*/true);

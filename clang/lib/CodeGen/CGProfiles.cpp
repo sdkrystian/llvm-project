@@ -7,74 +7,28 @@
 //===----------------------------------------------------------------------===//
 /// \file
 /// This file implements the CodeGen side of the C++ profiles framework
-/// (P3589R2): tracking which [[profiles::suppress]] entries cover the code
-/// being emitted. See clang/docs/ProfilesFrameworkInternals.rst.
+/// (P3589R2): the emission of pattern-5 runtime checks. See
+/// clang/docs/ProfilesFrameworkInternals.rst.
 ///
 //===----------------------------------------------------------------------===//
 
 #include "CGDebugInfo.h"
 #include "CodeGenFunction.h"
-#include "clang/AST/Attr.h"
-#include "clang/AST/Profiles.h"
+#include "clang/AST/ASTContext.h"
 
 using namespace clang;
 using namespace clang::CodeGen;
-
-void CodeGenFunction::ProfileSuppressionScope::addFromStmt(const Stmt *S) {
-  if (!CGF.getLangOpts().Profiles)
-    return;
-  profiles::forEachSuppression(
-      S, [&](const Decl *Owner, const ProfilesSuppressAttr &A) {
-        CGF.ProfileStmtSuppressions.push_back(
-            {A.getProfileName(), A.getRule(),
-             Owner ? profiles::declaratorDominion(*Owner) : SourceRange()});
-        return false;
-      });
-}
-
-void CodeGenFunction::ProfileSuppressionScope::addFromDecl(const Decl *D) {
-  // The attribute check is a fast path: nearly every local variable emitted
-  // through here carries no attributes at all, and one that does carry a
-  // suppression already pushed under an enclosing EmitDeclStmt merely pushes
-  // a harmless duplicate.
-  if (!CGF.getLangOpts().Profiles || !D || !D->hasAttrs())
-    return;
-  profiles::forEachSuppression(
-      D, /*WalkLexicalParents=*/false,
-      [&](const Decl &Owner, const ProfilesSuppressAttr &A) {
-        CGF.ProfileStmtSuppressions.push_back(
-            {A.getProfileName(), A.getRule(),
-             profiles::declaratorDominion(Owner)});
-        return false;
-      });
-}
-
-profiles::SuppressionQuery CodeGenFunction::profileSuppressionQuery() const {
-  assert(ProfileSuppressionFloor <= ProfileStmtSuppressions.size() &&
-         "suppression floor points past the end of the stack");
-  // The declaration side of the query is the anchor when one is set (the code
-  // being emitted belongs to that declaration's construct, not to the
-  // function hosting the emission) and CurCodeDecl otherwise. Lambda call
-  // operators carry their enclosing scopes' suppressions as implicit
-  // attributes, so the chain walk recovers statement-level suppression around
-  // a lambda; a null CurCodeDecl (a synthesized helper such as a block
-  // copy/dispose function) carries none.
-  return {llvm::ArrayRef(ProfileStmtSuppressions)
-              .drop_front(ProfileSuppressionFloor),
-          ProfileSuppressionAnchor ? ProfileSuppressionAnchor : CurCodeDecl};
-}
 
 void CodeGenFunction::EmitProfileRuntimeCheck(
     StringRef Profile, StringRef Rule, unsigned TrapDiagID, SourceLocation Loc,
     llvm::function_ref<llvm::Value *()> BuildPassed) {
   if (!getLangOpts().Profiles)
     return;
-  // The location-aware gate keeps code before the enforcement --
+  // The positional gate keeps code before the enforcement --
   // global-module-fragment functions emitted after the purview is parsed, or
-  // from a BMI -- outside the dominion.
-  if (!profiles::shouldEmitProfileViolation(getContext(), TrapDiagID, Profile,
-                                            Rule, Loc,
-                                            profileSuppressionQuery()))
+  // from a BMI -- outside the dominion, and honors a suppression wherever
+  // the checked tokens are emitted from.
+  if (!getContext().isProfileRuleActiveAt(TrapDiagID, Loc))
     return;
   // The check fires: only now build the site's "no violation" predicate, so
   // an inactive site emits no IR at all.

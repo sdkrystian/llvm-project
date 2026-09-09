@@ -1030,16 +1030,18 @@ public:
   /// enforcement into system-header code.
   bool isProfileExemptSystemHeaderLoc(SourceLocation Loc) const;
 
-  /// True if the profile rule diagnosed by \p DiagID is enforced at \p Loc
-  /// and \p Loc is not system-header-exempt: the enforcement half of the one
-  /// violation gate, profiles::shouldEmitProfileViolation
-  /// (clang/AST/Profiles.h). A rule is enforced where its diagnostic is
+  /// True if the profile rule diagnosed by \p DiagID is enforced and not
+  /// suppressed at \p Loc and \p Loc is not system-header-exempt: the
+  /// enforce/exempt/suppress rung of every violation gate
+  /// (SemaProfiles::shouldEmitProfileViolation, CodeGen's
+  /// EmitProfileRuntimeCheck). A rule is enforced where its diagnostic is
   /// mapped -- from an enforcement's attribute to the end of its translation
-  /// unit (P3589R2 [decl.attr.enforce]p4; SemaProfiles::addProfileEnforcement
-  /// installs the mapping), or everywhere for -fprofiles-enforce= -- so code
-  /// from a module is checked under the module's own enforcement, and a
-  /// location-less check site under the command line's only. See
-  /// ProfilesFrameworkInternals.rst, "Enforcement and Suppression State".
+  /// unit (P3589R2 [decl.attr.enforce]p4), or everywhere for
+  /// -fprofiles-enforce= -- and suppressed where a [[profiles::suppress]]
+  /// dominion maps it to ignored ([decl.attr.suppress]p3); SemaProfiles
+  /// records both. Code from a module is therefore checked under the module's
+  /// own state, and a location-less check site under the command line's only.
+  /// See ProfilesFrameworkInternals.rst, "Enforcement and Suppression State".
   bool isProfileRuleActiveAt(unsigned DiagID, SourceLocation Loc) const;
 
   DiagnosticsEngine &getDiagnostics() const;

@@ -3,8 +3,8 @@
 // The suppression-coverage matrix: one test::type_cast violation per parser
 // context that can carry [[profiles::suppress]], suppressed and unsuppressed.
 // Most rows duplicate coverage in other test files; this file is the one
-// place a new context's missing ProfileSuppressScope guard turns red (see
-// SemaProfiles::ProfileSuppressScope).
+// place a new context's missing ProfileSuppressionDominion guard turns red
+// (see Parser::ProfileSuppressionDominion).
 
 [[profiles::enforce(test::type_cast)]];
 

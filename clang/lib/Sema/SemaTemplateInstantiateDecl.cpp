@@ -30,7 +30,6 @@
 #include "clang/Sema/SemaHLSL.h"
 #include "clang/Sema/SemaObjC.h"
 #include "clang/Sema/SemaOpenMP.h"
-#include "clang/Sema/SemaProfiles.h"
 #include "clang/Sema/SemaSwift.h"
 #include "clang/Sema/Template.h"
 #include "llvm/Support/SaveAndRestore.h"
@@ -5976,9 +5975,6 @@ void Sema::InstantiateFunctionDefinition(SourceLocation PointOfInstantiation,
     // PushDeclContext because we don't have a scope.
     Sema::ContextRAII savedContext(*this, Function);
 
-    SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(
-        *this, PatternDecl, /*WalkLexicalParents=*/true);
-
     FPFeaturesStateRAII SavedFPFeatures(*this);
     CurFPFeatures = FPOptions(getLangOpts());
     FpPragmaStack.CurrentValue = FPOptionsOverride();
@@ -6276,9 +6272,6 @@ void Sema::InstantiateVariableInitializer(
     Var->setImplicitlyInline();
 
   ContextRAII SwitchContext(*this, Var->getDeclContext());
-  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(
-      *this, OldVar, /*WalkLexicalParents=*/true);
-
   EnterExpressionEvaluationContext Evaluated(
       *this, Sema::ExpressionEvaluationContext::PotentiallyEvaluated, Var,
       ExpressionEvaluationContextRecord::EK_VariableInit);

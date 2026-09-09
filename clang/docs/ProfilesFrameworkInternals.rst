@@ -113,12 +113,12 @@ implementation is one call at that site:
                          diag::err_my_profile_rule);
 
 The call runs the single violation gate,
-``SemaProfiles::shouldEmitProfileViolation``: the shared
-enforce/exempt/suppress ladder ``profiles::shouldEmitProfileViolation``
-(``clang/AST/Profiles.h``; CodeGen's runtime checks run it as is) plus the
-parse-time rungs -- a templated declaration, an unevaluated context, and a
-discarded statement never fire.  Every pattern's check site goes through
-that one gate.  ``test::type_cast`` is the in-tree example.
+``SemaProfiles::shouldEmitProfileViolation``: the enforce/exempt/suppress
+rung ``ASTContext::isProfileRuleActiveAt`` (which CodeGen's runtime checks
+run as is) plus the parse-time rungs -- a templated declaration, an
+unevaluated context, and a discarded statement never fire.  Every pattern's
+check site goes through that one gate.  ``test::type_cast`` is the in-tree
+example.
 
 Inside a template, a profile rule is checked on phase-7 entities only where
 it depends on a declaration, a completed class or constructor, or a function
@@ -147,19 +147,21 @@ Pattern 2: Post-Parse / CFG-Based
 
 For a rule that needs whole-function analysis.  Each post-parse analysis owns
 a small opt-in table of the profiles that ride it, one row per profile
-(profile name, rule name, diagnostic); the framework never learns the
-profile's name.  ``test::uninit_read`` is the in-tree example:
+(profile name, diagnostic); the framework never learns the profile's name.
+``test::uninit_read`` is the in-tree example:
 
 .. code-block:: c++
 
    constexpr CFGProfileEntry CFGProfiles[] = {
-       {"my::profile", /*Rule=*/"", diag::err_my_profile_rule},
+       {"my::profile", diag::err_my_profile_rule},
    };
 
 The analysis's diagnostic reporter walks the table calling the single gate
-as ``shouldEmitProfileViolation(Name, Rule, Loc, /*D=*/nullptr, Stmt,
-&AnalysisDeclContext)`` per use site, emitting the entry's diagnostic (and
-skipping the default warning) when it returns true.
+as ``shouldEmitProfileViolation(DiagID, Loc, /*D=*/nullptr,
+/*PostParse=*/true)`` per use site, emitting the entry's diagnostic (and
+skipping the default warning) when it returns true; the use site's location
+finds the suppression dominion it lies in, so the post-parse site needs no
+suppression sources of its own.
 
 A row may additionally install up to three optional hooks; a null column
 costs nothing:
@@ -202,13 +204,6 @@ likewise keeps dispatching per-function analysis after a TU error when such
 a profile is enforced; without this, the first error would disable the
 profile for every later function.
 
-That overload is the post-parse counterpart of the parse-time suppress
-stack: by the time the analysis runs the stack has unwound, so it walks the
-AST upward from the use site -- enclosing ``AttributedStmt``\ s,
-``DeclStmt``-declared variables, and the lexical ``Decl`` chain -- for a
-matching ``[[profiles::suppress]]``.
-
-
 Patterns 3 and 4: Class and Constructor Finalization
 ====================================================
 
@@ -237,8 +232,8 @@ invalid ones, lambdas (pattern 3), and delegating constructors (pattern 4)
 before the shared dispatcher runs the enforced callbacks; a filter that is
 one profile's policy rather than the pattern's contract lives in that
 profile's callback.  Each callback gates its diagnostics on
-``shouldEmitProfileViolation`` with the finalized declaration, whose lexical
-chain is walked for a suppression.
+``shouldEmitProfileViolation`` with the finalized declaration and its
+location.
 
 The split between the two patterns matters: class finalization runs *before
 any constructor body or member-initializer list has been parsed*, so a
@@ -272,12 +267,12 @@ in-tree pilot:
                Ops.RHS, llvm::Constant::getNullValue(Ops.RHS->getType()));
          });
 
-``EmitProfileRuntimeCheck`` checks that the rule is enforced at the check
-site (its trap diagnostic's mapping there, ``ASTContext::isProfileRuleActiveAt``,
-so a body deserialized from an AST file is decided by the state its own unit
-recorded), that the given location is not in an exempt system header, and
-that the rule is not suppressed for the code being emitted (the CodeGen
-suppression state above).  Only when the
+``EmitProfileRuntimeCheck`` checks that the rule is enforced and not
+suppressed at the check site and that the site is not in an exempt system
+header (``ASTContext::isProfileRuleActiveAt``: the trap diagnostic's mapping
+at that location, so a body deserialized from an AST file is decided by the
+state its own unit recorded, and an NSDMI or default argument by its
+member's or parameter's dominion wherever it is emitted).  Only when the
 check is active does it invoke the builder for the predicate, so an inactive
 site emits no IR, and then emits a conditional branch to a trap block
 (``SanitizerHandler::ProfileViolation``).  Unevaluated operands and
@@ -369,175 +364,39 @@ construct carrying ``[[profiles::suppress]]``: the prefix attributes of a
 statement, a declaration (at namespace, block, class, and template scope),
 a parameter, a condition, and an enumerator; the class, enum, and namespace
 heads (from the attributes themselves); a declarator's declarator-id
-attributes; and the Decl-keyed continuations.
+attributes; and the Decl-keyed continuations, at each point a definition's
+body is parsed or token-cached (``ParseFunctionDefinition`` and its
+``-fdelayed-template-parsing`` branch, ``ParseCXXInlineMethodDef``).
 clang/test/SemaCXX/safety-profile-suppress-coverage.cpp is the per-context
-regression net for this contract.
+regression net for this contract.  Template instantiation, late parsing, and
+code generation consult no suppression state of their own: an instantiated
+body, default argument, or member initializer keeps the pattern's locations,
+and a check site emitted or analyzed anywhere is judged by the dominion its
+tokens lie in -- an NSDMI or default argument emitted at a use site by its
+member's or parameter's, never the use site's.
+``ProfilesSuppressAttr`` is not inherited by redeclarations
+(``mergeDeclAttribute`` skips it), so a suppression written on a previous
+declaration does not appear on the definition in the AST either.
 
+Where the recorded dominion departs from the construct's token range:
 
-Suppression Dominion Mechanics
-==============================
+- Positions are expansion sites, so a macro that expands to a suppressed
+  declaration or statement followed by further tokens suppresses the whole
+  expansion (the one under-check corner).
+- A ``#pragma clang diagnostic`` inside a token-cached construct (an inline
+  member function body, a class-scope default argument or member
+  initializer, a ``-fdelayed-template-parsing`` body) is recorded before the
+  construct's guard runs, and the state it establishes does not carry the
+  suppression: the tokens between the pragma and the construct's end are
+  checked.
+- A ``#pragma clang diagnostic pop`` inside a suppressed construct, of a
+  push before it, restores the unsuppressed state for the rest of the
+  construct.
+- A check site with an invalid location sees the initial state: no
+  suppression, and command-line enforcement only.
 
-A ``[[profiles::suppress]]`` attribute's dominion is the token range of the
-construct it appertains to (the user-level rule is stated in
-:doc:`ProfilesFramework`).  The parse-time suppress stack -- pushed and
-popped by ``ProfileSuppressScope`` RAII guards in the parser and the
-template-instantiation machinery -- enforces this positionally: each entry
-records its construct's token range, and a violation matches an entry only if
-its location falls within that range.  This keeps a live suppress scope from
-leaking into code its tokens do not cover, which would otherwise happen in
-two ways: a template pattern instantiated synchronously while the scope is
-live (instantiated code retains the pattern's source locations), and a class
-or constructor finalized as a side effect of such an instantiation.
-Conversely, a local class or lambda defined *inside* the suppressed construct
-is covered, whichever path re-enters it.
-
-A declaration's guard is pushed before its decl-specifier-seq is parsed, so
-the dominion covers a class or enum defined there -- NSDMIs and late-parsed
-member bodies included.  A block-scope declaration is covered twice, once by
-the enclosing statement's guard and once by its own; the duplicate entries
-are harmless, since any matching entry suppresses.
-
-A suppression written on a *declarator* rather than in the declaration's
-prefix reaches the parse-time stack only once the declarator's Decl exists,
-so the parser pushes a second, Decl-keyed guard at each point where a
-freshly created Decl's initializer or default argument is about to be parsed
-(or instantiated): the declarator initializer
-(``Parser::ParseDeclarationAfterDeclaratorAndAttributes``), an immediately
-parsed default argument (``Parser::ParseParameterDeclarationClause``), a
-late-parsed member default argument
-(``Parser::ParseLexedMethodDeclaration``), an instantiated default argument
-(``Sema::SubstDefaultArgument``), and a condition variable
-(``Parser::ParseCondition``).  Declarator-id attributes are the one case
-where the tokens to cover precede the Decl -- the parameter clause is parsed
-before the function is declared -- so ``Parser::ParseDirectDeclarator``
-pushes them from the ``Declarator`` itself, which makes the prefix,
-declarator-id, and member declarator-id spellings agree on a declaration.
-
-An enum body gets the same two-guard treatment in
-``Parser::ParseEnumBody``: a Decl-keyed guard covering the body from the
-enum-head's attributes (mirroring the class and namespace body guards), and,
-per enumerator, a guard around the initializer parse built from the
-enumerator's parsed attributes -- its ``EnumConstantDecl`` is created only
-after the initializer, so the attribute-keyed constructor is the one that
-works, exactly as for statements.
-
-The range's end is recorded only when the construct was already fully parsed
-when the entry was pushed.  For a construct still being parsed no end exists
-yet (a mid-parse end location would be misleadingly early), so the entry's
-scope lifetime bounds the dominion instead -- exact mid-parse, because the
-construct's later tokens do not exist yet, and instantiation of a template
-that has no definition yet is deferred past the scope's death.
-
-Suppression written on a template pattern or its lexical parents is
-re-established around instantiation, so it applies to instantiated code.  The
-reverse is not propagated: a scope live at the *point of instantiation*
-covers the trigger's tokens, not the pattern's, and the positional match
-above keeps it from suppressing checks inside a synchronously instantiated
-body, NSDMI, default argument, or marker re-check.
-
-For the same reason ``ProfilesSuppressAttr`` is deliberately not inherited
-by redeclarations (``mergeDeclAttribute`` skips it): each redeclaration's
-tokens form their own dominion, so a suppression written on a previous
-declaration does not cover the definition.
-
-Every consumer of suppression state builds one ``profiles::SuppressionQuery``
--- a stack of live entries, a statement walked upward through a
-``ParentMap``, and a declaration whose lexical chain is walked -- and
-``profiles::isSuppressed`` composes the sources; the composition order
-(stack, then statement walk, then chain) is the query's, not the caller's,
-and is not observable, since any match suppresses.  The parse-time gate
-queries the live stack and the checked declaration.  The post-parse gate
-used by the CFG passes adds the two sources that cover the analyzed
-function's own interior -- the use statement's enclosing statements and the
-function's lexical declaration chain -- and keeps the live parse-time stack,
-which covers enclosing constructs still mid-parse.  The latter matters
-because a function can be analyzed before its enclosing construct finishes
-parsing -- a local class's method body runs its CFG passes at the end of the
-method, while the ``ProfileSuppressScope`` of the statement the class is
-declared in is still live.  The stack consult is dominion-checked as above,
-so an unrelated live scope never matches.
-
-The AST walk reconstructs the same positional rule for a ``DeclStmt``: a
-suppression there is attached to a ``VarDecl``, so the walk bounds it to that
-declarator's tokens (``profiles::declaratorDominion`` -- the declarator-id
-through the end of its initializer), keeping one declarator's suppression off
-its siblings in a multi-declarator group.  A prefix suppression is attached
-to every declarator by the attribute machinery, so per-declarator containment
-reproduces whole-declaration coverage.  One accepted corner: decl-specifier
-tokens precede every declarator-id, so the AST-walk consumers do not cover
-them; expressions there do not execute in the enclosing function's CFG or IR,
-and the parse-time stack still covers them at parse time.
-
-
-Suppression During Code Generation
-==================================
-
-A profile check site that runs during IR emission needs suppression state
-long after the parse-time stack has unwound, and it may be emitting a body
-deserialized from an AST file that was never parsed in this compilation.
-``CodeGenFunction`` therefore mirrors the post-parse walker's two-part
-structure over the AST it is emitting:
-
-- A *statement-suppression stack* (``ProfileStmtSuppressions``, of the same
-  ``profiles::SuppressionEntry`` element type as Sema's parse-time stack,
-  consulted through the same ``profiles::anyEntryCovers`` loop), pushed and
-  popped by ``ProfileSuppressionScope`` RAII guards in every
-  statement-emission path that can carry ``[[profiles::suppress]]``:
-  ``EmitAttributedStmt``, ``EmitDeclStmt``, and the local-variable arm of
-  ``EmitDecl`` (an if/while/for/switch condition variable is emitted
-  directly, never through ``EmitDeclStmt``).  A declaration-carried entry
-  records its owning declarator's dominion
-  (``profiles::declaratorDominion``) and matches only check sites located
-  inside it, so one declarator's suppression stays off its siblings in a
-  multi-declarator group -- the same positional rule the post-parse walk
-  applies; an AttributedStmt entry records no range, since the emitting
-  scope's lifetime already bounds it.
-- The lexical declaration chain, reached through the shared walk in
-  ``clang/AST/Profiles.h``.  Because Sema propagates active suppressions onto
-  lambda call operators as implicit attributes, the chain walk also recovers
-  statement-level suppression around a lambda body.
-
-``CodeGenFunction::profileSuppressionQuery`` builds the same
-``profiles::SuppressionQuery`` as the Sema gate *lazily at each check
-site*, and ``EmitProfileRuntimeCheck`` runs the shared ladder
-``profiles::shouldEmitProfileViolation`` over it: the stack above its floor,
-and the chain from the suppression anchor or, absent one, from
-``CurCodeDecl`` (it has no statement to walk; the emitting scopes' stack
-stands in for that source).  Whatever code is
-being emitted -- a function, lambda, global dynamic initializer, coroutine
-body, or OpenMP captured region -- ``CurCodeDecl`` is the declaration whose
-chain carries its suppressions.  A null ``CurCodeDecl`` (synthesized
-helpers such as block copy/dispose functions) carries none.  Lazy querying is a
-correctness requirement, not a convenience: an inlined inheriting
-constructor swaps ``CurCodeDecl`` mid-function without a ``StartFunction``,
-so per-function seeding would apply the wrong declaration's suppressions.
-
-The dominion rule -- a suppression covers only its construct's tokens -- is
-enforced structurally rather than positionally: emitting an NSDMI
-(``CXXDefaultInitExprScope``), a default argument
-(``CXXDefaultArgExprScope``), or an inlined inherited constructor
-(``InlinedInheritingConstructorScope``) raises ``ProfileSuppressionFloor``
-to the current stack size, hiding the statement suppressions of the function
-whose emission reached the construct, and the first two set
-``ProfileSuppressionAnchor`` to the field or parameter whose construct the
-emitted tokens belong to (the inherited-constructor scope needs no anchor;
-it already swaps ``CurCodeDecl``).  For a default argument that anchor is
-the parameter of the redeclaration that *wrote* it
-(``ParmVarDecl::getDefaultArgOwningParam``), not the parameter of the
-declaration the call resolved to, whose dominion holds no default-argument
-tokens when it inherits the default.  A suppression written on the field,
-parameter, or a lexical parent is honored through the anchored chain walk;
-one written around the use site is not -- the same answer Sema's positional
-dominion check gives.  Nesting composes automatically as the scopes save and
-restore both values.
-
-Known over-check-only gaps (a check that suppression fails to remove, never
-a missing check):
-member functions of a local class defined inside a suppressed *statement*,
-ObjC blocks (no lambda-style implicit-attribute propagation exists for
-``BlockDecl``), and C++26 structured-binding condition variables, whose
-holding-variable initializer is emitted deferred, outside the variable's
-suppression scope.
+Each of the last three is an over-check (a check that suppression fails to
+remove), never a missing check.
 
 
 Modules and Serialization

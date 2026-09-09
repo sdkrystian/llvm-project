@@ -7,8 +7,8 @@
 //===----------------------------------------------------------------------===//
 /// \file
 /// This file implements semantic analysis for the C++ profiles framework
-/// (P3589R2): profile enforcement and suppression state, the shared violation
-/// gate, and the class- and constructor-finalization dispatch.
+/// (P3589R2): enforcement and suppression recording, the violation gate, and
+/// the class- and constructor-finalization dispatch.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -16,9 +16,6 @@
 #include "clang/AST/Attr.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/ExprCXX.h"
-#include "clang/AST/ParentMap.h"
-#include "clang/AST/Profiles.h"
-#include "clang/Analysis/AnalysisDeclContext.h"
 #include "clang/Basic/Module.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Sema/Attr.h"
@@ -259,16 +256,6 @@ SemaProfiles::makeProfilesSuppressAttr(const ParsedAttr &AL) {
       RawArgumentKinds.size());
 }
 
-ProfilesSuppressAttr *
-SemaProfiles::makeImplicitProfilesSuppressAttr(StringRef ProfileName,
-                                               StringRef RuleName) {
-  return ProfilesSuppressAttr::CreateImplicit(
-      getASTContext(), ProfileName, /*Justification=*/"", RuleName,
-      /*RawArgumentKeys=*/nullptr, /*RawArgumentKeysSize=*/0,
-      /*RawArgumentValues=*/nullptr, /*RawArgumentValuesSize=*/0,
-      /*RawArgumentKinds=*/nullptr, /*RawArgumentKindsSize=*/0);
-}
-
 /// Map every diagnostic of the rule groups named by \p Suppressions (profile,
 /// rule) to ignored from \p Begin on, recording the replaced mappings into
 /// \p Record; a diagnostic already ignored at \p Begin needs nothing.
@@ -323,6 +310,9 @@ void SemaProfiles::beginSuppression(const Decl *D, SourceLocation Begin,
                                     SuppressionRecord &Record) {
   if (!getLangOpts().Profiles || !D)
     return;
+  // A template's attributes are attached to its templated declaration.
+  if (const auto *TD = dyn_cast<TemplateDecl>(D))
+    D = TD->getTemplatedDecl();
   SmallVector<std::pair<StringRef, StringRef>, 2> Suppressions;
   for (const auto *A : D->specific_attrs<ProfilesSuppressAttr>()) {
     Suppressions.push_back({A->getProfileName(), A->getRule()});
@@ -345,24 +335,9 @@ void SemaProfiles::endSuppression(SuppressionRecord &Record,
 }
 
 bool SemaProfiles::shouldEmitProfileViolation(unsigned DiagID,
-                                              StringRef ProfileName,
-                                              StringRef RuleName,
                                               SourceLocation Loc, const Decl *D,
-                                              const Stmt *UseStmt,
-                                              AnalysisDeclContext *AC) {
-  // The suppression sources: the live parse-time stack (a function can be
-  // analyzed while an enclosing construct is still mid-parse -- a local
-  // class's method body -- and the consult is dominion-checked, so an
-  // unrelated live scope never matches), the checked declaration's lexical
-  // chain (it survives the parse scope's teardown, so finalization checks
-  // still respect suppression), and for a post-parse site the use statement's
-  // enclosing statements and the analyzed declaration's chain. See
-  // ProfilesFrameworkInternals.rst, "Suppression Dominion Mechanics".
-  profiles::SuppressionQuery Q{ProfileSuppressStack,
-                               D ? D : (AC ? AC->getDecl() : nullptr), UseStmt,
-                               AC ? &AC->getParentMap() : nullptr};
-  if (!profiles::shouldEmitProfileViolation(getASTContext(), DiagID,
-                                            ProfileName, RuleName, Loc, Q))
+                                              bool PostParse) {
+  if (!getASTContext().isProfileRuleActiveAt(DiagID, Loc))
     return false;
   // A templated entity is not a phase-7 entity (P3589R2 §1.1), so a profile
   // rule fires only on the instantiation, never on the pattern (checking the
@@ -373,7 +348,7 @@ bool SemaProfiles::shouldEmitProfileViolation(unsigned DiagID,
     return false;
   // The evaluation-context rungs are parse-time facts; a post-parse site has
   // no evaluation context of its own.
-  if (AC)
+  if (PostParse)
     return true;
   if (SemaRef.isUnevaluatedContext())
     return false;
@@ -385,110 +360,10 @@ bool SemaProfiles::shouldEmitProfileViolation(unsigned DiagID,
 bool SemaProfiles::checkProfileViolation(StringRef ProfileName,
                                          StringRef RuleName, SourceLocation Loc,
                                          unsigned DiagID) {
-  if (!shouldEmitProfileViolation(DiagID, ProfileName, RuleName, Loc))
+  if (!shouldEmitProfileViolation(DiagID, Loc))
     return false;
   Diag(Loc, DiagID) << ProfileName;
   return true;
-}
-
-void SemaProfiles::ProfileSuppressScope::push(StringRef ProfileName,
-                                              StringRef RuleName,
-                                              SourceLocation Begin,
-                                              SourceLocation End) {
-  S.Profiles().ProfileSuppressStack.push_back(
-      {ProfileName, RuleName, SourceRange(Begin, End)});
-  ++Count;
-}
-
-SemaProfiles::ProfileSuppressScope::ProfileSuppressScope(
-    Sema &S, const ParsedAttributesView &Attrs)
-    : S(S) {
-  if (!S.getLangOpts().Profiles)
-    return;
-  for (const auto &AL : Attrs) {
-    if (AL.getKind() != ParsedAttr::AT_ProfilesSuppress)
-      continue;
-    const auto &Args = AL.getProfileSuppressArgs();
-    // These are the prefix attributes of a statement or declaration about to
-    // be parsed, so the attribute's own location is the construct's begin and
-    // no end is known yet (the scope's lifetime bounds it).
-    if (!Args.Name.empty())
-      push(Args.Name, Args.Rule, AL.getLoc(), SourceLocation());
-  }
-}
-
-/// The end location of \p D's construct if it is fully parsed, invalid
-/// otherwise. A partially parsed construct's end location is usually *valid
-/// but early*, so each arm gates on the marker that the construct's real end
-/// has been seen. An unhandled declaration kind returns invalid, which falls
-/// back to scope-lifetime bounding -- a longer dominion, more suppression,
-/// never a false positive.
-static SourceLocation getCompletedConstructEnd(const Decl *D) {
-  // The brace range is set only by ActOnTagFinishDefinition, so a mid-parse
-  // tag yields an invalid end with no explicit gate.
-  if (const auto *TD = dyn_cast<TagDecl>(D))
-    return TD->getBraceRange().getEnd();
-  if (const auto *FD = dyn_cast<FunctionDecl>(D)) {
-    // isLateTemplateParsed makes doesThisDeclarationHaveABody true while the
-    // body is merely token-cached and the range still ends at the declarator.
-    if (FD->doesThisDeclarationHaveABody() && !FD->isLateTemplateParsed())
-      return FD->getSourceRange().getEnd();
-    return SourceLocation();
-  }
-  if (const auto *VD = dyn_cast<VarDecl>(D)) {
-    // A declarator with no initializer attached yet ends -- valid but early
-    // -- at the declarator itself; gate on the initializer.
-    if (VD->hasInit())
-      return VD->getSourceRange().getEnd();
-    return SourceLocation();
-  }
-  if (const auto *FD = dyn_cast<FieldDecl>(D)) {
-    // The in-class initializer expression is null while its late parse is
-    // still pending.
-    if (FD->hasNonNullInClassInitializer())
-      return FD->getInClassInitializer()->getEndLoc();
-    return SourceLocation();
-  }
-  // The r-brace is recorded only when the namespace body finishes.
-  if (const auto *ND = dyn_cast<NamespaceDecl>(D))
-    return ND->getRBraceLoc();
-  // Unhandled kinds fall back to scope-lifetime bounding (see above).
-  return SourceLocation();
-}
-
-SemaProfiles::ProfileSuppressScope::ProfileSuppressScope(
-    Sema &S, const Decl *D, bool WalkLexicalParents)
-    : S(S) {
-  if (!S.getLangOpts().Profiles || !D)
-    return;
-  // Each entry's dominion is its own owner's construct range, so the range is
-  // computed per owning declaration as the shared walk surfaces it.
-  profiles::forEachSuppression(
-      D, WalkLexicalParents,
-      [&](const Decl &Owner, const ProfilesSuppressAttr &A) {
-        SourceLocation Begin = Owner.getBeginLoc();
-        if (Begin.isInvalid())
-          Begin = Owner.getLocation();
-        push(A.getProfileName(), A.getRule(), Begin,
-             getCompletedConstructEnd(&Owner));
-        return false;
-      });
-}
-
-SemaProfiles::ProfileSuppressScope::ProfileSuppressScope(
-    Sema &S, ArrayRef<const Attr *> Attrs, SourceLocation Begin,
-    SourceLocation End)
-    : S(S) {
-  if (!S.getLangOpts().Profiles)
-    return;
-  for (const auto *A : Attrs)
-    if (const auto *PSA = dyn_cast<ProfilesSuppressAttr>(A))
-      push(PSA->getProfileName(), PSA->getRule(), Begin, End);
-}
-
-SemaProfiles::ProfileSuppressScope::~ProfileSuppressScope() {
-  assert(S.Profiles().ProfileSuppressStack.size() >= Count);
-  S.Profiles().ProfileSuppressStack.pop_back_n(Count);
 }
 
 namespace {
@@ -506,8 +381,7 @@ template <class Node> struct FinalizationProfile {
 
 void runTestClassFinalCallback(Sema &S, CXXRecordDecl *RD) {
   if (!S.Profiles().shouldEmitProfileViolation(
-          diag::err_profile_class_final_test, "test::class_final",
-          /*Rule=*/"", RD->getLocation(), RD))
+          diag::err_profile_class_final_test, RD->getLocation(), RD))
     return;
   S.Diag(RD->getLocation(), diag::err_profile_class_final_test)
       << "test::class_final" << RD;
@@ -515,8 +389,7 @@ void runTestClassFinalCallback(Sema &S, CXXRecordDecl *RD) {
 
 void runTestCtorFinalCallback(Sema &S, CXXConstructorDecl *Ctor) {
   if (!S.Profiles().shouldEmitProfileViolation(
-          diag::err_profile_ctor_final_test, "test::ctor_final", /*Rule=*/"",
-          Ctor->getLocation(), Ctor))
+          diag::err_profile_ctor_final_test, Ctor->getLocation(), Ctor))
     return;
   S.Diag(Ctor->getLocation(), diag::err_profile_ctor_final_test)
       << "test::ctor_final" << Ctor->getParent();
@@ -533,9 +406,8 @@ constexpr FinalizationProfile<CXXConstructorDecl>
 
 /// Run the enforced finalization-profile callbacks in \p Table for \p D; the
 /// per-node filter (dependent, lambda, delegating, ...) stays at each call
-/// site. Each callback consults shouldEmitProfileViolation with \p D, which
-/// honors [[profiles::suppress]] on \p D or a lexical parent, so the
-/// dispatcher needs no suppress scope of its own.
+/// site. Each callback consults shouldEmitProfileViolation with \p D and its
+/// location.
 template <class Node, std::size_t N>
 void dispatchFinalizationProfiles(Sema &S, Node *D,
                                   const FinalizationProfile<Node> (&Table)[N]) {

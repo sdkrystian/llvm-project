@@ -1,9 +1,8 @@
 // Under -fdelayed-template-parsing a templated function definition is
-// re-lexed at end of TU with every scope unwound, so
-// ParseLateTemplatedFuncDef must re-establish the function's suppress scopes
-// (its own [[profiles::suppress]] attributes and, via the lexical walk, its
-// enclosing classes' and namespaces') before parsing the mem-initializers
-// and body.
+// re-lexed at end of TU with every scope unwound; its tokens still lie in the
+// dominions recorded when the definition was first lexed -- its own
+// [[profiles::suppress]] attributes' and its enclosing classes' and
+// namespaces'.
 
 // RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-test-profiles -std=c++23 -fdelayed-template-parsing %s
 // Parity: the same shapes without the flag.

@@ -882,10 +882,9 @@ auto leak_macro_fn() { return EMIT_CAST(T, &instantiation_leak_target); } // exp
 // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
 [[profiles::suppress(test::type_cast)]] int *leak_macro_use = leak_macro_fn<int>(); // expected-note {{in instantiation of function template specialization 'leak_macro_fn<int>' requested here}}
 
-// The dominion's end is bounded by the construct's recorded end location: a
-// live suppress scope does not cover a pattern first declared or defined
-// *after* the suppressed construct, even though those tokens compare after
-// the dominion's begin.
+// The dominion ends with the construct's last token: a suppression does not
+// cover a pattern first declared or defined *after* the suppressed construct,
+// even though those tokens compare after the dominion's begin.
 
 // Fwd-declared class template defined after the suppressed pattern.
 template <typename T> struct FwdLeak;

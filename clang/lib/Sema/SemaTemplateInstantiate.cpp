@@ -31,7 +31,6 @@
 #include "clang/Sema/Sema.h"
 #include "clang/Sema/SemaConcept.h"
 #include "clang/Sema/SemaInternal.h"
-#include "clang/Sema/SemaProfiles.h"
 #include "clang/Sema/Template.h"
 #include "clang/Sema/TemplateDeduction.h"
 #include "llvm/ADT/SmallVectorExtras.h"
@@ -3329,10 +3328,6 @@ bool Sema::SubstDefaultArgument(
   //   the semantic constraints are checked, at the point where the
   //   default argument expression appears.
   ContextRAII SavedContext(*this, FD);
-  // The instantiated parameter carries the pattern's suppress attributes and
-  // locations; see ProfileSuppressScope.
-  SemaProfiles::ProfileSuppressScope ProfileSuppressForInit(
-      *this, Param, /*WalkLexicalParents=*/true);
   {
     std::optional<LocalInstantiationScope> LIS;
 
@@ -3941,9 +3936,6 @@ bool Sema::InstantiateInClassInitializer(
   // Instantiate the initializer.
   ActOnStartCXXInClassMemberInitializer();
   CXXThisScopeRAII ThisScope(*this, Instantiation->getParent(), Qualifiers());
-
-  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(
-      *this, Pattern, /*WalkLexicalParents=*/true);
 
   ExprResult NewInit = SubstInitializer(OldInit, TemplateArgs,
                                         /*CXXDirectInit=*/false);

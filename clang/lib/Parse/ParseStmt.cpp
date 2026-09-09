@@ -26,7 +26,6 @@
 #include "clang/Sema/SemaObjC.h"
 #include "clang/Sema/SemaOpenACC.h"
 #include "clang/Sema/SemaOpenMP.h"
-#include "clang/Sema/SemaProfiles.h"
 #include "clang/Sema/TypoCorrection.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/ScopeExit.h"
@@ -76,7 +75,6 @@ StmtResult Parser::ParseStatementOrDeclaration(StmtVector &Stmts,
   if (getLangOpts().HLSL)
     MaybeParseMicrosoftAttributes(GNUOrMSAttrs);
 
-  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, CXX11Attrs);
   ProfileSuppressionDominion ProfileDominion(*this, CXX11Attrs,
                                              CXX11Attrs.Range.getBegin());
 

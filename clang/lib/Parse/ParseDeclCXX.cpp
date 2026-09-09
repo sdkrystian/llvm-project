@@ -30,7 +30,6 @@
 #include "clang/Sema/Scope.h"
 #include "clang/Sema/SemaCodeCompletion.h"
 #include "clang/Sema/SemaHLSL.h"
-#include "clang/Sema/SemaProfiles.h"
 #include "llvm/Support/TimeProfiler.h"
 #include <optional>
 
@@ -208,7 +207,6 @@ Parser::DeclGroupPtrTy Parser::ParseNamespace(DeclaratorContext Context,
       getCurScope(), InlineLoc, NamespaceLoc, IdentLoc, Ident,
       T.getOpenLocation(), attrs, ImplicitUsingDirectiveDecl, false);
 
-  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, NamespcDecl);
   ProfileSuppressionDominion ProfileDominion(*this, NamespcDecl,
                                              SourceLocation());
 
@@ -261,7 +259,6 @@ void Parser::ParseInnerNamespace(const InnerNamespaceInfoList &InnerNSs,
   assert(!ImplicitUsingDirectiveDecl &&
          "nested namespace definition cannot define anonymous namespace");
 
-  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, NamespcDecl);
   ProfileSuppressionDominion ProfileDominion(*this, NamespcDecl,
                                              SourceLocation());
 
@@ -2832,9 +2829,6 @@ Parser::DeclGroupPtrTy Parser::ParseCXXClassMemberDeclaration(
        TemplateInfo.Kind == ParsedTemplateKind::ExplicitSpecialization);
   SuppressAccessChecks diagsFromTag(*this, IsTemplateSpecOrInst);
 
-  // The member declaration's prefix-attribute suppress scope (see
-  // ProfileSuppressScope).
-  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, DeclAttrs);
   ProfileSuppressionDominion ProfileDominion(*this, DeclAttrs,
                                              DeclAttrs.Range.getBegin());
 
@@ -3307,10 +3301,6 @@ ExprResult Parser::ParseCXXMemberInitializer(Decl *D, bool IsFunction,
           : Sema::ExpressionEvaluationContext::PotentiallyEvaluated,
       D);
 
-  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(
-      Actions, D,
-      /*WalkLexicalParents=*/true);
-
   // CWG2760
   // Default member initializers used to initialize a base or member subobject
   // [...] are considered to be part of the function body
@@ -3698,7 +3688,6 @@ void Parser::ParseCXXMemberSpecification(SourceLocation RecordLoc,
                                             IsFinalSpelledSealed, IsAbstract,
                                             T.getOpenLocation());
 
-  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, TagDecl);
   ProfileSuppressionDominion ProfileDominion(*this, TagDecl, SourceLocation());
 
   // C++ 11p3: Members of a class defined with the keyword class are private

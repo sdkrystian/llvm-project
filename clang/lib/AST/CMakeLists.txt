@@ -111,7 +111,6 @@ add_clang_library(clangAST
   OSLog.cpp
   ParentMap.cpp
   PrintfFormatString.cpp
-  Profiles.cpp
   QualTypeNames.cpp
   Randstruct.cpp
   RawCommentList.cpp

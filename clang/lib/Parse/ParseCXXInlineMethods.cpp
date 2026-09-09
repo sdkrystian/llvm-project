@@ -17,7 +17,6 @@
 #include "clang/Sema/DeclSpec.h"
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
 #include "clang/Sema/Scope.h"
-#include "clang/Sema/SemaProfiles.h"
 #include "llvm/ADT/ScopeExit.h"
 
 using namespace clang;
@@ -93,6 +92,11 @@ NamedDecl *Parser::ParseCXXInlineMethodDef(
     HandleMemberFunctionDeclDelays(D, FnD);
 
   D.complete(FnD);
+
+  // A [[profiles::suppress]] on the definition's declarator-id covers the
+  // rest of the definition, token-cached here.
+  ProfileSuppressionDominion ProfileDominion(
+      *this, FnD ? FnD->getAsFunction() : nullptr, Tok.getLocation());
 
   if (TryConsumeToken(tok::equal)) {
     if (!FnD) {
@@ -378,9 +382,6 @@ void Parser::ParseLexedMethodDeclaration(LateParsedMethodDeclaration &LM) {
   // Start the delayed C++ method declaration
   Actions.ActOnStartDelayedCXXMethodDeclaration(getCurScope(), LM.Method);
 
-  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(
-      Actions, LM.Method->getAsFunction(), /*WalkLexicalParents=*/true);
-
   // Introduce the parameters into scope and parse their default
   // arguments.
   InFunctionTemplateScope.Scopes.Enter(Scope::FunctionPrototypeScope |
@@ -408,10 +409,6 @@ void Parser::ParseLexedMethodDeclaration(LateParsedMethodDeclaration &LM) {
     std::unique_ptr<CachedTokens> Toks = std::move(LM.DefaultArgs[I].Toks);
     if (Toks) {
       ParenBraceBracketBalancer BalancerRAIIObj(*this);
-      // The parameter's suppress attributes cover its default argument;
-      // see ProfileSuppressScope.
-      SemaProfiles::ProfileSuppressScope ProfileSuppressForInit(Actions, Param);
-
       // Mark the end of the default argument so that we know when to stop when
       // we parse it later on.
       Token LastDefaultArgToken = Toks->back();
@@ -617,9 +614,6 @@ void Parser::ParseLexedMethodDef(LexedMethod &LM) {
 
   Actions.ActOnStartOfFunctionDef(getCurScope(), LM.D);
 
-  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(
-      Actions, LM.D->getAsFunction(), /*WalkLexicalParents=*/true);
-
   llvm::scope_exit _([&]() {
     while (Tok.isNot(tok::eof))
       ConsumeAnyToken();
@@ -682,13 +676,6 @@ void Parser::ParseLexedMemberInitializers(ParsingClass &Class) {
 void Parser::ParseLexedMemberInitializer(LateParsedMemberInitializer &MI) {
   if (!MI.Field || MI.Field->isInvalidDecl())
     return;
-
-  // A member declaration's dominion includes its initializer tokens (P3589R2
-  // §2.4p3). ParseCXXMemberInitializer pushes its own scope around the parse,
-  // but checks run from ActOnFinishCXXInClassMemberInitializer fire after
-  // that scope is gone, so cover the whole late-parse here.
-  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(
-      Actions, MI.Field, /*WalkLexicalParents=*/true);
 
   ParenBraceBracketBalancer BalancerRAIIObj(*this);
 

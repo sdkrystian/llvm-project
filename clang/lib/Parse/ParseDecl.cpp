@@ -31,7 +31,6 @@
 #include "clang/Sema/SemaCodeCompletion.h"
 #include "clang/Sema/SemaObjC.h"
 #include "clang/Sema/SemaOpenMP.h"
-#include "clang/Sema/SemaProfiles.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/StringSwitch.h"
@@ -1968,11 +1967,8 @@ Parser::DeclGroupPtrTy Parser::ParseSimpleDeclaration(
   ParsingDeclSpec DS(*this);
   DS.takeAttributesAppendingingFrom(DeclSpecAttrs);
 
-  // The declaration's prefix-attribute suppress scope (see
-  // ProfileSuppressScope). At block scope the statement guard has already
-  // pushed the same attributes; duplicate entries are harmless, since any
-  // matching entry suppresses.
-  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, DeclAttrs);
+  // At block scope the statement's guard already covers these attributes, and
+  // this one records nothing.
   ProfileSuppressionDominion ProfileDominion(*this, DeclAttrs,
                                              DeclAttrs.Range.getBegin());
 
@@ -2621,7 +2617,6 @@ Decl *Parser::ParseDeclarationAfterDeclaratorAndAttributes(
   SemaCUDA::CUDATargetContextRAII X(Actions.CUDA(),
                                     SemaCUDA::CTCK_InitGlobalVar, ThisDecl);
 
-  SemaProfiles::ProfileSuppressScope ProfileSuppressForInit(Actions, ThisDecl);
   ProfileSuppressionDominion ProfileDominionForInit(*this, ThisDecl,
                                                     Tok.getLocation());
 
@@ -5488,9 +5483,6 @@ void Parser::ParseEnumBody(SourceLocation StartLoc, Decl *EnumDecl,
   BalancedDelimiterTracker T(*this, tok::l_brace);
   T.consumeOpen();
 
-  // The enum-head suppress scope; the body is mid-parse, so the guard's
-  // lifetime bounds the dominion (see ProfileSuppressScope).
-  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, EnumDecl);
   ProfileSuppressionDominion ProfileDominion(*this, EnumDecl, SourceLocation());
 
   // C does not allow an empty enumerator-list, C++ does [dcl.enum].
@@ -5540,10 +5532,8 @@ void Parser::ParseEnumBody(SourceLocation StartLoc, Decl *EnumDecl,
     EnterExpressionEvaluationContext ConstantEvaluated(
         Actions, Sema::ExpressionEvaluationContext::ConstantEvaluated);
     if (TryConsumeToken(tok::equal, EqualLoc)) {
-      // The enumerator's own suppress scope: its EnumConstantDecl does not
-      // exist until after the initializer, so the guard is built from the
-      // prefix attributes (see ProfileSuppressScope).
-      SemaProfiles::ProfileSuppressScope ProfileSuppressForInit(Actions, attrs);
+      // The enumerator's EnumConstantDecl does not exist until after the
+      // initializer, so its dominion is recorded from the parsed attributes.
       ProfileSuppressionDominion ProfileDominionForInit(*this, attrs,
                                                         attrs.Range.getBegin());
       AssignedVal = ParseConstantExpressionInExprEvalContext();
@@ -6992,11 +6982,9 @@ void Parser::ParseDirectDeclarator(Declarator &D) {
   if (D.hasName() && !D.getNumTypeObjects())
     MaybeParseCXX11Attributes(D);
 
-  // Declarator-id suppress attributes cover the rest of the declarator, the
-  // parameter clause and its default arguments included; see
-  // ProfileSuppressScope.
-  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions,
-                                                          D.getAttributes());
+  // Declarator-id suppress attributes cover the declarator from its
+  // declarator-id on, the parameter clause and its default arguments
+  // included; see ProfileSuppressionDominion.
   ProfileSuppressionDominion ProfileDominion(
       *this, D.getAttributes(),
       D.getIdentifierLoc().isValid() ? D.getIdentifierLoc()
@@ -7805,10 +7793,8 @@ void Parser::ParseParameterDeclarationClause(
       if (Tok.is(tok::equal)) {
         SourceLocation EqualLoc = Tok.getLocation();
 
-        // The parameter's suppress attributes cover its default argument;
-        // see ProfileSuppressScope.
-        SemaProfiles::ProfileSuppressScope ProfileSuppressForInit(Actions,
-                                                                  Param);
+        // The parameter's suppress attributes cover its default argument,
+        // token-cached or not.
         ProfileSuppressionDominion ProfileDominionForInit(*this, Param,
                                                           Tok.getLocation());
 

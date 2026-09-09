@@ -8,8 +8,8 @@
 /// \file
 /// Shared value types and helpers of the C++ profiles framework (P3589R2):
 /// profile arguments and their canonical spelling, enforced-profile records,
-/// the suppression-matching rule, the diagnostic-group naming rule, and the
-/// profile-name-convention policies.
+/// the diagnostic-group naming rule, and the profile-name-convention
+/// policies.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -60,31 +60,6 @@ struct EnforcedProfile {
 struct ProfileEnforcement : EnforcedProfile {
   SourceLocation EnforceLoc;
 };
-
-/// One live [[profiles::suppress]] entry: the suppressed profile, the rule it
-/// names (empty for the whole profile), and the dominion of the construct it
-/// appertains to (P3589R2 [decl.attr.suppress]p3). An invalid end (or range)
-/// leaves the dominion bounded by the owning scope's lifetime; see
-/// ProfilesFrameworkInternals.rst, "Suppression Dominion Mechanics". The
-/// element type of Sema's parse-time suppress stack and CodeGen's
-/// statement-suppression stack.
-struct SuppressionEntry {
-  llvm::StringRef Profile;
-  llvm::StringRef Rule;
-  SourceRange Dominion;
-};
-
-/// True if a [[profiles::suppress]] entry naming \p EntryProfile /
-/// \p EntryRule suppresses a violation of \p Rule of \p Profile: the profile
-/// names must agree, and the entry either names the violated rule or names no
-/// rule at all (suppressing the whole profile). The one matching rule shared
-/// by every consumer of suppression state -- Sema's parse-time suppress stack
-/// and the post-parse AST walks (clang/AST/Profiles.h).
-inline bool suppressionMatches(llvm::StringRef EntryProfile,
-                               llvm::StringRef EntryRule,
-                               llvm::StringRef Profile, llvm::StringRef Rule) {
-  return EntryProfile == Profile && (EntryRule.empty() || EntryRule == Rule);
-}
 
 /// True if \p Name spells a profile-name (P3589R2 [decl.attr.grammar]:
 /// identifiers joined by "::"), the form -fprofiles-enforce= accepts.

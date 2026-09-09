@@ -25,7 +25,6 @@
 #include "clang/Sema/ParsedTemplate.h"
 #include "clang/Sema/Scope.h"
 #include "clang/Sema/SemaCodeCompletion.h"
-#include "clang/Sema/SemaProfiles.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <numeric>
@@ -1476,8 +1475,6 @@ ExprResult Parser::ParseLambdaExpressionAfterIntroducer(
 
   StmtResult Stmt;
   {
-    SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(
-        Actions, Actions.getCurLambda()->CallOperator);
     ProfileSuppressionDominion ProfileDominion(
         *this, Actions.getCurLambda()->CallOperator, Tok.getLocation());
     Stmt = ParseCompoundStatementBody();
@@ -2065,9 +2062,7 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
     return Sema::ConditionError();
   Decl *DeclOut = Dcl.get();
 
-  // The condition variable's suppress attributes cover its initializer; see
-  // ProfileSuppressScope.
-  SemaProfiles::ProfileSuppressScope ProfileSuppressForInit(Actions, DeclOut);
+  // The condition variable's suppress attributes cover its initializer.
   ProfileSuppressionDominion ProfileDominionForInit(*this, DeclOut,
                                                     Tok.getLocation());
 

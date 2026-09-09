@@ -1,10 +1,8 @@
 // A declaration's prefix [[profiles::suppress]] dominion is the whole
-// declaration's token range (P3589R2 s2.4p3), including a class or enum
-// defined in its decl-specifier-seq. The scope is pushed by ParseDeclGroup's
-// callers before the decl-specifier-seq is parsed, so parse-time rules firing
-// during the member-specification parse are covered, as are a file-scope
-// class's late-parsed NSDMIs and method bodies (they parse inside
-// ParseCXXMemberSpecification, within the hoisted scope's lifetime).
+// declaration's token range (P3589R2 [decl.attr.suppress]p3), including a
+// class or enum defined in its decl-specifier-seq: parse-time rules firing
+// during the member-specification parse are covered, as are late-parsed
+// NSDMIs and method bodies, whenever they are parsed.
 
 // RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-test-profiles -std=c++23 -Wno-uninitialized %s
 // RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -Wno-uninitialized %s

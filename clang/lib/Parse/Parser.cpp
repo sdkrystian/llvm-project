@@ -26,7 +26,6 @@
 #include "clang/Sema/ParsedTemplate.h"
 #include "clang/Sema/Scope.h"
 #include "clang/Sema/SemaCodeCompletion.h"
-#include "clang/Sema/SemaProfiles.h"
 #include "llvm/ADT/STLForwardCompat.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/TimeProfiler.h"
@@ -1059,9 +1058,6 @@ Parser::DeclGroupPtrTy Parser::ParseDeclOrFunctionDefInternal(
   ParsedTemplateInfo TemplateInfo;
   MaybeParseMicrosoftAttributes(DS.getAttributes());
 
-  // The declaration's prefix-attribute suppress scope (see
-  // ProfileSuppressScope).
-  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, Attrs);
   ProfileSuppressionDominion ProfileDominion(*this, Attrs,
                                              Attrs.Range.getBegin());
 
@@ -1259,6 +1255,11 @@ Decl *Parser::ParseFunctionDefinition(ParsingDeclarator &D,
     D.complete(DP);
     D.getMutableDeclSpec().abort();
 
+    // A [[profiles::suppress]] on the definition's declarator-id covers the
+    // rest of the definition, token-cached here.
+    ProfileSuppressionDominion ProfileDominion(
+        *this, DP ? DP->getAsFunction() : nullptr, Tok.getLocation());
+
     if (SkipFunctionBodies && (!DP || Actions.canSkipFunctionBody(DP)) &&
         trySkippingFunctionBody()) {
       BodyScope.Exit();
@@ -1377,11 +1378,7 @@ Decl *Parser::ParseFunctionDefinition(ParsingDeclarator &D,
   D.getMutableDeclSpec().abort();
 
   // A [[profiles::suppress]] on the definition's declarator-id covers the
-  // whole definition, mem-initializers and body included. No lexical-parent
-  // walk: this parse is in place, so any enclosing suppress scopes are
-  // already on the stack.
-  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(
-      Actions, Res ? Res->getAsFunction() : nullptr);
+  // rest of the definition, mem-initializers and body included.
   ProfileSuppressionDominion ProfileDominion(
       *this, Res ? Res->getAsFunction() : nullptr, Tok.getLocation());
 

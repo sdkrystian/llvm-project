@@ -20,7 +20,6 @@
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
 #include "clang/Sema/ParsedTemplate.h"
 #include "clang/Sema/Scope.h"
-#include "clang/Sema/SemaProfiles.h"
 using namespace clang;
 
 unsigned Parser::ReenterTemplateScopes(MultiParseScope &S, Decl *D) {
@@ -199,9 +198,6 @@ Parser::DeclGroupPtrTy Parser::ParseDeclarationAfterTemplate(
   DS.SetRangeEnd(DeclSpecAttrs.Range.getEnd());
   DS.takeAttributesAppendingingFrom(DeclSpecAttrs);
 
-  // The declaration's prefix-attribute suppress scope (see
-  // ProfileSuppressScope).
-  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, DeclAttrs);
   ProfileSuppressionDominion ProfileDominion(*this, DeclAttrs,
                                              DeclAttrs.Range.getBegin());
 
@@ -1506,13 +1502,6 @@ void Parser::ParseLateTemplatedFuncDef(LateParsedTemplate &LPT) {
   Sema::ContextRAII FunctionSavedContext(Actions, FunD->getLexicalParent());
 
   Actions.ActOnStartOfFunctionDef(getCurScope(), FunD);
-
-  // Re-establish the suppress scopes for the function's own
-  // [[profiles::suppress]] attributes and (WalkLexicalParents) its enclosing
-  // classes' and namespaces' -- everything has unwound at end of TU and
-  // ReenterTemplateScopes restores no suppress state.
-  SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(
-      Actions, FunD, /*WalkLexicalParents=*/true);
 
   if (Tok.is(tok::kw_try)) {
     ParseFunctionTryBlock(LPT.D, FnScope);

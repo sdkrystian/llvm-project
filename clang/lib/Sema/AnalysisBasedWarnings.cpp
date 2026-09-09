@@ -1696,7 +1696,6 @@ namespace {
 /// are optional (see ProfilesFrameworkInternals.rst, "Pattern 2").
 struct CFGProfileEntry {
   StringRef Name;
-  StringRef Rule;
   /// The uninitialized-read diagnostic; 0 opts the row out of the
   /// uninitialized-variables reporter, so it rides the analysis for its hooks
   /// alone.
@@ -1744,15 +1743,15 @@ static void runTestCFGHooksPass(Sema &S, const Decl *, AnalysisDeclContext &AC,
       if (std::optional<CFGStmt> CS = E.getAs<CFGStmt>())
         if (const auto *LE = dyn_cast<LambdaExpr>(CS->getStmt()))
           if (S.Profiles().shouldEmitProfileViolation(
-                  diag::err_profile_cfg_hooks_test, Entry.Name, "lambda",
-                  LE->getBeginLoc(), /*D=*/nullptr, LE, &AC))
+                  diag::err_profile_cfg_hooks_test, LE->getBeginLoc(),
+                  /*D=*/nullptr, /*PostParse=*/true))
             S.Diag(LE->getBeginLoc(), diag::err_profile_cfg_hooks_test)
                 << Entry.Name;
 }
 
 constexpr CFGProfileEntry CFGProfiles[] = {
-    {"test::uninit_read", /*Rule=*/"", diag::err_profile_uninit_read},
-    {"test::cfg_hooks", /*Rule=*/"", diag::err_profile_cfg_hooks_uninit_read,
+    {"test::uninit_read", diag::err_profile_uninit_read},
+    {"test::cfg_hooks", diag::err_profile_cfg_hooks_uninit_read,
      &isTestCFGHooksExemptVar, &configureTestCFGHooksCFG, &runTestCFGHooksPass},
 };
 
@@ -1777,9 +1776,9 @@ tryDiagnoseProfileUninitRead(Sema &S, AnalysisDeclContext &AC,
   if (hasSelfInit && vd->getInit()) {
     const Expr *Init = vd->getInit()->IgnoreParenCasts();
     for (const CFGProfileEntry *E : Rows) {
-      if (!S.Profiles().shouldEmitProfileViolation(E->DiagID, E->Name, E->Rule,
-                                                   Init->getBeginLoc(),
-                                                   /*D=*/nullptr, Init, &AC))
+      if (!S.Profiles().shouldEmitProfileViolation(
+              E->DiagID, Init->getBeginLoc(), /*D=*/nullptr,
+              /*PostParse=*/true))
         continue;
       S.Diag(Init->getBeginLoc(), E->DiagID) << E->Name << vd->getDeclName();
       S.Diag(vd->getLocation(), diag::note_var_declared_here)
@@ -1798,8 +1797,8 @@ tryDiagnoseProfileUninitRead(Sema &S, AnalysisDeclContext &AC,
       continue;
     for (const CFGProfileEntry *E : Rows) {
       if (!S.Profiles().shouldEmitProfileViolation(
-              E->DiagID, E->Name, E->Rule, U.getUser()->getBeginLoc(),
-              /*D=*/nullptr, U.getUser(), &AC))
+              E->DiagID, U.getUser()->getBeginLoc(), /*D=*/nullptr,
+              /*PostParse=*/true))
         continue;
       S.Diag(U.getUser()->getBeginLoc(), E->DiagID)
           << E->Name << vd->getDeclName();

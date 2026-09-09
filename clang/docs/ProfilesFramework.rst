@@ -322,9 +322,8 @@ Behavior of a runtime check:
   suppression around a use site does not silence checks in a default member
   initializer or default argument emitted there -- those belong to the
   member's or parameter's construct, so suppress on the member or parameter
-  instead.  A small number of known over-checking gaps (a check that
-  suppression fails to remove, never a missing check) are listed in
-  :doc:`ProfilesFrameworkInternals`.
+  instead.  The corners where a suppression's recorded dominion departs from
+  its construct's tokens are listed in :doc:`ProfilesFrameworkInternals`.
 - **System-header exemption.**  As for compile-time rules, code originating
   in a system header gets no checks by default (see `System Headers`_).
 - **Sanitizer independence.**  The checks are emitted regardless of

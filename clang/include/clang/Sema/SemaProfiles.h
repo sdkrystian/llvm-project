@@ -7,7 +7,8 @@
 //===----------------------------------------------------------------------===//
 /// \file
 /// This file declares semantic analysis for the C++ profiles framework
-/// (P3589R2).
+/// (P3589R2): enforcement and suppression recording, the violation gate, and
+/// the class- and constructor-finalization dispatch.
 /// See clang/docs/ProfilesFrameworkInternals.rst for the design and
 /// clang/docs/ProfilesFramework.rst for the user-facing documentation.
 ///
@@ -27,7 +28,6 @@
 
 namespace clang {
 
-class AnalysisDeclContext;
 class Module;
 class ParsedAttr;
 class ParsedAttributesView;
@@ -43,13 +43,6 @@ public:
   /// the PCH's declarations; ASTWriter ORs it forward so chained PCHs
   /// propagate the bit.
   bool TUPrecededByNonEmptyDecl = false;
-
-  /// The live parse-time suppress entries, innermost last; pushed and popped
-  /// by ProfileSuppressScope guards. An entry's dominion begins at its
-  /// construct (the declaration or statement, not the attribute) and ends at
-  /// the construct's end when that was known at push time, invalid otherwise
-  /// (exact mid-parse; the guard's lifetime bounds it).
-  SmallVector<profiles::SuppressionEntry, 4> ProfileSuppressStack;
 
   /// Thin wrapper over ASTContext::isProfileEnforced (the enforcement state
   /// lives on the ASTContext).
@@ -89,30 +82,21 @@ public:
   /// returns null if the attribute carries no profile name (parse error).
   ProfilesSuppressAttr *makeProfilesSuppressAttr(const ParsedAttr &AL);
 
-  /// Create an implicit ProfilesSuppressAttr carrying just a profile and rule
-  /// name (no justification or arguments), for propagating an active
-  /// suppression onto a declaration.
-  ProfilesSuppressAttr *makeImplicitProfilesSuppressAttr(StringRef ProfileName,
-                                                         StringRef RuleName);
-
-  /// True if a violation of \p RuleName of \p ProfileName at \p Loc,
-  /// diagnosed by \p DiagID, is to be diagnosed: the shared ladder
-  /// (profiles::shouldEmitProfileViolation -- the rule enforced at \p Loc,
-  /// not system-header-exempt, not suppressed) plus the parse-time rungs.
-  /// Suppression is looked up on the live parse-time
-  /// stack, on \p D and its lexical parents, and -- for a post-parse (CFG)
-  /// site -- upward from \p UseStmt through \p AC's parent map and then from
-  /// the analyzed declaration. A templated \p D never fires (the rule fires
-  /// on the instantiation; see ProfilesFrameworkInternals.rst, "Pattern 1"),
-  /// and a parse-time site (\p AC null) in an unevaluated or discarded
-  /// context never fires.
-  bool shouldEmitProfileViolation(unsigned DiagID, StringRef ProfileName,
-                                  StringRef RuleName, SourceLocation Loc,
+  /// True if a violation at \p Loc diagnosed by \p DiagID is to be
+  /// diagnosed: the rule is enforced and not suppressed at \p Loc and \p Loc
+  /// is not system-header-exempt (ASTContext::isProfileRuleActiveAt), plus
+  /// the parse-time rungs -- a templated \p D never fires (the rule fires on
+  /// the instantiation; see ProfilesFrameworkInternals.rst, "Pattern 1"), nor
+  /// does a site in an unevaluated or discarded context. A \p PostParse
+  /// site (a CFG analysis, which has no evaluation context of its own) skips
+  /// the context rungs.
+  bool shouldEmitProfileViolation(unsigned DiagID, SourceLocation Loc,
                                   const Decl *D = nullptr,
-                                  const Stmt *UseStmt = nullptr,
-                                  AnalysisDeclContext *AC = nullptr);
-  /// Emit \p DiagID at \p Loc if shouldEmitProfileViolation passes; returns
-  /// true if the diagnostic was emitted.
+                                  bool PostParse = false);
+  /// Emit \p DiagID -- the diagnostic of \p RuleName of \p ProfileName,
+  /// which names the rule for the reader; the rule's identity is the
+  /// diagnostic's group -- at \p Loc if shouldEmitProfileViolation passes;
+  /// returns true if the diagnostic was emitted.
   bool checkProfileViolation(StringRef ProfileName, StringRef RuleName,
                              SourceLocation Loc, unsigned DiagID);
 
@@ -132,8 +116,9 @@ public:
   /// ProfilesFrameworkInternals.rst, "Enforcement and Suppression State".
   void beginSuppression(const ParsedAttributesView &Attrs, SourceLocation Begin,
                         SuppressionRecord &Record);
-  /// The same for the ProfilesSuppressAttrs attached to \p D; an invalid
-  /// \p Begin starts the dominion at the attributes themselves.
+  /// The same for the ProfilesSuppressAttrs attached to \p D (a template's
+  /// templated declaration); an invalid \p Begin starts the dominion at the
+  /// attributes themselves.
   void beginSuppression(const Decl *D, SourceLocation Begin,
                         SuppressionRecord &Record);
   /// Record that \p Record's dominion ends at \p End: the mappings its
@@ -169,45 +154,6 @@ public:
   /// constructors are filtered out.
   void
   checkProfileViolationsAtConstructorFinalization(CXXConstructorDecl *Ctor);
-
-  /// RAII guard pushing entries onto the parse-time suppress stack for a
-  /// construct's [[profiles::suppress]] attributes, popping them when the
-  /// construct's parse (or instantiation) ends. A declaration's guard is
-  /// pushed before its decl-specifier-seq, so the dominion covers a class or
-  /// enum defined there, NSDMIs and late-parsed member bodies included
-  /// (P3589R2 §2.4p3: the whole declaration's tokens). A declarator whose
-  /// attributes are attached only once its Decl exists gets a second,
-  /// Decl-keyed guard around its initializer or default argument; the sites
-  /// are enumerated in ProfilesFrameworkInternals.rst, "Suppression Dominion
-  /// Mechanics". Every parser path that parses an initializer or body for a
-  /// construct that can carry [[profiles::suppress]] must install a guard;
-  /// clang/test/SemaCXX/safety-profile-suppress-coverage.cpp is the
-  /// per-context regression net for this contract.
-  class ProfileSuppressScope {
-    Sema &S;
-    unsigned Count = 0;
-
-    void push(StringRef ProfileName, StringRef RuleName, SourceLocation Begin,
-              SourceLocation End);
-
-  public:
-    /// Push entries for the suppress attributes among \p Attrs, the prefix
-    /// attributes of a construct about to be parsed: the dominion begins at
-    /// the attribute and no end is recorded.
-    ProfileSuppressScope(Sema &S, const ParsedAttributesView &Attrs);
-    /// Push entries for the suppress attributes attached to \p D (and, with
-    /// \p WalkLexicalParents, to its lexical parents), each bounded by its
-    /// owner's construct range.
-    ProfileSuppressScope(Sema &S, const Decl *D,
-                         bool WalkLexicalParents = false);
-    /// Push entries for the suppress attributes among \p Attrs with the
-    /// explicitly supplied dominion [\p Begin, \p End].
-    ProfileSuppressScope(Sema &S, ArrayRef<const Attr *> Attrs,
-                         SourceLocation Begin, SourceLocation End);
-    ProfileSuppressScope(const ProfileSuppressScope &) = delete;
-    ProfileSuppressScope &operator=(const ProfileSuppressScope &) = delete;
-    ~ProfileSuppressScope();
-  };
 };
 
 } // namespace clang

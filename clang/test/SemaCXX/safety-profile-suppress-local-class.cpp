@@ -1,9 +1,7 @@
-// A statement-level [[profiles::suppress]] must silence CFG-based rules
-// inside a local class's member function: the method runs its CFG passes at
-// ActOnFinishFunctionBody, mid-parse of the enclosing function, while the
-// enclosing statement's ProfileSuppressScope is still live. The post-parse
-// violation gate consults that live stack (dominion-checked) in addition to
-// the analyzed function's own AST.
+// A statement-level [[profiles::suppress]] silences CFG-based rules inside a
+// local class's member function: the method runs its CFG passes at
+// ActOnFinishFunctionBody, mid-parse of the enclosing function, and its use
+// sites lie in the statement's dominion.
 
 // RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-test-profiles -std=c++23 -Wno-uninitialized %s
 // RUN: %clang_cc1 -fsyntax-only -verify=inert -fprofiles -std=c++23 -Wno-uninitialized %s
@@ -23,8 +21,8 @@ void suppressed_stmt() {
   }
 }
 
-// An unsuppressed sibling local class still fires: the live scope's dominion
-// ended with the suppressed statement.
+// An unsuppressed sibling local class still fires: the dominion ended with
+// the suppressed statement.
 void unsuppressed_sibling() {
   // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
   [[profiles::suppress(test::uninit_read)]] {

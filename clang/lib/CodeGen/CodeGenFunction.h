@@ -25,7 +25,6 @@
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/ExprObjC.h"
 #include "clang/AST/ExprOpenMP.h"
-#include "clang/AST/Profiles.h"
 #include "clang/AST/StmtOpenACC.h"
 #include "clang/AST/StmtOpenMP.h"
 #include "clang/AST/StmtSYCL.h"
@@ -626,67 +625,10 @@ public:
   /// True if the current statement has noconvergent attribute.
   bool InNoConvergentAttributedStmt = false;
 
-  /// The [[profiles::suppress]] entries of the statements enclosing the
-  /// code being emitted, innermost last -- pushed by the AttributedStmt,
-  /// DeclStmt, and local-variable emission hooks. A DeclStmt or
-  /// local-variable entry's dominion is its owning declarator's
-  /// (profiles::declaratorDominion); an AttributedStmt entry's is invalid,
-  /// since statement scoping already bounds it. Entries at indices below
-  /// ProfileSuppressionFloor belong to an enclosing construct whose tokens do
-  /// not cover the code being emitted (emitting an NSDMI, a default argument,
-  /// or an inlined inherited constructor raises the floor; P3589R2's
-  /// suppression dominion) and are not consulted.
-  SmallVector<profiles::SuppressionEntry, 4> ProfileStmtSuppressions;
-  size_t ProfileSuppressionFloor = 0;
-
-  /// When non-null, the declaration whose lexical chain carries the
-  /// [[profiles::suppress]] entries for the code being emitted *instead of*
-  /// CurCodeDecl: the field whose NSDMI, or the parameter whose default
-  /// argument, is emitted inline in another function's body.
-  const Decl *ProfileSuppressionAnchor = nullptr;
-
-  /// The suppression sources for the code being emitted, for the shared
-  /// violation gate (profiles::shouldEmitProfileViolation): the
-  /// statement-suppression stack above the floor (an entry with a valid
-  /// dominion matches only when it contains the check site) and the lexical
-  /// declaration chain of the suppression anchor (or, absent one, of
-  /// CurCodeDecl -- null in synthesized helpers such as block copy/dispose
-  /// functions, which carry no suppressions). Built lazily at each check site
-  /// rather than seeded per-function because the current declaration can
-  /// change mid-function without a StartFunction (inlined inheriting
-  /// constructors).
-  profiles::SuppressionQuery profileSuppressionQuery() const;
-
-  /// RAII bounding the lifetime of statement-carried [[profiles::suppress]]
-  /// entries on ProfileStmtSuppressions: entries added through it are popped
-  /// on scope exit. Instantiated by every statement-emission path that can
-  /// carry the attribute -- AttributedStmt, DeclStmt, and direct
-  /// local-variable emission (condition variables of if/while/for/switch
-  /// never pass through EmitDeclStmt).
-  class ProfileSuppressionScope {
-    CodeGenFunction &CGF;
-    size_t OldSize;
-
-  public:
-    ProfileSuppressionScope(CodeGenFunction &CGF)
-        : CGF(CGF), OldSize(CGF.ProfileStmtSuppressions.size()) {}
-    ProfileSuppressionScope(const ProfileSuppressionScope &) = delete;
-    ProfileSuppressionScope &
-    operator=(const ProfileSuppressionScope &) = delete;
-    /// Push the entries the statement node \p S itself carries: an
-    /// AttributedStmt's attributes, or those of a DeclStmt's declarations.
-    void addFromStmt(const Stmt *S);
-    /// Push the entries declared directly on \p D (a local variable emitted
-    /// without an enclosing DeclStmt).
-    void addFromDecl(const Decl *D);
-    ~ProfileSuppressionScope() {
-      CGF.ProfileStmtSuppressions.truncate(OldSize);
-    }
-  };
-
   /// Emit the runtime check of a pattern-5 profile rule when it is active --
-  /// \p Profile enforced, \p Loc not in an exempt system header, \p Rule not
-  /// suppressed for the code being emitted -- as a conditional branch to a
+  /// \p Rule of \p Profile enforced and not suppressed at \p Loc, which is
+  /// not in an exempt system header (ASTContext::isProfileRuleActiveAt on
+  /// \p TrapDiagID) -- as a conditional branch to a
   /// trap (SanitizerHandler::ProfileViolation) taken when the value
   /// \p BuildPassed returns is false. \p BuildPassed is invoked only when a
   /// check is actually emitted, so an inactive site builds no IR. The trap's
@@ -1902,14 +1844,7 @@ public:
     CXXDefaultInitExprScope(CodeGenFunction &CGF, const CXXDefaultInitExpr *E)
         : CGF(CGF), OldCXXThisValue(CGF.CXXThisValue),
           OldCXXThisAlignment(CGF.CXXThisAlignment),
-          SourceLocScope(E, CGF.CurSourceLocExprScope),
-          // The NSDMI's tokens belong to the field's construct, not to the
-          // constructor whose emission reached it: hide the constructor's
-          // statement suppressions and anchor the suppression chain walk at
-          // the field itself.
-          ProfileFloor(CGF.ProfileSuppressionFloor,
-                       CGF.ProfileStmtSuppressions.size()),
-          ProfileAnchor(CGF.ProfileSuppressionAnchor, E->getField()) {
+          SourceLocScope(E, CGF.CurSourceLocExprScope) {
       CGF.CXXThisValue = CGF.CXXDefaultInitExprThis.getBasePointer();
       CGF.CXXThisAlignment = CGF.CXXDefaultInitExprThis.getAlignment();
     }
@@ -1923,24 +1858,11 @@ public:
     llvm::Value *OldCXXThisValue;
     CharUnits OldCXXThisAlignment;
     SourceLocExprScopeGuard SourceLocScope;
-    SaveAndRestore<size_t> ProfileFloor;
-    SaveAndRestore<const Decl *> ProfileAnchor;
   };
 
   struct CXXDefaultArgExprScope : SourceLocExprScopeGuard {
     CXXDefaultArgExprScope(CodeGenFunction &CGF, const CXXDefaultArgExpr *E)
-        : SourceLocExprScopeGuard(E, CGF.CurSourceLocExprScope),
-          // The default argument's tokens belong to the parameter's
-          // construct, not to the caller being emitted: hide the caller's
-          // statement suppressions and anchor the suppression chain walk at
-          // the parameter of the redeclaration that wrote the default
-          // argument, whose dominion holds those tokens.
-          ProfileFloor(CGF.ProfileSuppressionFloor,
-                       CGF.ProfileStmtSuppressions.size()),
-          ProfileAnchor(CGF.ProfileSuppressionAnchor,
-                        E->getParam()->getDefaultArgOwningParam()) {}
-    SaveAndRestore<size_t> ProfileFloor;
-    SaveAndRestore<const Decl *> ProfileAnchor;
+        : SourceLocExprScopeGuard(E, CGF.CurSourceLocExprScope) {}
   };
 
   /// The scope of an ArrayInitLoopExpr. Within this scope, the value of the
@@ -1970,13 +1892,7 @@ public:
           OldCXXThisAlignment(CGF.CXXThisAlignment),
           OldReturnValue(CGF.ReturnValue), OldFnRetTy(CGF.FnRetTy),
           OldCXXInheritedCtorInitExprArgs(
-              std::move(CGF.CXXInheritedCtorInitExprArgs)),
-          // The inherited constructor's tokens belong to its own construct,
-          // not to the constructor whose emission inlines it: hide the
-          // latter's statement suppressions. No anchor is needed -- this
-          // scope already swaps CurCodeDecl to the inherited constructor.
-          ProfileFloor(CGF.ProfileSuppressionFloor,
-                       CGF.ProfileStmtSuppressions.size()) {
+              std::move(CGF.CXXInheritedCtorInitExprArgs)) {
       CGF.CurGD = GD;
       CGF.CurFuncDecl = CGF.CurCodeDecl =
           cast<CXXConstructorDecl>(GD.getDecl());
@@ -2017,7 +1933,6 @@ public:
     Address OldReturnValue;
     QualType OldFnRetTy;
     CallArgList OldCXXInheritedCtorInitExprArgs;
-    SaveAndRestore<size_t> ProfileFloor;
   };
 
   // Helper class for the OpenMP IR Builder. Allows reusability of code used for

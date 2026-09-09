@@ -229,9 +229,24 @@ int later_suppressed([[profiles::suppress(test::arith)]] int x) { return x; }
 // CHECK: call void @llvm.ubsantrap(i8
 int use_later_suppressed() { return later_suppressed(); }
 
-// An inlined inheriting constructor (variadic base constructor) raises the
-// suppression floor: the statement suppression at the use site does not
-// cover the NSDMI emitted within the inlined constructor.
+// A member function of a local class defined inside a suppressed statement
+// is covered: its tokens lie in the statement's dominion.
+// CHECK-LABEL: define {{.*}} @_Z11local_classii(
+// CHECK-NOT: llvm.ubsantrap
+// CHECK: ret i32
+// CHECK-LABEL: define internal {{.*}} @_ZZ11local_classiiEN1L1mEii(
+// CHECK-NOT: llvm.ubsantrap
+// CHECK: ret i32
+int local_class(int a, int b) {
+  [[profiles::suppress(test::arith)]] struct L {
+    int m(int x, int y) { return x / y; }
+  } l;
+  return l.m(a, b);
+}
+
+// The NSDMI emitted within an inlined inheriting constructor (variadic base
+// constructor) belongs to the member's construct, outside the dominion of
+// the statement suppression at the use site.
 struct VBase {
   VBase(...);
 };
