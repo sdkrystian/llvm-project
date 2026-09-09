@@ -1595,28 +1595,6 @@ void InitListChecker::CheckSubElementType(const InitializedEntity &Entity,
           if (Result.isInvalid())
             hadError = true;
 
-          // std::init / ref_to_uninit (P4222R2 §4.2-§4.3): in C++ a pointer
-          // field initialized by an enclosing aggregate's init list is
-          // copy-initialized here (a scalar member never reaches
-          // CheckScalarType). Scoped to an aggregate subobject -- a field, or
-          // an array / vector / complex element, which no declaration marks
-          // -- so the enclosing variable/argument/return is left to its own
-          // site. No Decl is passed: the init list can appear in a template
-          // independently of whether the aggregate is one, so the funnel
-          // defers on an instantiation-dependent source and suppression comes
-          // from the parse-time stack. (A reference field is routed to
-          // CheckReferenceType above; an array of references is ill-formed.)
-          if (!Result.isInvalid() &&
-              (Entity.getKind() == InitializedEntity::EK_Member ||
-               Entity.getKind() == InitializedEntity::EK_ArrayElement ||
-               Entity.getKind() == InitializedEntity::EK_VectorElement ||
-               Entity.getKind() == InitializedEntity::EK_ComplexElement))
-            SemaRef.Profiles().checkInitProfileBinding(
-                Entity.getKind() == InitializedEntity::EK_Member
-                    ? SemaProfiles::InitBindingKind::DataMember
-                    : SemaProfiles::InitBindingKind::AggregateElement,
-                expr->getExprLoc(), Entity.getDecl(), ElemType, expr);
-
           UpdateStructuredListElement(StructuredList, StructuredIndex,
                                       Result.getAs<Expr>());
         } else if (!Seq) {
@@ -1889,11 +1867,6 @@ void InitListChecker::CheckReferenceType(const InitializedEntity &Entity,
     return;
   }
 
-  // Capture the source element before 'expr' is overwritten by the
-  // PerformCopyInitialization result below; the ref_to_uninit recognizer needs
-  // the written source, not the bound reference.
-  const Expr *Src = expr;
-
   ExprResult Result;
   if (VerifyOnly) {
     if (SemaRef.CanPerformCopyInitialization(Entity,expr))
@@ -1913,21 +1886,6 @@ void InitListChecker::CheckReferenceType(const InitializedEntity &Entity,
   // FIXME: Why are we updating the syntactic init list?
   if (!VerifyOnly && expr)
     IList->setInit(Index, expr);
-
-  // std::init / ref_to_uninit (paper §5): a reference field bound by an
-  // enclosing aggregate's init list must be bound consistently with its
-  // marking. getParent() restricts this to a genuine aggregate subobject: a
-  // top-level reference member braced-init (a constructor member-initializer or
-  // an NSDMI) has a null parent and is checked at its own Decl-aware site, so
-  // the parent guard prevents a double diagnostic there. No Decl is passed: the
-  // init list can appear in a template independently of whether the aggregate
-  // is one, so the funnel defers on an instantiation-dependent source and
-  // suppression comes from the parse-time stack.
-  if (!VerifyOnly && !Result.isInvalid() &&
-      Entity.getKind() == InitializedEntity::EK_Member && Entity.getParent())
-    SemaRef.Profiles().checkInitProfileBinding(
-        SemaProfiles::InitBindingKind::DataMember, Src->getExprLoc(),
-        Entity.getDecl(), DeclType, Src);
 
   UpdateStructuredListElement(StructuredList, StructuredIndex, expr);
   ++Index;
@@ -6079,18 +6037,6 @@ static void TryOrBuildParenListInitialization(
           E->getExprLoc(), /*isDirectInit=*/false, E);
       if (!HandleInitializedEntity(SubEntity, SubKind, E))
         return;
-
-      // std::init / ref_to_uninit (paper §5): a pointer element initialized
-      // from a C++20 parenthesized aggregate list is an element binding,
-      // checked exactly like the braced-list hook in CheckSubElementType (see
-      // SemaProfiles::InitBindingKind). Only in the build phase, so the
-      // verify pass does not double-diagnose; the trailing value-initialized
-      // filler below has no source expression and stays unchecked
-      // (value-initialization is null, a non-source).
-      if (!VerifyOnly)
-        S.Profiles().checkInitProfileBinding(
-            SemaProfiles::InitBindingKind::AggregateElement, E->getExprLoc(),
-            /*Target=*/nullptr, AT->getElementType(), E);
     }
     //   ...and value-initialized for each k < i <= n;
     if (ArrayLength > Args.size() || Entity.isVariableLengthArrayNew()) {
@@ -6179,16 +6125,6 @@ static void TryOrBuildParenListInitialization(
             E->getExprLoc(), /*isDirectInit=*/false, E);
         if (!HandleInitializedEntity(SubEntity, SubKind, E))
           return;
-
-        // std::init / ref_to_uninit (paper §5): a pointer or reference field
-        // initialized from a C++20 parenthesized aggregate list is a member
-        // binding, checked exactly like the braced-list hooks in
-        // CheckSubElementType / CheckReferenceType. Only in the build phase,
-        // so the verify pass does not double-diagnose.
-        if (!VerifyOnly)
-          S.Profiles().checkInitProfileBinding(
-              SemaProfiles::InitBindingKind::DataMember, E->getExprLoc(), FD,
-              FD->getType(), E);
 
         // Unions should have only one initializer expression, so we bail out
         // after processing the first field. If there are more initializers then
