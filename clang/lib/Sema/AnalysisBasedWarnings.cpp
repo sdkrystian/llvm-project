@@ -2607,8 +2607,7 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
 /// reporter. The profile name and rule arrive from the std::init CFGProfiles
 /// row.
 static void reportMemberReadsBeforeInit(
-    Sema &S, AnalysisDeclContext &AC,
-    MutableArrayRef<SmallVector<const Expr *, 2>> Offending,
+    Sema &S, MutableArrayRef<SmallVector<const Expr *, 2>> Offending,
     const TrackedStorage &Storage, StringRef Name) {
   for (unsigned I = 0, N = Offending.size(); I != N; ++I) {
     if (Offending[I].empty())
@@ -2635,7 +2634,7 @@ static void reportMemberReadsBeforeInit(
 /// Emit the collected binding, destroy, read-through, and subobject-write
 /// violations in source order, each through the shared gate at its own
 /// location.
-static void reportFlowViolations(Sema &S, AnalysisDeclContext &AC,
+static void reportFlowViolations(Sema &S,
                                  MutableArrayRef<PendingViolation> Violations,
                                  StringRef Name) {
   llvm::stable_sort(
@@ -3862,8 +3861,8 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
   SmallVector<PendingViolation, 8> Violations;
   std::vector<SmallVector<const Expr *, 2>> Offending = runDefiniteAssignment(
       *cfg, InitAC, Storage, Events, Sites, DSites, ASites, Violations);
-  reportMemberReadsBeforeInit(S, InitAC, Offending, Storage, Entry.Name);
-  reportFlowViolations(S, InitAC, Violations, Entry.Name);
+  reportMemberReadsBeforeInit(S, Offending, Storage, Entry.Name);
+  reportFlowViolations(S, Violations, Entry.Name);
 }
 
 class UninitValsDiagReporter : public UninitVariablesHandler {
