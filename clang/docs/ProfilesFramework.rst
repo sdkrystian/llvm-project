@@ -562,9 +562,11 @@ by a whole-entity store, a ``[[now_init]]`` call, or ``std::construct_at``
    };
 
 A member (each base-class copy of a member separately) or variable counts as
-assigned only when every path to the read assigns it (§1.3), exception paths
-included: a call inside a ``try`` block may transfer control to the handler
-before the assignment that follows it.  A compound
+assigned only when every path to the read assigns it (§1.3); for a member,
+exception paths are included: a call inside a ``try`` block may transfer
+control to the handler before the assignment that follows it (the analysis
+of a plain local considers no exception paths, see `Limitations`_).  A
+compound
 assignment (``x += 1``) or an increment or
 decrement reads the old value first, so it is diagnosed like a read.  A
 comma or conditional lvalue reads (or assigns) whichever member the chosen
@@ -854,7 +856,7 @@ an unmarked pointer the release changes no classification -- post-release
 use stays the invalidation profile's concern -- and only a second
 ``[[now_uninit]]`` destroy of the same storage fires ``double_destroy``.  The ``delete`` and ``delete[]`` *expressions*
 perform the same release, likewise recording no destroyed state
--- with no diagnostic on the operand, matching their historical silence --
+-- with no diagnostic on the operand --
 so ``delete q;`` and ``::operator delete(q);`` agree on everything that
 follows.  Like the allocator side, trusted ``free``/``realloc`` recognition
 keys on Clang's builtin IDs.  Where those are absent (``-fno-builtin``,
@@ -1108,6 +1110,10 @@ those entries never cause a rejection.
   ``[[ref_to_uninit]]``, is the workaround -- the parameter marker keeps
   ``destroy_uninit`` from rejecting the release of a buffer that was
   never written (a release function's contract, unlike a destroy's).
+- The read analysis of a plain ``[[uninit]]`` local considers no exception
+  paths: after ``try { x = f(); } catch (...) {}`` a read of ``x`` is
+  accepted although the handler path skips the assignment.  The member
+  analyses consider them.
 - An element write through the marker (``p[3] = 0``) is accepted and never
   credited -- a gap against the paper's random-access ban ("Static
   analysis", p4222r2.md:314-316; "Guarantees", p4222r2.md:1987-1989); no
@@ -1160,8 +1166,8 @@ those entries never cause a rejection.
   is rejected as running a constructor.
 - Storage that is not flow-tracked -- a class-type or array ``[[uninit]]``
   member, a marked pointer member's pointee -- is judged by its form alone
-  at every read and write; only its destroys still consult the
-  ``[[now_init]]`` calls seen earlier in parse order.
+  at every read, write, and destroy: a ``construct_at`` into it legalizes no
+  later access, and a second ``destroy_at`` of it is not a double destroy.
 - In a template, the declaration rules, the constructor rules, and the
   flow-based rules fire per instantiation; ``uninit_read`` (through a
   marker), ``uninit_write``, and the binding rule fire at the definition

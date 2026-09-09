@@ -155,8 +155,8 @@ struct IncSuppressedStmt {
 };
 
 // A transparent reference cast denotes the same storage (paper §4.3), and the
-// pass peels exactly the casts the parse-order credit sees through: a store
-// through the cast credits the member, a read through it is detected. A value
+// pass peels exactly the casts the recognizers see through: a store through
+// the cast credits the member, a read through it is detected. A value
 // cast like (int)m is not transparent -- its operand read is the ordinary
 // lvalue-to-rvalue arm's business, unchanged.
 struct CastStoreThenRead {

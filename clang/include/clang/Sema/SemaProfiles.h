@@ -7,10 +7,10 @@
 //===----------------------------------------------------------------------===//
 /// \file
 /// This file declares semantic analysis for the C++ profiles framework
-/// (P3589R2): enforcement and suppression recording, the violation gate, and
-/// the class- and constructor-finalization dispatch; and the built-in
-/// std::init initialization profile (P4222R1.1).
-/// See clang/docs/ProfilesFrameworkInternals.rst for the design and
+/// (P3589R2) and the built-in std::init initialization profile (P4222R2):
+/// the parse-time checks, and the recognizers and tracked-storage predicates
+/// the CFG pass in AnalysisBasedWarnings.cpp shares with them. See
+/// clang/docs/ProfilesFrameworkInternals.rst for the design and
 /// clang/docs/ProfilesFramework.rst for the user-facing documentation.
 ///
 //===----------------------------------------------------------------------===//
@@ -424,10 +424,8 @@ public:
   /// pointer or glvalue (paper §4.3: a cast of a marked pointer is itself
   /// marked; a reference cast denotes the same storage). Value casts like
   /// `(int)m` are not stripped -- they produce a new value, not the same
-  /// storage. Shared by the parse-order store recorders, the
-  /// lifetime-annotated-argument resolver, and the CFG member passes in
-  /// AnalysisBasedWarnings.cpp, so recognition, crediting, and flow tracking
-  /// see through exactly the same casts.
+  /// storage. Shared with the CFG pass in AnalysisBasedWarnings.cpp, so
+  /// recognition and flow tracking see through exactly the same casts.
   static const Expr *ignoreTransparentCasts(const Expr *E);
 
   /// The construct a pointer or reference binding belongs to, selecting
@@ -493,8 +491,7 @@ public:
   /// DefaultArgument binding of a [[now_uninit]] or storage-release callee
   /// runs the destroy rules instead -- at parse time for a source with no
   /// flow-tracked leaf, in the CFG pass otherwise
-  /// (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage") -- and every
-  /// kind's tail records the callee's lifecycle effects.
+  /// (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage").
   void checkInitProfileBinding(InitBindingKind Kind, SourceLocation Loc,
                                const ValueDecl *Target, QualType T,
                                const Expr *Src, const Decl *D = nullptr);
@@ -583,14 +580,13 @@ public:
   void checkInitProfileIncDec(Expr *Operand, SourceLocation OpLoc);
 
   /// What a direct callee does to the storage bound to its parameters,
-  /// derived once per binding by the funnel (checkInitProfileBinding) from
-  /// the callee's lifetime
-  /// attributes and the allocator-callee table. Each consumer reads only
-  /// the bits its direction may rely on: binding *acceptance* (which never
-  /// diagnoses) reads the union of the destroy and release bits, credit
-  /// withdrawal (a diagnostic's firing basis) reads the trusted release bit
-  /// only, and double_destroy keys on the destroy bit only (a storage
-  /// release leaves no object to destroy again).
+  /// derived from the callee's lifetime attributes and the allocator-callee
+  /// table. Each consumer reads only the bits its direction may rely on:
+  /// binding *acceptance* (which never diagnoses) reads the union of the
+  /// destroy and release bits, the CFG pass's Kill (a diagnostic's firing
+  /// basis) reads the trusted release bit only, and double_destroy keys on
+  /// the destroy bit only (a storage release leaves no object to destroy
+  /// again).
   struct CalleeLifecycleRoles {
     /// [[now_init]]: the callee initializes the storage bound to its
     /// [[ref_to_uninit]] parameters (P4222R2 §6.2).
@@ -634,458 +630,16 @@ private:
                                const Decl *D,
                                const NamedDecl *Subject = nullptr);
 
-  /// The binding funnel's recorder tail: after the binding is judged
-  /// against the *pre-call* state, apply what the callee promises to do to
-  /// the bound storage -- withdraw first, then credit, so a callee carrying
-  /// both attributes (a reinitializer) nets to destroy-then-construct: the
-  /// storage is initialized after the call -- and, independent of the
-  /// callee's roles, record any mutable-alias escape of a marked pointer
-  /// object.
-  void recordLifecycleArguments(const CalleeLifecycleRoles &Roles,
-                                const ValueDecl *Target, QualType T,
-                                const Expr *Src);
-
-  /// std::init / [[now_init]] (P4222R2 §6.2): a [[now_init]] callee
-  /// initializes the storage bound to each of its [[ref_to_uninit]]
-  /// parameters, so the binding earns the same parse-order credit the
-  /// equivalent direct store would. The credit arm of
-  /// recordLifecycleArguments, applied when \p Target is a marked parameter
-  /// of a [[now_init]] function; recognizes the affirmatively creditable
-  /// source shapes -- &u / u (whole-entity credit on an [[uninit]] local), p
-  /// / *p / &*p (pointee credit on a marked local/parameter pointer; §6.2's
-  /// initialize2(p) example), r (pointee credit on a marked reference), and
-  /// &base.m / base.m (per-object member credit, resolveMemberStoreBase
-  /// keys) -- through the recognizers' explicit-cast pass-through. Variadic
-  /// arguments, unmarked parameters, and calls through function pointers
-  /// never earn anything (no marked ParmVarDecl target). Recorded regardless
-  /// of enforcement, suppression, or diagnosis of the binding itself (the
-  /// callee still initializes; recordInitProfileStore's rationale), but not
-  /// in never-executed contexts.
-  void recordNowInitArgument(const CalleeLifecycleRoles &Roles,
-                             const ValueDecl *Target, QualType T,
-                             const Expr *Src);
-
-  /// std::init / [[now_uninit]]: a [[now_uninit]] callee ends the lifetime
-  /// of the storage bound to each of its pointer/reference parameters
-  /// (P4222R2 §4.4's missing destroy_at recording), so the binding
-  /// *withdraws* the parse-order credit the equivalent [[now_init]] call
-  /// would have recorded: the storage classifies as uninitialized again,
-  /// re-construction becomes legal, an unmarked-target binding of the
-  /// storage is the ordinary unmarked-direction violation, and a second
-  /// destruction is the dedicated double_destroy violation (the destroyed
-  /// state a Definite withdrawal records). The withdrawal arm of
-  /// recordLifecycleArguments, applied when \p Target is a pointer/reference
-  /// parameter of a [[now_uninit]] or trusted storage-release callee -- the
-  /// parameters are unmarked (they receive initialized memory), so unlike
-  /// recordNowInitArgument no parameter marker is required; a release
-  /// withdraws like a destroy but records no destroyed state. Recognizes the
-  /// same source shapes, which are marker-keyed on the source side, so an
-  /// ordinary initialized argument withdraws nothing. Same gates as its
-  /// sibling: not enforcement- or suppression-gated (a suppressed destroy
-  /// still destroys), but never-executed contexts withdraw nothing. The
-  /// withdrawal mirrors the recording's strength rule: an unconditional
-  /// same-function destroy withdraws credit of both strengths, while a
-  /// merely-possible one (under a condition, or in another function)
-  /// withdraws only the Definite claim -- it may have destroyed the
-  /// storage, so no credit-fired diagnostic may rely on it, but the Maybe
-  /// credit survives and the lenient direction gains no new errors.
-  void recordNowUninitArgument(const CalleeLifecycleRoles &Roles,
-                               const ValueDecl *Target, QualType T,
-                               const Expr *Src);
-
 public:
-  /// The tracked storage a glvalue (or a lifetime-annotated callee's
-  /// argument) denotes: the whole [[uninit]] entity (Whole), the storage
-  /// behind a marked pointer or reference (Pointee), the [[uninit]] member
-  /// of a trackable base object (Member), a marked pointer object as a
-  /// store target -- its own reseat, a store-side-only kind the argument
-  /// side maps to None -- (Reseat), or nothing trackable (None).
-  struct LifetimeAnnotatedStorage {
-    enum class Kind { None, Whole, Pointee, Member, Reseat };
-    Kind StorageKind = Kind::None;
-    /// The credited local/parameter (Whole, Pointee, and Reseat).
-    const VarDecl *Entity = nullptr;
-    /// The member store-credit key (Member; resolveMemberStoreBase's base).
-    const Decl *Base = nullptr;
-    const FieldDecl *Field = nullptr;
-
-    static LifetimeAnnotatedStorage whole(const VarDecl *VD) {
-      return {Kind::Whole, VD, nullptr, nullptr};
-    }
-    static LifetimeAnnotatedStorage pointee(const VarDecl *VD) {
-      return {Kind::Pointee, VD, nullptr, nullptr};
-    }
-    static LifetimeAnnotatedStorage member(const Decl *Base,
-                                           const FieldDecl *F) {
-      return {Kind::Member, nullptr, Base, F};
-    }
-    static LifetimeAnnotatedStorage reseat(const VarDecl *VD) {
-      return {Kind::Reseat, VD, nullptr, nullptr};
-    }
-  };
-
-  /// Resolve the already caller-normalized glvalue \p E -- each caller
-  /// peels its own layer: the store funnel ignoreTransparentCasts, the
-  /// argument-side derivation IgnoreParenImpCasts under `&` -- to the
-  /// tracked storage it denotes: *p (Pointee), base.m (Member), u (Whole),
-  /// r (Pointee), or a marked pointer p itself (Reseat). The single shape
-  /// walk shared by recordInitProfileStore and
-  /// resolveLifetimeAnnotatedStorage; the two suppress-only corners --
-  /// marked pointer members' pointees and element accesses -- resolve None
-  /// by construction.
-  LifetimeAnnotatedStorage resolveTrackedGlvalue(const Expr *E) const;
-
-  /// The shared shape walk of recordNowInitArgument and
-  /// recordNowUninitArgument: resolve \p Src (bound as \p T) to the storage
-  /// the annotated callee initializes or destroys -- &u / u (whole-entity),
-  /// p / *p / &*p (marked-pointer pointee), r (marked-reference referent),
-  /// &base.m / base.m (per-object member) -- deriving the target glvalue
-  /// from the binding and resolving it through resolveTrackedGlvalue, with
-  /// Reseat mapped to None (the argument side never credits a reseat
-  /// target). Marker-keyed on the source side: an ordinary unmarked
-  /// argument resolves to None.
-  LifetimeAnnotatedStorage resolveLifetimeAnnotatedStorage(QualType T,
-                                                           const Expr *Src)
-      const;
-
-  /// What a lifecycle-annotated (or release-recognized) callee does to the
-  /// storage handed to it. Construct adds credit. Destroy and Release both
-  /// withdraw it, but only Destroy -- a genuine [[now_uninit]] end of the
-  /// object's lifetime -- records the destroyed state double_destroy fires
-  /// on: a storage *release* (free, realloc's pointer, operator delete, the
-  /// delete-expression) leaves no object to destroy again, and post-release
-  /// use is the invalidation profile's rule, not this one's.
-  enum class LifetimeAnnotationEffect { Construct, Destroy, Release };
-
-  /// Resolve \p Src (bound as \p T, see resolveLifetimeAnnotatedStorage)
-  /// and add (Construct) or remove (Destroy, Release) the resolved
-  /// storage's credit, at the strength the current parse position earns
-  /// toward it (currentStoreStrength; for a withdrawal, the strength rule
-  /// described at recordNowUninitArgument). A Definite Destroy also records
-  /// the storage as destroyed; a Release never does; any recorded store
-  /// retires that state.
-  void recordLifetimeAnnotatedArgument(QualType T, const Expr *Src,
-                                       LifetimeAnnotationEffect Effect);
-
-  /// True if the storage \p Src (bound as \p T) denotes -- resolved through
-  /// the same shapes as recordLifetimeAnnotatedArgument -- is in the
-  /// destroyed state: definitely destroyed by a [[now_uninit]] callee and
-  /// not stored or reinitialized since. Read-only; untrackable shapes are
-  /// never destroyed.
-  bool storageIsDestroyed(QualType T, const Expr *Src) const;
-
-  /// std::init: a delete-expression releases its operand's storage like a
-  /// storage-release callee, but the operand never passes through the
-  /// parameter-binding funnel (Sema::ActOnCXXDelete converts it with no
-  /// InitializedEntity, and a usual operator delete's void* parameter skips
-  /// the conversion entirely), so this hook -- hosted just before the
-  /// CXXDeleteExpr is built -- records the same credit withdrawal, with no
-  /// binding diagnostic of its own: `delete q` and `::operator delete(q)`
-  /// agree, and a later whole-`*q` read through the marked pointer is
-  /// diagnosed. An instantiation-dependent operand defers to the rebuilt
-  /// expression (TreeTransform re-invokes ActOnCXXDelete); never-executed
-  /// contexts withdraw nothing, as everywhere.
-  void checkInitProfileDeleteOperand(const Expr *Operand);
-
-  /// True if the current expression-evaluation context never executes at
-  /// runtime (unevaluated or discarded-statement), mirroring
-  /// shouldEmitProfileViolation's context checks: a store or a callee
-  /// initialization seen there earns no credit. The shared gate of
-  /// recordInitProfileStore and recordNowInitArgument.
-  bool inNeverExecutedContext() const;
-
-  /// How firmly a consult may rely on recorded store credit: a `Maybe`
-  /// consult only ever *suppresses* a diagnostic (the storage may well be
-  /// initialized); a `Definite` consult uses credit as a diagnostic's
-  /// firing basis. See "Parse-Order Store Credit" in
-  /// ProfilesFrameworkInternals.rst.
-  enum class InitCreditStrength { Maybe, Definite };
-
-  /// The strength a store (or lifetime-annotated call) recorded at the
-  /// current parse position earns toward the credit keyed by \p CreditKey:
-  /// Definite iff the store is unconditionally executed in the function
-  /// body that owns the credited entity. The full rule set -- the
-  /// conditional-depth, goto-flag, and same-function-pattern requirements
-  /// -- lives under "Parse-Order Store Credit" in
-  /// ProfilesFrameworkInternals.rst.
-  InitCreditStrength currentStoreStrength(const Decl *CreditKey) const;
-
-  /// True if \p VD is a local [[uninit]] variable credited by a recorded
-  /// whole-entity store of at least \p Strength; the recognizers then
-  /// classify it as initialized (which also enables the paper's
-  /// reverse-direction rule: a credited entity requires an unmarked target).
-  bool hasWholeObjectStoreCredit(const ValueDecl *VD,
-                                 InitCreditStrength Strength) const;
-
-  /// True if \p VD is a [[ref_to_uninit]] local/parameter pointer or
-  /// reference credited by a recorded store through it of at least
-  /// \p Strength; the storage behind it then classifies as initialized
-  /// (until a pointer is reseated -- references cannot be reseated, so no
-  /// *store* ever clears their credit; a [[now_uninit]] callee withdraws
-  /// either kind).
-  bool hasPointeeStoreCredit(const ValueDecl *VD,
-                             InitCreditStrength Strength) const;
-
-  /// True if the [[uninit]] member \p F of the base object identified by
-  /// \p Base (see resolveMemberStoreBase; null returns false) is credited by
-  /// a recorded whole-member store of at least \p Strength; the member then
-  /// classifies as initialized through that same base.
-  bool hasMemberStoreCredit(const Decl *Base, const FieldDecl *F,
-                            InitCreditStrength Strength) const;
-
-  /// Resolve the identity key of a member access's base object for the
-  /// per-object member store credit: the parse-time pattern of the enclosing
-  /// function declaration for a current-object access (this->m / m /
-  /// (*this).m) -- so credit recorded in one function body can never satisfy
-  /// a binding in another, while a statement an instantiation reuses
-  /// (unrebuilt) from its template or generic-lambda pattern agrees with a
-  /// rebuilt one on the key -- or the directly named local-storage,
-  /// non-reference VarDecl of a dot access (a.m). Any other base -- another
-  /// member (a.b.m; §5.4 rejects deep delayed-initialization tracking), an
-  /// arrow through an arbitrary pointer value, a reference (an alias to an
-  /// object also reachable other ways) -- is untrackable per object: null.
-  const Decl *resolveMemberStoreBase(const MemberExpr *ME) const;
-
-  /// Depth of conditionally-evaluated *expression* regions enclosing the
-  /// current parse position -- the right operand of && and ||, and the
-  /// operands after a conditional's ? and : (including the GNU x ?: y
-  /// form). These are the only conditional constructs that introduce no
-  /// parser Scope, so the scope walk of currentConditionalDepth cannot see
-  /// them; the parser bumps this counter around them instead (via
-  /// ConditionalExprRegion). Deliberately not saved and restored around a
-  /// lambda body nested inside a conditional expression
-  /// (c ? [&]{ ... }() : 0), so stores in such a body conservatively count
-  /// as conditional -- only ever losing a credit-fired diagnostic, never
-  /// adding a false positive.
-  unsigned ConditionalExprDepth = 0;
-
-  /// RAII bump of ConditionalExprDepth around a conditionally-evaluated
-  /// expression region; inert when \p Conditional is false (the same parse
-  /// site also handles unconditional operators).
-  class ConditionalExprRegion {
-    SemaProfiles *SP;
-
-  public:
-    ConditionalExprRegion(SemaProfiles &SP, bool Conditional)
-        : SP(Conditional ? &SP : nullptr) {
-      if (this->SP)
-        ++this->SP->ConditionalExprDepth;
-    }
-    ConditionalExprRegion(const ConditionalExprRegion &) = delete;
-    ConditionalExprRegion &operator=(const ConditionalExprRegion &) = delete;
-    ~ConditionalExprRegion() {
-      if (SP)
-        --SP->ConditionalExprDepth;
-    }
-  };
-
-  /// How many conditionally-executed regions enclose the current parse
-  /// position within the innermost function body: ConditionalExprDepth plus
-  /// the number of conditional parser scopes from the current scope up to --
-  /// and excluding -- the nearest function scope (or the top, if none). A
-  /// scope counts as conditional when it carries any flag beyond a plain
-  /// declaration/compound-statement block: safe by default, since a future
-  /// statement kind cannot silently become "unconditional", while plain
-  /// nested { } blocks correctly do not count. Stopping at the nearest
-  /// function scope makes a store at a lambda body's top level depth 0
-  /// *within the lambda* -- isolation from the *enclosing* function's
-  /// entities is a same-function predicate's job, not depth's. Known
-  /// conservatisms, each of which can only lose a credit-fired diagnostic
-  /// and never adds a false positive: a store in an if/while/for
-  /// *condition* or a for *init-statement* counts as conditional (the
-  /// control scope is pushed before the parens are parsed), and both
-  /// do { } while bodies and the taken branch of if constexpr count as
-  /// conditional. Parser-only: meaningless during template instantiation,
-  /// where getCurScope() does not track the instantiated function.
-  unsigned currentConditionalDepth() const;
-
-  /// Parse-order store credit: one façade owns the whole-entity/pointee
-  /// credit of local variables and the per-object whole-member credit, so
-  /// every mutation and query is a named operation on a single seam -- the
-  /// place a new kind of recorded fact (or a flow-sensitive replacement)
-  /// slots in. A clear of an absent entry leaves a harmless zero entry
-  /// behind. See "Parse-Order Store Credit" in
-  /// ProfilesFrameworkInternals.rst.
-  class InitStoreCreditMap {
-  public:
-    /// The [[uninit]] entity itself was assigned (u = e, u @= e, ++u).
-    /// Every store earns the Maybe credit; a \p Strength of Definite (an
-    /// unconditional store in the owning function, currentStoreStrength)
-    /// earns the Definite bit besides. A store at either strength retires
-    /// the destroyed state: a write to a built-in *is* its initialization,
-    /// and clearing on a conditional store only converts a would-be
-    /// double-destroy error into a missed diagnostic.
-    void markWholeStored(const VarDecl *VD, InitCreditStrength Strength) {
-      Entity[VD] |= storedBits(WholeStoredMaybe, WholeStoredDefinite, Strength);
-      Entity[VD] &= ~unsigned(WholeDestroyed);
-    }
-    /// A [[now_uninit]] or storage-release callee destroyed the whole
-    /// entity. \p Strength is the *destroy's* certainty: a Definite destroy
-    /// withdraws credit of both strengths; a merely-possible one withdraws
-    /// only the Definite claim -- it may have destroyed the storage, so no
-    /// credit-fired diagnostic may rely on it, while the Maybe credit
-    /// (which only ever suppresses) survives. The destroyed state is
-    /// recorded only for a Definite destroy that also ends the object's
-    /// lifetime (\p EndsLifetime; a storage *release* leaves no object to
-    /// destroy again): that state is a diagnostic's firing basis and must
-    /// be definite by construction.
-    void destroyWhole(const VarDecl *VD, InitCreditStrength Strength,
-                      bool EndsLifetime) {
-      Entity[VD] &=
-          ~clearedBits(WholeStoredMaybe, WholeStoredDefinite, Strength);
-      if (Strength == InitCreditStrength::Definite && EndsLifetime)
-        Entity[VD] |= WholeDestroyed;
-    }
-    bool hasWholeStored(const VarDecl *VD, InitCreditStrength Strength) const {
-      auto It = Entity.find(VD);
-      return It != Entity.end() &&
-             (It->second &
-              queriedBit(WholeStoredMaybe, WholeStoredDefinite, Strength));
-    }
-    bool isWholeDestroyed(const VarDecl *VD) const {
-      auto It = Entity.find(VD);
-      return It != Entity.end() && (It->second & WholeDestroyed);
-    }
-
-    /// The storage behind the [[ref_to_uninit]] entity was written through
-    /// the exact *p / r lvalue (strength and destroyed-state semantics as
-    /// for markWholeStored).
-    void markPointeeStored(const VarDecl *VD, InitCreditStrength Strength) {
-      Entity[VD] |=
-          storedBits(PointeeStoredMaybe, PointeeStoredDefinite, Strength);
-      Entity[VD] &= ~unsigned(PointeeDestroyed);
-    }
-    /// A [[now_uninit]] or storage-release callee destroyed the pointee
-    /// (semantics as for destroyWhole).
-    void destroyPointee(const VarDecl *VD, InitCreditStrength Strength,
-                        bool EndsLifetime) {
-      Entity[VD] &=
-          ~clearedBits(PointeeStoredMaybe, PointeeStoredDefinite, Strength);
-      if (Strength == InitCreditStrength::Definite && EndsLifetime)
-        Entity[VD] |= PointeeDestroyed;
-    }
-    /// Reseating a marked pointer: every pointee fact -- credit of both
-    /// strengths and the destroyed state -- described the old pointee, so
-    /// all of it is retired wholesale, whatever the reseat's own
-    /// conditionality (the parse-order status quo).
-    void clearPointee(const VarDecl *VD) {
-      Entity[VD] &= ~unsigned(PointeeStoredMaybe | PointeeStoredDefinite |
-                              PointeeDestroyed);
-    }
-    bool hasPointeeStored(const VarDecl *VD,
-                          InitCreditStrength Strength) const {
-      auto It = Entity.find(VD);
-      return It != Entity.end() &&
-             (It->second &
-              queriedBit(PointeeStoredMaybe, PointeeStoredDefinite, Strength));
-    }
-    bool isPointeeDestroyed(const VarDecl *VD) const {
-      auto It = Entity.find(VD);
-      return It != Entity.end() && (It->second & PointeeDestroyed);
-    }
-
-    /// The [[uninit]] member \p F of the base object \p Base (a
-    /// resolveMemberStoreBase key) was assigned whole. Only whole-member
-    /// stores are ever recorded: member *pointee* stores (*a.p = e) are
-    /// deliberately never credited -- per-object pointee aliasing (copies
-    /// share pointees) makes them unsound to approximate. Strength and
-    /// destroyed-state semantics as for markWholeStored.
-    void markMemberStored(const Decl *Base, const FieldDecl *F,
-                          InitCreditStrength Strength) {
-      Member[{Base, F}] |=
-          storedBits(WholeStoredMaybe, WholeStoredDefinite, Strength);
-      Member[{Base, F}] &= ~unsigned(WholeDestroyed);
-    }
-    /// A [[now_uninit]] or storage-release callee destroyed the member
-    /// (semantics as for destroyWhole).
-    void destroyMember(const Decl *Base, const FieldDecl *F,
-                       InitCreditStrength Strength, bool EndsLifetime) {
-      Member[{Base, F}] &=
-          ~clearedBits(WholeStoredMaybe, WholeStoredDefinite, Strength);
-      if (Strength == InitCreditStrength::Definite && EndsLifetime)
-        Member[{Base, F}] |= WholeDestroyed;
-    }
-    bool hasMemberStored(const Decl *Base, const FieldDecl *F,
-                         InitCreditStrength Strength) const {
-      auto It = Member.find({Base, F});
-      return It != Member.end() &&
-             (It->second &
-              queriedBit(WholeStoredMaybe, WholeStoredDefinite, Strength));
-    }
-    bool isMemberDestroyed(const Decl *Base, const FieldDecl *F) const {
-      auto It = Member.find({Base, F});
-      return It != Member.end() && (It->second & WholeDestroyed);
-    }
-
-  private:
-    /// The per-entry bits: one stored pair per strength -- a Definite store
-    /// sets both bits of its pair, so the Maybe bit is exactly "any store"
-    /// and the Definite bit exactly "an unconditional owner-function store"
-    /// -- plus a destroyed bit per shape, recording that the storage's
-    /// lifetime was definitely ended and not restarted (P4222R2 §1:
-    /// destroying an object twice is an error). Destroyed is
-    /// Definite-by-construction: only an unconditional same-function
-    /// lifetime-ending destroy sets it (a storage *release* clears credit
-    /// but sets no destroyed state), so it can serve as a diagnostic's
-    /// firing basis without a strength of its own.
-    enum Flags : unsigned {
-      WholeStoredMaybe = 1u << 0,
-      PointeeStoredMaybe = 1u << 1,
-      WholeStoredDefinite = 1u << 2,
-      PointeeStoredDefinite = 1u << 3,
-      WholeDestroyed = 1u << 4,
-      PointeeDestroyed = 1u << 5,
-    };
-
-    /// The bits a store of \p Strength sets.
-    static unsigned storedBits(unsigned MaybeBit, unsigned DefiniteBit,
-                               InitCreditStrength Strength) {
-      return Strength == InitCreditStrength::Definite ? (MaybeBit | DefiniteBit)
-                                                      : MaybeBit;
-    }
-    /// The stored bits a destroy of \p Strength clears.
-    static unsigned clearedBits(unsigned MaybeBit, unsigned DefiniteBit,
-                                InitCreditStrength Strength) {
-      return Strength == InitCreditStrength::Definite ? (MaybeBit | DefiniteBit)
-                                                      : DefiniteBit;
-    }
-    /// The bit a query at \p Strength tests.
-    static unsigned queriedBit(unsigned MaybeBit, unsigned DefiniteBit,
-                               InitCreditStrength Strength) {
-      return Strength == InitCreditStrength::Definite ? DefiniteBit : MaybeBit;
-    }
-
-    /// Whole-entity and pointee credit, keyed by the credited
-    /// local/parameter (only local-storage VarDecls carrying the relevant
-    /// marker are ever inserted).
-    llvm::DenseMap<const VarDecl *, unsigned> Entity;
-
-    /// Whole-member credit, keyed per base object: the base is the directly
-    /// named local-storage VarDecl (a.m = e) or, for the current object
-    /// (this->m = e / m = e), the parse-time pattern of the enclosing
-    /// function declaration -- so credit recorded in one function body can
-    /// never satisfy a binding in another, two locals of the same type
-    /// never share credit, and instantiations agree with their pattern on
-    /// statements they reuse from it (see resolveMemberStoreBase).
-    llvm::DenseMap<std::pair<const Decl *, const FieldDecl *>, unsigned> Member;
-  };
-
-  /// The recorded std::init store credit; mutated by the recorders above,
-  /// consulted through the has*Credit queries.
-  InitStoreCreditMap StoreCredit;
-
-  /// Enumerate the lvalue leaves the assignment target or lifecycle argument
-  /// \p E can name: peel transparent casts and single-element braced
-  /// initializers, walk conditional arms (\p ConditionalArm set for each,
-  /// since the chosen arm is not known) and comma right operands, and hand
-  /// each leaf to \p F with its arm flag. The one target-shape walk shared
-  /// by the store recorder, the lifecycle-argument consumers, and the CFG
-  /// member passes' event extraction (AnalysisBasedWarnings.cpp), so a
-  /// wrapped lvalue affects credit and flow state exactly like its leaf
-  /// form.
-  static void forEachTargetLeaf(
-      const Expr *E, bool ConditionalArm,
-      llvm::function_ref<void(const Expr *Leaf, bool ConditionalArm)> F);
+  /// Enumerate the lvalue leaves the store target, binding source, or
+  /// lifecycle argument \p E can name: peel transparent casts and
+  /// single-element braced initializers, walk conditional arms and comma
+  /// right operands, and hand each leaf to \p F. The one target-shape walk
+  /// shared by the parse-time checks and the CFG pass's event extraction
+  /// (AnalysisBasedWarnings.cpp), so a wrapped lvalue is judged exactly like
+  /// its leaf form.
+  static void forEachTargetLeaf(const Expr *E,
+                                llvm::function_ref<void(const Expr *Leaf)> F);
 
   /// std::init / pointer_marker + union_marker (paper §4.1, §5.6): diagnose
   /// [[uninit]] placed on a pointer, a union variable, or a union member.

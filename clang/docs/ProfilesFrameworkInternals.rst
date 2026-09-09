@@ -633,9 +633,9 @@ patterns.  Its rules map to mechanisms as follows:
        ``Destroyed``, ``destroy_uninit`` unless ``May``, a reinitializer, or
        a marked parameter); otherwise the destroy arm of
        ``checkInitProfileBinding`` (its Parameter and DefaultArgument
-       kinds): ``storageIsDestroyed`` answers the destroyed state, and
-       ``classifyUninitSource`` -- run exactly as for an unmarked binding
-       target (``Maybe`` credit) -- the uninitialized one
+       kinds), where ``classifyUninitSource`` -- run exactly as for an
+       unmarked binding target -- answers ``destroy_uninit`` by form and no
+       destroyed state exists
    * - ``uninit_write``
      - 2 for flow-tracked targets, 1 otherwise
      - the SubobjectWrite sites of ``extractStdInitEvents`` for a target
@@ -648,21 +648,16 @@ patterns.  Its rules map to mechanisms as follows:
 Two helpers are shared across the rules.  ``classifyUninitSource`` -- the
 pointer and glvalue recognizers -- classifies an expression as referring to
 initialized, uninitialized, or unknown storage purely from its syntactic
-form (parse-order store credit refines it for a destroy of storage that is
-not flow-tracked, recorded by the ``recordNowInitArgument`` /
-``recordNowUninitArgument`` pair, which share one argument-shape walk to add
-or withdraw the credit of storage a ``[[now_init]]`` callee initializes or a
-``[[now_uninit]]`` callee destroys, resolving the argument through
-``resolveTrackedGlvalue``); its ``UninitAccessOpts``
+form (the flow state of tracked storage is the CFG pass's, "Flow-Tracked
+Storage (std::init)" below); its ``UninitAccessOpts``
 presets distinguish a *binding* source (markers count everywhere), a value
 *read*, and a scalar *store* (which differ in whether the top-level
 ``[[uninit]]`` marker counts and whether ``[[ref_to_uninit]]`` storage is
 trusted).  ``defaultInitLeavesScalarIndeterminate`` answers whether a type's
 default-initialization leaves an unacknowledged scalar subobject
 indeterminate, trusting user-provided default constructors -- the paper's
-trust-the-constructor principle (P4222R1.1 §5.1), which is also why members
-of objects initialized by a user-provided constructor are deliberately not
-flow-tracked.
+trust-the-constructor principle (P4222R2 §5.1), which is also why members
+of objects initialized by a user-provided constructor are not flow-tracked.
 
 Clang itself supplies the standard library's lifecycle annotations:
 ``SemaProfiles::addKnownInitLifecycleAttributes``, called from
@@ -674,8 +669,8 @@ rules holding by construction (a ``T*`` parameter is a pointer by form even
 when ``T`` is dependent), and the seam runs after declaration merging and
 after ``checkNowInitVacuity``, so the vacuity check never sees a
 half-injected pair.  Implicit attributes are indistinguishable from
-hand-written ones, so the funnels, store credit, the CFG passes' Gen/Kill
-arms, serialization, and suppression apply unchanged, and specializations
+hand-written ones, so the funnels, the CFG pass's lifecycle arm,
+serialization, and suppression apply unchanged, and specializations
 inherit them from the pattern via attribute instantiation.  Iterator-shaped
 relatives (``destroy_n``, the ``uninitialized_*`` family) and ``ranges::``
 CPOs sit outside the form key; the user-facing scope note lives in
@@ -719,51 +714,3 @@ whose state the enclosing body decides, enters with ``May`` set and ``Must``
 clear, so neither direction fires on it until the body itself stores.  The
 remaining blind spots are listed in :doc:`ProfilesFramework`,
 "Limitations".
-
-Parse-Order Store Credit (std::init)
-====================================
-
-The destroy rules for a source with no flow-tracked leaf refine the
-recognizers' classification with *parse-order store credit*: the
-lifetime-annotated calls seen earlier in the translation unit.  The
-``recordNowInitArgument`` / ``recordNowUninitArgument`` pair records what a
-``[[now_init]]`` / ``[[now_uninit]]`` callee does to the storage bound to
-its parameters; ``InitStoreCreditMap`` is the façade that owns the recorded
-facts, keyed by unique declarations (entries persist across the translation
-unit, only the named clear operations remove a fact, and template
-instantiations build fresh declarations, so pattern-time and
-instantiation-time state stay independent).  This section is the canonical
-rationale for all of them; the code comments carry only site-specific
-deltas.
-
-**Credit is parse-order.**  There is no dominance or flow analysis: a call
-counts for every consult that happens later in parse order, whatever the
-control flow between them.  The design consequently errs only toward missed
-diagnostics -- crediting a call the execution might skip can at worst
-*suppress* a diagnostic, never manufacture one.  Every consult reads the
-``Maybe`` strength, which every call records; a ``Definite`` call -- one
-unconditionally executed in the function body that owns the credited entity,
-decided by ``currentStoreStrength`` (outside template instantiation, at
-conditional depth 0, before the function has branched by ``goto`` or
-``switch``, with the enclosing function's parse-time pattern equal to the
-entity's owning function) -- additionally records the destroyed state
-``double_destroy`` fires on.
-
-**Recording is not gated on enforcement or suppression.**  A suppressed
-call still initializes or destroys, and failing to record it would turn
-suppression into later false positives.  There is likewise no in-template
-gate: an expression check with a non-dependent operand fires at the
-definition and must find pattern-time credit (instantiations rebuild their
-``DeclRefExpr``\ s against fresh declarations, so they re-record
-independently).  The one gate is never-executed contexts -- unevaluated and
-discarded-statement contexts, mirroring ``shouldEmitProfileViolation``: a
-call there never executes, so it earns no credit and a destroy there
-withdraws none.
-
-**Withdrawal mirrors recording.**  A ``[[now_uninit]]`` or storage-release
-callee withdraws credit at the strength the destroy itself earns under the
-same rules: an unconditional same-function destroy withdraws credit of both
-strengths, while a merely-possible one withdraws only the ``Definite``
-claim -- it may have destroyed the storage, so no destroyed state may rely
-on it, but the ``Maybe`` credit survives and the lenient direction gains no
-new errors.

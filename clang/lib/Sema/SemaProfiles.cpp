@@ -7,10 +7,12 @@
 //===----------------------------------------------------------------------===//
 /// \file
 /// This file implements semantic analysis for the C++ profiles framework
-/// (P3589R2) and the built-in std::init initialization profile (P4222R1.1):
-/// enforcement and suppression recording, the violation gate, the class- and
-/// constructor-finalization dispatch, and the parse-time std::init rule
-/// checks. The CFG-based std::init checks live in AnalysisBasedWarnings.cpp.
+/// (P3589R2) and the built-in std::init initialization profile (P4222R2):
+/// profile enforcement and suppression state, the shared violation gate, the
+/// parse-time std::init rule checks, and the recognizers and tracked-storage
+/// predicates shared with the CFG-based std::init checks in
+/// AnalysisBasedWarnings.cpp, which judge every access to flow-tracked
+/// storage.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -1028,8 +1030,8 @@ void SemaProfiles::checkNowInitVacuity(FunctionDecl *FD) {
 
 void SemaProfiles::addKnownInitLifecycleAttributes(FunctionDecl *FD) {
   // Injected implicit attributes are indistinguishable from hand-written
-  // ones, so the funnels, store credit, CFG passes, serialization, and
-  // suppression all apply unchanged, and template specializations inherit
+  // ones, so the funnels, the CFG pass, serialization, and suppression all
+  // apply unchanged, and template specializations inherit
   // them from the pattern via attribute instantiation. The injected pair is
   // consistent by construction (marker and NowInit added together, first
   // parameter checked as a pointer), so checkNowInitVacuity -- which runs
@@ -1084,9 +1086,9 @@ static bool isUninitializedOrMixed(UninitStorage S) {
 // uninitialized. A value access of such an entity is owned elsewhere: a named
 // [[uninit]] object by the CFG uninit_read pass, a current-object member by
 // the ctor-body pass, an [[uninit]] member of a constructor-less aggregate
-// local by the local-aggregate pass (all three credit assignments), and a
+// local by the local-aggregate pass (all three track assignments), and a
 // marked member of an object with a user-provided constructor reached through
-// any other object is deliberately trusted (paper §5.1: its constructor body
+// any other object is trusted (paper §5.1: its constructor body
 // may have assigned it, which local analysis cannot see). So the read-through
 // check must not second-guess them -- and for a store, writing the whole
 // named entity IS its initialization (paper §4.5: for a built-in type, a
@@ -1103,17 +1105,6 @@ static bool isUninitializedOrMixed(UninitStorage S) {
 // banned nor endorsed -- while below a member step only whole-object
 // construct_at could initialize, which is unmodeled, so the member arm
 // clears the trust and the marker counts again (§5.4's piecemeal ban).
-// SubscriptBase: the classification runs below an element access (p[i]),
-// where pointee store credit must not apply: element-wise state is
-// untrackable by design (paper §5.4/§5.5 ban random access through the
-// marker), so only the whole-`*p` form is ever credited. Purely syntactic:
-// p[0] is not credited even though it denotes the same storage as *p.
-//
-// Credit: when non-null, the recognizers consult the parse-order store
-// credit ("Parse-Order Store Credit" in ProfilesFrameworkInternals.rst) --
-// a credited entity classifies as Initialized. Null in the constexpr
-// presets; the checking entry points attach it via withCredit, choosing the
-// Strength every consult below passes to the credit queries.
 //
 // Alias: how a binding aliases a glvalue *of pointer type* (P4222R2 §4.3),
 // set by the binding funnel from the bound type. A read-only alias (T *const
@@ -1127,16 +1118,11 @@ static bool isUninitializedOrMixed(UninitStorage S) {
 // member initializer), so the current object's members may not be initialized
 // yet and `this` classifies Unknown; otherwise `this` is Initialized. Set by
 // the checking entry points from SemaProfiles::thisIsUnderConstruction.
-using InitCreditStrength = SemaProfiles::InitCreditStrength;
-
 struct UninitAccessOpts {
   enum class PointerAlias { None, ReadOnly, Mutable };
 
   bool DropTopLevelUninit = false;
   bool TrustRefToUninit = false;
-  bool SubscriptBase = false;
-  const SemaProfiles *Credit = nullptr;
-  InitCreditStrength Strength = InitCreditStrength::Maybe;
   PointerAlias Alias = PointerAlias::None;
   bool ThisUnderConstruction = false;
 
@@ -1147,24 +1133,9 @@ struct UninitAccessOpts {
     O.DropTopLevelUninit = false;
     return O;
   }
-  UninitAccessOpts withSubscriptBase() const {
-    UninitAccessOpts O = *this;
-    O.SubscriptBase = true;
-    return O;
-  }
   UninitAccessOpts withoutMarkerTrust() const {
     UninitAccessOpts O = *this;
     O.TrustRefToUninit = false;
-    return O;
-  }
-  UninitAccessOpts withCredit(const SemaProfiles *SP) const {
-    return withCredit(SP, InitCreditStrength::Maybe);
-  }
-  UninitAccessOpts withCredit(const SemaProfiles *SP,
-                              InitCreditStrength St) const {
-    UninitAccessOpts O = *this;
-    O.Credit = SP;
-    O.Strength = St;
     return O;
   }
   UninitAccessOpts withAlias(PointerAlias A) const {
@@ -1267,85 +1238,15 @@ static bool isCurrentObjectExpr(const Expr *E) {
          isa<CXXThisExpr>(UO->getSubExpr()->IgnoreParenImpCasts());
 }
 
-// The parse-time pattern of \p FD -- the declaration whose body statements
-// the current function can share. TreeTransform hands a statement back
-// *unchanged* when nothing in it needs rebuilding, so a fully non-dependent
-// `this->m = 5` inside a generic lambda (or a lambda in a member function
-// template) runs Sema -- and earns its parse-order credit -- only once,
-// while the pattern is parsed; the instantiated call operator reuses the
-// statement wholesale. Keying current-object member credit on the pattern
-// makes record and consult agree whether a statement was reused
-// (pattern-time credit) or rebuilt (the instantiation-time key normalizes
-// to the same pattern). Iterated because each transform hop adds one link:
-// a generic lambda in a member function template reaches its parsed pattern
-// via a member-specialization link and then a primary-template link (a
-// local twin of SemaLambda.cpp's getPatternFunctionDecl). Instantiations of
-// one pattern share its key -- and its statements, so the parse order the
-// credit approximates is the same for all of them; a store only one
-// sibling instantiation rebuilds (e.g. under a dependent `if constexpr`)
-// then credits the others too, a parse-order-style missed diagnostic, never
-// a false positive.
-static const FunctionDecl *getParseTimePattern(const FunctionDecl *FD) {
-  while (FD) {
-    // A local function without template machinery of its own, instantiated
-    // while transforming an enclosing templated body. (A transformed lambda
-    // call operator instead carries a member-specialization link and a
-    // generic lambda's specialization a primary-template link -- both
-    // resolved by the pattern walk below.)
-    if (FD->getTemplatedKind() == FunctionDecl::TK_DependentNonTemplate) {
-      const FunctionDecl *P = FD->getInstantiatedFromDecl();
-      if (!P)
-        return FD;
-      FD = P;
-      continue;
-    }
-    const FunctionDecl *P = FD->getTemplateInstantiationPattern();
-    if (!P || P == FD)
-      return FD;
-    FD = P;
-  }
-  return FD;
-}
-
-const Decl *SemaProfiles::resolveMemberStoreBase(const MemberExpr *ME) const {
-  const Expr *Base = ME->getBase()->IgnoreParenImpCasts();
-  // The current object: this->m, the implicit m, or (*this).m. Keyed on the
-  // enclosing function declaration's parse-time pattern (`this` cannot be
-  // reseated, so the key is stable for the whole body; the *pattern*, so
-  // that a statement an instantiation reuses from its pattern and a rebuilt
-  // one agree on the key -- see getParseTimePattern); AllowLambda gives a
-  // lambda body inside a member function its own key, so its stores and the
-  // enclosing function's never share credit. No current function (e.g. an
-  // NSDMI parse) is untrackable.
-  if (isCurrentObjectExpr(Base))
-    return getParseTimePattern(
-        SemaRef.getCurFunctionDecl(/*AllowLambda=*/true));
-  // A directly named local object: a dot access on a local-storage,
-  // non-reference VarDecl (a by-value parameter is its own object and
-  // qualifies). A reference base is an alias to an object also reachable
-  // under other names, and an arrow base reaches the object through an
-  // arbitrary (reseatable) pointer value -- both untrackable per object, the
-  // same aliasing boundary that keeps fields of parameter-reached objects
-  // uncredited. A deeper base (a.b.m) is §5.4's rejected deep
-  // delayed-initialization tracking.
-  if (!ME->isArrow())
-    if (const auto *DRE = dyn_cast<DeclRefExpr>(Base))
-      if (const auto *VD = dyn_cast<VarDecl>(DRE->getDecl());
-          VD && VD->hasLocalStorage() && !VD->getType()->isReferenceType())
-        return VD;
-  return nullptr;
-}
-
 // Strip what the recognizers see through on the way to a named entity:
 // parens, implicit casts, and explicit casts whose operand is a pointer or
 // glvalue (paper §4.3: a cast of a marked pointer is itself marked; a
 // reference cast denotes the same storage). Implicit casts are re-stripped
 // after every explicit-cast peel -- a cast's operand may itself be
 // parenthesized or implicitly converted -- so a single leading
-// IgnoreParenImpCasts is not equivalent. Shared by the store recorders, the
-// lifetime-annotated-argument resolver, and the CFG member passes
-// (AnalysisBasedWarnings.cpp), so crediting and flow tracking see through
-// exactly the casts recognition does.
+// IgnoreParenImpCasts is not equivalent. Shared with the CFG pass
+// (AnalysisBasedWarnings.cpp), so flow tracking sees through exactly the
+// casts recognition does.
 const Expr *SemaProfiles::ignoreTransparentCasts(const Expr *E) {
   E = E->IgnoreParenImpCasts();
   while (const auto *CE = dyn_cast<ExplicitCastExpr>(E)) {
@@ -1355,21 +1256,6 @@ const Expr *SemaProfiles::ignoreTransparentCasts(const Expr *E) {
     E = Sub->IgnoreParenImpCasts();
   }
   return E;
-}
-
-// The directly named [[ref_to_uninit]] local/parameter *pointer* of \p E, if
-// any: the only pointer entity whose pointee state is tracked (the credit
-// map keys on VarDecls; a marked member pointer is the pinned per-object
-// aliasing boundary -- copies share pointees). Sees through transparent
-// casts, like the recognizers ((int *)p is still p). Shared by the
-// store-recording deref arm and the [[now_init]] argument shapes.
-static const VarDecl *getCreditableMarkedPointer(const Expr *E) {
-  const auto *VD = dyn_cast_or_null<VarDecl>(SemaProfiles::getDirectlyNamedDecl(
-      SemaProfiles::ignoreTransparentCasts(E)));
-  if (VD && VD->hasLocalStorage() && VD->getType()->isPointerType() &&
-      VD->hasAttr<RefToUninitAttr>())
-    return VD;
-  return nullptr;
 }
 
 // Pass-through forms shared by the pointer and glvalue recognizers, which are
@@ -1564,10 +1450,10 @@ static AllocatorCalleeMatch matchAllocatorCallee(const FunctionDecl *FD) {
 // and releasing its storage are different operations. The trusted/by-name
 // split preserves the lenient/strict query pair: acceptance may read the
 // union (a declared free(p) should not reject its argument just because
-// -fno-builtin stripped the ID), while withdrawal must key on the trusted
-// bit only -- withdrawing on an untrusted name-only free could manufacture
-// read-through false positives, while stale credit is the documented
-// missed-diagnostic direction.
+// -fno-builtin stripped the ID), while the CFG pass's Kill must key on the
+// trusted bit only -- killing on an untrusted name-only free could
+// manufacture read-through false positives, while a missed kill is the
+// documented missed-diagnostic direction.
 SemaProfiles::CalleeLifecycleRoles
 SemaProfiles::getCalleeLifecycleRoles(const FunctionDecl *FD) {
   SemaProfiles::CalleeLifecycleRoles Roles;
@@ -1692,8 +1578,8 @@ pointerRefersToUninitStorage(ASTContext &Ctx, const Expr *E,
       // pointer constant, or an empty braced list, which value-initializes to
       // null -- is a null source like the literal (paper §4.3's f1(p2)
       // example): Unknown. Reassignment after the null init is a documented,
-      // accepted missed diagnostic (parse-order leniency). Deliberately
-      // excluded: globals/extern (an extern pointer may be initialized
+      // accepted missed diagnostic (an unmarked pointer is not flow-tracked).
+      // Excluded: globals/extern (an extern pointer may be initialized
       // elsewhere, and keeping them Initialized preserves the
       // marked-direction diagnostics), null-NSDMI fields, and parameters --
       // a ParmVarDecl's getInit() is its *default argument*, which is not
@@ -1712,17 +1598,6 @@ pointerRefersToUninitStorage(ASTContext &Ctx, const Expr *E,
       }
       return UninitStorage::Initialized;
     }
-    // Parse-order store credit: after a whole-`*p` store, the marked
-    // pointer's pointee counts as initialized (paper §4.3: "p no longer
-    // refers to uninitialized memory") for further whole-`*p` accesses --
-    // until the pointer is reseated, which clears the credit. The consult
-    // sits before the TrustRefToUninit branch (under the write preset the
-    // outcome merely changes Unknown to Initialized, both "not
-    // Uninitialized": no preset regression) and is skipped below an element
-    // access (SubscriptBase), preserving §5.4's random-access ban.
-    if (Opts.Credit && !Opts.SubscriptBase &&
-        Opts.Credit->hasPointeeStoreCredit(VD, Opts.Strength))
-      return UninitStorage::Initialized;
     return Opts.TrustRefToUninit ? UninitStorage::Unknown
                                  : UninitStorage::Uninitialized;
   }
@@ -1834,18 +1709,14 @@ static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
   // Under the top-level drop the [[uninit]] arm is skipped: a value access of
   // a directly named [[uninit]] object is the flow-based passes' territory, so
   // only a [[ref_to_uninit]] reference (or indirection, handled below) still
-  // counts. Parse-order store credit clears both arms: a whole-entity store
-  // is the [[uninit]] entity's initialization (paper §4.2/§4.5), and a store
-  // through a marked reference initializes its referent (§4.3; references
-  // cannot be reseated, so that credit never lapses).
+  // counts. The flow state of a tracked entity -- a whole-entity store is
+  // the [[uninit]] entity's initialization (paper §4.2/§4.5), a store through
+  // a marked reference its referent's (§4.3) -- is the CFG pass's, which
+  // judges every access with a tracked leaf instead of this recognizer.
   auto DeclDenotesUninit = [&](const ValueDecl *VD) {
-    return (!Opts.DropTopLevelUninit && VD->hasAttr<UninitAttr>() &&
-            !(Opts.Credit &&
-              Opts.Credit->hasWholeObjectStoreCredit(VD, Opts.Strength))) ||
+    return (!Opts.DropTopLevelUninit && VD->hasAttr<UninitAttr>()) ||
            (!Opts.TrustRefToUninit && VD->getType()->isReferenceType() &&
-            VD->hasAttr<RefToUninitAttr>() &&
-            !(Opts.Credit &&
-              Opts.Credit->hasPointeeStoreCredit(VD, Opts.Strength)));
+            VD->hasAttr<RefToUninitAttr>());
   };
   // A structured binding classifies as the member or element it decomposes.
   if (const Expr *Bound = getStructuredBindingSource(E))
@@ -1858,7 +1729,7 @@ static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
     // glvalue a. When m does not itself denote uninit storage, the subobject is
     // uninit exactly when its base is. The base recursion clears the top-level
     // drop: the drop exists because a directly named [[uninit]] entity's value
-    // accesses are owned by the flow passes or deliberately trusted (see the
+    // accesses are owned by the flow passes or trusted (see the
     // UninitAccessOpts comment above), but nothing tracks a subobject reached
     // through a *further* member access -- and member-wise delayed
     // initialization of an [[uninit]] object is itself banned (paper §5.4;
@@ -1868,25 +1739,12 @@ static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
     // write preset trusts the marker only at the top level, where a scalar
     // write is the whole pointee's initialization (§4.5) -- below a member
     // step the write initializes nothing, so [[ref_to_uninit]] markers,
-    // marked callees, and the allocator tail all count again.
-    //
-    // Parse-order member store credit: after `a.m = 5` / `this->m = 5`, the
-    // marked member of that *specific* base object counts as initialized
-    // (paper §4.2: "After initialization, the object is no longer
-    // [[uninit]]"; §6: assignment initializes a built-in) -- covering both
-    // `a.m` (a reference binding lands in this arm directly) and `&a.m` (the
-    // UO_AddrOf arm recurses here). The consult keys on the same base
-    // identity the recording resolved, so the same member observed through
-    // any other object -- including a copy (§5.2: a copy does not inherit
-    // credit) -- stays uncredited. It applies at any chain depth: the map
-    // only ever holds whole-member initializations (which initialize the
-    // entire member; recordLifetimeAnnotatedArgument).
+    // marked callees, and the allocator tail all count again. A tracked
+    // member of a directly named local or of the current object (`a.m`,
+    // `this->m`) never reaches this arm: the CFG pass judges its accesses by
+    // flow state (paper §4.2: "After initialization, the object is no longer
+    // [[uninit]]").
     const ValueDecl *MD = ME->getMemberDecl();
-    if (const auto *F = dyn_cast<FieldDecl>(MD);
-        F && Opts.Credit && F->hasAttr<UninitAttr>() &&
-        Opts.Credit->hasMemberStoreCredit(
-            Opts.Credit->resolveMemberStoreBase(ME), F, Opts.Strength))
-      return UninitStorage::Initialized;
     if (DeclDenotesUninit(MD))
       return UninitStorage::Uninitialized;
     // Only a field (or an indirect field through an anonymous union/struct)
@@ -1913,13 +1771,12 @@ static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
   // it returns is uninitialized.
   if (const auto *CE = dyn_cast<CallExpr>(E))
     return classifyRefToUninitCallee(CE, Opts);
-  // An element access classifies like its base, but pointee store credit
-  // must not apply below it (SubscriptBase): `*p = 5;` never legalizes
-  // `p[1]` -- the pointee may be an array with only element 0 written, and
-  // element-wise state is untrackable by design (paper §5.4/§5.5).
+  // An element access classifies like its base (an element is never
+  // flow-tracked: `*p = 5;` never legalizes `p[1]` -- the pointee may be an
+  // array with only element 0 written, and element-wise state is
+  // untrackable by design, paper §5.4/§5.5).
   if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(E))
-    return pointerRefersToUninitStorage(Ctx, ASE->getBase(),
-                                        Opts.withSubscriptBase());
+    return pointerRefersToUninitStorage(Ctx, ASE->getBase(), Opts);
 
   // *p, where p points to uninitialized storage.
   if (const auto *UO = dyn_cast<UnaryOperator>(E))
@@ -2337,7 +2194,7 @@ bool SemaProfiles::hasFlowTrackedGlvalueLeaf(const Expr *G) const {
   if (!G)
     return false;
   bool Any = false;
-  forEachTargetLeaf(G, /*ConditionalArm=*/false, [&](const Expr *Leaf, bool) {
+  forEachTargetLeaf(G, [&](const Expr *Leaf) {
     Any |= isFlowTrackedLeaf(getASTContext(), Leaf, /*AsPointerValue=*/false,
                              SemaRef.CurContext);
   });
@@ -2352,7 +2209,7 @@ bool SemaProfiles::hasFlowTrackedLeaf(const Expr *Src, QualType T) const {
   if (!Src)
     return false;
   bool Any = false;
-  forEachTargetLeaf(Src, /*ConditionalArm=*/false, [&](const Expr *Leaf, bool) {
+  forEachTargetLeaf(Src, [&](const Expr *Leaf) {
     Any |= isFlowTrackedLeaf(getASTContext(), Leaf, AsPointerValue,
                              SemaRef.CurContext);
   });
@@ -2371,8 +2228,7 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
   const auto *Parm = dyn_cast_or_null<ParmVarDecl>(Target);
   const auto *Callee =
       Parm ? dyn_cast<FunctionDecl>(Parm->getDeclContext()) : nullptr;
-  // The callee's lifecycle roles, derived once; every consumer below reads
-  // only the bits its direction may rely on (see CalleeLifecycleRoles).
+  // The callee's lifecycle roles (see CalleeLifecycleRoles).
   CalleeLifecycleRoles Roles =
       Callee ? getCalleeLifecycleRoles(Callee) : CalleeLifecycleRoles();
   if (Roles.DestroysPointerParams || Roles.ReleasesStorageTrusted ||
@@ -2404,315 +2260,24 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
     // (the annotation spelling for an unrecognized storage-release function,
     // the Limitations workaround for _aligned_free and kin). A source with a
     // flow-tracked leaf is the CFG pass's (its Destroy sites judge both
-    // rules against the flow state); the rest is judged here by form and
-    // parse-order credit, keyed on the state rather than on diagnostic
-    // emission, so a suppressed double destroy stays silent rather than
-    // falling through to a swapped destroy_uninit error. An
-    // instantiation-dependent source defers exactly like
+    // rules against the flow state, double_destroy included: destroyed
+    // storage exists only as flow state); the rest is judged here by form.
+    // An instantiation-dependent source defers exactly like
     // judgeInitProfileBinding's.
     bool Checkable = Src && !isa<RecoveryExpr>(Src->IgnoreParens()) &&
                      (D || !Src->isInstantiationDependent()) &&
                      !hasFlowTrackedLeaf(Src, T);
-    bool Destroyed =
-        Checkable && Roles.DestroysPointerParams && storageIsDestroyed(T, Src);
-    if (Destroyed) {
-      if (shouldEmitProfileViolation(diag::err_init_double_destroy, Loc, D))
-        Diag(Loc, diag::err_init_double_destroy) << "std::init";
-    } else if (Roles.DestroysPointerParams &&
-               !Roles.InitializesRefToUninitParams && !TargetMarked &&
-               Checkable &&
-               shouldEmitProfileViolation(diag::err_init_destroy_uninit, Loc,
-                                          D) &&
-               isUninitializedOrMixed(classifyUninitSource(
-                   getASTContext(), Src, T->isReferenceType(),
-                   UninitBindAccess.withCredit(this, InitCreditStrength::Maybe)
-                       .withThisUnderConstruction(thisIsUnderConstruction()))))
+    if (Roles.DestroysPointerParams && !Roles.InitializesRefToUninitParams &&
+        !TargetMarked && Checkable &&
+        shouldEmitProfileViolation(diag::err_init_destroy_uninit, Loc, D) &&
+        isUninitializedOrMixed(
+            classifyUninitSource(getASTContext(), Src, T->isReferenceType(),
+                                 UninitBindAccess.withThisUnderConstruction(
+                                     thisIsUnderConstruction()))))
       Diag(Loc, diag::err_init_destroy_uninit) << "std::init";
   } else {
     judgeInitProfileBinding(Kind, Loc, TargetMarked, T, Src, D);
   }
-  recordLifecycleArguments(Roles, Target, T, Src);
-}
-
-void SemaProfiles::recordLifecycleArguments(const CalleeLifecycleRoles &Roles,
-                                            const ValueDecl *Target, QualType T,
-                                            const Expr *Src) {
-  // Runs after the binding check: the binding itself is judged against the
-  // *pre-call* state, and only then does a [[now_init]] callee's promised
-  // initialization -- or a [[now_uninit]] callee's promised destruction --
-  // take effect for what follows in parse order. The withdrawal runs before
-  // the credit so a callee carrying both attributes (a reinitializer) nets
-  // to destroy-then-construct: the storage is initialized after the call.
-  recordNowUninitArgument(Roles, Target, T, Src);
-  recordNowInitArgument(Roles, Target, T, Src);
-}
-
-void SemaProfiles::recordNowInitArgument(const CalleeLifecycleRoles &Roles,
-                                         const ValueDecl *Target, QualType T,
-                                         const Expr *Src) {
-  // Only the binding of a [[ref_to_uninit]] parameter of a [[now_init]]
-  // function carries the callee's initialization promise (P4222R2 §6.2: the
-  // attribute "would apply to every [[ref_to_uninit]] argument"). A variadic
-  // argument, an unmarked parameter, or a call through a function pointer
-  // presents no marked ParmVarDecl and earns nothing.
-  if (!Roles.InitializesRefToUninitParams)
-    return;
-  const auto *Parm = dyn_cast_or_null<ParmVarDecl>(Target);
-  if (!Parm || !Src || !Parm->hasAttr<RefToUninitAttr>())
-    return;
-  // Like recordInitProfileStore: no enforcement, suppression, or in-template
-  // gate (a suppressed or pattern-parsed call still initializes; rebuilt
-  // instantiations re-record against fresh declarations), but a call in a
-  // never-executed context earns no credit.
-  if (inNeverExecutedContext())
-    return;
-  recordLifetimeAnnotatedArgument(T, Src, LifetimeAnnotationEffect::Construct);
-}
-
-void SemaProfiles::recordNowUninitArgument(const CalleeLifecycleRoles &Roles,
-                                           const ValueDecl *Target, QualType T,
-                                           const Expr *Src) {
-  // The mirror of recordNowInitArgument: a [[now_uninit]] callee ends the
-  // lifetime of the storage bound to each of its pointer/reference
-  // parameters (P4222R2 §4.4's missing destroy_at recording). The
-  // parameters are *unmarked* -- destruction takes initialized memory -- so
-  // the gate keys on the callee's role, not a parameter marker; the shape
-  // walk is marker-keyed on the source side, so an ordinary initialized
-  // argument withdraws nothing. A variadic argument or a call through a
-  // function pointer presents no ParmVarDecl and withdraws nothing (stale
-  // credit is a missed diagnostic, never a false positive -- the same
-  // boundary as [[now_init]]).
-  //
-  // A known storage-release callee (free, realloc's pointer parameter,
-  // replaceable global operator delete) withdraws like a [[now_uninit]]
-  // one: the released storage no longer holds the object the credit
-  // described, so a whole-`*q` read through a marked pointer after free(q)
-  // classifies uninitialized again. (Unmarked pointers stay untracked;
-  // use-after-free through them is the invalidation profile's job.) Only
-  // the *trusted* release bit may withdraw (see CalleeLifecycleRoles).
-  if (!Roles.DestroysPointerParams && !Roles.ReleasesStorageTrusted)
-    return;
-  const auto *Parm = dyn_cast_or_null<ParmVarDecl>(Target);
-  if (!Parm || !Src)
-    return;
-  // Not enforcement- or suppression-gated (a suppressed destroy still
-  // destroys), but a call in a never-executed context destroys nothing.
-  if (inNeverExecutedContext())
-    return;
-  // A [[now_uninit]] callee ends the object's lifetime -- recording the
-  // destroyed state double_destroy fires on -- while a plain release callee
-  // only releases the storage: free(p); destroy_at(p); must not trip
-  // double_destroy on free's account. A dual-attributed callee stays a
-  // destroy.
-  recordLifetimeAnnotatedArgument(T, Src,
-                                  Roles.DestroysPointerParams
-                                      ? LifetimeAnnotationEffect::Destroy
-                                      : LifetimeAnnotationEffect::Release);
-}
-
-SemaProfiles::LifetimeAnnotatedStorage
-SemaProfiles::resolveTrackedGlvalue(const Expr *E) const {
-  // *p: the whole-`*p` lvalue of a marked local/parameter pointer denotes
-  // its pointee (paper §4.3/§4.5: for a built-in type, a write is its
-  // initialization). Class-typed pointees never get here: `*sp = S{...}`
-  // resolves to a member operator= (already rejected as a call on
-  // uninitialized storage), so pointee credit is only ever recorded for
-  // built-in-typed stores. Subscript forms (p[i]) are deliberately not
-  // tracked: the paper bans element-wise tracking (§5.4/§5.5).
-  if (const auto *UO = dyn_cast<UnaryOperator>(E);
-      UO && UO->getOpcode() == UO_Deref) {
-    if (const VarDecl *VD = getCreditableMarkedPointer(UO->getSubExpr()))
-      return LifetimeAnnotatedStorage::pointee(VD);
-    return {};
-  }
-  // base.m: the whole-member glvalue of an [[uninit]] field of a trackable
-  // base object, under exactly the member-store keys
-  // (resolveMemberStoreBase) so unrelated objects and other function bodies
-  // never share credit; an untrackable base -- a parameter-reached object,
-  // a deeper chain (x.agg.m, §5.4) -- resolves nothing, the same boundary
-  // everywhere. Member *pointee* forms (*a.p) take the deref arm above,
-  // which keys on local pointers only: the pinned per-object aliasing
-  // boundary (copies share pointees).
-  if (const auto *ME = dyn_cast<MemberExpr>(E)) {
-    if (const auto *F = dyn_cast<FieldDecl>(ME->getMemberDecl());
-        F && F->hasAttr<UninitAttr>())
-      if (const Decl *Base = resolveMemberStoreBase(ME))
-        return LifetimeAnnotatedStorage::member(Base, F);
-    return {};
-  }
-  // Only a directly named local-storage variable is trackable beyond this
-  // point: statics fail hasLocalStorage.
-  const auto *VD = dyn_cast_or_null<VarDecl>(getDirectlyNamedDecl(E));
-  if (!VD || !VD->hasLocalStorage())
-    return {};
-  // u: the whole [[uninit]] entity (paper §4.2/§4.5).
-  if (VD->hasAttr<UninitAttr>())
-    return LifetimeAnnotatedStorage::whole(VD);
-  if (VD->hasAttr<RefToUninitAttr>()) {
-    // r: the marked reference's referent; a reference cannot be reseated,
-    // so no store ever clears that credit -- only a [[now_uninit]] callee's
-    // withdrawal does.
-    if (VD->getType()->isReferenceType())
-      return LifetimeAnnotatedStorage::pointee(VD);
-    // p as a store target: the marked pointer's own reseat.
-    if (VD->getType()->isPointerType())
-      return LifetimeAnnotatedStorage::reseat(VD);
-  }
-  return {};
-}
-
-SemaProfiles::LifetimeAnnotatedStorage
-SemaProfiles::resolveLifetimeAnnotatedStorage(QualType T,
-                                              const Expr *Src) const {
-  // Mirror the recognizers' explicit-cast pass-through
-  // (ignoreTransparentCasts): the callee affects the same storage either
-  // way.
-  const Expr *E = ignoreTransparentCasts(Src);
-  // The glvalue whose storage the callee affects: the operand of &G for a
-  // pointer parameter, the bound glvalue itself for a reference one, or --
-  // for fill(arr) -- the array glvalue the stripped decay leaves behind
-  // (binding acceptance already has a dedicated decayed-array arm; the
-  // credit side resolves the same storage, so accept and credit agree). An
-  // element-address argument (fill(&arr[0])) still resolves nothing --
-  // §5.4's element ban -- and a file-scope [[uninit]] array fails the
-  // hasLocalStorage gate below like every other non-local.
-  const Expr *Glvalue = nullptr;
-  if (const auto *UO = dyn_cast<UnaryOperator>(E);
-      UO && UO->getOpcode() == UO_AddrOf)
-    Glvalue = UO->getSubExpr()->IgnoreParenImpCasts();
-  else if (T->isReferenceType())
-    Glvalue = E;
-  else if (E->getType()->isArrayType())
-    Glvalue = E;
-  if (Glvalue) {
-    // The argument side never credits a reseat target: a marked pointer
-    // object handed out by address is an alias escape
-    // (the CFG pass's Escape event), not a store.
-    LifetimeAnnotatedStorage Storage = resolveTrackedGlvalue(Glvalue);
-    if (Storage.StorageKind == LifetimeAnnotatedStorage::Kind::Reseat)
-      return {};
-    return Storage;
-  }
-  // p as a pointer value: p's pointee -- §6.2's initialize2(p) example
-  // verbatim. Only a directly named marked local/parameter pointer is
-  // trackable; reseating p afterwards clears pointee credit like any other.
-  if (const VarDecl *VD = getCreditableMarkedPointer(E))
-    return LifetimeAnnotatedStorage::pointee(VD);
-  return {};
-}
-
-void SemaProfiles::recordLifetimeAnnotatedArgument(
-    QualType T, const Expr *Src, LifetimeAnnotationEffect Effect) {
-  // A [[now_init]] callee's initialization marks the resolved storage
-  // stored; a [[now_uninit]] callee's destruction -- or a release callee's
-  // deallocation -- clears the mark. All directions share one strength: for
-  // the credit it is the store's certainty (only an unconditional
-  // same-function call may fire the requires-uninit direction), for the
-  // withdrawal the destroy's -- a conditional destroy may or may not have
-  // run, so it kills only the Definite claim and leaves the
-  // suppression-only Maybe credit in place (see recordNowUninitArgument).
-  // Only a Destroy records the destroyed state (LifetimeAnnotationEffect).
-  // A conditional or comma argument shape walks like a store target: each
-  // leaf's effect applies at Maybe strength on a conditional arm, so a
-  // wrapped construct only suppresses and a wrapped destroy kills only the
-  // Definite claim, recording no destroyed state.
-  bool Withdraw = Effect != LifetimeAnnotationEffect::Construct;
-  bool EndsLifetime = Effect == LifetimeAnnotationEffect::Destroy;
-  forEachTargetLeaf(
-      Src, /*ConditionalArm=*/false, [&](const Expr *Leaf, bool Arm) {
-        LifetimeAnnotatedStorage Storage =
-            resolveLifetimeAnnotatedStorage(T, Leaf);
-        auto Strength = [&](const Decl *CreditKey) {
-          return Arm ? InitCreditStrength::Maybe
-                     : currentStoreStrength(CreditKey);
-        };
-        switch (Storage.StorageKind) {
-        case LifetimeAnnotatedStorage::Kind::None:
-          break;
-        case LifetimeAnnotatedStorage::Kind::Whole:
-          if (Withdraw)
-            StoreCredit.destroyWhole(Storage.Entity, Strength(Storage.Entity),
-                                     EndsLifetime);
-          else
-            StoreCredit.markWholeStored(Storage.Entity,
-                                        Strength(Storage.Entity));
-          break;
-        case LifetimeAnnotatedStorage::Kind::Pointee:
-          if (Withdraw)
-            StoreCredit.destroyPointee(Storage.Entity, Strength(Storage.Entity),
-                                       EndsLifetime);
-          else
-            StoreCredit.markPointeeStored(Storage.Entity,
-                                          Strength(Storage.Entity));
-          break;
-        case LifetimeAnnotatedStorage::Kind::Member:
-          if (Withdraw)
-            StoreCredit.destroyMember(Storage.Base, Storage.Field,
-                                      Strength(Storage.Base), EndsLifetime);
-          else
-            StoreCredit.markMemberStored(Storage.Base, Storage.Field,
-                                         Strength(Storage.Base));
-          break;
-        case LifetimeAnnotatedStorage::Kind::Reseat:
-          llvm_unreachable(
-              "resolveLifetimeAnnotatedStorage maps Reseat to None");
-        }
-      });
-}
-
-void SemaProfiles::checkInitProfileDeleteOperand(const Expr *Operand) {
-  // The delete-expression twin of a storage-release callee's binding: the
-  // operand's storage is released, so its credit is withdrawn -- a later
-  // whole-`*q` read through a marked pointer classifies uninitialized
-  // again -- with no binding diagnostic, matching both the funnel's
-  // release relaxation and this expression's historical silence. An
-  // instantiation-dependent operand defers: TreeTransform re-invokes
-  // ActOnCXXDelete at instantiation, re-running this hook with the
-  // substituted operand.
-  if (!getLangOpts().Profiles || !Operand ||
-      Operand->isInstantiationDependent())
-    return;
-  // A delete in a never-executed context releases nothing (the recorders'
-  // shared gate).
-  if (inNeverExecutedContext())
-    return;
-  // A Release, like operator delete's binding: the storage is gone, but no
-  // destroyed state is recorded -- delete p; destroy_at(p); is the
-  // invalidation profile's problem, not double_destroy's.
-  recordLifetimeAnnotatedArgument(Operand->getType(), Operand,
-                                  LifetimeAnnotationEffect::Release);
-}
-
-bool SemaProfiles::storageIsDestroyed(QualType T, const Expr *Src) const {
-  // Every leaf of a conditional or comma shape must resolve to destroyed
-  // storage, preserving double_destroy's definite-by-construction contract:
-  // destroy(c ? p : q) with one destroyed arm does not fire, while
-  // destroy(c ? p : p) after an unconditional destroy still does.
-  bool AnyLeaf = false, AllDestroyed = true;
-  forEachTargetLeaf(Src, /*ConditionalArm=*/false, [&](const Expr *Leaf, bool) {
-    AnyLeaf = true;
-    LifetimeAnnotatedStorage Storage = resolveLifetimeAnnotatedStorage(T, Leaf);
-    switch (Storage.StorageKind) {
-    case LifetimeAnnotatedStorage::Kind::None:
-      AllDestroyed = false;
-      return;
-    case LifetimeAnnotatedStorage::Kind::Whole:
-      AllDestroyed &= StoreCredit.isWholeDestroyed(Storage.Entity);
-      return;
-    case LifetimeAnnotatedStorage::Kind::Pointee:
-      AllDestroyed &= StoreCredit.isPointeeDestroyed(Storage.Entity);
-      return;
-    case LifetimeAnnotatedStorage::Kind::Member:
-      AllDestroyed &=
-          StoreCredit.isMemberDestroyed(Storage.Base, Storage.Field);
-      return;
-    case LifetimeAnnotatedStorage::Kind::Reseat:
-      llvm_unreachable("resolveLifetimeAnnotatedStorage maps Reseat to "
-                       "None");
-    }
-    llvm_unreachable("unknown LifetimeAnnotatedStorage kind");
-  });
-  return AnyLeaf && AllDestroyed;
 }
 
 void SemaProfiles::checkInitProfileRefCapture(SourceLocation Loc,
@@ -2993,137 +2558,35 @@ void SemaProfiles::checkInitProfileIncDec(Expr *Operand, SourceLocation OpLoc) {
   checkInitProfileSubobjectWrite(OpLoc, Operand);
 }
 
-bool SemaProfiles::inNeverExecutedContext() const {
-  return SemaRef.isUnevaluatedContext() ||
-         SemaRef.currentEvaluationContext().isDiscardedStatementContext();
-}
-
-SemaProfiles::InitCreditStrength
-SemaProfiles::currentStoreStrength(const Decl *CreditKey) const {
-  // The parser scope chain is parser-only state (see Sema::getCurScope):
-  // during template instantiation it describes whatever the parser happens
-  // to be doing, not the instantiated function -- and the requires-uninit
-  // direction ignores credit while instantiating anyway.
-  if (SemaRef.inTemplateInstantiation())
-    return InitCreditStrength::Maybe;
-  // Synthesized special members build member-wise assignments through
-  // CheckAssignmentOperands *outside* template instantiation with a stale
-  // getCurScope() (Sema::DefineImplicitCopyAssignment). Harmless without
-  // further machinery: those stores target this->m of the synthesized
-  // operator=, so their member credit keys on that operator's parse-time
-  // pattern, which no user-code consult ever matches.
-  if (!SemaRef.getCurScope() || currentConditionalDepth() != 0)
-    return InitCreditStrength::Maybe;
-  // A goto seen *earlier* in this function body can jump over any later
-  // store without introducing a scope (if (c) goto skip; u = 5; skip:),
-  // which neither the scope walk nor the expression-depth counter can see
-  // -- so once the current function has branched (goto, indirect goto, asm
-  // goto; a switch shares the flag, an over-inclusion in the safe
-  // direction), every later store records Maybe only: lost requires-uninit
-  // diagnostics, never a false positive. A goto *after* a store cannot
-  // skip it -- every path from the goto's target to a later consult
-  // re-passes the store or never reaches the consult -- so stores before
-  // the first branch keep their strength.
-  const sema::FunctionScopeInfo *FSI = SemaRef.getCurFunction();
-  if (!FSI || FSI->HasBranchIntoScope || FSI->HasIndirectGoto)
-    return InitCreditStrength::Maybe;
-  // The innermost function-like context, walked from CurContext directly:
-  // getCurFunctionDecl skips blocks and captured regions, but a store
-  // inside a block body must not definitely credit the enclosing
-  // function's entity -- the block may never run. (The depth walk cannot
-  // see this either: a block body's scope carries FnScope, so a store at
-  // its top level is depth 0 *within the block*.) Only a FunctionDecl --
-  // a plain function, a method, a lambda call operator -- earns Definite;
-  // block-, captured-, and ObjC-method-owned stores stay Maybe, as they
-  // were when this predicate keyed on getCurFunctionDecl.
-  const DeclContext *Innermost = SemaRef.CurContext;
-  while (Innermost && !Innermost->isFunctionOrMethod())
-    Innermost = Innermost->getParent();
-  const auto *InnermostFn = dyn_cast_or_null<FunctionDecl>(Innermost);
-  if (!InnermostFn)
-    return InitCreditStrength::Maybe;
-  // Normalized to its parse-time pattern to match the member-credit key
-  // (an identity while parsing -- inTemplateInstantiation was excluded
-  // above -- kept for symmetry with resolveMemberStoreBase).
-  const DeclContext *Enclosing = getParseTimePattern(InnermostFn);
-  // The credited entity's owning function: the DeclContext of a credited
-  // local/parameter (or of the directly named local base object of member
-  // credit); for current-object member credit the key *is* the owning
-  // function's parse-time pattern (see resolveMemberStoreBase). The
-  // same-function requirement stops a store inside a lambda body from
-  // definitely crediting an enclosing function's local -- depth alone
-  // cannot, since the walk stops at the lambda's own function scope.
-  const DeclContext *Owner = nullptr;
-  if (const auto *VD = dyn_cast<VarDecl>(CreditKey))
-    Owner = VD->getDeclContext();
-  else if (const auto *FD = dyn_cast<FunctionDecl>(CreditKey))
-    Owner = FD;
-  return Owner == Enclosing ? InitCreditStrength::Definite
-                            : InitCreditStrength::Maybe;
-}
-
-unsigned SemaProfiles::currentConditionalDepth() const {
-  unsigned Depth = ConditionalExprDepth;
-  // Count the conditional scopes from the current parse position up to --
-  // and excluding -- the nearest function scope. Any flag beyond a plain
-  // declaration/compound-statement block marks a scope conditional (see the
-  // header comment for the rationale and the known conservatisms).
-  for (const Scope *S = SemaRef.getCurScope();
-       S && !(S->getFlags() & Scope::FnScope); S = S->getParent())
-    if (S->getFlags() & ~unsigned(Scope::DeclScope | Scope::CompoundStmtScope))
-      ++Depth;
-  return Depth;
-}
-
-void SemaProfiles::forEachTargetLeaf(
-    const Expr *E, bool ConditionalArm,
-    llvm::function_ref<void(const Expr *, bool)> F) {
+void SemaProfiles::forEachTargetLeaf(const Expr *E,
+                                     llvm::function_ref<void(const Expr *)> F) {
   E = ignoreTransparentCasts(E);
   // A conditional or comma shape names whichever lvalue the chosen arm
-  // does: walk each named arm. The Maybe cap is explicit because
-  // ConditionalExprRegion has unwound by the consumers' run time, so
-  // currentStoreStrength alone cannot see the shape's own conditionality.
+  // does: walk each named arm.
   if (const auto *CO = dyn_cast<ConditionalOperator>(E)) {
-    forEachTargetLeaf(CO->getTrueExpr(), /*ConditionalArm=*/true, F);
-    forEachTargetLeaf(CO->getFalseExpr(), /*ConditionalArm=*/true, F);
+    forEachTargetLeaf(CO->getTrueExpr(), F);
+    forEachTargetLeaf(CO->getFalseExpr(), F);
     return;
   }
   if (const auto *BCO = dyn_cast<BinaryConditionalOperator>(E)) {
     // The written common operand doubles as the true arm, mirroring
     // classifyUninitPassThrough's OVE avoidance.
-    forEachTargetLeaf(BCO->getCommon(), /*ConditionalArm=*/true, F);
-    forEachTargetLeaf(BCO->getFalseExpr(), /*ConditionalArm=*/true, F);
+    forEachTargetLeaf(BCO->getCommon(), F);
+    forEachTargetLeaf(BCO->getFalseExpr(), F);
     return;
   }
   if (const auto *BO = dyn_cast<BinaryOperator>(E); BO && BO->isCommaOp()) {
-    forEachTargetLeaf(BO->getRHS(), ConditionalArm, F);
+    forEachTargetLeaf(BO->getRHS(), F);
     return;
   }
   // A single-element braced initializer names its element, as it does for
   // the recognizers (classifyUninitPassThrough).
   if (const auto *ILE = dyn_cast<InitListExpr>(E);
       ILE && ILE->getNumInits() == 1) {
-    forEachTargetLeaf(ILE->getInit(0), ConditionalArm, F);
+    forEachTargetLeaf(ILE->getInit(0), F);
     return;
   }
-  F(E, ConditionalArm);
-}
-
-bool SemaProfiles::hasWholeObjectStoreCredit(const ValueDecl *VD,
-                                             InitCreditStrength Strength) const {
-  const auto *Var = dyn_cast<VarDecl>(VD);
-  return Var && StoreCredit.hasWholeStored(Var, Strength);
-}
-
-bool SemaProfiles::hasPointeeStoreCredit(const ValueDecl *VD,
-                                         InitCreditStrength Strength) const {
-  const auto *Var = dyn_cast<VarDecl>(VD);
-  return Var && StoreCredit.hasPointeeStored(Var, Strength);
-}
-
-bool SemaProfiles::hasMemberStoreCredit(const Decl *Base, const FieldDecl *F,
-                                        InitCreditStrength Strength) const {
-  return Base && F && StoreCredit.hasMemberStored(Base, F, Strength);
+  F(E);
 }
 
 namespace {
@@ -3198,9 +2661,9 @@ forEachCtorUninitField(Sema &S, const CXXRecordDecl *RD,
       if (!AnonRD || !AnonRD->hasDefinition() || AnonRD->isInvalidDecl())
         continue;
       // An anonymous union's members are mutually exclusive: one written
-      // leaf gives it its active member -- deliberately lenient for a
-      // struct variant only partially covered by its written leaves (a
-      // missed diagnostic, never a false positive) -- and a vacuous
+      // leaf gives it its active member -- lenient for a struct variant
+      // only partially covered by its written leaves (a missed
+      // diagnostic, never a false positive) -- and a vacuous
       // default-initialization (an empty union, or a leaf NSDMI, which is
       // the active member) needs nothing. A leaf [[uninit]] marker is not
       // consulted: union_marker already rejects markers on union members.
