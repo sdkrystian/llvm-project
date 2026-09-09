@@ -1824,10 +1824,10 @@ tryDiagnoseProfileUninitRead(Sema &S, AnalysisDeclContext &AC,
   return false;
 }
 
-// True if E denotes the current object: `this` (the implicit/explicit pointer
-// of an arrow access) or `*this` (the object lvalue of a dot access), seen
-// through the transparent casts the parse-order credit sees through
-// (`(Base &)*this`, `(Base *)this`).
+/// True if \p E denotes the current object: `this` (the implicit/explicit
+/// pointer of an arrow access) or `*this` (the object lvalue of a dot
+/// access), seen through the transparent casts the recognizers see through
+/// (`(Base &)*this`, `(Base *)this`).
 static bool isCurrentObjectBase(const Expr *E) {
   E = SemaProfiles::ignoreTransparentCasts(E);
   if (isa<CXXThisExpr>(E))
@@ -1838,79 +1838,7 @@ static bool isCurrentObjectBase(const Expr *E) {
              SemaProfiles::ignoreTransparentCasts(UO->getSubExpr()));
 }
 
-// A class with a user-provided constructor is trusted (paper §5.1): its
-// constructor body may have assigned a member, which local analysis cannot
-// see, so its members are not flow-tracked.
-static bool hasUserProvidedCtor(const CXXRecordDecl *RD) {
-  return llvm::any_of(RD->ctors(), [](const CXXConstructorDecl *C) {
-    return C->isUserProvided();
-  });
-}
-
-/// A derived-to-base path: the canonical class of each base step from an
-/// object's class to the class declaring a member; empty for the object's own
-/// members. Two copies of one member reached through different bases (a
-/// non-virtual diamond) have different paths.
-using BasePath = SmallVector<const CXXRecordDecl *, 2>;
-
-// Visit the candidate fields of RD and of its non-virtual, constructor-less
-// base classes, recursively, each with its derived-to-base path from RD.
-template <typename Fn>
-static void forEachCandidateUninitField(const CXXRecordDecl *RD, Fn Visit) {
-  SmallVector<std::pair<const CXXRecordDecl *, BasePath>, 4> RecordStack;
-  RecordStack.push_back({RD, BasePath()});
-  while (!RecordStack.empty()) {
-    auto [Cur, Path] = RecordStack.pop_back_val();
-    for (const FieldDecl *F : Cur->fields())
-      Visit(Path, F);
-    for (const CXXBaseSpecifier &BS : Cur->bases()) {
-      if (BS.isVirtual())
-        continue;
-      const CXXRecordDecl *BRD = BS.getType()->getAsCXXRecordDecl();
-      if (BRD && BRD->hasDefinition() &&
-          !hasUserProvidedCtor(BRD->getDefinition())) {
-        BasePath BP(Path);
-        BP.push_back(BRD->getCanonicalDecl());
-        RecordStack.push_back({BRD->getDefinition(), std::move(BP)});
-      }
-    }
-  }
-}
-
-/// Peel the transparent casts SemaProfiles::ignoreTransparentCasts peels --
-/// parens, implicit casts, and explicit casts of a pointer or glvalue -- from
-/// \p E, prepending the derived-to-base steps they take to \p Path in
-/// object-to-member order (this step's casts sit closer to the object than
-/// the caller's); returns the operand reached.
-static const Expr *peelBaseCasts(const Expr *E, BasePath &Path) {
-  SmallVector<const CastExpr *, 4> Casts;
-  E = E->IgnoreParens();
-  while (true) {
-    if (const auto *FE = dyn_cast<FullExpr>(E)) {
-      E = FE->getSubExpr()->IgnoreParens();
-      continue;
-    }
-    const auto *CE = dyn_cast<CastExpr>(E);
-    if (!CE)
-      break;
-    if (isa<ExplicitCastExpr>(CE)) {
-      const Expr *Sub = CE->getSubExpr();
-      if (!Sub->getType()->isPointerType() && !Sub->isGLValue())
-        break;
-    }
-    Casts.push_back(CE);
-    E = CE->getSubExpr()->IgnoreParens();
-  }
-  BasePath Steps;
-  for (const CastExpr *CE : llvm::reverse(Casts))
-    if (CE->getCastKind() == CK_DerivedToBase ||
-        CE->getCastKind() == CK_UncheckedDerivedToBase)
-      for (const CXXBaseSpecifier *BS : CE->path())
-        Steps.push_back(
-            BS->getType()->getAsCXXRecordDecl()->getCanonicalDecl());
-  Path.insert(Path.begin(), Steps.begin(), Steps.end());
-  return E;
-}
+using BasePath = SemaProfiles::BasePath;
 
 /// One flow-tracked std::init storage entity of the analyzed body: an
 /// [[uninit]] scalar member of the current object or of a directly named
@@ -1965,7 +1893,7 @@ static bool typeHoldsPointerOrReference(
   return false;
 }
 
-/// The entity table of one analyzed body and the one lvalue-shape resolver
+/// The entity table of one analyzed body and the lvalue-shape resolvers
 /// over it. Each object's entities are contiguous, so a whole-object event
 /// covers a range.
 struct TrackedStorage {
@@ -1974,7 +1902,8 @@ struct TrackedStorage {
   llvm::DenseMap<const VarDecl *, std::pair<unsigned, unsigned>> LocalRange;
   /// The WholeLocal or Pointee entity of a marked local or parameter.
   llvm::DenseMap<const VarDecl *, unsigned> LocalEntity;
-  /// The current object's range (a constructor body); empty otherwise.
+  /// The current object's range (an instance member function body); empty
+  /// otherwise.
   std::pair<unsigned, unsigned> CurrentObjectRange{0, 0};
   /// The tracked local a tracked copy was copy- or move-constructed from,
   /// and the derived-to-base path of the conversion a slicing copy applied
@@ -1985,17 +1914,18 @@ struct TrackedStorage {
   };
   llvm::DenseMap<const VarDecl *, CopyOrigin> CopySource;
 
-  /// Append one entity per flow-trackable member of \p RD -- an [[uninit]]
-  /// built-in scalar (arithmetic or enum) member with no default member
-  /// initializer, std::byte excepted (P4222R2 §4.6), including those of its
+  /// Append one entity per flow-tracked member of \p RD
+  /// (SemaProfiles::isFlowTrackedMemberField, including the members of its
   /// non-virtual, constructor-less bases, which nothing can have assigned
-  /// before the containing object's user code runs -- for the object
-  /// \p Base (null: the current object). Class-type and array members (which
-  /// would need construct_at flow modeling) and pointers (rejected under
-  /// [[uninit]]) are out of scope. Returns the appended range; a local's
-  /// range is recorded only when non-empty.
+  /// before the containing object's user code runs) for the object \p Base
+  /// (null: the current object), with the given read-tracking and entry
+  /// state. Class-type and array members (which would need construct_at
+  /// flow modeling) and pointers (rejected under [[uninit]]) are out of
+  /// scope. Returns the appended range; a local's range is recorded only
+  /// when non-empty.
   std::pair<unsigned, unsigned> addObject(Sema &S, const VarDecl *Base,
-                                          const CXXRecordDecl *RD);
+                                          const CXXRecordDecl *RD,
+                                          bool TrackReads, bool UnknownEntry);
 
   /// Append the WholeLocal or Pointee entity of the marked local or
   /// parameter \p V (once); returns its index.
@@ -2008,24 +1938,46 @@ struct TrackedStorage {
                                ArrayRef<const CXXRecordDecl *> Path,
                                const FieldDecl *F) const;
 
-  /// What resolving a glvalue found: the tracked entity it names, or -- for
-  /// an access that reaches a tracked local without naming a tracked member
-  /// -- the consumed base and whether the access is benign: it cannot reach
-  /// a tracked member (an untracked scalar sibling, or a sub-access below a
-  /// member whose type holds no pointer, reference, or member pointer), so
-  /// the base does not escape.
+  /// What resolving a glvalue found: the tracked entity it names -- Subobject
+  /// when it reaches storage below that entity (a member or element of an
+  /// [[uninit]] object, a member of a marked pointee), which a store does not
+  /// initialize and a binding judges by the entity's state -- or, for an
+  /// access that reaches a tracked aggregate local without naming a tracked
+  /// member, the consumed base and whether the access is benign: it cannot
+  /// reach a tracked member (an untracked scalar sibling, or a sub-access
+  /// below a member whose type holds no pointer, reference, or member
+  /// pointer), so the base does not escape.
   struct Resolution {
     std::optional<unsigned> Entity;
+    bool Subobject = false;
     const DeclRefExpr *LocalBase = nullptr;
     bool Benign = false;
   };
-  /// Resolve the glvalue \p E: this->m, the implicit m, or (*this).m on the
-  /// current object, or V.m on a directly named tracked local, each through
-  /// the transparent casts the parse-order credit sees through and through
-  /// anonymous-record member steps; a sub-access below a named class or
-  /// array member (x.in.v, x.arr[0]) names no entity and is benign or an
-  /// escape by that member's type.
+  /// Resolve the glvalue \p E through SemaProfiles::flowLeafShape: a tracked
+  /// member of the current object (this->m, m, (*this).m) or of a directly
+  /// named tracked local (V.m), an [[uninit]] local or a subobject of it (u,
+  /// u.x, arr[i]), or a marked local pointer's or reference's referent or a
+  /// subobject of it (*p, p->m, r, r.m; never an element, P4222R2 §5.4). A
+  /// sub-access below a named class or array member of a tracked aggregate
+  /// (x.in.v, x.arr[0]) names no entity and is benign or an escape by that
+  /// member's type. The one resolver behind every event arm, so a leaf
+  /// affects flow state exactly as SemaProfiles::isFlowTrackedLeaf says it
+  /// is tracked.
   Resolution resolve(const Expr *E) const;
+
+  /// Resolve a binding or argument leaf: the glvalue \p E (resolve), or --
+  /// with \p AsPointerValue, a leaf used as a pointer value -- the storage
+  /// `&x` names, a marked local pointer's referent (its value), or a decayed
+  /// [[uninit]] array as a whole.
+  Resolution resolveFlowLeaf(const Expr *E, bool AsPointerValue) const;
+
+  /// The Pointee entity of the marked local pointer \p V (a reference's
+  /// referent cannot be reseated and is not one), if tracked.
+  std::optional<unsigned> markedPointerObject(const VarDecl *V) const;
+  /// The same for the pointer object the glvalue \p E directly names through
+  /// transparent casts: the object a store reseats or an alias binding
+  /// escapes.
+  std::optional<unsigned> markedPointerObject(const Expr *E) const;
 
   /// The range of the object \p E names as a whole -- `this` / `*this`, or
   /// a tracked local's DeclRefExpr -- empty otherwise.
@@ -2033,26 +1985,23 @@ struct TrackedStorage {
 };
 
 std::pair<unsigned, unsigned>
-TrackedStorage::addObject(Sema &S, const VarDecl *Base,
-                          const CXXRecordDecl *RD) {
+TrackedStorage::addObject(Sema &S, const VarDecl *Base, const CXXRecordDecl *RD,
+                          bool TrackReads, bool UnknownEntry) {
   unsigned Begin = Entities.size();
-  forEachCandidateUninitField(RD, [&](const BasePath &Path,
-                                      const FieldDecl *F) {
-    if (!F->hasAttr<UninitAttr>() || !F->getDeclName() ||
-        F->hasInClassInitializer())
-      return;
-    QualType T = F->getType();
-    if (!T->isIntegralOrEnumerationType() && !T->isFloatingType())
-      return;
-    if (S.Context.getBaseElementType(T)->isStdByteType())
-      return;
-    for (unsigned I = Begin, N = Entities.size(); I != N; ++I)
-      if (Entities[I].Field == F && Entities[I].Path == Path)
-        return;
-    Entities.push_back({Base ? TrackedEntity::Kind::LocalMember
+  SemaProfiles::forEachCandidateUninitField(
+      RD, [&](const BasePath &Path, const FieldDecl *F) {
+        if (!SemaProfiles::isFlowTrackedMemberField(S.Context, F))
+          return;
+        for (unsigned I = Begin, N = Entities.size(); I != N; ++I)
+          if (Entities[I].Field == F && Entities[I].Path == Path)
+            return;
+        TrackedEntity E{Base ? TrackedEntity::Kind::LocalMember
                              : TrackedEntity::Kind::CurrentObjectMember,
-                        Base, Path, F});
-  });
+                        Base, Path, F};
+        E.TrackReads = TrackReads;
+        E.UnknownEntry = UnknownEntry;
+        Entities.push_back(std::move(E));
+      });
   std::pair<unsigned, unsigned> Range{Begin, (unsigned)Entities.size()};
   if (!Base)
     CurrentObjectRange = Range;
@@ -2101,68 +2050,55 @@ std::pair<unsigned, unsigned> TrackedStorage::wholeObject(const Expr *E) const {
 }
 
 TrackedStorage::Resolution TrackedStorage::resolve(const Expr *E) const {
+  std::optional<SemaProfiles::FlowLeafShape> Shape =
+      SemaProfiles::flowLeafShape(E);
+  if (!Shape)
+    return {};
   Resolution R;
-  // Walk from the leaf toward the object: named member steps (anonymous
-  // struct/union steps are transparent, as the harvest tracks nothing inside
-  // an anonymous record) and element steps; an arrow reaches the current
-  // object only.
-  SmallVector<const FieldDecl *, 4> Named;
-  bool Subscript = false;
-  BasePath Path;
-  const Expr *Cur = peelBaseCasts(E, Path);
-  while (true) {
-    if (const auto *ME = dyn_cast<MemberExpr>(Cur)) {
-      const auto *F = dyn_cast<FieldDecl>(ME->getMemberDecl());
-      if (!F)
-        return {};
-      if (!F->isAnonymousStructOrUnion())
-        Named.push_back(F);
-      Cur = peelBaseCasts(ME->getBase(), Path);
-      if (ME->isArrow()) {
-        if (!isa<CXXThisExpr>(Cur))
-          return {};
-        break;
-      }
-      continue;
-    }
-    if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(Cur)) {
-      Subscript = true;
-      Cur = peelBaseCasts(ASE->getBase(), Path);
-      continue;
-    }
-    break;
-  }
-  if (Named.empty())
-    return {};
-  // `(*this).m`, with any base cast inside the dereference.
-  if (const auto *UO = dyn_cast<UnaryOperator>(Cur);
-      UO && UO->getOpcode() == UO_Deref) {
-    Cur = peelBaseCasts(UO->getSubExpr(), Path);
-    if (!isa<CXXThisExpr>(Cur))
+  if (Shape->IsThis) {
+    if (Shape->Named.size() != 1 || Shape->Subscript)
       return {};
+    R.Entity = find(nullptr, Shape->Path, Shape->Named.front());
+    return R;
   }
-  std::pair<unsigned, unsigned> Range;
-  if (isa<CXXThisExpr>(Cur)) {
-    Range = CurrentObjectRange;
-  } else if (const auto *DRE = dyn_cast<DeclRefExpr>(Cur)) {
-    const auto *V = dyn_cast<VarDecl>(DRE->getDecl());
-    auto It = V ? LocalRange.find(V) : LocalRange.end();
-    if (It == LocalRange.end())
+  const VarDecl *V = Shape->Local;
+  // *p, p->m: a marked pointer's referent or a subobject of it.
+  if (Shape->ThroughPointer) {
+    if (Shape->Subscript)
       return {};
-    Range = It->second;
-    R.LocalBase = DRE;
-  } else {
-    return {};
+    if (std::optional<unsigned> Idx = markedPointerObject(V)) {
+      R.Entity = Idx;
+      R.Subobject = !Shape->Named.empty();
+    }
+    return R;
   }
+  if (auto It = LocalEntity.find(V); It != LocalEntity.end()) {
+    // u, u.x, arr[i]: an [[uninit]] local as a whole or a subobject of it;
+    // r, r.m: a marked reference's referent or a subobject of it.
+    const TrackedEntity &Ent = Entities[It->second];
+    if (Ent.K == TrackedEntity::Kind::WholeLocal) {
+      R.Entity = It->second;
+      R.Subobject = !Shape->Named.empty() || Shape->Subscript;
+    } else if (Ent.K == TrackedEntity::Kind::Pointee &&
+               V->getType()->isReferenceType() && !Shape->Subscript) {
+      R.Entity = It->second;
+      R.Subobject = !Shape->Named.empty();
+    }
+    return R;
+  }
+  // V.m: a member of a tracked aggregate local, or a consuming access of one.
+  auto RangeIt = LocalRange.find(V);
+  if (RangeIt == LocalRange.end() || Shape->Named.empty())
+    return {};
+  R.LocalBase = Shape->LocalRef;
   // The member directly on the object.
-  const FieldDecl *Top = Named.back();
-  if (Named.size() == 1 && !Subscript) {
-    for (unsigned I = Range.first; I != Range.second; ++I)
-      if (Entities[I].Field == Top && Entities[I].Path == Path) {
-        R.Entity = I;
-        R.Benign = true;
-        return R;
-      }
+  const FieldDecl *Top = Shape->Named.back();
+  if (Shape->Named.size() == 1 && !Shape->Subscript) {
+    if (std::optional<unsigned> Idx = find(V, Shape->Path, Top)) {
+      R.Entity = Idx;
+      R.Benign = true;
+      return R;
+    }
     // An untracked sibling consumes the base without exposing the object
     // only when it cannot itself reach a tracked member: a pointer or
     // reference member may denote one, and a class or array member may hold
@@ -2176,23 +2112,69 @@ TrackedStorage::Resolution TrackedStorage::resolve(const Expr *E) const {
   return R;
 }
 
+TrackedStorage::Resolution
+TrackedStorage::resolveFlowLeaf(const Expr *E, bool AsPointerValue) const {
+  if (!AsPointerValue)
+    return resolve(E);
+  E = SemaProfiles::ignoreTransparentCasts(E);
+  if (const auto *UO = dyn_cast<UnaryOperator>(E);
+      UO && UO->getOpcode() == UO_AddrOf)
+    return resolve(UO->getSubExpr());
+  Resolution R;
+  if (std::optional<unsigned> Idx = markedPointerObject(E)) {
+    R.Entity = Idx;
+    return R;
+  }
+  // A decayed [[uninit]] array.
+  const auto *VD =
+      dyn_cast_or_null<VarDecl>(SemaProfiles::getDirectlyNamedDecl(E));
+  if (VD && VD->getType()->isArrayType())
+    if (auto It = LocalEntity.find(VD);
+        It != LocalEntity.end() &&
+        Entities[It->second].K == TrackedEntity::Kind::WholeLocal)
+      R.Entity = It->second;
+  return R;
+}
+
+std::optional<unsigned>
+TrackedStorage::markedPointerObject(const VarDecl *V) const {
+  auto It = LocalEntity.find(V);
+  if (It == LocalEntity.end() ||
+      Entities[It->second].K != TrackedEntity::Kind::Pointee ||
+      !V->getType()->isPointerType())
+    return std::nullopt;
+  return It->second;
+}
+
+std::optional<unsigned>
+TrackedStorage::markedPointerObject(const Expr *E) const {
+  const auto *V = dyn_cast_or_null<VarDecl>(SemaProfiles::getDirectlyNamedDecl(
+      SemaProfiles::ignoreTransparentCasts(E)));
+  return V ? markedPointerObject(V) : std::nullopt;
+}
+
 /// Per-block ordered events recovered from the CFG by the std::init dataflow
 /// engine and replayed over a FlowState in element order. Read: a value load
 /// of entity Idx (read-tracked members). Write: Idx is assigned. ReadWrite: a
 /// compound assignment or built-in ++/--, a Read then a Write. MayWrite: a
 /// store whose target names Idx on one of several arms. Copy: Idx takes
 /// entity Aux's state (the tracked-copy transfer). Kill: a storage release
-/// (free, operator delete, a delete-expression) leaves Idx unassigned.
-/// Destroy: a [[now_uninit]] destruction of Idx, judged by the destroy rules,
-/// then unassigned and destroyed until stored again. Reseat: marked pointer
-/// Idx is reassigned, retiring every fact about its pointee. Escape: a
-/// mutable alias of marked pointer Idx is handed out, so its pointee is no
-/// longer definitely assigned nor destroyed. Binding: a pointer or reference
-/// binding whose source has a tracked leaf (BindingSites[Aux]), judged by
-/// the binding rule. ReadThrough / SubobjectWrite: a read through, or a store
-/// below, the storage of Idx, judged by uninit_read / uninit_write. Every
-/// event carries the anchor expression the diagnostic and the suppression
-/// walk use.
+/// (free, realloc, operator delete, a delete-expression) or a [[now_uninit]]
+/// destruction leaves Idx unassigned. Destroy: a [[now_uninit]] destruction
+/// of Idx, judged by the destroy rules, then unassigned and destroyed until
+/// stored again. Reseat: marked pointer Idx is reassigned, retiring every
+/// fact about its pointee. Escape: Idx may have been reseated or destroyed
+/// by something the analysis cannot see -- a mutable alias of marked pointer
+/// Idx handed out, or a destroy or release on one of several arms -- so it
+/// is no longer definitely assigned nor destroyed. AggregateEscape: the
+/// tracked aggregate local owning member
+/// Idx escapes as a whole (a non-benign DeclRefExpr), so reads of the member
+/// are trusted from here (the local read leniency) while its assignment
+/// state is unchanged. Binding: a pointer or reference binding whose source
+/// has a tracked leaf (BindingSites[Aux]), judged by the binding rule.
+/// ReadThrough / SubobjectWrite: a read through, or a store below, the
+/// storage of Idx, judged by uninit_read / uninit_write. Every event carries
+/// the anchor expression the diagnostic and the suppression walk use.
 enum class DefAssignEventKind {
   Read,
   Write,
@@ -2203,6 +2185,7 @@ enum class DefAssignEventKind {
   Destroy,
   Reseat,
   Escape,
+  AggregateEscape,
   Binding,
   ReadThrough,
   SubobjectWrite
@@ -2417,6 +2400,9 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       St.Must.reset(Ev.Idx);
       St.Destroyed.reset(Ev.Idx);
       break;
+    case DefAssignEventKind::AggregateEscape:
+      St.Esc.set(Ev.Idx);
+      break;
     case DefAssignEventKind::Binding:
       if (Violations) {
         size_t Before = Violations->size();
@@ -2447,9 +2433,10 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
 /// definitely assigned at a point only if assigned on every incoming path,
 /// the paper's all-branches rule, P4222R2 §1.3), and a block's transfer is
 /// the event replay above -- the same replay the reporting pass uses. Every
-/// transfer is monotone in each lattice (Read, Write, ReadWrite, and
-/// MayWrite only set bits, Copy projects the source's bits, Kill, Destroy,
-/// Reseat, and Escape are constant functions of their bits), so a block's
+/// transfer is monotone in each lattice (Read, Write, ReadWrite, MayWrite,
+/// and AggregateEscape only set bits, Copy projects the source's bits, Kill,
+/// Destroy, Reseat, and Escape are constant functions of their bits), so a
+/// block's
 /// exit only ever descends from the join identity in a finite lattice and
 /// the iteration terminates. Unprocessed (unreachable) predecessors keep the
 /// join identity, so unreachable code is never flagged. Returns, per
@@ -2588,93 +2575,80 @@ static void reportFlowViolations(Sema &S, AnalysisDeclContext &AC,
   }
 }
 
-// Peel a lifecycle call's argument down to the expression that names the
-// storage: the transparent casts the parse-time recognizers see through
-// (§4.3: a cast marked pointer is itself marked), and, through \p Glvalue,
-// a top-level `&`. Returns the peeled argument (`&m`, `m`, `this`); Glvalue
-// is the same expression with the `&` stripped (`m`), the shape
-// TrackedStorage::resolve takes.
-static const Expr *peelLifecycleArgument(const Expr *Arg,
-                                         const Expr *&Glvalue) {
-  Arg = SemaProfiles::ignoreTransparentCasts(Arg);
-  Glvalue = Arg;
-  if (const auto *AddrOf = dyn_cast<UnaryOperator>(Arg);
-      AddrOf && AddrOf->getOpcode() == UO_AddrOf)
-    Glvalue = AddrOf->getSubExpr();
-  return Arg;
-}
-
-// A call to a lifecycle-annotated function changes the assignment state of
-// the current-object storage bound to its parameters, as real dataflow
-// facts, not parse-order credit -- §1.2's all-branches rule governs both
-// directions. A [[now_uninit]] callee destroys the storage bound to each
-// pointer/reference parameter (no marker key: the attribute's contract
-// covers every such argument), so a member passed as `&m` / `m` -- or
-// every tracked member when `this` / `*this` itself is passed -- has its
-// assigned bit killed: destruction makes the storage uninitialized again
-// ("Lifetimes", p4222r2.md:922-927), and a destroy under a branch already
-// spoils a read at the join (may-kill). A [[now_init]] callee initializes
-// the storage bound to each of its [[ref_to_uninit]] parameters (P4222R2
-// §6.2) -- the paper's sanctioned exception to the ctor-body pass's strict
-// assignment-only crediting. A current-object member passed as `&m` / `m`
-// becomes assigned at the call element (its argument-subexpression events,
-// e.g. a read of another member, precede it in the block); passing `this`
-// / `*this` itself to a marked parameter hands the callee the whole object
-// to initialize, so every tracked member is assigned. Kill events are
-// appended before Write events -- append order is replay order -- so a
-// dual-attributed reinitializer nets to assigned. Storage-release callees
-// (free) are deliberately not kills: a release ends no object's lifetime,
-// and the trusted/by-name allocator split stays out of this file. A plain
-// callee earns nothing.
+/// The lifecycle effects of the call \p CE on the storage bound to its
+/// parameters (\p Roles, derived by the caller; \p ArgOffset skips a member
+/// operator's object argument). A [[now_init]] callee writes the storage
+/// bound to each of its [[ref_to_uninit]] parameters (P4222R2 §6.2): a
+/// member passed as `&m` / `m`, a marked pointer's pointee passed as `p`, a
+/// decayed [[uninit]] array, an [[uninit]] local passed as `&u` / `u`, or
+/// every tracked member of an object passed as a whole (`this`, `*this`,
+/// `&x`, `x`); an argument whose arms name several storages may-writes each.
+/// A [[now_uninit]] callee kills the storage bound to each pointer or
+/// reference parameter (no marker key: the attribute's contract covers every
+/// such argument), and so does a trusted storage-release callee (free,
+/// realloc's pointer, a replaceable global operator delete): destruction
+/// makes the storage uninitialized again (P4222R2 §4.4), a kill under a
+/// branch already spoils a read at the join, and a released or destroyed
+/// entity is no longer definitely initialized for a binding; an argument
+/// whose arms name several storages escapes each (the chosen arm is
+/// unknown, so each may have been destroyed). Kills are appended before
+/// writes -- append order is replay order -- so a dual-attributed
+/// reinitializer nets to assigned. A plain callee earns nothing. The
+/// bindings judged at this call precede these effects in the block, so they
+/// see the pre-call state.
 static void
-appendLifecycleCallEvents(const CallExpr *CE, const TrackedStorage &Storage,
+appendLifecycleCallEvents(const CallExpr *CE, const FunctionDecl *Callee,
+                          const SemaProfiles::CalleeLifecycleRoles &Roles,
+                          unsigned ArgOffset, const TrackedStorage &Storage,
                           SmallVectorImpl<DefAssignEvent> &BlockEvents) {
-  const FunctionDecl *Callee = CE->getDirectCallee();
-  if (!Callee ||
-      (!Callee->hasAttr<NowInitAttr>() && !Callee->hasAttr<NowUninitAttr>()))
-    return;
-  // Zip declared parameters with arguments. A member operator called
-  // through CXXOperatorCallExpr receives the object as argument 0
-  // ahead of its declared parameters -- for a C++23 static operator
-  // too, whose object argument is still evaluated -- so skip it. An
-  // explicit-object member function instead declares its object as
-  // parameter 0, so its mapping is already direct.
-  unsigned ArgOffset = 0;
-  if (isa<CXXOperatorCallExpr>(CE))
-    if (const auto *MD = dyn_cast<CXXMethodDecl>(Callee);
-        MD && !MD->isExplicitObjectMemberFunction())
-      ArgOffset = 1;
-  // The storage an argument names: the resolved entity, or every entity of
-  // the object passed as a whole (`this`, `*this`, `&x`, `x`).
-  auto AppendFor = [&](const Expr *Arg, DefAssignEventKind Kind) {
-    const Expr *G = nullptr;
-    peelLifecycleArgument(Arg, G);
-    if (std::optional<unsigned> Idx = Storage.resolve(G).Entity) {
-      BlockEvents.push_back({Kind, *Idx, CE});
-      return;
-    }
-    std::pair<unsigned, unsigned> Range = Storage.wholeObject(G);
-    for (unsigned Idx = Range.first; Idx != Range.second; ++Idx)
-      BlockEvents.push_back({Kind, Idx, CE});
-  };
-  if (Callee->hasAttr<NowUninitAttr>())
-    for (unsigned PI = 0, NP = Callee->getNumParams(); PI != NP; ++PI) {
-      if (PI + ArgOffset >= CE->getNumArgs())
-        break;
-      QualType PT = Callee->getParamDecl(PI)->getType();
-      if (!PT->isPointerType() && !PT->isReferenceType())
+  // The storage an argument leaf names: the resolved whole entity, or every
+  // entity of the object passed as a whole.
+  auto AppendFor = [&](const Expr *Arg, QualType ParamTy,
+                       DefAssignEventKind Kind) {
+    bool AsPointerValue = !ParamTy->isReferenceType();
+    SmallVector<const Expr *, 2> Leaves;
+    SemaProfiles::forEachTargetLeaf(
+        Arg, /*ConditionalArm=*/false,
+        [&](const Expr *Leaf, bool) { Leaves.push_back(Leaf); });
+    if (Leaves.size() != 1)
+      Kind = Kind == DefAssignEventKind::Write ? DefAssignEventKind::MayWrite
+                                               : DefAssignEventKind::Escape;
+    for (const Expr *Leaf : Leaves) {
+      TrackedStorage::Resolution R =
+          Storage.resolveFlowLeaf(Leaf, AsPointerValue);
+      if (R.Entity) {
+        if (!R.Subobject)
+          BlockEvents.push_back({Kind, *R.Entity, CE});
         continue;
-      AppendFor(CE->getArg(PI + ArgOffset), DefAssignEventKind::Kill);
+      }
+      const Expr *G = SemaProfiles::ignoreTransparentCasts(Leaf);
+      if (const auto *AddrOf = dyn_cast<UnaryOperator>(G);
+          AsPointerValue && AddrOf && AddrOf->getOpcode() == UO_AddrOf)
+        G = AddrOf->getSubExpr();
+      std::pair<unsigned, unsigned> Range = Storage.wholeObject(G);
+      for (unsigned Idx = Range.first; Idx != Range.second; ++Idx)
+        BlockEvents.push_back({Kind, Idx, CE});
     }
-  if (!Callee->hasAttr<NowInitAttr>())
-    return;
-  for (unsigned PI = 0, NP = Callee->getNumParams(); PI != NP; ++PI) {
-    if (PI + ArgOffset >= CE->getNumArgs())
-      break;
-    if (!Callee->getParamDecl(PI)->hasAttr<RefToUninitAttr>())
-      continue;
-    AppendFor(CE->getArg(PI + ArgOffset), DefAssignEventKind::Write);
-  }
+  };
+  auto ForEachParam =
+      [&](llvm::function_ref<void(const ParmVarDecl *, const Expr *)> F) {
+        for (unsigned PI = 0, NP = Callee->getNumParams(); PI != NP; ++PI) {
+          if (PI + ArgOffset >= CE->getNumArgs())
+            break;
+          F(Callee->getParamDecl(PI), CE->getArg(PI + ArgOffset));
+        }
+      };
+  if (Roles.DestroysPointerParams || Roles.ReleasesStorageTrusted)
+    ForEachParam([&](const ParmVarDecl *P, const Expr *Arg) {
+      QualType PT = P->getType();
+      if (PT->isPointerType() || PT->isReferenceType())
+        AppendFor(Arg, PT, DefAssignEventKind::Kill);
+    });
+  if (Roles.InitializesRefToUninitParams)
+    ForEachParam([&](const ParmVarDecl *P, const Expr *Arg) {
+      if (P->hasAttr<RefToUninitAttr>())
+        AppendFor(Arg, P->getType(), DefAssignEventKind::Write);
+    });
 }
 
 // The lambda body is a separate function and never appears in the enclosing
@@ -2786,37 +2760,61 @@ static void collectCtorBodyStmts(const CXXConstructorDecl *Ctor,
   }
 }
 
+/// The recognizers' form verdict on a binding leaf as the engine's leaf
+/// state.
+static LeafState formState(SemaProfiles::InitSourceState S) {
+  switch (S) {
+  case SemaProfiles::InitSourceState::Initialized:
+    return LeafState::Initialized;
+  case SemaProfiles::InitSourceState::Uninitialized:
+    return LeafState::Uninitialized;
+  case SemaProfiles::InitSourceState::Unknown:
+    return LeafState::Unknown;
+  case SemaProfiles::InitSourceState::Mixed:
+    return LeafState::Mixed;
+  }
+  llvm_unreachable("unknown InitSourceState");
+}
+
 /// Recover the per-block std::init events of \p cfg over \p Storage: the one
-/// extraction loop of the member read-before-init rule. Every arm resolves
-/// through TrackedStorage::resolve and distributes a comma, conditional, or
-/// GNU ?: lvalue to its leaves (SemaProfiles::forEachTargetLeaf): a load
-/// reads whichever member the chosen arm names; an assignment writes only
-/// when every leaf names the same entity and otherwise credits nothing (a
-/// compound one reads each leaf). A written member or base initializer
-/// writes its members; a lifecycle call kills or writes the storage bound to
-/// its parameters; a this-capturing lambda reads members at its creation; a
-/// non-benign DeclRefExpr of a tracked local is an escape writing its whole
-/// range (the local leniency, ProfilesFramework.rst, "Reads of Uninitialized
-/// Objects"); a tracked copy's DeclStmt copies each member's state. Current
-/// object events (\p Ctor non-null) come from the constructor body and its
+/// extraction loop of the engine. Every store arm resolves through
+/// TrackedStorage::resolve and distributes a comma, conditional, or GNU ?:
+/// lvalue to its leaves (SemaProfiles::forEachTargetLeaf): a load reads
+/// whichever member the chosen arm names; a store writes the one whole
+/// entity every leaf names and otherwise may-writes each named entity (a
+/// compound one reads each leaf); a store to a marked pointer reseats its
+/// pointee. A written member or base initializer writes its members; a
+/// lifecycle call kills or writes the storage bound to its parameters
+/// (appendLifecycleCallEvents); a this-capturing lambda reads members at its
+/// creation; a non-benign DeclRefExpr of a tracked aggregate local is an
+/// escape (the read leniency for locals, ProfilesFramework.rst, "Reads of
+/// Uninitialized Objects"); a tracked copy's DeclStmt copies each member's
+/// state. Every pointer or reference binding the body performs -- a variable
+/// or member initializer, an aggregate element, a call or constructor
+/// argument (declared, variadic, or the implicit object argument), a return,
+/// a throw, a new-expression's initializer, a pointer assignment, a lambda
+/// capture -- becomes a Binding site when a leaf of its source names tracked
+/// storage (SemaProfiles::isFlowTrackedLeaf: the parse-time funnel left
+/// exactly those to this pass), its other leaves classified by form; a
+/// binding that hands out a mutable alias of a marked pointer (`T *&` to
+/// `p`, `T **` to `&p`, a by-reference capture) escapes its pointee, and a
+/// delete-expression kills its operand's storage. Current-object events of
+/// a constructor (\p Ctor non-null) come from the constructor body and its
 /// written initializers only. \p cfg is the engine's own, fully linearized
 /// CFG (runStdInitMemberReadChecks), so every statement class has an
 /// element.
 static void
-extractStdInitEvents(const CFG &cfg, const TrackedStorage &Storage,
+extractStdInitEvents(Sema &S, const Decl *D, const CFG &cfg,
+                     const TrackedStorage &Storage,
                      const CXXConstructorDecl *Ctor, bool StarThisCopyTrusted,
                      std::vector<SmallVector<DefAssignEvent, 4>> &Events,
                      SmallVectorImpl<BindingSite> &Sites) {
+  using K = SemaProfiles::InitBindingKind;
+  ASTContext &Ctx = S.Context;
+  const auto *DC = cast<DeclContext>(D);
   llvm::SmallPtrSet<const Stmt *, 32> BodyStmts;
   if (Ctor)
     collectCtorBodyStmts(Ctor, BodyStmts);
-  // A current-object event outside the constructor body's statements (an
-  // NSDMI subtree) is dropped.
-  auto Admit = [&](unsigned Idx, const Stmt *St) {
-    return Storage.Entities[Idx].K !=
-               TrackedEntity::Kind::CurrentObjectMember ||
-           BodyStmts.count(St);
-  };
   auto ForEachLeaf =
       [&](const Expr *E,
           llvm::function_ref<void(const TrackedStorage::Resolution &)> F) {
@@ -2868,58 +2866,206 @@ extractStdInitEvents(const CFG &cfg, const TrackedStorage &Storage,
   // Pass two: the events, in CFG element order.
   for (const CFGBlock *B : cfg) {
     auto &BlockEvents = Events[B->getBlockID()];
-    // The entities a glvalue's leaves name, one per leaf; nullopt for a leaf
-    // that names no tracked entity.
-    SmallVector<std::optional<unsigned>, 4> Leaves;
+    // The resolutions of a glvalue's leaves, one per leaf.
+    SmallVector<TrackedStorage::Resolution, 4> Leaves;
     auto CollectLeaves = [&](const Expr *G) {
       Leaves.clear();
-      ForEachLeaf(G, [&](const TrackedStorage::Resolution &R) {
-        Leaves.push_back(R.Entity);
-      });
+      ForEachLeaf(
+          G, [&](const TrackedStorage::Resolution &R) { Leaves.push_back(R); });
     };
-    // One Read per distinct resolved, read-tracked leaf.
+    // One Read per distinct resolved, read-tracked whole-entity leaf.
     auto AppendReads = [&](const Expr *At) {
       SmallVector<unsigned, 4> Seen;
-      for (std::optional<unsigned> Idx : Leaves)
-        if (Idx && Storage.Entities[*Idx].TrackReads && Admit(*Idx, At) &&
-            !llvm::is_contained(Seen, *Idx)) {
-          Seen.push_back(*Idx);
-          BlockEvents.push_back({DefAssignEventKind::Read, *Idx, At});
+      for (const TrackedStorage::Resolution &R : Leaves)
+        if (R.Entity && !R.Subobject &&
+            Storage.Entities[*R.Entity].TrackReads &&
+            !llvm::is_contained(Seen, *R.Entity)) {
+          Seen.push_back(*R.Entity);
+          BlockEvents.push_back({DefAssignEventKind::Read, *R.Entity, At});
         }
     };
-    // A store: one Write (or ReadWrite) when every leaf names the same
-    // entity; otherwise the chosen arm is unknown, so nothing is credited and
-    // a compound store reads each leaf.
-    auto AppendStore = [&](const Expr *At, bool ReadsFirst) {
-      if (!Leaves.empty() && Leaves.front() &&
-          llvm::all_of(Leaves, [&](std::optional<unsigned> Idx) {
-            return Idx == Leaves.front();
-          })) {
-        if (Admit(*Leaves.front(), At))
-          BlockEvents.push_back(
-              {ReadsFirst && Storage.Entities[*Leaves.front()].TrackReads
-                   ? DefAssignEventKind::ReadWrite
-                   : DefAssignEventKind::Write,
-               *Leaves.front(), At});
+    // A store to \p G: one Write (or ReadWrite) when every leaf names the
+    // same whole entity; otherwise the chosen arm is unknown, so each named
+    // whole entity is may-written and a compound store reads each leaf. A
+    // store below a whole entity (a subobject) initializes nothing. Every
+    // marked pointer a leaf names as its object is reseated.
+    auto AppendStore = [&](const Expr *G, const Expr *At, bool ReadsFirst) {
+      CollectLeaves(G);
+      std::optional<unsigned> Same;
+      bool AllSame = !Leaves.empty();
+      for (const TrackedStorage::Resolution &R : Leaves) {
+        if (!R.Entity || R.Subobject) {
+          AllSame = false;
+          break;
+        }
+        if (!Same)
+          Same = R.Entity;
+        else if (*Same != *R.Entity)
+          AllSame = false;
+      }
+      if (AllSame) {
+        BlockEvents.push_back({ReadsFirst && Storage.Entities[*Same].TrackReads
+                                   ? DefAssignEventKind::ReadWrite
+                                   : DefAssignEventKind::Write,
+                               *Same, At});
+      } else {
+        if (ReadsFirst)
+          AppendReads(At);
+        for (const TrackedStorage::Resolution &R : Leaves)
+          if (R.Entity && !R.Subobject)
+            BlockEvents.push_back(
+                {DefAssignEventKind::MayWrite, *R.Entity, At});
+      }
+      SmallVector<unsigned, 2> Reseated;
+      SemaProfiles::forEachTargetLeaf(
+          G, /*ConditionalArm=*/false, [&](const Expr *Leaf, bool) {
+            if (std::optional<unsigned> Idx = Storage.markedPointerObject(Leaf);
+                Idx && !llvm::is_contained(Reseated, *Idx)) {
+              Reseated.push_back(*Idx);
+              BlockEvents.push_back({DefAssignEventKind::Reseat, *Idx, At});
+            }
+          });
+    };
+    // The mutable alias a binding of \p Src as \p T hands out (P4222R2
+    // §4.3): `p` bound to a `T *&`, or `&p` bound to a `T **`, per leaf. A
+    // const pointer cannot be reseated through either.
+    auto AppendAliasEscapes = [&](const Expr *Src, QualType T, const Expr *At) {
+      if (!Src || T.isNull())
+        return;
+      bool ByRef = SemaProfiles::pointerAliasKind(T) ==
+                   SemaProfiles::PointerAliasKind::Mutable;
+      bool ByAddr = T->isPointerType() &&
+                    T->getPointeeType()->isPointerType() &&
+                    !T->getPointeeType().isConstQualified();
+      if (!ByRef && !ByAddr)
+        return;
+      SemaProfiles::forEachTargetLeaf(
+          Src, /*ConditionalArm=*/false, [&](const Expr *Leaf, bool) {
+            const Expr *G = SemaProfiles::ignoreTransparentCasts(Leaf);
+            if (ByAddr) {
+              const auto *UO = dyn_cast<UnaryOperator>(G);
+              if (!UO || UO->getOpcode() != UO_AddrOf)
+                return;
+              G = UO->getSubExpr();
+            }
+            if (std::optional<unsigned> Idx = Storage.markedPointerObject(G))
+              BlockEvents.push_back({DefAssignEventKind::Escape, *Idx, At});
+          });
+    };
+    // A pointer or reference binding of \p Src as \p T, with the parse-time
+    // funnel's kind, location, and target marking (SemaProfiles::
+    // checkInitProfileBinding): a site judged at \p At against the flow state
+    // when a leaf names tracked storage; the funnel judged every other
+    // binding at parse time. A leaf no entity tracks is classified by form.
+    auto AddBinding = [&](K Kind, SourceLocation Loc, bool TargetMarked,
+                          QualType T, const Expr *Src, const NamedDecl *Subject,
+                          const Expr *At) {
+      if (!Src || T.isNull() || T->isDependentType() ||
+          (!T->isPointerType() && !T->isReferenceType()) ||
+          isa<RecoveryExpr>(Src->IgnoreParens()))
+        return;
+      bool AsPointerValue;
+      const Expr *Operand =
+          SemaProfiles::bindingSourceOperand(Src, T, AsPointerValue);
+      if (!Operand)
+        return;
+      BindingSite Site{Kind,    Loc, TargetMarked, T->isReferenceType(),
+                       Subject, {}};
+      bool AnyTracked = false;
+      SemaProfiles::forEachTargetLeaf(
+          Operand, /*ConditionalArm=*/false, [&](const Expr *Leaf, bool) {
+            BindingLeaf L;
+            if (SemaProfiles::isFlowTrackedLeaf(Ctx, Leaf, AsPointerValue,
+                                                DC)) {
+              AnyTracked = true;
+              TrackedStorage::Resolution R =
+                  Storage.resolveFlowLeaf(Leaf, AsPointerValue);
+              L.Entity = R.Entity;
+              L.Subobject = R.Subobject;
+            }
+            if (!L.Entity)
+              L.State =
+                  formState(S.Profiles().classifyInitBindingLeaf(Leaf, T, D));
+            Site.Leaves.push_back(L);
+          });
+      if (!AnyTracked)
+        return;
+      Sites.push_back(std::move(Site));
+      BlockEvents.push_back(
+          {DefAssignEventKind::Binding, 0, At, (unsigned)(Sites.size() - 1)});
+    };
+    // The element bindings of an aggregate initializer of type \p T: each
+    // pointer or reference field of a record (the bases consume the leading
+    // initializers, unnamed bit-fields none) is a member binding, each
+    // element of an array, vector, or complex a bare element binding. A
+    // field's default member initializer and a value-initialized filler
+    // have no written source.
+    auto AppendAggregateBindings = [&](QualType T, ArrayRef<Expr *> Inits,
+                                       const FieldDecl *UnionField) {
+      auto Judge = [&](K Kind, const FieldDecl *F, QualType ElemT,
+                       const Expr *Init) {
+        if (!Init || isa<ImplicitValueInitExpr, CXXDefaultInitExpr>(Init))
+          return;
+        AddBinding(Kind, Init->IgnoreImplicit()->getExprLoc(),
+                   F && F->hasAttr<RefToUninitAttr>(), ElemT, Init, nullptr,
+                   Init);
+        AppendAliasEscapes(Init, ElemT, Init);
+      };
+      if (const RecordDecl *RD = T->getAsRecordDecl()) {
+        RD = RD->getDefinition();
+        if (!RD)
+          return;
+        if (RD->isUnion()) {
+          if (UnionField && !Inits.empty())
+            Judge(K::DataMember, UnionField, UnionField->getType(), Inits[0]);
+          return;
+        }
+        unsigned I = 0;
+        if (const auto *CRD = dyn_cast<CXXRecordDecl>(RD))
+          I = CRD->getNumBases();
+        for (const FieldDecl *F : RD->fields()) {
+          if (F->isUnnamedBitField())
+            continue;
+          if (I >= Inits.size())
+            break;
+          Judge(K::DataMember, F, F->getType(), Inits[I++]);
+        }
         return;
       }
-      if (ReadsFirst)
-        AppendReads(At);
+      QualType ElemT;
+      if (const ArrayType *AT = Ctx.getAsArrayType(T))
+        ElemT = AT->getElementType();
+      else if (const auto *VT = T->getAs<VectorType>())
+        ElemT = VT->getElementType();
+      else if (const auto *CT = T->getAs<ComplexType>())
+        ElemT = CT->getElementType();
+      else
+        return;
+      for (const Expr *Init : Inits)
+        Judge(K::AggregateElement, nullptr, ElemT, Init);
     };
+
     for (const CFGElement &Elem : *B) {
       if (auto OptInit = Elem.getAs<CFGInitializer>()) {
-        // A written member initializer assigns its member at this point in
-        // execution order, after its init expression's events above it; a
-        // written base initializer (e.g. `: Base{1}`) gives the tracked
-        // members of that constructor-less base subtree their values.
+        // A written member initializer binds and then assigns its member at
+        // this point in execution order, after its init expression's events
+        // above it; a written base initializer (e.g. `: Base{1}`) gives the
+        // tracked members of that constructor-less base subtree their
+        // values.
         const CXXCtorInitializer *CI = OptInit->getInitializer();
         if (!Ctor || !CI->isWritten())
           continue;
         if (CI->isAnyMemberInitializer()) {
-          if (const FieldDecl *F = CI->getAnyMember())
-            if (std::optional<unsigned> Idx = Storage.find(nullptr, {}, F))
-              BlockEvents.push_back(
-                  {DefAssignEventKind::Write, *Idx, CI->getInit()});
+          const FieldDecl *F = CI->getAnyMember();
+          if (!F)
+            continue;
+          AddBinding(K::DataMember, CI->getMemberLocation(),
+                     F->hasAttr<RefToUninitAttr>(), F->getType(), CI->getInit(),
+                     nullptr, CI->getInit());
+          AppendAliasEscapes(CI->getInit(), F->getType(), CI->getInit());
+          if (std::optional<unsigned> Idx = Storage.find(nullptr, {}, F))
+            BlockEvents.push_back(
+                {DefAssignEventKind::Write, *Idx, CI->getInit()});
         } else if (CI->isBaseInitializer()) {
           // Every entity below that base: its path starts with the base.
           const auto *BRD = CI->getBaseClass()->getAsCXXRecordDecl();
@@ -2939,6 +3085,10 @@ extractStdInitEvents(const CFG &cfg, const TrackedStorage &Storage,
       if (!CS)
         continue;
       const Stmt *St = CS->getStmt();
+      // A constructor's statement outside its body and written initializers
+      // (an NSDMI subtree) contributes nothing.
+      if (Ctor && !BodyStmts.count(St))
+        continue;
       if (const auto *ICE = dyn_cast<ImplicitCastExpr>(St)) {
         if (ICE->getCastKind() != CK_LValueToRValue)
           continue;
@@ -2947,47 +3097,211 @@ extractStdInitEvents(const CFG &cfg, const TrackedStorage &Storage,
       } else if (const auto *BO = dyn_cast<BinaryOperator>(St)) {
         if (!BO->isAssignmentOp())
           continue;
-        CollectLeaves(BO->getLHS());
-        AppendStore(BO, /*ReadsFirst=*/BO->isCompoundAssignmentOp());
+        // A pointer assignment is judged by the assigned-to pointer's
+        // marking; a target of unknown marking checks neither direction
+        // (SemaProfiles::resolveAssignTargetMarking).
+        if (BO->getOpcode() == BO_Assign &&
+            BO->getLHS()->getType()->isPointerType()) {
+          if (std::optional<bool> Marked =
+                  SemaProfiles::resolveAssignTargetMarking(BO->getLHS()))
+            AddBinding(K::PointerAssignment, BO->getOperatorLoc(), *Marked,
+                       BO->getLHS()->getType(), BO->getRHS(), nullptr, BO);
+          AppendAliasEscapes(BO->getRHS(), BO->getLHS()->getType(), BO);
+        }
+        AppendStore(BO->getLHS(), BO,
+                    /*ReadsFirst=*/BO->isCompoundAssignmentOp());
       } else if (const auto *UO = dyn_cast<UnaryOperator>(St)) {
         // A built-in ++m / m++ / --m / m-- reads the old value and then
         // writes, but unlike -m / !m it carries no lvalue-to-rvalue cast, so
         // the Read arm never sees it: a ReadWrite.
         if (!UO->isIncrementDecrementOp())
           continue;
-        CollectLeaves(UO->getSubExpr());
-        AppendStore(UO, /*ReadsFirst=*/true);
+        AppendStore(UO->getSubExpr(), UO, /*ReadsFirst=*/true);
       } else if (const auto *CE = dyn_cast<CallExpr>(St)) {
-        size_t Before = BlockEvents.size();
-        appendLifecycleCallEvents(CE, Storage, BlockEvents);
-        BlockEvents.erase(llvm::remove_if(llvm::drop_begin(BlockEvents, Before),
-                                          [&](const DefAssignEvent &Ev) {
-                                            return !Admit(Ev.Idx, CE);
-                                          }),
-                          BlockEvents.end());
+        const FunctionDecl *Callee = CE->getDirectCallee();
+        // Zip declared parameters with arguments. A member operator called
+        // through CXXOperatorCallExpr receives the object as argument 0
+        // ahead of its declared parameters -- for a C++23 static operator
+        // too, whose object argument is still evaluated -- so skip it. An
+        // explicit-object member function instead declares its object as
+        // parameter 0, so its mapping is already direct.
+        unsigned ArgOffset = 0;
+        const CXXMethodDecl *ObjectMethod = nullptr;
+        const Expr *Object = nullptr;
+        if (isa<CXXOperatorCallExpr>(CE)) {
+          if (const auto *MD = dyn_cast_or_null<CXXMethodDecl>(Callee);
+              MD && !MD->isExplicitObjectMemberFunction()) {
+            ArgOffset = 1;
+            if (!MD->isStatic() && CE->getNumArgs() > 0) {
+              ObjectMethod = MD;
+              Object = CE->getArg(0);
+            }
+          }
+        } else if (const auto *MCE = dyn_cast<CXXMemberCallExpr>(CE)) {
+          if (const CXXMethodDecl *MD = MCE->getMethodDecl();
+              MD && !MD->isStatic() && !MD->isExplicitObjectMemberFunction()) {
+            ObjectMethod = MD;
+            Object = MCE->getImplicitObjectArgument();
+          }
+        }
+        // The implicit object parameter: a pointer for an arrow call, a
+        // reference to the object otherwise. A destructor call is the destroy
+        // rules' (SemaProfiles::checkInitProfileObjectArgument).
+        if (ObjectMethod && Object && !isa<CXXDestructorDecl>(ObjectMethod)) {
+          QualType OT = Object->getType();
+          QualType T =
+              OT->isPointerType()
+                  ? OT
+                  : Ctx.getLValueReferenceType(OT.getNonReferenceType());
+          AddBinding(K::ObjectArgument, Object->IgnoreImplicit()->getExprLoc(),
+                     /*TargetMarked=*/false, T, Object, ObjectMethod, CE);
+        }
+        QualType CalleeTy = CE->getCallee()->getType();
+        if (CalleeTy->isAnyPointerType() || CalleeTy->isBlockPointerType() ||
+            CalleeTy->isReferenceType())
+          CalleeTy = CalleeTy->getPointeeType();
+        const auto *Proto = CalleeTy->getAs<FunctionProtoType>();
+        // A builtin with custom type checking has no parameter list to zip:
+        // __builtin_operator_new / __builtin_operator_delete resolve to a
+        // usual allocation or deallocation function and copy-initialize
+        // their arguments into its parameters (type-only entities, so
+        // nothing carries the marker), every other one converts its
+        // arguments itself and binds nothing. A defaulted argument was
+        // judged when its CXXDefaultArgExpr was built; a call with no
+        // declared callee (through a function pointer) has parameter types
+        // but no declaration to carry the marker.
+        unsigned BuiltinID = Callee ? Callee->getBuiltinID() : 0;
+        bool CustomBuiltin =
+            BuiltinID && Ctx.BuiltinInfo.hasCustomTypechecking(BuiltinID);
+        SemaProfiles::CalleeLifecycleRoles Roles =
+            Callee ? SemaProfiles::getCalleeLifecycleRoles(Callee)
+                   : SemaProfiles::CalleeLifecycleRoles();
+        // A [[now_uninit]] or storage-release callee's parameter runs the
+        // destroy rules instead of the binding check.
+        bool DestroyOrRelease = Roles.DestroysPointerParams ||
+                                Roles.ReleasesStorageTrusted ||
+                                Roles.ReleasesStorageByName;
+        if (CustomBuiltin) {
+          if (BuiltinID == Builtin::BI__builtin_operator_new ||
+              BuiltinID == Builtin::BI__builtin_operator_delete)
+            for (const Expr *Arg : CE->arguments()) {
+              AddBinding(K::Parameter, Arg->IgnoreImplicit()->getExprLoc(),
+                         /*TargetMarked=*/false, Arg->getType(), Arg, nullptr,
+                         CE);
+              AppendAliasEscapes(Arg, Arg->getType(), CE);
+            }
+        } else if (Callee || Proto) {
+          unsigned NP = Callee ? Callee->getNumParams() : Proto->getNumParams();
+          for (unsigned I = ArgOffset, N = CE->getNumArgs(); I != N; ++I) {
+            const Expr *Arg = CE->getArg(I);
+            if (isa<CXXDefaultArgExpr>(Arg))
+              continue;
+            unsigned PI = I - ArgOffset;
+            if (PI < NP) {
+              const ParmVarDecl *Parm =
+                  Callee ? Callee->getParamDecl(PI) : nullptr;
+              QualType T = Parm ? Parm->getType() : Proto->getParamType(PI);
+              if (!DestroyOrRelease)
+                AddBinding(K::Parameter, Arg->IgnoreImplicit()->getExprLoc(),
+                           Parm && Parm->hasAttr<RefToUninitAttr>(), T, Arg,
+                           nullptr, CE);
+              AppendAliasEscapes(Arg, T, CE);
+            } else {
+              AddBinding(
+                  K::VariadicArgument, Arg->IgnoreImplicit()->getExprLoc(),
+                  /*TargetMarked=*/false, Arg->getType(), Arg, nullptr, CE);
+              AppendAliasEscapes(Arg, Arg->getType(), CE);
+            }
+          }
+        }
+        if (Callee)
+          appendLifecycleCallEvents(CE, Callee, Roles, ArgOffset, Storage,
+                                    BlockEvents);
+      } else if (const auto *CCE = dyn_cast<CXXConstructExpr>(St)) {
+        // A constructor call's parameter bindings, the copy of a class object
+        // out of tracked storage included.
+        const CXXConstructorDecl *CD = CCE->getConstructor();
+        for (unsigned I = 0, N = CCE->getNumArgs(); I != N; ++I) {
+          const Expr *Arg = CCE->getArg(I);
+          if (isa<CXXDefaultArgExpr>(Arg))
+            continue;
+          if (I < CD->getNumParams()) {
+            const ParmVarDecl *Parm = CD->getParamDecl(I);
+            AddBinding(K::Parameter, Arg->IgnoreImplicit()->getExprLoc(),
+                       Parm->hasAttr<RefToUninitAttr>(), Parm->getType(), Arg,
+                       nullptr, CCE);
+            AppendAliasEscapes(Arg, Parm->getType(), CCE);
+          } else {
+            AddBinding(K::VariadicArgument, Arg->IgnoreImplicit()->getExprLoc(),
+                       /*TargetMarked=*/false, Arg->getType(), Arg, nullptr,
+                       CCE);
+            AppendAliasEscapes(Arg, Arg->getType(), CCE);
+          }
+        }
       } else if (const auto *LE = dyn_cast<LambdaExpr>(St)) {
-        if (Ctor && BodyStmts.count(LE))
+        if (Ctor)
           appendThisCaptureLambdaReadEvents(LE, Storage, StarThisCopyTrusted,
                                             BlockEvents);
+        // An init-capture is a variable binding; a by-reference capture
+        // binds an unmarked reference to the variable and hands out a
+        // mutable alias of a marked pointer; a by-copy capture copies a
+        // pointer into a closure field, which cannot carry the marker.
+        auto InitIt = LE->capture_init_begin();
+        for (const LambdaCapture &C : LE->captures()) {
+          const Expr *Init =
+              InitIt != LE->capture_init_end() ? *InitIt++ : nullptr;
+          if (!C.capturesVariable())
+            continue;
+          const auto *V = dyn_cast<VarDecl>(C.getCapturedVar());
+          if (!V)
+            continue;
+          if (V->isInitCapture()) {
+            AddBinding(K::Variable, C.getLocation(),
+                       V->hasAttr<RefToUninitAttr>(), V->getType(),
+                       V->getInit(), nullptr, LE);
+            AppendAliasEscapes(V->getInit(), V->getType(), LE);
+            continue;
+          }
+          QualType VT = V->getType().getNonReferenceType();
+          if (C.getCaptureKind() == LCK_ByRef) {
+            AddBinding(K::ByRefCapture, C.getLocation(),
+                       /*TargetMarked=*/false, Ctx.getLValueReferenceType(VT),
+                       Init, V, LE);
+            if (!VT.isConstQualified())
+              if (std::optional<unsigned> Idx = Storage.markedPointerObject(V))
+                BlockEvents.push_back({DefAssignEventKind::Escape, *Idx, LE});
+          } else if (C.getCaptureKind() == LCK_ByCopy) {
+            AddBinding(K::ByCopyCapture, C.getLocation(),
+                       /*TargetMarked=*/false, VT, Init, nullptr, LE);
+          }
+        }
       } else if (const auto *DRE = dyn_cast<DeclRefExpr>(St)) {
         if (Benign.count(DRE))
           continue;
         std::pair<unsigned, unsigned> Range = Storage.wholeObject(DRE);
         for (unsigned Idx = Range.first; Idx != Range.second; ++Idx)
-          BlockEvents.push_back({DefAssignEventKind::Write, Idx, DRE});
+          BlockEvents.push_back(
+              {DefAssignEventKind::AggregateEscape, Idx, DRE});
       } else if (const auto *DS = dyn_cast<DeclStmt>(St)) {
-        // A tracked copy: each dest member's state becomes its source
-        // member's -- the source entity at the copy's derived-to-base path
-        // followed by the member's own path, so a sliced copy maps onto the
-        // right base subobject. The DeclStmt element follows its
-        // initializer's subexpression elements, so the transfer sees the
-        // source's state at the copy point. A source entity that does not
-        // exist cannot occur (the dest's members are a subset of the
-        // source's); fall back to Write (assume assigned) if it somehow does.
         for (const Decl *Dcl : DS->decls()) {
           const auto *V = dyn_cast<VarDecl>(Dcl);
-          if (!V)
+          if (!V || V->isInvalidDecl())
             continue;
+          // The variable's own binding (a decomposition's hidden variable
+          // included); the DeclStmt element follows its initializer's
+          // subexpression elements, so the judgment sees their effects.
+          if (const Expr *Init = V->getInit()) {
+            AddBinding(K::Variable, V->getLocation(),
+                       V->hasAttr<RefToUninitAttr>(), V->getType(), Init,
+                       nullptr, Init);
+            AppendAliasEscapes(Init, V->getType(), Init);
+          }
+          // A tracked copy: each dest member's state becomes its source
+          // member's -- the source entity at the copy's derived-to-base path
+          // followed by the member's own path, so a sliced copy maps onto the
+          // right base subobject. A source entity that does not exist cannot
+          // occur (the dest's members are a subset of the source's); fall
+          // back to Write (assume assigned) if it somehow does.
           auto CopyIt = Storage.CopySource.find(V);
           if (CopyIt == Storage.CopySource.end())
             continue;
@@ -3004,39 +3318,75 @@ extractStdInitEvents(const CFG &cfg, const TrackedStorage &Storage,
                   {DefAssignEventKind::Write, Idx, V->getInit()});
           }
         }
+      } else if (const auto *RS = dyn_cast<ReturnStmt>(St)) {
+        // The returned pointer or reference against the function's return
+        // marking (a block's inferred return type carries none).
+        const Expr *RV = RS->getRetValue();
+        if (!RV)
+          continue;
+        const ValueDecl *Target = nullptr;
+        QualType T;
+        if (const auto *FD = dyn_cast<FunctionDecl>(D)) {
+          Target = FD;
+          T = FD->getReturnType();
+        } else if (const auto *BD = dyn_cast<BlockDecl>(D)) {
+          const TypeSourceInfo *TSI = BD->getSignatureAsWritten();
+          const FunctionType *FT =
+              TSI ? TSI->getType()->getAs<FunctionType>() : nullptr;
+          T = FT ? FT->getReturnType() : RV->getType();
+        } else if (const auto *OMD = dyn_cast<ObjCMethodDecl>(D)) {
+          T = OMD->getReturnType();
+        }
+        AddBinding(K::Return, RV->IgnoreImplicit()->getExprLoc(),
+                   Target && Target->hasAttr<RefToUninitAttr>(), T, RV, nullptr,
+                   RV);
+        AppendAliasEscapes(RV, T, RV);
+      } else if (const auto *TE = dyn_cast<CXXThrowExpr>(St)) {
+        // The thrown pointer copy-initializes the exception object, which
+        // cannot carry the marker.
+        const Expr *Sub = TE->getSubExpr();
+        if (!Sub)
+          continue;
+        AddBinding(K::Throw, Sub->IgnoreImplicit()->getExprLoc(),
+                   /*TargetMarked=*/false, Sub->getType(), Sub, nullptr, TE);
+        AppendAliasEscapes(Sub, Sub->getType(), TE);
+      } else if (const auto *NE = dyn_cast<CXXNewExpr>(St)) {
+        // The written initializer of a scalar allocation binds the allocated
+        // pointer; an array's elements are the aggregate arm's.
+        if (NE->isArray() || !NE->hasInitializer())
+          continue;
+        const Expr *Init = NE->getInitializer();
+        if (const auto *ILE = dyn_cast<InitListExpr>(Init)) {
+          if (ILE->getNumInits() != 1)
+            continue;
+          Init = ILE->getInit(0);
+        }
+        AddBinding(K::NewInitializer, Init->IgnoreImplicit()->getExprLoc(),
+                   /*TargetMarked=*/false, NE->getAllocatedType(), Init,
+                   nullptr, NE);
+        AppendAliasEscapes(Init, NE->getAllocatedType(), NE);
+      } else if (const auto *DE = dyn_cast<CXXDeleteExpr>(St)) {
+        // A delete-expression releases its operand's storage.
+        SmallVector<const Expr *, 2> Operands;
+        SemaProfiles::forEachTargetLeaf(
+            DE->getArgument(), /*ConditionalArm=*/false,
+            [&](const Expr *Leaf, bool) { Operands.push_back(Leaf); });
+        if (Operands.size() != 1)
+          continue;
+        TrackedStorage::Resolution R =
+            Storage.resolveFlowLeaf(Operands.front(), /*AsPointerValue=*/true);
+        if (R.Entity && !R.Subobject)
+          BlockEvents.push_back({DefAssignEventKind::Kill, *R.Entity, DE});
+      } else if (const auto *ILE = dyn_cast<InitListExpr>(St)) {
+        if (!ILE->isTransparent())
+          AppendAggregateBindings(ILE->getType(), ILE->inits(),
+                                  ILE->getInitializedFieldInUnion());
+      } else if (const auto *PLIE = dyn_cast<CXXParenListInitExpr>(St)) {
+        AppendAggregateBindings(PLIE->getType(), PLIE->getInitExprs(),
+                                PLIE->getInitializedFieldInUnion());
       }
     }
   }
-}
-
-// The type-shape half of the tracked guards: a non-union, non-dependent
-// class with no user-provided constructor anywhere in the contributing
-// subtree (paper §5.1 trusts one: its body may assign, which local analysis
-// cannot see). A reference type aliases an object also reachable other ways
-// and never qualifies.
-static const CXXRecordDecl *getTrackableSlotClass(QualType T) {
-  if (T->isReferenceType() || T->isDependentType())
-    return nullptr;
-  const CXXRecordDecl *RD = T->getAsCXXRecordDecl();
-  if (!RD || !RD->hasDefinition())
-    return nullptr;
-  RD = RD->getDefinition();
-  if (RD->isUnion() || RD->isDependentType() || hasUserProvidedCtor(RD))
-    return nullptr;
-  return RD;
-}
-
-// The declaration-shape half for a local: V is a non-parameter local, not
-// itself [[uninit]]-marked (its subobject accesses are the parse-time
-// read-through / uninit_write rules' territory, and tracking it here would
-// double-diagnose), of a trackable class. How V's declaration *initializes*
-// the members is the callers' half.
-static const CXXRecordDecl *getTrackableLocalClass(const VarDecl *V) {
-  if (!V->hasLocalStorage() || isa<ParmVarDecl>(V) || isa<DecompositionDecl>(V))
-    return nullptr;
-  if (V->isInvalidDecl() || V->hasAttr<UninitAttr>())
-    return nullptr;
-  return getTrackableSlotClass(V->getType());
 }
 
 // If V is a local whose [[uninit]] members this pass may soundly flow-track
@@ -3045,7 +3395,7 @@ static const CXXRecordDecl *getTrackableLocalClass(const VarDecl *V) {
 // the class shape qualifies (above) and the declaration ran nothing but the
 // implicit no-op default-construction.
 static const CXXRecordDecl *getTrackedLocalAggregate(const VarDecl *V) {
-  const CXXRecordDecl *RD = getTrackableLocalClass(V);
+  const CXXRecordDecl *RD = SemaProfiles::getTrackableLocalClass(V);
   if (!RD)
     return nullptr;
   // Declared without a real initializer: for a record local that is the
@@ -3078,30 +3428,30 @@ static const DeclRefExpr *getLocalCopySourceRef(const VarDecl *V,
   if (!CCE || CCE->getNumArgs() < 1 ||
       !CCE->getConstructor()->isCopyOrMoveConstructor())
     return nullptr;
-  return dyn_cast<DeclRefExpr>(peelBaseCasts(CCE->getArg(0), CastPath));
+  return dyn_cast<DeclRefExpr>(
+      SemaProfiles::peelBaseCasts(CCE->getArg(0), CastPath));
 }
 
-/// Harvest the tracked locals of the analyzed body \p D into \p Storage:
-/// by-value parameters of a trackable class, default-initialized
-/// constructor-less aggregate locals (the body's DeclStmts in source order,
-/// a lambda's or block's body excluded as a separate function), and locals
-/// copy- or move-constructed from a tracked local (recorded in
-/// TrackedStorage::CopySource; iterated to a fixpoint so a copy of a copy
-/// resolves). The tracking premises -- a copy does not inherit
+/// Harvest the tracked storage of the analyzed body \p D into \p Storage.
+/// Read-tracked (TrackedEntity::TrackReads) are the members of by-value
+/// parameters of a trackable class without a default argument, of
+/// default-initialized constructor-less aggregate locals (the body's
+/// DeclStmts in source order, a lambda's or block's body excluded as a
+/// separate function), and of locals copy- or move-constructed from a
+/// read-tracked local (recorded in TrackedStorage::CopySource; iterated to a
+/// fixpoint so a copy of a copy resolves). Tracked for bindings only are the
+/// members of every other local, handler variable, or parameter whose class
+/// has marked scalar members (SemaProfiles::flowTrackedAggregateClass),
+/// every [[uninit]] local or parameter as a whole, and the referent of every
+/// [[ref_to_uninit]] local pointer or reference; a variable of an enclosing
+/// function the body reaches by capture is tracked from an unknown entry
+/// state. The read-tracking premises -- a copy does not inherit
 /// initialization (P4222R2 §5.2), a by-value parameter is a copy of the
 /// caller's argument, a defaulted parameter is not -- are argued in
-/// ProfilesFramework.rst, "Reads of Uninitialized Objects" and "Limitations".
+/// ProfilesFramework.rst, "Reads of Uninitialized Objects" and
+/// "Limitations".
 static void harvestTrackedLocals(Sema &S, const Decl *D,
                                  TrackedStorage &Storage) {
-  auto HarvestVar = [&](const VarDecl *V, const CXXRecordDecl *RD) {
-    std::pair<unsigned, unsigned> Range = Storage.addObject(S, V, RD);
-    return Range.first != Range.second;
-  };
-  // A by-value slot parameter is tracked from the all-unassigned entry
-  // state; a parameter with a default argument is not (a defaulted call
-  // initializes the parameter object directly, and the mere presence gates
-  // so that getDefaultArg() is never called on an unparsed or
-  // uninstantiated default).
   // A marked local or parameter is tracked as a whole ([[uninit]]) or by
   // its referent ([[ref_to_uninit]] pointer or reference).
   auto HarvestMarked = [&](const VarDecl *V, bool UnknownEntry) {
@@ -3113,18 +3463,34 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
              (V->getType()->isPointerType() || V->getType()->isReferenceType()))
       Storage.addLocalEntity(TrackedEntity::Kind::Pointee, V, UnknownEntry);
   };
+  llvm::SmallPtrSet<const VarDecl *, 16> Owned;
+  // A by-value parameter's members are read-tracked from the all-unassigned
+  // entry state unless the parameter declares a default argument (a
+  // defaulted call initializes the parameter object directly, and the mere
+  // presence gates so that getDefaultArg() is never called on an unparsed or
+  // uninstantiated default).
+  ArrayRef<ParmVarDecl *> Params;
   if (const auto *FD = dyn_cast<FunctionDecl>(D))
-    for (const ParmVarDecl *P : FD->parameters()) {
-      HarvestMarked(P, /*UnknownEntry=*/false);
-      if (P->isInvalidDecl() || P->hasAttr<UninitAttr>() || P->hasDefaultArg())
-        continue;
-      if (const CXXRecordDecl *RD = getTrackableSlotClass(P->getType()))
-        HarvestVar(P, RD);
-    }
+    Params = FD->parameters();
+  else if (const auto *BD = dyn_cast<BlockDecl>(D))
+    Params = BD->parameters();
+  else if (const auto *OMD = dyn_cast<ObjCMethodDecl>(D))
+    Params = OMD->parameters();
+  for (const ParmVarDecl *P : Params) {
+    Owned.insert(P);
+    HarvestMarked(P, /*UnknownEntry=*/false);
+    if (const CXXRecordDecl *RD = SemaProfiles::flowTrackedAggregateClass(P))
+      Storage.addObject(S, P, RD,
+                        /*TrackReads=*/!P->hasDefaultArg() &&
+                            SemaProfiles::getTrackableSlotClass(P->getType()),
+                        /*UnknownEntry=*/false);
+  }
+  // The body's own variables (DeclStmts and handler declarations, in source
+  // order) and the local-storage variables of enclosing functions it reaches
+  // by capture.
+  SmallVector<const VarDecl *, 8> Locals;
   SmallVector<const DeclStmt *, 8> DeclStmts;
-  // Marked variables of an enclosing function the body reaches by capture:
-  // tracked from an unknown entry state.
-  SmallVector<const VarDecl *, 4> Captured;
+  SmallVector<const VarDecl *, 4> Referenced;
   {
     SmallVector<const Stmt *, 32> Stack;
     if (const Stmt *Body = D->getBody())
@@ -3133,14 +3499,21 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
       const Stmt *Cur = Stack.pop_back_val();
       if (!Cur)
         continue;
-      if (const auto *DS = dyn_cast<DeclStmt>(Cur))
+      if (const auto *DS = dyn_cast<DeclStmt>(Cur)) {
         DeclStmts.push_back(DS);
-      if (const auto *DRE = dyn_cast<DeclRefExpr>(Cur))
+        for (const Decl *Dcl : DS->decls())
+          if (const auto *V = dyn_cast<VarDecl>(Dcl);
+              V && Owned.insert(V).second)
+            Locals.push_back(V);
+      } else if (const auto *CS = dyn_cast<CXXCatchStmt>(Cur)) {
+        if (const VarDecl *V = CS->getExceptionDecl();
+            V && Owned.insert(V).second)
+          Locals.push_back(V);
+      } else if (const auto *DRE = dyn_cast<DeclRefExpr>(Cur)) {
         if (const auto *V = dyn_cast<VarDecl>(DRE->getDecl());
-            V && V->hasLocalStorage() &&
-            V->getDeclContext() != dyn_cast<DeclContext>(D) &&
-            (V->hasAttr<UninitAttr>() || V->hasAttr<RefToUninitAttr>()))
-          Captured.push_back(V);
+            V && V->hasLocalStorage())
+          Referenced.push_back(V);
+      }
       if (const auto *LE = dyn_cast<LambdaExpr>(Cur)) {
         for (const Expr *Init : llvm::reverse(LE->capture_inits()))
           Stack.push_back(Init);
@@ -3153,23 +3526,13 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
         Stack.push_back(Child);
     }
   }
-  bool AnyLocal = false;
-  for (const DeclStmt *DS : DeclStmts)
-    for (const Decl *Dcl : DS->decls()) {
-      const auto *V = dyn_cast<VarDecl>(Dcl);
-      if (!V)
-        continue;
-      HarvestMarked(V, /*UnknownEntry=*/false);
-      if (Storage.LocalRange.count(V))
-        continue;
-      if (const CXXRecordDecl *RD = getTrackedLocalAggregate(V))
-        AnyLocal |= HarvestVar(V, RD);
-    }
-  for (const VarDecl *V : Captured)
-    HarvestMarked(V, /*UnknownEntry=*/true);
-  // The copy harvest only chains from an already-tracked local.
-  if (!AnyLocal && Storage.LocalRange.empty())
-    return;
+  for (const VarDecl *V : Locals) {
+    HarvestMarked(V, /*UnknownEntry=*/false);
+    if (const CXXRecordDecl *RD = getTrackedLocalAggregate(V))
+      Storage.addObject(S, V, RD, /*TrackReads=*/true, /*UnknownEntry=*/false);
+  }
+  // The copy harvest chains from a read-tracked local only, so it runs
+  // before the binding-only objects are added.
   for (bool Added = true; Added;) {
     Added = false;
     for (const DeclStmt *DS : DeclStmts)
@@ -3177,33 +3540,60 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
         const auto *V = dyn_cast<VarDecl>(Dcl);
         if (!V || Storage.LocalRange.count(V))
           continue;
-        const CXXRecordDecl *RD = getTrackableLocalClass(V);
+        const CXXRecordDecl *RD = SemaProfiles::getTrackableLocalClass(V);
         if (!RD)
           continue;
         BasePath CastPath;
         const DeclRefExpr *SrcRef = getLocalCopySourceRef(V, CastPath);
         const auto *Src =
             SrcRef ? dyn_cast<VarDecl>(SrcRef->getDecl()) : nullptr;
-        if (!Src || !Storage.LocalRange.count(Src))
+        auto SrcIt =
+            Src ? Storage.LocalRange.find(Src) : Storage.LocalRange.end();
+        if (SrcIt == Storage.LocalRange.end() ||
+            !Storage.Entities[SrcIt->second.first].TrackReads)
           continue;
-        if (!HarvestVar(V, RD))
+        std::pair<unsigned, unsigned> Range =
+            Storage.addObject(S, V, RD, /*TrackReads=*/true,
+                              /*UnknownEntry=*/false);
+        if (Range.first == Range.second)
           continue;
         Storage.CopySource[V] = {Src, std::move(CastPath)};
         Added = true;
       }
   }
+  // Every other local with marked scalar members is tracked for bindings.
+  for (const VarDecl *V : Locals)
+    if (!Storage.LocalRange.count(V))
+      if (const CXXRecordDecl *RD = SemaProfiles::flowTrackedAggregateClass(V))
+        Storage.addObject(S, V, RD, /*TrackReads=*/false,
+                          /*UnknownEntry=*/false);
+  // Variables of enclosing functions, from an unknown entry state.
+  llvm::SmallPtrSet<const VarDecl *, 4> Seen;
+  for (const VarDecl *V : Referenced) {
+    if (Owned.count(V) || !Seen.insert(V).second)
+      continue;
+    HarvestMarked(V, /*UnknownEntry=*/true);
+    if (!Storage.LocalRange.count(V) && !Storage.LocalEntity.count(V))
+      if (const CXXRecordDecl *RD = SemaProfiles::flowTrackedAggregateClass(V))
+        Storage.addObject(S, V, RD, /*TrackReads=*/false,
+                          /*UnknownEntry=*/true);
+  }
 }
 
-/// The member read-before-init rule (P4222R2 §4.2, §5.1-§5.4): one entity
-/// table -- the current object's [[uninit]] scalar members in a constructor
-/// body, and those of tracked locals and by-value parameters -- one event
-/// extraction, one definite-assignment run, one report, over a CFG of the
-/// engine's own. A delegating constructor's target initializes the members
-/// first and a union's members are mutually exclusive (§5.6), so neither
-/// constructor's current object is tracked, as ctor_uninit_member exempts
-/// both. The crediting policy -- strict whole-member stores and lifecycle
-/// calls for the current object, any escape for a local -- is stated in
-/// ProfilesFramework.rst, "Reads of Uninitialized Objects" and "Limitations".
+/// The std::init flow engine over one body: the member read-before-init rule
+/// (P4222R2 §4.2, §5.1-§5.4) and the judgments of flow-tracked storage
+/// (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage") -- one entity
+/// table, one event extraction, one definite-assignment run, one report,
+/// over a CFG of the engine's own. The current object's members are tracked
+/// in every instance member function body (a lambda's or block's body inside
+/// one included), from the unassigned entry state; their reads are tracked
+/// in a constructor body only. A delegating constructor's target initializes
+/// the members first and a union's members are mutually exclusive (§5.6), so
+/// neither constructor's reads are tracked, as ctor_uninit_member exempts
+/// both. The crediting policy -- whole-entity stores and lifecycle calls,
+/// plus any escape for a local aggregate's reads -- is stated in
+/// ProfilesFramework.rst, "Reads of Uninitialized Objects" and
+/// "Limitations".
 static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
                                        AnalysisDeclContext &,
                                        const CFGProfileEntry &Entry) {
@@ -3212,15 +3602,19 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
   if (Ctor && (Ctor->isDelegatingConstructor() || Ctor->getParent()->isUnion()))
     Ctor = nullptr;
   bool StarThisCopyTrusted = false;
-  if (Ctor) {
-    Storage.addObject(S, /*Base=*/nullptr, Ctor->getParent());
+  if (const CXXMethodDecl *MD =
+          SemaProfiles::enclosingInstanceMethod(dyn_cast<DeclContext>(D))) {
+    if (const CXXRecordDecl *RD = MD->getParent()->getDefinition())
+      Storage.addObject(S, /*Base=*/nullptr, RD, /*TrackReads=*/Ctor != nullptr,
+                        /*UnknownEntry=*/false);
     // A `[*this]` capture copy-constructs the whole object; a user-provided
     // copy constructor is opaque and trusted (P4222R2 §5.1), so the
     // capture's whole-object reads are appended only without one.
-    StarThisCopyTrusted = llvm::any_of(
-        Ctor->getParent()->ctors(), [](const CXXConstructorDecl *C) {
-          return C->isCopyConstructor() && C->isUserProvided();
-        });
+    if (Ctor)
+      StarThisCopyTrusted = llvm::any_of(
+          Ctor->getParent()->ctors(), [](const CXXConstructorDecl *C) {
+            return C->isCopyConstructor() && C->isUserProvided();
+          });
   }
   harvestTrackedLocals(S, D, Storage);
   if (Storage.Entities.empty())
@@ -3245,7 +3639,8 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
     return;
   std::vector<SmallVector<DefAssignEvent, 4>> Events(cfg->getNumBlockIDs());
   SmallVector<BindingSite, 8> Sites;
-  extractStdInitEvents(*cfg, Storage, Ctor, StarThisCopyTrusted, Events, Sites);
+  extractStdInitEvents(S, D, *cfg, Storage, Ctor, StarThisCopyTrusted, Events,
+                       Sites);
   // Nothing is assigned at function entry: written initializers write at
   // their CFGInitializer elements, a tracked local cannot be referenced
   // before its DeclStmt, a by-value parameter starts unassigned by design,

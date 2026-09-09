@@ -374,20 +374,19 @@ void test_conditional_assignment_target(bool c) {
   (void)p; (void)q; (void)r; (void)s;
 }
 
-// A store through a conditional target credits each named arm with the
-// suppressing strength only: the chosen arm is not known, so the credit
-// suppresses the unmarked-target diagnostic but cannot fire the
-// marked-target one.
+// A store through a conditional target initializes whichever arm is chosen:
+// each arm is initialized on some path, so an unmarked binding is accepted,
+// and on no path definitely, so a marked binding is not forced.
 void test_conditional_store_credit(bool c) {
   int u [[uninit]], u2 [[uninit]];
   (c ? u : u2) = 5;
   int *a = &u;                    // OK: the store may have initialized 'u'
-  int *b [[ref_to_uninit]] = &u2; // OK: Maybe credit cannot fire the marked direction
+  int *b [[ref_to_uninit]] = &u2; // OK: 'u2' is not initialized on every path
   (void)a; (void)b;
 }
 
-// A reseat through a conditional target retires the marked pointer's pointee
-// credit wholesale, whichever arm: every pointee fact described the old
+// A reseat through a conditional target retires everything known about the
+// marked pointer's pointee, whichever arm: every fact described the old
 // pointee.
 void test_conditional_reseat(bool c) {
   int u [[uninit]], u2 [[uninit]];
@@ -395,7 +394,7 @@ void test_conditional_reseat(bool c) {
   *p = 1;
   int *m0 [[ref_to_uninit]] = p; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   (c ? p : p) = &u2;
-  int *m [[ref_to_uninit]] = p;  // OK: the stale pointee credit is retired
+  int *m [[ref_to_uninit]] = p;  // OK: the reseat retired the pointee's state
   (void)m0; (void)m;
 }
 
@@ -465,12 +464,13 @@ void test_null_sources() {
   int *zb [[ref_to_uninit]] = {nullptr}; // OK: braced null recurses to the literal
   (void)zb;
 
-  // The null-init classification is parse-order lenient: a reassignment after
-  // the null declaration is not tracked, so passing the now-initialized
-  // pointer to a marked parameter is an accepted missed diagnostic.
+  // The null-init classification is by form: an unmarked pointer is not
+  // flow-tracked, so a reassignment after the null declaration is not seen
+  // and passing the now-initialized pointer to a marked parameter is an
+  // accepted missed diagnostic.
   int *r = nullptr;
   r = &g_init;
-  take_uninit_ptr(r); // accepted: missed diagnostic (parse-order leniency)
+  take_uninit_ptr(r); // accepted: missed diagnostic (an unmarked pointer is not tracked)
 }
 
 // A zero-initialized *global* null pointer stays classified initialized:
@@ -731,8 +731,6 @@ template void template_init_capture_bad<int>(); // expected-note {{in instantiat
 void test_ref_captures() {
   int x [[uninit]];
   int ok = 0;
-  // The bodies must not assign x: a body store would credit it in parse
-  // order and silence the capture check (see test_ref_capture_body_store).
   auto c1 = [&x] { (void)x; }; // expected-error {{capturing 'x' by reference binds a reference to uninitialized memory under profile 'std::init'}}
   auto c2 = [&] { (void)x; };  // expected-error {{capturing 'x' by reference binds a reference to uninitialized memory under profile 'std::init'}}
   auto c3 = [&ok] { ok = 1; }; // OK: initialized
@@ -748,34 +746,30 @@ void test_ref_captures() {
   (void)c1; (void)c2; (void)c3; (void)c4; (void)c5;
 }
 
-// Parse-order store credit reaches the capture check both ways -- accepted
-// leniencies of the scope-less credit map (false negatives only):
+// The capture is judged by the flow state at the lambda expression: a store
+// before it initializes the variable, a store inside the lambda body -- a
+// separate function that may never run -- does not.
 void test_ref_capture_after_store() {
   int u [[uninit]];
   u = 5;
-  auto c = [&u] { (void)u; }; // OK: the store initialized u (symmetric
-                              // with binding &u after the store)
+  auto c = [&u] { (void)u; }; // OK: the store initialized u
   (void)c;
 }
 
 void test_ref_capture_body_store() {
   int u [[uninit]];
-  auto L = [&] { u = 5; }; // OK: the body's own store credits u at parse
-                           // order, silencing this capture check -- the
-                           // deliberate leniency (no FunctionScopeInfo
-                           // scoping), pinned here
-  int *q = &u;             // OK: credited by the body store above
+  auto L = [&] { u = 5; }; // expected-error {{capturing 'u' by reference binds a reference to uninitialized memory under profile 'std::init'}}
+  int *q = &u;             // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   (void)L; (void)q;
 }
 
-// A by-reference capture of a variable with a non-dependent type is reported
-// at the definition and again at each instantiation, which rebuilds the
-// lambda and re-processes the capture. (The body must not assign x, as in
-// test_ref_captures.)
+// A by-reference capture of a flow-tracked variable is judged on each
+// instantiation's own CFG; the pattern is never analyzed, so it is reported
+// once, at the instantiation.
 template <typename T>
 void template_ref_capture_bad() {
   int x [[uninit]];
-  auto c = [&x] { (void)x; }; // expected-error 2 {{capturing 'x' by reference binds a reference to uninitialized memory under profile 'std::init'}}
+  auto c = [&x] { (void)x; }; // expected-error {{capturing 'x' by reference binds a reference to uninitialized memory under profile 'std::init'}}
   (void)c;
 }
 template void template_ref_capture_bad<int>(); // expected-note {{in instantiation of function template specialization 'template_ref_capture_bad<int>' requested here}}
@@ -784,8 +778,8 @@ template void template_ref_capture_bad<int>(); // expected-note {{in instantiati
 // which can never carry [[ref_to_uninit]] (the introducer grammar has no
 // attribute position) -- copying a marked pointer into one is the
 // unmarked-direction rejection, exactly like `int *q = p;` on the same line.
-// Remedies: capture by reference, store through the marker first (credit
-// suppresses), or suppress.
+// Remedies: capture by reference, store through the marker first, or
+// suppress.
 void test_copy_captures(int *p [[ref_to_uninit]]) {
   auto c1 = [p] {};            // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   auto c2 = [=] { (void)p; };  // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
@@ -800,7 +794,7 @@ void test_copy_captures(int *p [[ref_to_uninit]]) {
 
 void test_copy_capture_after_store(int *p [[ref_to_uninit]]) {
   *p = 5;
-  auto c = [p] {}; // OK: the pointee store's Maybe credit suppresses
+  auto c = [p] {}; // OK: the pointee is initialized
   (void)c;
 }
 
@@ -1036,15 +1030,15 @@ void test_lambda_return_suppress() {
   (void)l; (void)m;
 }
 
-// Parse-order store credit reaches lambda returns like every binding: the
-// body's own store precedes the return in parse order, so the credited entity
-// is initialized memory and the unmarked return is accepted (the by-ref
-// capture is accepted for the same reason, see test_ref_capture_body_store).
+// A lambda body is its own function: the variable enters it in an unknown
+// state and the body's own store initializes it for the return that follows,
+// while the by-reference capture in the enclosing function is judged before
+// any store and rejected (an implicit capture is located at its first use).
 void test_lambda_return_after_store() {
   int u [[uninit]];
   auto l = [&]() -> int * {
-    u = 5;
-    return &u; // OK: credited by the store above
+    u = 5; // expected-error {{capturing 'u' by reference binds a reference to uninitialized memory under profile 'std::init'}}
+    return &u; // OK: initialized by the store above
   };
   (void)l;
 }
@@ -1758,17 +1752,16 @@ void template_compound_read_bad(int *p [[ref_to_uninit]]) {
 }
 template void template_compound_read_bad<int>(int *); // expected-note {{in instantiation of function template specialization 'template_compound_read_bad<int>' requested here}}
 
-// Parse-order pointee store credit (paper §4.3/§4.5): a whole-`*p` store
-// through a [[ref_to_uninit]] pointer is the pointee's initialization, so
-// whole-`*p` accesses after it (in parse order) are legal -- and the paper's
-// reverse direction applies: the credited pointer now refers to initialized
-// memory and REQUIRES an unmarked target. Element accesses never see the
-// credit in either direction (§5.4's random-access ban), and reseating the
-// pointer clears it.
+// A whole-`*p` store through a [[ref_to_uninit]] pointer is the pointee's
+// initialization (paper §4.3/§4.5): whole-`*p` reads after it are legal, and
+// the paper's reverse direction applies to bindings: the pointer now refers
+// to initialized memory and REQUIRES an unmarked target. Element accesses
+// are never initialized by it (§5.4's random-access ban), and reseating the
+// pointer retires it.
 void test_pointee_store_credit(int *p [[ref_to_uninit]]) {
-  *p = 5;      // OK: the write initializes the pointee (and credits it)
+  *p = 5;      // OK: the write initializes the pointee
   *p = 7;      // OK: further whole-entity stores stay legal
-  int x = *p;  // OK: credited (rejected before the store)
+  int x = *p;  // OK: initialized (rejected before the store)
   int *r2 [[ref_to_uninit]] = p; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   (void)x; (void)r2;
 }
@@ -1821,13 +1814,13 @@ void test_reseat_clears_credit(int *p [[ref_to_uninit]],
   (void)x; (void)y; (void)z;
 }
 
-// A store through a transparent cast credits (and reseats) exactly like its
-// uncast form, symmetric with the recognizers' cast pass-through (§4.3): a
-// cast does not launder the store any more than it launders the marking.
+// A store through a transparent cast initializes (and reseats) exactly like
+// its uncast form, symmetric with the recognizers' cast pass-through (§4.3):
+// a cast does not launder the store any more than it launders the marking.
 void test_cast_store_credits_whole() {
   int u [[uninit]];
   (int &)u = 5;
-  int *q = &u; // OK: the cast store credited u whole
+  int *q = &u; // OK: the cast store initialized u whole
   (void)q;
 }
 void test_cast_store_fires_reverse() {
@@ -1850,11 +1843,10 @@ void test_cast_reseat_clears(int *p [[ref_to_uninit]],
 }
 
 // Handing out a *mutable alias* of the marked pointer object (T*& or T**)
-// lets the holder reseat it, so the escape withdraws the Definite pointee
-// credit -- the firing basis of the marked-target diagnostic -- while the
-// suppressing Maybe credit survives (the callee may equally leave the
-// pointer alone): the same "revoke only the firing strength" semantics as
-// a conditional [[now_uninit]] destroy.
+// lets the holder reseat it, so after the escape the pointee is neither
+// definitely initialized (a marked binding is not forced) nor definitely
+// uninitialized (an unmarked binding stays accepted: the callee may equally
+// leave the pointer alone).
 void alias_by_ref(int *&);
 void alias_by_ptr(int **);
 void alias_by_const_ref(int *const &);
@@ -1862,7 +1854,7 @@ void test_alias_escape_by_reference(int *p [[ref_to_uninit]]) {
   *p = 5;
   alias_by_ref(p);
   int *m [[ref_to_uninit]] = p; // OK: the callee may have reseated p
-  int *u2 = p;                  // OK: the Maybe credit still suppresses
+  int *u2 = p;                  // OK: the pointee may still be initialized
   (void)m; (void)u2;
 }
 void test_alias_escape_by_pointer(int *p [[ref_to_uninit]]) {
@@ -1883,8 +1875,7 @@ void test_alias_escape_declaration_form(int *p [[ref_to_uninit]]) {
   int *m [[ref_to_uninit]] = p; // OK: pp can reseat p
   (void)pp; (void)m;
 }
-// A ternary-wrapped alias source withdraws per named arm (the escape is
-// Maybe-only already, so the arm's conditionality changes nothing).
+// A ternary-wrapped alias source escapes per named arm.
 void test_alias_escape_ternary_source(int *p [[ref_to_uninit]], bool c) {
   *p = 5;
   int **pp = (c ? &p : &p);
@@ -1927,13 +1918,12 @@ void test_alias_escape_throw(int *p [[ref_to_uninit]]) {
 }
 
 // A lambda capturing the marked pointer by reference holds the same mutable
-// alias as `pp = &p` above and withdraws the same way: the Definite firing
-// basis goes, the suppressing Maybe credit survives.
+// alias as `pp = &p` above and escapes the pointee the same way.
 void test_alias_escape_by_ref_capture(int *p [[ref_to_uninit]]) {
   *p = 5;
   auto c = [&p] {};
   int *m [[ref_to_uninit]] = p; // OK: the closure may have reseated p
-  int *u2 = p;                  // OK: the Maybe credit still suppresses
+  int *u2 = p;                  // OK: the pointee may still be initialized
   (void)c; (void)m; (void)u2;
 }
 void test_alias_escape_by_ref_capture_default(int *p [[ref_to_uninit]]) {
@@ -1942,7 +1932,7 @@ void test_alias_escape_by_ref_capture_default(int *p [[ref_to_uninit]]) {
   int *m [[ref_to_uninit]] = p; // OK: the closure may have reseated p
   (void)c; (void)m;
 }
-// A const-qualified pointer cannot be reseated: no withdrawal (mirror of
+// A const-qualified pointer cannot be reseated: no escape (mirror of
 // test_const_alias_does_not_withdraw).
 void test_const_capture_does_not_withdraw(int *const cp [[ref_to_uninit]]) {
   *cp = 5;
@@ -1951,7 +1941,8 @@ void test_const_capture_does_not_withdraw(int *const cp [[ref_to_uninit]]) {
   (void)c; (void)m;
 }
 // A by-ref capture of a marked *reference* is unchanged: references cannot
-// be reseated, so the referent's Definite credit survives the capture.
+// be reseated, so the referent stays definitely initialized through the
+// capture.
 void test_marked_reference_capture_keeps_credit(int &r [[ref_to_uninit]]) {
   r = 5;
   auto c = [&r] { (void)r; };
@@ -2007,15 +1998,12 @@ void test_explicit_object_assignment(EPair *p [[ref_to_uninit]]) {
   *p = EPair{1, 2}; // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 }
 
-// Per-object whole-member store credit (paper §4.2: "After initialization,
-// the object is no longer [[uninit]]"; §6: ordinary assignment initializes a
-// built-in): `a.m = 5` credits exactly the (base object, member) pair, so a
-// later binding of that member through the same base is legal -- the member
-// analog of the locals credit above. The base identity is the directly named
-// local-storage variable or, for current-object accesses (this->m / m), the
-// enclosing function declaration, so unrelated objects and other function
-// bodies never share credit. Same parse-order semantics: no dominance or
-// flow analysis, missed diagnostics only.
+// A whole-member store initializes exactly that member of that object (paper
+// §4.2: "After initialization, the object is no longer [[uninit]]"; §6:
+// ordinary assignment initializes a built-in): `a.m = 5` on a directly named
+// local, or `this->m = 5` on the current object, makes a later binding of
+// that member through the same base legal, judged by the flow state of the
+// enclosing body; unrelated objects and other function bodies share nothing.
 struct MemberCredit { int m [[uninit]]; }; // expected-note {{member 'm' declared here}}
 void mc_sink_ptr(int *);
 void mc_sink_ref(const int &);
@@ -2026,51 +2014,51 @@ void test_member_store_credit() {
   mc_sink_ref(a.m); // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   mc_sink_ptr(&a.m); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   a.m = 5;
-  mc_sink_ref(a.m);  // OK: credited
-  mc_sink_ptr(&a.m); // OK: credited
-  int *q = &a.m;     // OK: credited
+  mc_sink_ref(a.m);  // OK: initialized
+  mc_sink_ptr(&a.m); // OK: initialized
+  int *q = &a.m;     // OK: initialized
   (void)q;
 }
 
 // The reverse direction applies too (mirroring test_assign_credited_to_marked):
-// a credited member is initialized memory and now requires an unmarked target.
+// an initialized member requires an unmarked target.
 void test_member_credit_reverse_direction() {
   MemberCredit a;
   a.m = 5;
   mc_fill(&a.m); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
 }
 
-// The credit is per base object: a store to one local's member says nothing
-// about another local of the same type (and per §5.2, nothing about a copy).
+// The state is per object: a store to one local's member says nothing about
+// another local of the same type (and per §5.2, nothing about a copy).
 void test_member_credit_per_object() {
   MemberCredit a1, a2;
   a1.m = 5;
-  mc_sink_ref(a1.m); // OK: credited
+  mc_sink_ref(a1.m); // OK: initialized
   mc_sink_ref(a2.m); // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 }
 
-// Current-object members key on the enclosing function: `m = 5` in one member
-// function never credits a binding in another, `this->m` / `m` / `(*this).m`
-// share the key within one body, and a this-capturing lambda's body is its
-// own function (its stores and the enclosing function's do not mix, in
-// either direction).
+// Current-object members are tracked per body: `m = 5` in one member
+// function says nothing about a binding in another, `this->m` / `m` /
+// `(*this).m` name the same member within one body, and a this-capturing
+// lambda's body is its own function (its stores and the enclosing function's
+// do not mix, in either direction).
 struct ThisMemberCredit {
   int m [[uninit]];
   void store_then_bind() {
     this->m = 5;
-    mc_sink_ref(m);          // OK: credited (same key as this->m)
-    mc_sink_ptr(&(*this).m); // OK: credited
+    mc_sink_ref(m);          // OK: initialized (the same member as this->m)
+    mc_sink_ptr(&(*this).m); // OK: initialized
   }
   void bind_without_store() {
     mc_sink_ref(m); // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   }
   void lambda_store_isolated() {
-    auto l = [this] { m = 5; }; // records under the lambda's own key
+    auto l = [this] { m = 5; }; // a store in the lambda's own body
     mc_sink_ptr(&m); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
     (void)l;
   }
   void lambda_bind_isolated() {
-    m = 5; // records under this function's key
+    m = 5; // a store in this body only
     auto l = [this] {
       mc_sink_ptr(&m); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
     };
@@ -2078,15 +2066,13 @@ struct ThisMemberCredit {
   }
 };
 
-// In a constructor, the parse-time binding after a whole-member store is
-// credited the same way (this was the escape-adjacent false positive); the
-// CFG ctor-body pass independently keeps governing *reads*, with real flow
-// analysis (safety-profile-init-ctor-body.cpp).
+// In a constructor body the same flow state judges bindings and governs
+// reads (safety-profile-init-ctor-body.cpp).
 struct CtorMemberCredit {
   int m [[uninit]];
   CtorMemberCredit() {
     m = 5;
-    mc_sink_ptr(&m); // OK: credited by the store above
+    mc_sink_ptr(&m); // OK: initialized by the store above
   }
   CtorMemberCredit(int) {
     mc_sink_ptr(&m); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
@@ -2094,21 +2080,21 @@ struct CtorMemberCredit {
   }
 };
 
-// Compound assignment and ++/-- record through the same arm: the store side
-// credits later bindings (the read side of `a.m += 1` on a local aggregate is
-// the CFG local-members pass's, which flags it with flow precision).
+// Compound assignment and ++/-- read and then write: the read of the
+// unassigned member is rejected, and the write initializes it for later
+// bindings.
 void test_member_credit_compound() {
   MemberCredit a;
   a.m += 1; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
-  mc_sink_ref(a.m); // OK: the compound store credited (a, m)
+  mc_sink_ref(a.m); // OK: the compound store initialized a.m
 }
 
-// Only a single-level, directly named base earns or consults credit. A store
+// Only a scalar member directly on a named object is flow-tracked. A store
 // below a marked class-type member (x.agg.m) is itself the banned piecemeal
-// initialization (uninit_write, §5.4) and resolves no base, so it earns
-// nothing -- the later binding still sees agg's marker below top level. A
-// whole-member `x.agg = ...` cannot credit either: a class-typed assignment
-// is a member operator= call on uninitialized storage, rejected outright.
+// initialization (uninit_write, §5.4) and initializes nothing -- the later
+// binding still sees agg's marker below top level. A whole-member `x.agg =
+// ...` cannot initialize either: a class-typed assignment is a member
+// operator= call on uninitialized storage, rejected outright.
 struct AggMemberCredit { MemberCredit agg [[uninit]]; };
 void test_member_credit_single_level() {
   AggMemberCredit x;
@@ -2118,8 +2104,8 @@ void test_member_credit_single_level() {
 }
 
 // A member of an object reached through a reference or pointer parameter is
-// the pinned aliasing boundary: the store is trusted as a write, but the
-// binding through that alias stays strict.
+// not flow-tracked: the store is trusted as a write, but the binding through
+// that alias is judged by its form and stays strict.
 void test_member_credit_alias_boundary(MemberCredit &r, MemberCredit *p) {
   r.m = 5;
   mc_sink_ref(r.m); // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
@@ -2127,33 +2113,28 @@ void test_member_credit_alias_boundary(MemberCredit &r, MemberCredit *p) {
   mc_sink_ptr(&p->m); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 }
 
-// Credit is recorded at pattern-parse time and independently at instantiation
-// (fresh field and function declarations), so the store-then-bind sequence
-// holds in templates too; the dependent binding defers on the pattern and
-// re-runs on the rebuilt (credited-in-order) instantiation.
+// A flow-tracked binding inside a template is judged on the instantiation's
+// own CFG, so the store-then-bind sequence holds in templates too.
 template <typename T>
 struct TmplMemberCredit {
   int m [[uninit]];
   void f() {
     this->m = 5;
-    mc_sink_ref(this->m); // OK at the pattern and at instantiation
+    mc_sink_ref(this->m); // OK: judged at instantiation
   }
 };
 template struct TmplMemberCredit<int>;
 
 // TreeTransform hands a fully non-dependent statement back *unchanged* when
-// instantiating a body, so `m = 5` inside a generic lambda runs Sema (and
-// records its credit) only at the pattern parse. The current-object key is
-// the function's parse-time pattern on record and consult alike, so the
-// instantiated call operators' checks still find that credit -- while the
-// per-function isolation above is unchanged (different functions have
-// different patterns).
+// instantiating a body, so `m = 5` inside a generic lambda is the pattern's
+// node in every instantiation's CFG; the CFG analyzes a reused node like a
+// rebuilt one, so each instantiated call operator sees the store.
 struct GenericLambdaMemberCredit {
   int m [[uninit]];
   void go() {
     auto l = [this](auto) {
       m = 5;
-      mc_sink_ref(m);  // OK: credited at the pattern parse and per instantiation
+      mc_sink_ref(m);  // OK: initialized in each instantiation's CFG
       mc_sink_ptr(&m); // OK
     };
     l(1);
@@ -2162,8 +2143,7 @@ struct GenericLambdaMemberCredit {
 };
 
 // The same statement reuse through a non-generic lambda in a member function
-// template: the transformed call operator reaches its parsed pattern through
-// a member-specialization link.
+// template.
 struct LambdaInMemberTemplateCredit {
   int m [[uninit]];
   template <class T> void go() {
@@ -2174,12 +2154,10 @@ struct LambdaInMemberTemplateCredit {
 template void LambdaInMemberTemplateCredit::go<int>();
 
 // [[now_init]] (P4222R2 §6.2): binding an entity to a [[ref_to_uninit]]
-// parameter of a [[now_init]] function earns the same parse-order credit as
-// the equivalent direct store -- the callee initializes the storage it was
-// handed. A plain (non-[[now_init]]) callee still earns nothing (the strict
-// no-escape-credit doctrine; the paper reserves callee-initialization for
-// exactly this annotation). Inside constructors the CFG ctor-body pass has
-// its own flow-precise [[now_init]] credit (safety-profile-init-ctor-body.cpp).
+// parameter of a [[now_init]] function initializes it exactly like the
+// equivalent direct store -- the callee initializes the storage it was
+// handed. A plain (non-[[now_init]]) callee initializes nothing (the paper
+// reserves callee-initialization for exactly this annotation).
 [[now_init]] void now_init_fill(int *p [[ref_to_uninit]]);
 [[now_init]] void now_init_fill_ref(int &r [[ref_to_uninit]]);
 [[now_init]] void now_init_variadic(int *p [[ref_to_uninit]], ...);
@@ -2195,7 +2173,7 @@ void test_now_init_whole_local() {
   now_init_fill(&u); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
 }
 
-// A plain callee taking the same marked parameter earns no credit: the
+// A plain callee taking the same marked parameter initializes nothing: the
 // binding after it stays the strict error.
 void plain_fill(int *p [[ref_to_uninit]]);
 void test_plain_callee_no_credit() {
@@ -2206,8 +2184,7 @@ void test_plain_callee_no_credit() {
 
 // Passing the marked pointer's *value* is §6.2's initialize2(p) example
 // verbatim: the callee initializes the pointee, so whole-`*p` accesses after
-// the call are legal -- composed with the existing reseat machinery, which
-// clears the credit like any other pointee credit.
+// the call are legal -- until the pointer is reseated.
 void test_now_init_pointee(int *p [[ref_to_uninit]]) {
   int before = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
   now_init_fill(p); // OK: marked-to-marked binding
@@ -2218,7 +2195,7 @@ void test_now_init_pointee(int *p [[ref_to_uninit]]) {
 
 void test_now_init_reseat(int *p [[ref_to_uninit]], int *q [[ref_to_uninit]]) {
   now_init_fill(p);
-  p = q;      // reseating clears the pointee credit
+  p = q;      // reseating retires the pointee's state
   int x = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
   (void)x;
 }
@@ -2229,25 +2206,24 @@ void test_now_init_reference(int &r [[ref_to_uninit]]) {
   (void)v;
 }
 
-// A ternary-wrapped [[now_init]] argument credits each named arm at Maybe
-// strength only, since the chosen arm is not known: the unmarked binding is
-// suppressed, the marked binding stays legal.
+// A ternary-wrapped [[now_init]] argument may initialize either arm, since
+// the chosen arm is not known: the unmarked binding is accepted, the marked
+// binding is not forced.
 void test_now_init_ternary_arms(bool c) {
   int u [[uninit]], v [[uninit]];
   now_init_fill(c ? &u : &v);
-  int *w = &u;                   // OK: the Maybe credit suppresses
-  int *m [[ref_to_uninit]] = &u; // OK: no Definite claim to fire on
+  int *w = &u;                   // OK: 'u' may be initialized
+  int *m [[ref_to_uninit]] = &u; // OK: 'u' is not initialized on every path
   (void)w;
   (void)m;
 }
 
-// Members earn the same per-object credit as a direct member store, under
-// the same base-identity keys and boundaries: a member of a parameter-
-// reached object stays uncredited (the pinned aliasing boundary).
+// A member is initialized as by a direct member store, with the same
+// boundaries: a member of a parameter-reached object is not flow-tracked.
 void test_now_init_member() {
   MemberCredit a;
   now_init_fill(&a.m); // OK
-  mc_sink_ptr(&a.m);   // OK: (a, m) credited by the callee
+  mc_sink_ptr(&a.m);   // OK: a.m initialized by the callee
   mc_sink_ref(a.m);    // OK
 }
 void test_now_init_member_boundary(MemberCredit &r) {
@@ -2255,34 +2231,33 @@ void test_now_init_member_boundary(MemberCredit &r) {
   mc_sink_ptr(&r.m);   // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 }
 
-// The callee credit survives statement reuse in instantiated lambda bodies
-// exactly like a direct store (the current-object key is the parse-time
-// pattern; see GenericLambdaMemberCredit above).
+// The callee's initialization survives statement reuse in instantiated
+// lambda bodies exactly like a direct store (see GenericLambdaMemberCredit
+// above).
 struct GenericLambdaNowInitMemberCredit {
   int m [[uninit]];
   void go() {
     auto l = [this](auto) {
       now_init_fill(&m);
-      mc_sink_ptr(&m); // OK: credited at the pattern parse and per instantiation
+      mc_sink_ptr(&m); // OK: initialized in each instantiation's CFG
     };
     l(1);
   }
 };
 
-// A variadic argument reaches no declared parameter, so it earns nothing
-// even from a [[now_init]] callee (and is checked as an unmarked target).
+// A variadic argument reaches no declared parameter, so a [[now_init]]
+// callee initializes nothing through it (and it is checked as an unmarked
+// target).
 void test_now_init_variadic_no_credit() {
   int u [[uninit]];
   int w [[uninit]];
   now_init_variadic(&u, &w); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
-  ni_sink(&u); // OK: the marked parameter credited u
+  ni_sink(&u); // OK: the marked parameter initialized u
   ni_sink(&w); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 }
 
-// [[now_init]] on a function template: a call to a concrete [[now_init]]
-// callee credits at pattern-parse time, so definition-time checks find it; a
-// dependent callee defers with the rest of the call and credits per
-// instantiation, in the rebuilt parse order.
+// [[now_init]] on a function template: a call to a concrete or a dependent
+// [[now_init]] callee initializes its argument in each instantiation's CFG.
 template <typename T>
 [[now_init]] void now_init_tmpl(T *p [[ref_to_uninit]]);
 
@@ -2290,7 +2265,7 @@ template <typename T>
 void template_now_init_nondependent() {
   int u [[uninit]];
   now_init_fill(&u);
-  ni_sink(&u); // OK at definition time and at instantiation
+  ni_sink(&u); // OK: judged at instantiation
 }
 template void template_now_init_nondependent<int>();
 
@@ -2298,7 +2273,7 @@ template <typename T>
 void template_now_init_dependent() {
   T u [[uninit]];
   now_init_tmpl(&u);
-  T *s = &u; // OK per instantiation: the rebuilt call credits first
+  T *s = &u; // OK per instantiation: the call initializes first
   (void)s;
 }
 template void template_now_init_dependent<int>();
@@ -2432,14 +2407,15 @@ void test_reseat_clears_destroyed(int *p [[ref_to_uninit]],
   nu_wipe(p); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
-// A ternary-wrapped destroy withdraws each arm's credit at Maybe strength
-// only: the Definite claim goes -- the marked binding is legal again -- while
-// the suppressing Maybe credit survives, and no destroyed state is recorded.
+// A ternary-wrapped destroy may have destroyed either arm: the pointee is no
+// longer definitely initialized (the marked binding is legal again) nor
+// definitely uninitialized (the unmarked binding stays accepted), and no
+// destroyed state is recorded.
 void test_destroy_ternary_arm(int *p [[ref_to_uninit]], bool c) {
   *p = 1;
   nu_wipe(c ? p : p);
-  take_uninit_ptr(p); // OK: the Definite claim is withdrawn
-  int *u2 = p;        // OK: the Maybe credit still suppresses
+  take_uninit_ptr(p); // OK: the pointee is no longer definitely initialized
+  int *u2 = p;        // OK: the pointee may still be initialized
   (void)u2;
 }
 
@@ -2455,15 +2431,15 @@ void test_destroy_comma(int *p [[ref_to_uninit]]) {
 
 // double_destroy stays definite by construction: a two-leaf destroy fires it
 // only when every leaf is destroyed. With only p's arm destroyed the binding
-// direction rejects the destroy of the uninitialized arm instead, and both
-// arms' Definite claims are gone.
+// direction rejects the destroy of the uninitialized arm instead, and neither
+// arm is definitely initialized afterwards.
 void test_destroy_ternary_mixed_arms(int *p [[ref_to_uninit]],
                                      int *q [[ref_to_uninit]], bool c) {
   *p = 1;
   *q = 1;
   nu_wipe(p);
   nu_wipe(c ? p : q); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
-  int *mq [[ref_to_uninit]] = q; // OK: q's Definite claim is withdrawn
+  int *mq [[ref_to_uninit]] = q; // OK: 'q' is no longer definitely initialized
   (void)mq;
 }
 
@@ -2804,12 +2780,12 @@ void test_assign_credited_to_marked(int *p [[ref_to_uninit]],
 }
 void test_credited_to_unmarked(int *p [[ref_to_uninit]]) {
   *p = 5;
-  int *s = p; // OK: the credited pointee is initialized
+  int *s = p; // OK: the pointee is initialized
   (void)s;
 }
 
-// A store through a marked *reference* credits its referent; a reference
-// cannot be reseated, so the credit is never cleared.
+// A store through a marked *reference* initializes its referent; a reference
+// cannot be reseated, so the referent stays initialized.
 void test_marked_ref_store_credit(int &r [[ref_to_uninit]]) {
   r = 5;
   int x = r; // OK: the store initialized the referent
@@ -2830,20 +2806,19 @@ void test_marked_ref_read_before_store(int &r [[ref_to_uninit]]) {
   (void)x;
 }
 
-// The requires-uninit direction fires on credit only when the store is
-// *unconditional* in the entity's own function: a store under an if, a
-// loop, a switch, a try, &&/||/?:, or inside a lambda body may not have
-// executed on the path reaching the binding, so a marked binding after it
-// stays legal -- rejecting it would be a false positive on the untaken
-// path. The lenient direction is untouched: the same conditional store
-// still suppresses the unmarked-target error (the documented parse-order
-// missed diagnostic).
+// A marked binding is forced only when the storage is initialized on every
+// path reaching it: a store under an if, a loop, a switch, &&/||/?:, or
+// inside a lambda body may not have executed on the path reaching the
+// binding, so a marked binding after it stays legal -- rejecting it would be
+// a false positive on the untaken path. An unmarked binding is accepted when
+// the storage is initialized on some path: the same conditional store still
+// accepts it.
 void test_conditional_store_if(bool c) {
   int u [[uninit]];
   if (c)
     u = 5;
   int *r [[ref_to_uninit]] = &u; // OK: the store may not have run
-  int *q = &u;                   // OK: suppressing credit still applies
+  int *q = &u;                   // OK: initialized on some path
   (void)r; (void)q;
 }
 void test_conditional_store_else(bool c) {
@@ -2869,15 +2844,13 @@ void test_conditional_store_for(int n) {
   int *r [[ref_to_uninit]] = &u; // OK
   (void)r;
 }
-// A do-body store always runs, but the walk conservatively counts the loop
-// scope as conditional -- a missed strict-direction diagnostic, never a
-// false positive.
+// A do-body store always runs, so the marked binding after it is rejected.
 void test_conditional_store_do(bool c) {
   int u [[uninit]];
   do
     u = 5;
   while (c);
-  int *r [[ref_to_uninit]] = &u; // OK: conservatively conditional
+  int *r [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   (void)r;
 }
 void test_conditional_store_switch(int n) {
@@ -2892,13 +2865,15 @@ void test_conditional_store_switch(int n) {
   int *r [[ref_to_uninit]] = &u; // OK
   (void)r;
 }
+// A store in a try block runs on every path when nothing before it can
+// throw; a store in a handler runs on the throwing path only.
 void test_conditional_store_try() {
   int u [[uninit]];
   try {
     u = 5;
   } catch (...) {
   }
-  int *r [[ref_to_uninit]] = &u; // OK: conservatively conditional
+  int *r [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   (void)r;
 }
 void test_conditional_store_catch() {
@@ -2934,28 +2909,29 @@ void test_conditional_store_ternary(bool c) {
 void test_conditional_store_gnu_ternary(int c) {
   int u [[uninit]];
   (void)(c ?: (u = 5));
-  int *r [[ref_to_uninit]] = &u; // OK: the :-arm is conditional (Maybe credit)
-  int *q = &u;                   // OK: the Maybe credit still suppresses
+  int *r [[ref_to_uninit]] = &u; // OK: the :-arm is conditional
+  int *q = &u;                   // OK: initialized on some path
   (void)r; (void)q;
 }
+// A lambda body is a separate function that may never run: its store
+// initializes nothing for the enclosing body, and the by-reference capture
+// of the still-uninitialized variable is rejected.
 void test_lambda_body_store_conditional() {
   int u [[uninit]];
-  auto f = [&] { u = 5; };
+  auto f = [&] { u = 5; }; // expected-error {{capturing 'u' by reference binds a reference to uninitialized memory under profile 'std::init'}}
   (void)f;
   int *r [[ref_to_uninit]] = &u; // OK: the lambda may never run
   (void)r;
 }
-// A block body is a lambda body's twin -- it may never run -- but
-// getCurFunctionDecl skips BlockDecls and a block body's scope carries the
-// function-scope flag, so neither the owner check nor the depth walk sees
-// it; the innermost-context walk must.
+// A block body is a lambda body's twin: a separate function that may never
+// run, so its store initializes nothing for the enclosing body.
 void test_block_body_store_conditional(bool c) {
   __block int u [[uninit]];
   void (^b)() = ^{ u = 5; };
   if (c)
     b();
   int *r [[ref_to_uninit]] = &u; // OK: the block may never run
-  int *q = &u;                   // OK: suppressing credit still applies
+  int *q = &u;                   // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   (void)r; (void)q;
 }
 // A destroy inside a block body is likewise merely possible: it revokes
@@ -2966,12 +2942,12 @@ void test_block_body_destroy_conditional(bool c) {
   void (^b)() = ^{ nu_wipe(&u); };
   if (c)
     b();
-  int *q = &u; // OK: suppressing credit survives
+  int *q = &u; // OK: initialized; the block body's destroy is its own function's
   nu_wipe(&u); // OK: no destroyed state was recorded by the block's destroy
   (void)q;
 }
-// A store in a plain nested { } block is unconditional: the block scope
-// carries no control flag, so the credit keeps its firing strength.
+// A store in a plain nested { } block runs on every path, so the marked
+// binding is rejected.
 void test_plain_block_store_still_fires() {
   int u [[uninit]];
   {
@@ -2980,9 +2956,9 @@ void test_plain_block_store_still_fires() {
   int *r [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   (void)r;
 }
-// A store and a marked binding both at the top level of one lambda body:
-// the conditional-depth walk stops at the *nearest* function scope, so the
-// store is unconditional within the lambda and still fires.
+// A store and a marked binding both at the top level of one lambda body: the
+// body is analyzed as its own function, so the store is on every path and
+// the marked binding is rejected.
 void test_lambda_toplevel_store_still_fires() {
   auto f = [] {
     int u [[uninit]];
@@ -2992,20 +2968,18 @@ void test_lambda_toplevel_store_still_fires() {
   };
   f();
 }
-// A store in a control-statement *condition* always runs, but the control
-// scope is pushed before the parens are parsed, so it conservatively
-// counts as conditional: suppressing credit only.
+// A store in a control-statement *condition* runs on every path: the marked
+// binding after it is rejected.
 void test_store_in_condition_suppresses_only(bool c) {
   int u [[uninit]];
   if ((u = 5))
     ;
-  int *r [[ref_to_uninit]] = &u; // OK: conservatively conditional
-  int *q = &u;                   // OK: suppressing credit applies
+  int *r [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int *q = &u;                   // OK: initialized
   (void)r; (void)q;
 }
-// A goto seen earlier in the function can skip any later store without
-// introducing a scope, so a store after one records suppressing credit
-// only...
+// A goto can skip a later store, which is then initialized on some path
+// only: the marked binding is not forced and the unmarked one is accepted...
 void test_store_after_goto(bool c) {
   int u [[uninit]];
   if (c)
@@ -3013,11 +2987,11 @@ void test_store_after_goto(bool c) {
   u = 5;
 skip:;
   int *r [[ref_to_uninit]] = &u; // OK: the goto path skips the store
-  int *q = &u;                   // OK: suppressing credit applies
+  int *q = &u;                   // OK: initialized on some path
   (void)r; (void)q;
 }
-// ...while a store *before* the first goto keeps its firing strength: no
-// later jump can skip it on any path that still reaches the binding.
+// ...while a store *before* the goto is on every path that reaches the
+// binding, so the marked binding is rejected.
 void test_store_before_goto(bool c) {
   int u [[uninit]];
   u = 5;
@@ -3038,9 +3012,8 @@ void test_destroy_after_goto(bool c) {
 skip:;
   nu_wipe(&u); // OK: the first destroy may have been skipped
 }
-// The branch flag is shared with switch, so a store after one is
-// conservatively suppressing-only too -- a documented over-inclusion in
-// the safe direction (a switch cannot actually skip a later store).
+// A switch cannot skip a later store: the store is on every path and the
+// marked binding is rejected.
 void test_store_after_switch(int n) {
   int u [[uninit]];
   switch (n) {
@@ -3048,7 +3021,77 @@ void test_store_after_switch(int n) {
     break;
   }
   u = 5;
-  int *r [[ref_to_uninit]] = &u; // OK: conservatively conditional
+  int *r [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)r;
+}
+// A store in the taken branch of an if constexpr, in a for init-statement,
+// or before a label a later goto jumps back to is on every path reaching the
+// binding, so the marked binding is rejected.
+void test_store_in_if_constexpr_fires() {
+  int u [[uninit]];
+  if constexpr (true) {
+    u = 5;
+  }
+  int *r [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)r;
+}
+void test_store_in_for_init_fires(bool c) {
+  int u [[uninit]];
+  for (u = 5; c; c = false) {
+  }
+  int *r [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)r;
+}
+void test_store_before_backward_goto_fires(bool c) {
+  int u [[uninit]];
+again:
+  u = 5;
+  int *r [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)r;
+  if (c)
+    goto again;
+}
+// A store in an operand that is never evaluated -- __builtin_constant_p's, an
+// assumption's -- is not in the body's CFG and initializes nothing.
+void test_store_in_never_evaluated_operand() {
+  int u [[uninit]];
+  (void)__builtin_constant_p(u = 5);
+  int *r [[ref_to_uninit]] = &u; // OK: the operand never runs
+  int v [[uninit]];
+  [[assume((v = 5))]]; // expected-warning {{assumption is ignored because it contains (potential) side-effects}} \
+                       // no-profiles-warning {{assumption is ignored because it contains (potential) side-effects}}
+  int *s [[ref_to_uninit]] = &v; // OK: the operand never runs
+  (void)r; (void)s;
+}
+// The parse-time funnel and the CFG pass split bindings by whether a leaf
+// names flow-tracked storage: a local's address is judged by flow, a
+// global's by its form alone, in the same body; a conditional mixing the two
+// combines both answers (P4222R2 §4.9).
+void test_tracked_and_untracked_sources(bool c) {
+  int u [[uninit]];
+  u = 5;
+  int *r1 [[ref_to_uninit]] = &u;       // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int *r2 [[ref_to_uninit]] = &g_init;  // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int *r3 [[ref_to_uninit]] = &g_uninit; // OK
+  int *r4 [[ref_to_uninit]] = c ? &u : &g_uninit; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)r1; (void)r2; (void)r3; (void)r4;
+}
+// A flow-tracked binding inside a function template is judged on each
+// instantiation's own CFG, with the instantiation note; a never-instantiated
+// template's is not diagnosed.
+template <class T>
+void template_var_binding_after_store() {
+  int u [[uninit]];
+  u = 5;
+  int *r [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)r;
+}
+template void template_var_binding_after_store<int>(); // expected-note {{in instantiation of function template specialization 'template_var_binding_after_store<int>' requested here}}
+template <class T>
+void template_var_binding_never_instantiated() {
+  int u [[uninit]];
+  u = 5;
+  int *r [[ref_to_uninit]] = &u; // not diagnosed: never instantiated
   (void)r;
 }
 
@@ -3284,12 +3327,12 @@ void test_array_element_pointer() {
   (void)a1; (void)a2; (void)base; (void)a3; (void)a4; (void)a5; (void)a6;
 }
 
-// Parse-order store credit applies to element sources like any other binding:
-// after the whole-entity store, &u refers to initialized memory.
+// Flow state applies to element sources like any other binding: after the
+// whole-entity store, &u refers to initialized memory.
 void test_array_element_store_credit() {
   int u [[uninit]];
   u = 5;
-  int *a[1] = {&u}; // OK: credited by the store above
+  int *a[1] = {&u}; // OK: initialized by the store above
   (void)a;
 }
 
@@ -3664,10 +3707,9 @@ void test_member_call_suppressed() {
   [[profiles::suppress(std::init, rule: "ref_to_uninit")]] { s.f(); } // OK
 }
 
-// A dependent object argument defers to instantiation, where the rebuilt call
-// re-runs the funnel; a non-dependent call in a template fires at definition
-// time and repeats when the call is rebuilt at instantiation (the local is
-// remapped) -- the accepted repetition.
+// An object argument that names flow-tracked storage (an [[uninit]] local,
+// dependent or not) is judged on the instantiation's own CFG and reported
+// once, with the instantiation note.
 template <typename T>
 void template_member_call_dependent_bad() {
   T s [[uninit]];
@@ -3678,7 +3720,7 @@ template void template_member_call_dependent_bad<Callee>(); // expected-note {{i
 template <typename T>
 void template_member_call_nondependent_bad() {
   Callee s [[uninit]];
-  s.f(); // expected-error 2 {{calling member function 'f' binds its implicit object parameter to uninitialized memory under profile 'std::init'}}
+  s.f(); // expected-error {{calling member function 'f' binds its implicit object parameter to uninitialized memory under profile 'std::init'}}
 }
 template void template_member_call_nondependent_bad<int>(); // expected-note {{in instantiation of function template specialization 'template_member_call_nondependent_bad<int>' requested here}}
 

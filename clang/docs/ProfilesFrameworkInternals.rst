@@ -141,6 +141,9 @@ the body of a never-instantiated template is never parsed, so pattern-time
 diagnosis does not occur in that mode.  ``test::type_cast`` follows the
 expression policy exactly: a ``reinterpret_cast`` of a non-dependent operand
 fires at the definition, of a dependent operand once per instantiation.
+An expression check whose source names flow-tracked storage is the CFG
+pass's and follows the per-instantiation rule ("Flow-Tracked Storage
+(std::init)" below).
 
 
 Pattern 2: Post-Parse / CFG-Based
@@ -605,15 +608,18 @@ patterns.  Its rules map to mechanisms as follows:
        members and non-nominated bases an inherited constructor leaves
        uninitialized, once per class at the ``using``-declaration
    * - ``ref_to_uninit``
-     - 1
+     - 2 for flow-tracked sources, 1 otherwise
      - ``checkInitProfileBinding``, one funnel keyed on ``InitBindingKind``
        for every binding site (variable and member initialization, call
        arguments, returns, aggregate elements, pointer assignments, throws,
        new-initializers, variadic arguments, captures, object arguments);
-       ``classifyPointerGlvalue`` judges a reference-to-pointer binding by
-       the pointer's value (a read-only alias) or not at all (a mutable
-       alias); a defaulted argument is checked once at ``CXXDefaultArgExpr``
-       creation, in
+       a source with a flow-tracked leaf (``isFlowTrackedLeaf``) is left to
+       the binding arms of ``extractStdInitEvents``, which derive the same
+       kinds from the CFG's elements and judge each site against the flow
+       state (``judgeBindingSite``); ``classifyPointerGlvalue`` judges a
+       reference-to-pointer binding by the pointer's value (a read-only
+       alias) or not at all (a mutable alias); a defaulted argument is
+       checked once at ``CXXDefaultArgExpr`` creation, in
        ``Sema::BuildCXXDefaultArgExpr``, whatever call form reaches it --
        speculative creations (a SFINAE-trapped candidate, an elided-copy
        probe, an MS-ABI ctor closure) opt out per call site
@@ -670,13 +676,43 @@ CPOs sit outside the form key; the user-facing scope note lives in
 :doc:`ProfilesFramework`.
 
 
+Flow-Tracked Storage (std::init)
+================================
+
+The ``std::init`` recognizers classify storage from an expression's
+syntactic form alone.  Inside a function body that answer is refined by the
+definite-assignment engine in AnalysisBasedWarnings.cpp: the ``ExtraPass``
+of the ``std::init`` ``CFGProfiles`` row harvests the body's flow-tracked
+entities (``TrackedEntity``: ``[[uninit]]`` locals, marked local pointees,
+and marked scalar members of locals and of the current object), extracts one
+event stream from a CFG of its own (exception edges, fully linearized), runs
+a forward dataflow over four bit vectors per entity -- ``Must`` (assigned on
+every path), ``May`` (assigned on some path), ``Esc`` (escaped; read
+leniency for local aggregates), and ``Destroyed`` (destroyed on every path
+and not stored since) -- and reports the ``ref_to_uninit`` judgments of the
+body's bindings at their program points through the shared violation gate.
+The parse-time checks and the pass split the work by one predicate,
+``SemaProfiles::isFlowTrackedLeaf``: a binding source with a tracked leaf is
+the pass's, everything else -- and everything outside a function body -- is
+judged at parse time without flow state.  The pass's resolver
+(``TrackedStorage::resolve``) and the predicate share one lvalue-shape walk,
+``SemaProfiles::flowLeafShape``, so no binding falls between the two.  A
+templated body is never analyzed; each instantiation is analyzed on its own
+CFG, in which statements TreeTransform reused from the pattern are ordinary
+elements.  Consumers read the lattices as follows: a marked-target binding
+fires on ``Must``; an unmarked-target binding is suppressed by ``May``.  A
+variable of an enclosing function reached by capture, whose state the
+enclosing body decides, enters with ``May`` set and ``Must`` clear, so
+neither direction fires on it until the body itself stores.  The remaining
+blind spots are listed in :doc:`ProfilesFramework`, "Limitations".
+
 Parse-Order Store Credit (std::init)
 ====================================
 
-The ``std::init`` recognizers classify storage from an expression's
-syntactic form alone; *parse-order store credit* refines that classification
-by remembering the stores and lifetime-annotated calls seen earlier in the
-translation unit.  ``recordInitProfileStore`` records direct stores; the
+The read-through and subobject-write checks and the destroy rules refine the
+recognizers' classification with *parse-order store credit*: the stores and
+lifetime-annotated calls seen earlier in the translation unit.
+``recordInitProfileStore`` records direct stores; the
 ``recordNowInitArgument`` / ``recordNowUninitArgument`` pair records what a
 ``[[now_init]]`` / ``[[now_uninit]]`` callee does to the storage bound to
 its parameters; ``InitStoreCreditMap`` is the façade that owns the recorded
@@ -691,48 +727,14 @@ deltas.
 counts for every consult that happens later in parse order, whatever the
 control flow between them.  The design consequently errs only toward missed
 diagnostics -- crediting a store the execution might skip can at worst
-*suppress* a diagnostic, never manufacture one.
-
-**Two strengths.**  Every store records ``Maybe`` credit, which only ever
-*suppresses* a diagnostic (the storage may well be initialized).  A
-diagnostic may *fire* only on ``Definite`` credit, which needs the store to
-be certain.  ``currentStoreStrength`` decides, and its rules are the API
-contract: the strength a store (or lifetime-annotated call) recorded at the
-current parse position earns toward the credit keyed by a given key is
-``Definite`` iff the store is unconditionally executed in the function body
-that owns the credited entity -- outside template instantiation (the parser
-scope chain is parser-only state, and the requires-uninit direction ignores
-credit while instantiating anyway), at conditional depth 0
-(``currentConditionalDepth``; a conditional-target store's arms
-additionally carry an explicit ``Maybe`` cap in ``recordStoreTarget``,
-because the conditional expression's own region has unwound by
-assignment-completion time -- a marked-pointer arm still reseats
-wholesale, per ``clearPointee``'s semantics), before the function has
-branched by ``goto``
-(a ``goto`` earlier in the body could skip a later store without
-introducing any scope; the tracking flag is shared with ``switch``, an
-over-inclusion in the safe direction), with the enclosing function's
-parse-time pattern equal to the entity's owning function: the
-``DeclContext`` of a credited local/parameter (or of the directly named
-local base object of member credit), or the key itself for current-object
-member credit, which ``resolveMemberStoreBase`` already keys on that
-pattern.  The same-function requirement is what stops a store inside a
-lambda body from definitely crediting an enclosing function's local; the
-enclosing function is resolved from the context chain directly, so a store
-inside a *block* body -- which ``getCurFunctionDecl`` would skip -- stays
-``Maybe`` too.  Everything else records ``Maybe``.
-
-**The requires-uninitialized direction consults no credit while
-instantiating.**  Parse-order credit is recorded once and never rewound, so
-when an instantiation re-walks a statement the pattern already checked, the
-re-check runs against post-pattern state -- including credit that very
-statement recorded (a reused ``[[now_init]]`` argument, a this-member store
-keyed to the pattern) -- which would turn the pattern's pass into a false
-"must refer to uninitialized memory".  A violation established only by
-credit in fully dependent code is therefore a missed diagnostic, never a
-false positive; direct classification (an initialized global, a marked
-entity) is unaffected, and the accepting direction keeps credit everywhere,
-since a deferred binding needs the instantiation-time record to pass.
+*suppress* a diagnostic, never manufacture one.  Every consult reads the
+``Maybe`` strength, which every store records; a ``Definite`` store or
+destroy -- one unconditionally executed in the function body that owns the
+credited entity, decided by ``currentStoreStrength`` (outside template
+instantiation, at conditional depth 0, before the function has branched by
+``goto`` or ``switch``, with the enclosing function's parse-time pattern
+equal to the entity's owning function) -- additionally records the destroyed
+state ``double_destroy`` fires on.
 
 **Recording is not gated on enforcement or suppression.**  A suppressed
 store still initializes, and failing to credit it would turn suppression
@@ -740,19 +742,15 @@ into later false positives.  There is likewise no in-template gate: an
 expression check with a non-dependent operand fires at the definition and
 must find pattern-time credit (instantiations rebuild their
 ``DeclRefExpr``\ s against fresh declarations, so they re-record
-independently).  The one gate
-is never-executed contexts -- unevaluated and discarded-statement contexts,
-mirroring ``shouldEmitProfileViolation``: a store there never executes, so
-it earns no credit and a destroy there withdraws none.
+independently).  The one gate is never-executed contexts -- unevaluated and
+discarded-statement contexts, mirroring ``shouldEmitProfileViolation``: a
+store there never executes, so it earns no credit and a destroy there
+withdraws none.
 
 **Withdrawal mirrors recording.**  A ``[[now_uninit]]`` or storage-release
 callee withdraws credit at the strength the destroy itself earns under the
 same rules: an unconditional same-function destroy withdraws credit of both
 strengths, while a merely-possible one withdraws only the ``Definite``
-claim -- it may have destroyed the storage, so no credit-fired diagnostic
-may rely on it, but the ``Maybe`` credit survives and the lenient direction
-gains no new errors.  A mutable alias escape of a marked pointer object --
-``T **pp = &p;``, a ``T *&`` binding, or a lambda capturing ``p`` by
-reference -- withdraws the same way at ``Definite`` strength only: whoever
-holds the alias can reseat the pointer, so its pointee credit can no longer
-fire a diagnostic, but the suppressing ``Maybe`` credit survives.
+claim -- it may have destroyed the storage, so no destroyed state may rely
+on it, but the ``Maybe`` credit survives and the lenient direction gains no
+new errors.

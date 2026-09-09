@@ -1179,20 +1179,28 @@ struct UninitAccessOpts {
   }
 };
 
-/// The alias kind a bound type gives a pointer glvalue source (P4222R2
-/// §4.3): a reference whose referent is a pointer is a read-only alias when
-/// the referent is const-qualified or the reference is an rvalue reference,
-/// a mutable alias otherwise; any other bound type aliases nothing.
-static UninitAccessOpts::PointerAlias pointerAliasOf(QualType T) {
-  using PointerAlias = UninitAccessOpts::PointerAlias;
+SemaProfiles::PointerAliasKind SemaProfiles::pointerAliasKind(QualType T) {
   if (T.isNull() || !T->isReferenceType())
-    return PointerAlias::None;
+    return PointerAliasKind::None;
   QualType Referent = T->getPointeeType();
   if (!Referent->isPointerType())
-    return PointerAlias::None;
+    return PointerAliasKind::None;
   return Referent.isConstQualified() || T->isRValueReferenceType()
-             ? PointerAlias::ReadOnly
-             : PointerAlias::Mutable;
+             ? PointerAliasKind::ReadOnly
+             : PointerAliasKind::Mutable;
+}
+
+/// SemaProfiles::pointerAliasKind as the recognizers' option value.
+static UninitAccessOpts::PointerAlias pointerAliasOf(QualType T) {
+  switch (SemaProfiles::pointerAliasKind(T)) {
+  case SemaProfiles::PointerAliasKind::None:
+    return UninitAccessOpts::PointerAlias::None;
+  case SemaProfiles::PointerAliasKind::ReadOnly:
+    return UninitAccessOpts::PointerAlias::ReadOnly;
+  case SemaProfiles::PointerAliasKind::Mutable:
+    return UninitAccessOpts::PointerAlias::Mutable;
+  }
+  llvm_unreachable("unknown PointerAliasKind");
 }
 
 // Presets: a binding source (markers count everywhere), a value read (the
@@ -1560,8 +1568,8 @@ static AllocatorCalleeMatch matchAllocatorCallee(const FunctionDecl *FD) {
 // bit only -- withdrawing on an untrusted name-only free could manufacture
 // read-through false positives, while stale credit is the documented
 // missed-diagnostic direction.
-static SemaProfiles::CalleeLifecycleRoles
-getCalleeLifecycleRoles(const FunctionDecl *FD) {
+SemaProfiles::CalleeLifecycleRoles
+SemaProfiles::getCalleeLifecycleRoles(const FunctionDecl *FD) {
   SemaProfiles::CalleeLifecycleRoles Roles;
   Roles.InitializesRefToUninitParams = FD->hasAttr<NowInitAttr>();
   Roles.DestroysPointerParams = FD->hasAttr<NowUninitAttr>();
@@ -2018,6 +2026,11 @@ void SemaProfiles::judgeInitProfileBinding(InitBindingKind Kind,
   // not a source the user wrote, so it must not drive this rule.
   if (!Src || isa<RecoveryExpr>(Src->IgnoreParens()))
     return;
+  // A source with a flow-tracked leaf is the CFG pass's: judged at its
+  // program point, on each instantiation's own CFG (see
+  // ProfilesFrameworkInternals.rst, "Flow-Tracked Storage").
+  if (hasFlowTrackedLeaf(Src, T))
+    return;
   // The expression-check template policy (ProfilesFrameworkInternals.rst,
   // "Pattern 1"): without a Decl an instantiation-dependent source defers to
   // the rebuild; with one, the gate's templated rung defers instead.
@@ -2025,22 +2038,294 @@ void SemaProfiles::judgeInitProfileBinding(InitBindingKind Kind,
     return;
   if (!shouldEmitProfileViolation(diag::err_init_uninit_requires_ref_to_uninit, Loc, D))
     return;
-  // Credit is asymmetric between the two directions: an unmarked target
-  // consults Maybe credit (any earlier store suppresses), a marked target
-  // Definite credit (the diagnostic fires on credit, so the store must
-  // provably have run) and none at all while instantiating, where a
-  // re-walked statement would see credit it recorded itself. See
-  // "Parse-Order Store Credit" in ProfilesFrameworkInternals.rst.
   UninitAccessOpts Opts =
       UninitBindAccess.withAlias(pointerAliasOf(T))
           .withThisUnderConstruction(thisIsUnderConstruction());
-  if (!TargetMarked)
-    Opts = Opts.withCredit(this, InitCreditStrength::Maybe);
-  else if (!SemaRef.inTemplateInstantiation())
-    Opts = Opts.withCredit(this, InitCreditStrength::Definite);
   diagnoseBindingVerdict(
       *this, Kind, Loc, TargetMarked, IsReference,
       classifyUninitSource(getASTContext(), Src, IsReference, Opts), Subject);
+}
+
+SemaProfiles::InitSourceState
+SemaProfiles::classifyInitBindingLeaf(const Expr *Leaf, QualType T,
+                                      const Decl *Body) const {
+  const CXXMethodDecl *MD =
+      enclosingInstanceMethod(dyn_cast_or_null<DeclContext>(Body));
+  UninitAccessOpts Opts =
+      UninitBindAccess.withAlias(pointerAliasOf(T))
+          .withThisUnderConstruction(isa_and_nonnull<CXXConstructorDecl>(MD));
+  switch (
+      classifyUninitSource(getASTContext(), Leaf, T->isReferenceType(), Opts)) {
+  case UninitStorage::Initialized:
+    return InitSourceState::Initialized;
+  case UninitStorage::Uninitialized:
+    return InitSourceState::Uninitialized;
+  case UninitStorage::Unknown:
+    return InitSourceState::Unknown;
+  case UninitStorage::Mixed:
+    return InitSourceState::Mixed;
+  }
+  llvm_unreachable("unknown UninitStorage");
+}
+
+const Expr *SemaProfiles::peelBaseCasts(const Expr *E, BasePath &Path) {
+  SmallVector<const CastExpr *, 4> Casts;
+  E = E->IgnoreParens();
+  while (true) {
+    if (const auto *FE = dyn_cast<FullExpr>(E)) {
+      E = FE->getSubExpr()->IgnoreParens();
+      continue;
+    }
+    const auto *CE = dyn_cast<CastExpr>(E);
+    if (!CE)
+      break;
+    if (isa<ExplicitCastExpr>(CE)) {
+      const Expr *Sub = CE->getSubExpr();
+      if (!Sub->getType()->isPointerType() && !Sub->isGLValue())
+        break;
+    }
+    Casts.push_back(CE);
+    E = CE->getSubExpr()->IgnoreParens();
+  }
+  // The innermost cast applies first, and this step's casts sit closer to
+  // the object than the caller's.
+  BasePath Steps;
+  for (const CastExpr *CE : llvm::reverse(Casts))
+    if (CE->getCastKind() == CK_DerivedToBase ||
+        CE->getCastKind() == CK_UncheckedDerivedToBase)
+      for (const CXXBaseSpecifier *BS : CE->path())
+        Steps.push_back(
+            BS->getType()->getAsCXXRecordDecl()->getCanonicalDecl());
+  Path.insert(Path.begin(), Steps.begin(), Steps.end());
+  return E;
+}
+
+std::optional<SemaProfiles::FlowLeafShape>
+SemaProfiles::flowLeafShape(const Expr *E) {
+  FlowLeafShape S;
+  const Expr *Cur = peelBaseCasts(E, S.Path);
+  while (true) {
+    if (const auto *ME = dyn_cast<MemberExpr>(Cur)) {
+      const auto *F = dyn_cast<FieldDecl>(ME->getMemberDecl());
+      if (!F)
+        return std::nullopt;
+      if (!F->isAnonymousStructOrUnion())
+        S.Named.push_back(F);
+      Cur = peelBaseCasts(ME->getBase(), S.Path);
+      if (ME->isArrow()) {
+        S.ThroughPointer = true;
+        break;
+      }
+      continue;
+    }
+    if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(Cur)) {
+      S.Subscript = true;
+      Cur = peelBaseCasts(ASE->getBase(), S.Path);
+      // p[i] indexes the pointer's value; arr[i] the array glvalue its
+      // peeled decay leaves behind.
+      if (Cur->getType()->isPointerType()) {
+        S.ThroughPointer = true;
+        break;
+      }
+      continue;
+    }
+    if (const auto *UO = dyn_cast<UnaryOperator>(Cur);
+        UO && UO->getOpcode() == UO_Deref) {
+      S.ThroughPointer = true;
+      Cur = peelBaseCasts(UO->getSubExpr(), S.Path);
+      break;
+    }
+    break;
+  }
+  if (isa<CXXThisExpr>(Cur)) {
+    if (!S.ThroughPointer)
+      return std::nullopt;
+    S.IsThis = true;
+    return S;
+  }
+  if (const auto *DRE = dyn_cast<DeclRefExpr>(Cur))
+    if (const auto *V = dyn_cast<VarDecl>(DRE->getDecl())) {
+      S.Local = V;
+      S.LocalRef = DRE;
+      return S;
+    }
+  return std::nullopt;
+}
+
+bool SemaProfiles::hasUserProvidedCtor(const CXXRecordDecl *RD) {
+  return llvm::any_of(RD->ctors(), [](const CXXConstructorDecl *C) {
+    return C->isUserProvided();
+  });
+}
+
+bool SemaProfiles::isFlowTrackedMemberField(const ASTContext &Ctx,
+                                            const FieldDecl *F) {
+  if (!F->hasAttr<UninitAttr>() || !F->getDeclName() ||
+      F->hasInClassInitializer())
+    return false;
+  QualType T = F->getType();
+  if (!T->isIntegralOrEnumerationType() && !T->isFloatingType())
+    return false;
+  return !Ctx.getBaseElementType(T)->isStdByteType();
+}
+
+bool SemaProfiles::isFlowTrackedMemberOf(const ASTContext &Ctx,
+                                         const CXXRecordDecl *RD,
+                                         ArrayRef<const CXXRecordDecl *> Path,
+                                         const FieldDecl *F) {
+  if (!RD || !RD->hasDefinition())
+    return false;
+  bool Found = false;
+  forEachCandidateUninitField(RD->getDefinition(),
+                              [&](const BasePath &P, const FieldDecl *G) {
+                                if (G == F && llvm::ArrayRef(P) == Path)
+                                  Found = isFlowTrackedMemberField(Ctx, G);
+                              });
+  return Found;
+}
+
+const CXXRecordDecl *SemaProfiles::getTrackableSlotClass(QualType T) {
+  if (T->isReferenceType() || T->isDependentType())
+    return nullptr;
+  const CXXRecordDecl *RD = T->getAsCXXRecordDecl();
+  if (!RD || !RD->hasDefinition())
+    return nullptr;
+  RD = RD->getDefinition();
+  if (RD->isUnion() || RD->isDependentType() || hasUserProvidedCtor(RD))
+    return nullptr;
+  return RD;
+}
+
+const CXXRecordDecl *SemaProfiles::getTrackableLocalClass(const VarDecl *V) {
+  if (!V->hasLocalStorage() || isa<ParmVarDecl>(V) || isa<DecompositionDecl>(V))
+    return nullptr;
+  if (V->isInvalidDecl() || V->hasAttr<UninitAttr>())
+    return nullptr;
+  return getTrackableSlotClass(V->getType());
+}
+
+const CXXRecordDecl *SemaProfiles::flowTrackedAggregateClass(const VarDecl *V) {
+  if (!V->hasLocalStorage() || isa<DecompositionDecl>(V) ||
+      V->isInvalidDecl() || V->hasAttr<UninitAttr>())
+    return nullptr;
+  QualType T = V->getType();
+  if (T->isReferenceType() || T->isDependentType())
+    return nullptr;
+  const CXXRecordDecl *RD = T->getAsCXXRecordDecl();
+  if (!RD || !RD->hasDefinition())
+    return nullptr;
+  RD = RD->getDefinition();
+  return RD->isDependentType() ? nullptr : RD;
+}
+
+/// True if \p DC lies inside a function body -- the one place the std::init
+/// CFG pass runs; a namespace-scope initializer, a default member
+/// initializer (parsed in the class), or a default argument has no flow.
+static bool insideFunctionBody(const DeclContext *DC) {
+  while (DC && !DC->isFunctionOrMethod())
+    DC = DC->getParent();
+  return DC != nullptr;
+}
+
+const CXXMethodDecl *
+SemaProfiles::enclosingInstanceMethod(const DeclContext *DC) {
+  while (DC) {
+    if (const auto *MD = dyn_cast<CXXMethodDecl>(DC)) {
+      if (MD->getParent()->isLambda()) {
+        DC = MD->getParent()->getDeclContext();
+        continue;
+      }
+      return MD->isStatic() ? nullptr : MD;
+    }
+    if (isa<BlockDecl, CapturedDecl, EnumDecl, RequiresExprBodyDecl>(DC)) {
+      DC = DC->getParent();
+      continue;
+    }
+    return nullptr;
+  }
+  return nullptr;
+}
+
+bool SemaProfiles::isFlowTrackedLeaf(const ASTContext &Ctx, const Expr *Leaf,
+                                     bool AsPointerValue,
+                                     const DeclContext *CurContext) {
+  if (!insideFunctionBody(CurContext))
+    return false;
+  const Expr *E = ignoreTransparentCasts(Leaf);
+  if (AsPointerValue) {
+    if (const auto *UO = dyn_cast<UnaryOperator>(E);
+        UO && UO->getOpcode() == UO_AddrOf)
+      return isFlowTrackedLeaf(Ctx, UO->getSubExpr(), /*AsPointerValue=*/false,
+                               CurContext);
+    // The value of a marked pointer, or a decayed [[uninit]] array.
+    const auto *VD = dyn_cast_or_null<VarDecl>(getDirectlyNamedDecl(E));
+    if (!VD || !VD->hasLocalStorage())
+      return false;
+    if (VD->getType()->isPointerType())
+      return VD->hasAttr<RefToUninitAttr>();
+    return VD->getType()->isArrayType() && VD->hasAttr<UninitAttr>();
+  }
+  std::optional<FlowLeafShape> Shape = flowLeafShape(E);
+  if (!Shape)
+    return false;
+  if (Shape->IsThis) {
+    if (Shape->Named.size() != 1 || Shape->Subscript)
+      return false;
+    const CXXMethodDecl *MD = enclosingInstanceMethod(CurContext);
+    return MD && isFlowTrackedMemberOf(Ctx, MD->getParent(), Shape->Path,
+                                       Shape->Named.front());
+  }
+  const VarDecl *V = Shape->Local;
+  if (!V->hasLocalStorage())
+    return false;
+  // *p, p->m, (*p).m: a marked pointer's referent or a subobject of it; an
+  // element (p[i]) is never tracked (P4222R2 §5.4).
+  if (Shape->ThroughPointer)
+    return V->getType()->isPointerType() && V->hasAttr<RefToUninitAttr>() &&
+           !Shape->Subscript;
+  // u, u.x, arr[i]: an [[uninit]] local as a whole or a subobject of it.
+  if (V->hasAttr<UninitAttr>())
+    return true;
+  // r, r.m: a marked reference's referent or a subobject of it.
+  if (V->hasAttr<RefToUninitAttr>() && V->getType()->isReferenceType())
+    return !Shape->Subscript;
+  // a.m: a tracked member of an aggregate local or by-value parameter.
+  if (Shape->Named.size() != 1 || Shape->Subscript)
+    return false;
+  const CXXRecordDecl *RD = flowTrackedAggregateClass(V);
+  return RD &&
+         isFlowTrackedMemberOf(Ctx, RD, Shape->Path, Shape->Named.front());
+}
+
+const Expr *SemaProfiles::bindingSourceOperand(const Expr *Src, QualType T,
+                                               bool &AsPointerValue) {
+  AsPointerValue = !T->isReferenceType() ||
+                   pointerAliasKind(T) == PointerAliasKind::ReadOnly;
+  if (AsPointerValue)
+    return Src;
+  const auto *MTE =
+      dyn_cast<MaterializeTemporaryExpr>(ignoreParenImpCastsKeepMTE(Src));
+  if (!MTE)
+    return Src;
+  if (!MTE->getType()->isPointerType())
+    return nullptr;
+  AsPointerValue = true;
+  return MTE->getSubExpr();
+}
+
+bool SemaProfiles::hasFlowTrackedLeaf(const Expr *Src, QualType T) const {
+  if (!Src || T.isNull())
+    return false;
+  bool AsPointerValue;
+  Src = bindingSourceOperand(Src, T, AsPointerValue);
+  if (!Src)
+    return false;
+  bool Any = false;
+  forEachTargetLeaf(Src, /*ConditionalArm=*/false, [&](const Expr *Leaf, bool) {
+    Any |= isFlowTrackedLeaf(getASTContext(), Leaf, AsPointerValue,
+                             SemaRef.CurContext);
+  });
+  return Any;
 }
 
 void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
@@ -2141,10 +2426,8 @@ void SemaProfiles::recordLifecycleArguments(const CalleeLifecycleRoles &Roles,
   // take effect for what follows in parse order. The withdrawal runs before
   // the credit so a callee carrying both attributes (a reinitializer) nets
   // to destroy-then-construct: the storage is initialized after the call.
-  // The alias escape runs last and is independent of the callee's roles.
   recordNowUninitArgument(Roles, Target, T, Src);
   recordNowInitArgument(Roles, Target, T, Src);
-  recordInitProfilePointerAliasEscape(T, Src);
 }
 
 void SemaProfiles::recordNowInitArgument(const CalleeLifecycleRoles &Roles,
@@ -2208,63 +2491,6 @@ void SemaProfiles::recordNowUninitArgument(const CalleeLifecycleRoles &Roles,
                                   Roles.DestroysPointerParams
                                       ? LifetimeAnnotationEffect::Destroy
                                       : LifetimeAnnotationEffect::Release);
-}
-
-void SemaProfiles::recordInitProfilePointerAliasEscape(QualType T,
-                                                       const Expr *Src) {
-  // A mutable alias of a marked pointer object: T*& binds the pointer
-  // glvalue itself, T** its address -- the funnel's pointer/reference type
-  // gate passes both, and getPointeeType() works uniformly. The
-  // pointee-of-the-binding must be a non-const pointer: whoever holds the
-  // alias can reseat the pointer, so the Definite pointee credit (the
-  // firing basis) is withdrawn while the suppressing Maybe credit survives.
-  // (At Maybe strength the destroyed state is never recorded, so
-  // EndsLifetime is inert here.)
-  if (!Src || T.isNull() || (!T->isPointerType() && !T->isReferenceType()))
-    return;
-  QualType Pointee = T->getPointeeType();
-  if (Pointee.isNull() || !Pointee->isPointerType() ||
-      Pointee.isConstQualified())
-    return;
-  // The recorders' shared gate: an escape in a never-executed context
-  // escapes nothing.
-  if (inNeverExecutedContext())
-    return;
-  // A ternary- or comma-wrapped source escapes whichever arm is chosen:
-  // withdraw per leaf. The withdrawal is Maybe-only already, so the arm flag
-  // changes nothing per leaf.
-  forEachTargetLeaf(Src, /*ConditionalArm=*/false, [&](const Expr *Leaf, bool) {
-    const Expr *E = Leaf;
-    if (T->isPointerType()) {
-      // T**: peel the &p to reach the pointer object.
-      const auto *UO = dyn_cast<UnaryOperator>(E);
-      if (!UO || UO->getOpcode() != UO_AddrOf)
-        return;
-      E = UO->getSubExpr();
-    }
-    if (const VarDecl *VD = getCreditableMarkedPointer(E))
-      StoreCredit.destroyPointee(VD, InitCreditStrength::Maybe,
-                                 /*EndsLifetime=*/false);
-  });
-}
-
-void SemaProfiles::recordInitProfilePointerAliasEscape(const ValueDecl *Var) {
-  // The by-reference-capture flavor: the closure holds a mutable alias of
-  // the marked pointer object and can reseat it, exactly like `T **pp = &p`
-  // above -- withdraw the Definite firing basis, keep the suppressing Maybe
-  // credit. A const-qualified pointer cannot be reseated (mirror the Expr
-  // flavor's mutable-alias gate), and only a creditable local/parameter
-  // pointer has credit to withdraw.
-  const auto *VD = dyn_cast_or_null<VarDecl>(Var);
-  if (!VD || !VD->hasLocalStorage() || !VD->getType()->isPointerType() ||
-      VD->getType().isConstQualified() || !VD->hasAttr<RefToUninitAttr>())
-    return;
-  // The recorders' shared gate: an escape in a never-executed context
-  // escapes nothing.
-  if (inNeverExecutedContext())
-    return;
-  StoreCredit.destroyPointee(VD, InitCreditStrength::Maybe,
-                             /*EndsLifetime=*/false);
 }
 
 SemaProfiles::LifetimeAnnotatedStorage
@@ -2344,7 +2570,7 @@ SemaProfiles::resolveLifetimeAnnotatedStorage(QualType T,
   if (Glvalue) {
     // The argument side never credits a reseat target: a marked pointer
     // object handed out by address is an alias escape
-    // (recordInitProfilePointerAliasEscape), not a store.
+    // (the CFG pass's Escape event), not a store.
     LifetimeAnnotatedStorage Storage = resolveTrackedGlvalue(Glvalue);
     if (Storage.StorageKind == LifetimeAnnotatedStorage::Kind::Reseat)
       return {};
@@ -2476,22 +2702,19 @@ void SemaProfiles::checkInitProfileRefCapture(SourceLocation Loc,
                                               const ValueDecl *Var) {
   if (!getLangOpts().Profiles)
     return;
-  // A by-reference capture of a mutable marked *pointer* escapes it to the
-  // closure, which can reseat it; recorded before any early return below
-  // (recorders never gate on the verdict).
-  recordInitProfilePointerAliasEscape(Var);
+  // A capture of a flow-tracked variable -- a marked local of the enclosing
+  // function -- is the CFG pass's (the LambdaExpr arm of its extractor).
+  if (const auto *VD = dyn_cast<VarDecl>(Var);
+      VD && VD->hasLocalStorage() &&
+      (VD->hasAttr<UninitAttr>() || VD->hasAttr<RefToUninitAttr>()) &&
+      insideFunctionBody(SemaRef.CurContext))
+    return;
   // Derive the captured storage's state as the glvalue recognizer's
   // named-entity arm does: an [[uninit]] variable or a [[ref_to_uninit]]
-  // reference, unless parse-order store credit initialized it. A copy capture
-  // reads the variable in the enclosing function's CFG instead, which is the
-  // flow-based uninit_read pass's territory.
-  bool UninitNoCredit =
-      Var->hasAttr<UninitAttr>() &&
-      !hasWholeObjectStoreCredit(Var, InitCreditStrength::Maybe);
-  bool RefNoCredit = Var->getType()->isReferenceType() &&
-                     Var->hasAttr<RefToUninitAttr>() &&
-                     !hasPointeeStoreCredit(Var, InitCreditStrength::Maybe);
-  if (!UninitNoCredit && !RefNoCredit)
+  // reference. A copy capture reads the variable in the enclosing function's
+  // CFG instead, which is the flow-based uninit_read pass's territory.
+  if (!Var->hasAttr<UninitAttr>() &&
+      !(Var->getType()->isReferenceType() && Var->hasAttr<RefToUninitAttr>()))
     return;
   // No source expression: the deferral keys on the captured type; the lambda
   // is rebuilt at instantiation, re-processing the capture.
@@ -2680,17 +2903,7 @@ void SemaProfiles::checkInitProfileSubobjectWrite(SourceLocation Loc,
               : (uninitWriteChainSeesMarker(LHS) ? 1 : 2));
 }
 
-/// The [[ref_to_uninit]] marking of the pointer object an assignment target
-/// names: true/false for a directly named marked/unmarked pointer
-/// declaration, std::nullopt when the marking is unknown -- a reference to a
-/// pointer aliases an object whose marking it cannot carry, any other lvalue
-/// (*pp, arr[i]) names no declaration at all, and a conditional's arms may
-/// disagree -- where neither direction of the binding check is sound
-/// (P4222R2 §4.3). Peels transparent casts and walks the pass-through target
-/// shapes ((c ? p : q) = e assigns whichever arm is chosen, comma yields its
-/// right operand, the GNU form's written common operand doubles as the true
-/// arm -- mirroring classifyUninitPassThrough's OVE avoidance).
-static std::optional<bool> resolveAssignTargetMarking(const Expr *E) {
+std::optional<bool> SemaProfiles::resolveAssignTargetMarking(const Expr *E) {
   E = SemaProfiles::ignoreTransparentCasts(E);
   if (const auto *CO = dyn_cast<ConditionalOperator>(E)) {
     std::optional<bool> T = resolveAssignTargetMarking(CO->getTrueExpr());
@@ -2730,10 +2943,6 @@ void SemaProfiles::checkInitProfilePointerAssignment(Expr *LHS, Expr *RHS,
   if (std::optional<bool> Marked = resolveAssignTargetMarking(LHS))
     judgeInitProfileBinding(InitBindingKind::PointerAssignment, OpLoc, *Marked,
                             LHS->getType(), RHS, /*D=*/nullptr);
-  // An assignment can hand out a mutable alias of a marked pointer object
-  // (pp = &p) exactly like a binding does; the withdrawal mirrors the
-  // funnel's recorder tail.
-  recordInitProfilePointerAliasEscape(LHS->getType(), RHS);
 }
 
 void SemaProfiles::checkInitProfileAssignmentOperands(BinaryOperatorKind Opc,

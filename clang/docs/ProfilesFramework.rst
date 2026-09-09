@@ -665,8 +665,9 @@ direction diagnoses -- never trusted as initialized like an arbitrary
 callee; the ``operator new``/``operator delete`` families are recognized by
 form and keep their recognition everywhere), and a ``new``
 expression that default-initializes a type with indeterminate scalars
-(``new int``, ``new int[n]``; §1.2) -- refined by one parse-order fact,
-whole-entity stores (below).  A named *function's* decayed pointer value is
+(``new int``, ``new int[n]``; §1.2) -- refined, inside a function body,
+by the flow state of tracked storage (below).  A named *function's* decayed
+pointer value is
 none of these: its ``[[ref_to_uninit]]`` describes the return value, so
 binding the function itself to a function pointer is accepted while a call
 to it stays a marked source:
@@ -736,88 +737,51 @@ pointer or reference to an initialized member of the current object is
 rejected; inside a constructor body, mem-initializer, or default member
 initializer it is unclassified.
 
-The parse-order refinement: a *whole-entity store* credits its target as
-initialized (§4.2, §4.5).  After ``u = 5;`` the ``[[uninit]]`` variable
-``u`` counts as initialized, and after ``*p = 5;`` the marked pointer's
-pointee does, for every later ``*p`` access -- until ``p`` is reseated
-(``p = q``, ``p += n``, ``p++``; a reseat through a conditional target,
-``(c ? p : q) = e``, counts for every marked arm), which withdraws the
-credit; a store through a marked *reference* credits its referent
-permanently.  A store through a conditional target credits each named arm
-with the suppressing strength only, since the chosen arm is not known.  A store
-through a transparent cast credits (and reseats) like its uncast form --
-``(int &)u = 5`` credits ``u`` whole, ``*(int *)p = 5`` the pointee,
-``(int *&)p = q`` reseats ``p`` -- exactly the transparency the
-recognizers already grant casts (§4.3), narrowing included: ``(char &)u =
-'x'`` credits ``u`` whole.  Handing out a *mutable alias* of the marked
-pointer object -- binding ``p`` to a ``T*&``, or ``&p`` to a ``T**``,
-whether as a call argument, an initializer, or an assignment source --
-lets the holder reseat it, so the escape withdraws the credit's firing
-strength while the suppressing credit survives, like a conditional
-``[[now_uninit]]`` destroy; a const alias (``T* const &``) cannot reseat
-and withdraws nothing.  (A ``void*`` escape of ``&p`` is not recognized: the
-missed withdrawal leaves stale firing-strength credit, which errs toward a
-false positive of the marked-target rule.)  The two
-directions consult the credit differently, because they use it
-differently.  Credit *suppresses* the unmarked-target diagnostic in plain
-parse order: ``int *q = &u;`` after any earlier store -- even one under a
-condition -- is accepted, since the storage may well be initialized (the
-untaken path is a missed diagnostic, see `Limitations`_).  Credit *fires*
-the marked-target diagnostic only when the store is unconditional in the
-entity's own function: after a top-level ``u = 5;`` a later
-``int *r [[ref_to_uninit]] = &u;`` is rejected -- a definitely initialized
-entity requires an unmarked target (§4.2) -- while a store under an
-``if``, a loop, a ``switch``, a ``try``, ``&&``/``||``/``?:``, or inside a
-lambda or block body may not have executed on the path that reaches the
-binding, so the marked binding stays legal -- the mechanism errs toward
-missed diagnostics (see `Limitations`_).  (The
-conditionality test is syntactic and errs the same way: a store in a
-condition itself, in a ``do`` body, or in the taken branch of
-``if constexpr`` conservatively counts as conditional, and a store after a
-``goto`` -- which could jump over it without introducing any scope -- or
-after a ``switch`` (the shared branch flag) earns the suppressing credit
-only.)  Element accesses
-(``p[i]``) are never credited in either direction (§5.4's random-access
-ban applies even to ``p[0]``), element stores earn no credit, and address
-escapes (passing ``&u`` to a ``[[ref_to_uninit]]`` parameter) never count
--- the paper reserves callee-initialization for ``now_init()`` (§6.2).
-Class-typed whole-object assignment never credits either: it is a member
-``operator=`` call on uninitialized storage, rejected as above.
-
-Whole-member stores are credited too, keyed per base object: after
-``a.m = 5;`` on a directly named local, or ``this->m = 5;`` on the current
-object (keyed to the enclosing function body, so no other function -- nor a
-lambda body, which is its own function -- shares it; instantiations of one
-template or generic lambda share their pattern's single body, and its
-credit), binding ``a.m`` or
-``&a.m`` through the *same* base is accepted, and the reverse direction
-applies as for locals.  The boundaries: one member level only (``x.agg.m =
-5;`` is itself the piecemeal-initialization error and earns nothing), only
-directly named non-reference locals or the current object (a member reached
-through a pointer, reference, or any other object -- including a copy, per
-§5.2 -- stays strict), and never member *pointee* stores (``*w.p = 5;``),
-whose aliasing is per-value: a copy of the object shares the pointee.  The
-credit is purely parse-order, with no dominance or flow analysis: a store
-under a condition still credits -- and so suppresses -- everything after
-it, so a binding on the untaken path is a missed diagnostic (see
-`Limitations`_); only the requires-uninitialized direction insists on an
-unconditional store, exactly as for locals.
+The recognizer's answer is refined by *flow-tracked storage*: an
+``[[uninit]]`` local, the referent of a ``[[ref_to_uninit]]`` local pointer
+or reference (parameters included), and an ``[[uninit]]`` scalar member of a
+directly named local or of the current object.  For these the binding is
+judged where it occurs, by the same local analysis that checks reads (§1.3):
+a whole-entity store (``u = 5``, ``*p = 5``, ``r = 5``, ``a.m = 5``,
+``this->m = 5``), a ``[[now_init]]`` call, or ``std::construct_at``
+initializes the storage; reseating a marked pointer (``p = q``, ``p += n``,
+``p++``), handing out a mutable alias of it (``T *&``, ``T **``, a
+by-reference capture), a ``[[now_uninit]]`` call, ``std::destroy_at``,
+``free``, ``realloc``, ``operator delete``, or a ``delete`` expression ends
+what the analysis knows about it.  A marked target is rejected when the
+storage is initialized on every path reaching the binding; an unmarked
+target is accepted when the storage is initialized on some path.  Element
+accesses (``p[i]``, ``a[0]``) are never initialized by an element store, and
+a store through a conditional target (``(c ? p : q) = e``) initializes
+neither arm for the purpose of a later marked binding.  A lambda's or
+block's body is its own function: a store inside it initializes nothing for
+the enclosing body, and a by-reference capture of an uninitialized
+``[[uninit]]`` variable is the unmarked-reference violation even when the
+body assigns it.  Storage outside any function body -- a namespace-scope
+object, a default member initializer, a default argument -- has no flow and
+is judged by its form alone.  A transparent cast is as transparent to a
+store as to a binding: ``(int &)u = 5`` initializes ``u`` whole,
+``*(int *)p = 5`` the pointee, and ``(int *&)p = q`` reseats ``p`` (§4.3).
+Whole-object assignment of a class pointee never initializes: it is a member
+``operator=`` call on uninitialized storage, rejected as above.  (A
+``void*`` escape of ``&p`` is not recognized: the missed reseat leaves the
+pointee definitely initialized, which errs toward a false positive of the
+marked-target rule.)
 
 One kind of call *does* count as initialization: §6.2's ``[[now_init]]``
 attribute (its placement and spelling track an open committee question)
 declares that a function initializes the storage passed to each of its
 ``[[ref_to_uninit]]`` parameters, and it requires at least one such
-parameter.  After a call to a ``[[now_init]]`` function, the argument's
-storage earns exactly the credit the equivalent direct store would --
-``fill(&u)`` credits ``u`` whole, ``fill(p)`` credits the marked pointer's
-pointee (until ``p`` is reseated), ``fill(&a.m)`` credits the ``(a, m)``
-pair, and ``fill(arr)`` credits a local ``[[uninit]]`` array whole (§6's
-``uninitialized_fill`` shape; the element form ``fill(&arr[0])`` earns
-nothing, §5.4) -- with the same boundaries and the same reverse-direction
-consequence
-(after an *unconditional* ``fill(&u)`` in the entity's own function, a
-second ``fill(&u)`` is rejected: ``u`` no longer refers to uninitialized
-memory, which incidentally catches double ``construct_at``).  This is R2
+parameter.  A call to a ``[[now_init]]`` function initializes the
+argument's storage exactly as the equivalent direct store would --
+``fill(&u)`` initializes ``u`` whole, ``fill(p)`` the marked pointer's
+pointee (until ``p`` is reseated), ``fill(&a.m)`` the member ``m`` of ``a``,
+and ``fill(arr)`` a local ``[[uninit]]`` array whole (§6's
+``uninitialized_fill`` shape; the element form ``fill(&arr[0])`` initializes
+nothing, §5.4) -- with the same reverse-direction consequence (after a
+``fill(&u)`` on every path, a second ``fill(&u)`` is rejected: ``u`` no
+longer refers to uninitialized memory, which incidentally catches double
+``construct_at``).  This is R2
 §4.5's requested library annotation, and Clang applies it itself: a
 ``std::construct_at`` declaration whose first parameter is of pointer type
 receives ``[[now_init]]`` and the parameter marker implicitly, so the real
@@ -1021,7 +985,7 @@ those entries never cause a rejection.
 
 - Inside a constructor body, only a plain assignment to an ``[[uninit]]``
   member (including through a transparent reference cast such as
-  ``(int &)m = 1`` -- the same casts the parse-order credit sees through)
+  ``(int &)m = 1`` -- the same casts the recognizers see through)
   or a call to a ``[[now_init]]`` function (§6.2) counts as its
   initialization -- the latter for the current-object storage bound to the
   callee's ``[[ref_to_uninit]]`` parameters (``&m``, ``m``, or ``this``
@@ -1195,37 +1159,20 @@ those entries never cause a rejection.
   definition has been parsed: a marker written between the class definition
   and the constructor's still sees a declared-but-undefined constructor and
   is rejected as running a constructor.
-- Whole-entity store credit is parse-order only: a store under a condition
-  (or inside a lambda body) credits every later use in parse order, so a
-  read or binding on a path that skips the store is a missed diagnostic.
-  ``[[now_init]]`` call credit outside constructor bodies is parse-order in
-  the same way (inside them it is a real dataflow fact, as above).  The
-  requires-uninitialized direction is stricter about what it *fires* on:
-  only a store (or ``[[now_init]]`` call) unconditionally executed in the
-  entity's own function forces a later binding onto an unmarked target, so
-  a conditional store leaves both binding directions legal -- more missed
-  diagnostics, still no false positive.  The conditionality test is
-  syntactic and conservative in the same direction: a store in an
-  ``if``/``while``/``for`` condition or a ``for`` init-statement, in a
-  ``do`` body, or in the taken branch of ``if constexpr`` counts as
-  conditional, and once a function has branched -- ``goto``, indirect or
-  ``asm goto``, or a ``switch``, which shares the tracking flag -- every
-  later store counts as conditional too (a goto earlier in the body could
-  skip the store without introducing any scope; the switch inclusion is a
-  further over-approximation).  ``[[now_uninit]]`` withdrawal mirrors the
-  split: a
-  conditional destroy revokes only the firing strength and leaves the
-  suppressing credit in place.  The requires-uninitialized direction also
-  consults credit at definition time only -- an instantiation re-walk does
-  not rewind parse-order state, so re-checked statements must not trip over
-  credit they themselves recorded -- which makes a reverse-direction
-  violation established only by credit in fully dependent code a missed
-  diagnostic as well.
+- The read-through and subobject-write checks, and the destroy rules,
+  refine the recognizers with parse-order store credit: a store under a
+  condition (or inside a lambda body) credits every later such check in
+  parse order, so a read through a marker on a path that skips the store is
+  a missed diagnostic, and a conditional ``[[now_uninit]]`` destroy revokes
+  only the credit's firing strength.
 - In a template, the declaration rules, the constructor rules, and the
   flow-based rules fire per instantiation; ``uninit_read`` (through a
-  marker), ``uninit_write``, and the binding rule fire at the definition when
-  their operands do not depend on the template's parameters, and again at
-  each instantiation that rebuilds the expression.
+  marker), ``uninit_write``, and a binding of storage that is not
+  flow-tracked fire at the definition when their operands do not depend on
+  the template's parameters, and again at each instantiation that rebuilds
+  the expression.  A binding whose source names flow-tracked storage is
+  judged at instantiation only, whatever its operands depend on; a
+  never-instantiated template's such bindings are not diagnosed.
 
 
 Test Profiles

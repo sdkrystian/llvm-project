@@ -236,6 +236,168 @@ public:
   /// it keeps the untracked, FP-safe direction).
   static bool isDefaultInitShape(const Expr *Init);
 
+  /// A derived-to-base path: the canonical class of each base step from an
+  /// object's class to the class declaring a member; empty for the object's
+  /// own members. Two copies of one member reached through different bases
+  /// (a non-virtual diamond) have different paths.
+  using BasePath = SmallVector<const CXXRecordDecl *, 2>;
+
+  /// Peel the transparent casts ignoreTransparentCasts peels -- parens,
+  /// implicit casts, and explicit casts of a pointer or glvalue -- from
+  /// \p E, prepending the derived-to-base steps they take to \p Path in
+  /// object-to-member order; returns the operand reached.
+  static const Expr *peelBaseCasts(const Expr *E, BasePath &Path);
+
+  /// The shape of an lvalue the std::init flow analysis may track: the
+  /// object expression at the bottom of the member, element, and
+  /// dereference chain, and the chain itself. Shared by the parse-time
+  /// tracked-leaf predicate (isFlowTrackedLeaf) and the CFG pass's entity
+  /// resolver (AnalysisBasedWarnings.cpp), so the two never disagree on what
+  /// is tracked.
+  struct FlowLeafShape {
+    /// The directly named local or parameter at the bottom; null when the
+    /// chain bottoms out at `this`.
+    const VarDecl *Local = nullptr;
+    /// Local's DeclRefExpr (the base a consuming member access marks benign).
+    const DeclRefExpr *LocalRef = nullptr;
+    bool IsThis = false;
+    /// The chain reaches its storage through a pointer value -- `*p`,
+    /// `p->m`, `p[i]`, `this->m` -- rather than through the object itself.
+    bool ThroughPointer = false;
+    /// The named member steps, leaf first; anonymous-record steps are
+    /// transparent.
+    SmallVector<const FieldDecl *, 2> Named;
+    /// An element step (`a[i]`) occurs in the chain.
+    bool Subscript = false;
+    /// The derived-to-base path from the object's class to the innermost
+    /// member's class.
+    BasePath Path;
+  };
+  /// The shape of the glvalue \p E, or none when its chain bottoms out at
+  /// anything but a directly named local, a parameter, or `this` (a global,
+  /// a call, a member reached through another member's pointer).
+  static std::optional<FlowLeafShape> flowLeafShape(const Expr *E);
+
+  /// A class with a user-provided constructor is trusted (P4222R2 §5.1): its
+  /// constructor body may have assigned a member, which local analysis
+  /// cannot see, so its members are not flow-tracked for reads.
+  static bool hasUserProvidedCtor(const CXXRecordDecl *RD);
+
+  /// Visit the candidate fields of \p RD and of its non-virtual,
+  /// constructor-less base classes, recursively, each with its
+  /// derived-to-base path from \p RD.
+  template <typename Fn>
+  static void forEachCandidateUninitField(const CXXRecordDecl *RD, Fn Visit) {
+    SmallVector<std::pair<const CXXRecordDecl *, BasePath>, 4> RecordStack;
+    RecordStack.push_back({RD, BasePath()});
+    while (!RecordStack.empty()) {
+      auto [Cur, Path] = RecordStack.pop_back_val();
+      for (const FieldDecl *F : Cur->fields())
+        Visit(Path, F);
+      for (const CXXBaseSpecifier &BS : Cur->bases()) {
+        if (BS.isVirtual())
+          continue;
+        const CXXRecordDecl *BRD = BS.getType()->getAsCXXRecordDecl();
+        if (BRD && BRD->hasDefinition() &&
+            !hasUserProvidedCtor(BRD->getDefinition())) {
+          BasePath BP(Path);
+          BP.push_back(BRD->getCanonicalDecl());
+          RecordStack.push_back({BRD->getDefinition(), std::move(BP)});
+        }
+      }
+    }
+  }
+
+  /// True if \p F is a member the flow analysis tracks: an [[uninit]]
+  /// built-in scalar (arithmetic or enum) member with no default member
+  /// initializer, std::byte excepted (P4222R2 §4.6).
+  static bool isFlowTrackedMemberField(const ASTContext &Ctx,
+                                       const FieldDecl *F);
+  /// True if \p F, reached through \p Path from \p RD, is a tracked member
+  /// of an object of class \p RD.
+  static bool isFlowTrackedMemberOf(const ASTContext &Ctx,
+                                    const CXXRecordDecl *RD,
+                                    ArrayRef<const CXXRecordDecl *> Path,
+                                    const FieldDecl *F);
+
+  /// The type-shape half of the read-tracking guards: a non-union,
+  /// non-dependent class with no user-provided constructor anywhere in the
+  /// contributing subtree. A reference type aliases an object also reachable
+  /// other ways and never qualifies.
+  static const CXXRecordDecl *getTrackableSlotClass(QualType T);
+  /// The declaration-shape half of the read-tracking guards for a local:
+  /// \p V is a non-parameter local, not itself [[uninit]]-marked, of a
+  /// trackable class. How its declaration initializes the members is the
+  /// caller's half.
+  static const CXXRecordDecl *getTrackableLocalClass(const VarDecl *V);
+  /// The class whose [[uninit]] scalar members the flow analysis tracks for
+  /// the local or by-value parameter \p V -- any non-reference,
+  /// non-dependent class type of a local-storage variable that is not itself
+  /// [[uninit]] -- or null. Reads are tracked for the narrower
+  /// getTrackableLocalClass / getTrackableSlotClass subset only; bindings of
+  /// a member are judged by flow state for every such object.
+  static const CXXRecordDecl *flowTrackedAggregateClass(const VarDecl *V);
+
+  /// The non-lambda instance member function whose object `this` denotes in
+  /// \p DC -- walking out of lambda call operators and blocks -- or null.
+  static const CXXMethodDecl *enclosingInstanceMethod(const DeclContext *DC);
+
+  /// True if the leaf \p Leaf of a binding source names storage the
+  /// std::init CFG pass flow-tracks -- an [[uninit]] local or parameter (or
+  /// a subobject of one), a marked local pointer's or reference's referent
+  /// (or a subobject of it), or a tracked [[uninit]] scalar member of a
+  /// directly named local or of the current object -- while a function body
+  /// is being parsed (\p CurContext inside one). \p AsPointerValue says the
+  /// leaf is used as a pointer value (a pointer binding, or a read-only alias
+  /// binding of a pointer) rather than as a glvalue. The parse-time checks
+  /// leave such a source to the pass; a source with no tracked leaf, or one
+  /// outside any function body, is judged at parse time without flow state.
+  static bool isFlowTrackedLeaf(const ASTContext &Ctx, const Expr *Leaf,
+                                bool AsPointerValue,
+                                const DeclContext *CurContext);
+  /// True if any leaf of \p Src, bound as \p T, is flow-tracked in the
+  /// current context (isFlowTrackedLeaf).
+  bool hasFlowTrackedLeaf(const Expr *Src, QualType T) const;
+  /// The operand a binding of \p Src as \p T classifies, and whether it is
+  /// used as a pointer value (\p AsPointerValue): a pointer binding or a
+  /// read-only alias of a pointer reads the source's value; a reference
+  /// binding names the source glvalue -- unless the source materializes a
+  /// temporary, a fresh object that is initialized (null: no tracked
+  /// storage) except when pointer-typed, where the temporary's value still
+  /// refers to what its operand's does (a read-only alias). The recognizers
+  /// classify the same way (glvalueDenotesUninitStorage), so the parse-time
+  /// funnel and the CFG pass agree on which leaves a binding has.
+  static const Expr *bindingSourceOperand(const Expr *Src, QualType T,
+                                          bool &AsPointerValue);
+
+  /// How a bound type aliases a pointer glvalue source (P4222R2 §4.3): a
+  /// reference whose referent is a pointer is a read-only alias when the
+  /// referent is const-qualified or the reference is an rvalue reference, a
+  /// mutable alias otherwise; any other bound type aliases nothing.
+  enum class PointerAliasKind { None, ReadOnly, Mutable };
+  static PointerAliasKind pointerAliasKind(QualType T);
+
+  /// The recognizers' verdict on a binding source or leaf, without flow
+  /// state: Initialized, Uninitialized, Unknown, or Mixed (a conditional
+  /// whose arms disagree, P4222R2 §4.9).
+  enum class InitSourceState { Initialized, Uninitialized, Unknown, Mixed };
+  /// Classify the leaf \p Leaf of a binding source bound as \p T by its form
+  /// alone, for the CFG pass's judgment of a binding with tracked leaves;
+  /// \p Body is the analyzed function, which decides whether `this` is under
+  /// construction.
+  InitSourceState classifyInitBindingLeaf(const Expr *Leaf, QualType T,
+                                          const Decl *Body) const;
+
+  /// The [[ref_to_uninit]] marking of the pointer object an assignment
+  /// target names: true/false for a directly named marked/unmarked pointer
+  /// declaration, std::nullopt when the marking is unknown -- a reference to
+  /// a pointer aliases an object whose marking it cannot carry, any other
+  /// lvalue (*pp, arr[i]) names no declaration at all, and a conditional's
+  /// arms may disagree -- where neither direction of the binding check is
+  /// sound (P4222R2 §4.3). Peels transparent casts and walks the
+  /// pass-through target shapes.
+  static std::optional<bool> resolveAssignTargetMarking(const Expr *E);
+
   /// If \p E (stripped of parens and implicit casts) directly names a
   /// declaration -- a DeclRefExpr or a MemberExpr -- return that declaration;
   /// otherwise null. The std::init checks read [[ref_to_uninit]] /
@@ -439,6 +601,12 @@ public:
     /// acceptance only.
     bool ReleasesStorageByName = false;
   };
+  /// Derive what \p FD does to the storage bound to its parameters: the
+  /// lifetime attributes plus the allocator-callee table's storage-release
+  /// rows (free, realloc's pointer parameter, replaceable global operator
+  /// delete / operator delete[]), split by trust. Shared by the parse-time
+  /// funnel and the CFG pass's lifecycle arm.
+  static CalleeLifecycleRoles getCalleeLifecycleRoles(const FunctionDecl *FD);
 
 private:
   /// True if `this` in the current context denotes an object under
@@ -520,32 +688,6 @@ private:
                                const Expr *Src);
 
 public:
-  /// std::init: binding a marked pointer *object* out through a mutable
-  /// alias -- a T*& binding of p, or a T** binding of &p -- hands the
-  /// callee (or the aliasing pointer) the power to reseat it, so any
-  /// Definite pointee credit can no longer serve as the marked-target
-  /// diagnostic's firing basis. Withdraws at Maybe strength: the Definite
-  /// claim goes, the suppressing Maybe credit survives (the callee may
-  /// equally leave the pointer alone) -- the same "revoke only the firing
-  /// strength" semantics as a conditional [[now_uninit]] destroy. A const
-  /// alias (T* const &) cannot reseat and withdraws nothing. Called from
-  /// the binding funnel's recorder tail and from pointer assignment; gated
-  /// on never-executed contexts like the other recorders. Stale reads
-  /// through the escaped pointer remain the documented parse-order missed
-  /// diagnostic; a void* escape of &p is not recognized -- a missed
-  /// withdrawal leaves stale firing-strength credit, erring toward a false
-  /// positive of the marked-target rule.
-  void recordInitProfilePointerAliasEscape(QualType T, const Expr *Src);
-
-  /// The by-reference-capture flavor of the alias escape: a lambda capturing
-  /// a mutable marked pointer by reference holds the same reseating power as
-  /// a `T **pp = &p;` alias, so the Definite pointee credit is withdrawn the
-  /// same way (Maybe survives). \p Var is the captured variable; anything
-  /// but a mutable local [[ref_to_uninit]] pointer withdraws nothing. Called
-  /// from checkInitProfileRefCapture for every by-reference capture, before
-  /// its diagnostic early-returns (recorders never gate on enforcement).
-  void recordInitProfilePointerAliasEscape(const ValueDecl *Var);
-
   /// The tracked storage a glvalue (or a lifetime-annotated callee's
   /// argument) denotes: the whole [[uninit]] entity (Whole), the storage
   /// behind a marked pointer or reference (Pointee), the [[uninit]] member
