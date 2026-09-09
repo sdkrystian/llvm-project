@@ -38,7 +38,6 @@ struct ProfileArgument {
   llvm::StringRef Key;
   llvm::StringRef Value;
   ProfileArgumentKind Kind = ProfileArgumentKind::Positional;
-  SourceRange Range;
 
   bool isNamed() const { return Kind == ProfileArgumentKind::Named; }
 };

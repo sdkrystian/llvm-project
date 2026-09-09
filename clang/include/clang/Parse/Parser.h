@@ -2369,7 +2369,6 @@ private:
       std::string Value;
       profiles::ProfileArgumentKind Kind =
           profiles::ProfileArgumentKind::Positional;
-      SourceRange Range;
 
       bool isNamed() const {
         return Kind == profiles::ProfileArgumentKind::Named;
@@ -2402,12 +2401,10 @@ private:
   bool ParseProfileSuppressBody(ParsedProfileSuppressArgs &Args);
   /// Capture the spelling of one balanced token, or of a bracketed token
   /// sequence, that is not a bare comma. Returns true on error.
-  bool ParseNonCommaBalancedToken(std::string &Spelling,
-                                  SourceRange *Range = nullptr);
+  bool ParseNonCommaBalancedToken(std::string &Spelling);
   /// Capture the spelling of one non-operator-non-punctuator-token (P3589R2
   /// [dcl.attr.profiles]). Returns true on error.
-  bool ParseNonOperatorNonPunctuatorToken(std::string &Spelling,
-                                          SourceRange *Range = nullptr);
+  bool ParseNonOperatorNonPunctuatorToken(std::string &Spelling);
 
   /// Diagnose C++11 attributes on a module- or import-declaration, which
   /// accept none except the profile attribute \p AllowedKind (handled in
