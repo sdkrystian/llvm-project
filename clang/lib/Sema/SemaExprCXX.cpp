@@ -43,7 +43,6 @@
 #include "clang/Sema/SemaLambda.h"
 #include "clang/Sema/SemaObjC.h"
 #include "clang/Sema/SemaPPC.h"
-#include "clang/Sema/SemaProfiles.h"
 #include "clang/Sema/Template.h"
 #include "clang/Sema/TemplateDeduction.h"
 #include "llvm/ADT/APInt.h"
@@ -910,14 +909,6 @@ ExprResult Sema::BuildCXXThrow(SourceLocation OpLoc, Expr *Ex,
     ExprResult Res = PerformMoveOrCopyInitialization(Entity, NRInfo, Ex);
     if (Res.isInvalid())
       return ExprError();
-
-    // std::init / ref_to_uninit: the thrown pointer copy-initializes the
-    // exception object; see SemaProfiles::InitBindingKind.
-    if (getLangOpts().Profiles)
-      Profiles().checkInitProfileBinding(SemaProfiles::InitBindingKind::Throw,
-                                         Ex->getExprLoc(), /*Target=*/nullptr,
-                                         ExceptionObjectTy, Ex);
-
     Ex = Res.get();
   }
 
@@ -2629,18 +2620,6 @@ ExprResult Sema::BuildCXXNew(SourceRange Range, bool UseGlobal,
       FullInit = Binder->getSubExpr();
 
     Initializer = FullInit.get();
-
-    // std::init / ref_to_uninit: the written initializer of a scalar
-    // allocation binds the allocated pointer; see
-    // SemaProfiles::InitBindingKind. For an array new AllocType is the
-    // *element* type, and each written element -- including the lone
-    // initializer of `new T*[k]{p}` or `new T*[k](p)` -- is already checked
-    // by the aggregate element hooks (InitListChecker::CheckSubElementType
-    // and TryOrBuildParenListInitialization).
-    if (getLangOpts().Profiles && !ArraySize && Exprs.size() == 1)
-      Profiles().checkInitProfileBinding(
-          SemaProfiles::InitBindingKind::NewInitializer, Exprs[0]->getExprLoc(),
-          /*Target=*/nullptr, AllocType, Exprs[0]);
 
     // FIXME: If we have a KnownArraySize, check that the array bound of the
     // initializer is no greater than that constant value.
