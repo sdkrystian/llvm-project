@@ -93,9 +93,9 @@ Every profile follows the same recipe:
    runtime-checked rules, in the rule's diagnostic group
    (``DiagnosticGroups.td``; a new profile adds its group tree there, under
    ``Profiles``).
-3. Add the check: a ``checkProfileViolation`` or ``EmitProfileRuntimeCheck``
-   call at the check site (patterns 1 and 5), or a row in the analysis's
-   opt-in table (patterns 2-4).
+3. Add the check: a ``shouldEmitProfileViolation`` gate before the diagnostic,
+   or an ``EmitProfileRuntimeCheck`` call, at the check site (patterns 1 and
+   5), or a row in the analysis's opt-in table (patterns 2-4).
 4. Add tests; a test-only profile must be named under ``test::`` (see `Test
    Profiles`_).
 
@@ -107,20 +107,19 @@ Pattern 1: Parse-Time Check Sites
 =================================
 
 For a rule checkable at a single semantic entry point, the entire profile
-implementation is one call at that site:
+implementation is a gate and a diagnostic at that site:
 
 .. code-block:: c++
 
-   checkProfileViolation("my::profile", "my_rule", Loc,
-                         diag::err_my_profile_rule);
+   if (Profiles().shouldEmitProfileViolation(diag::err_my_profile_rule, Loc))
+     Diag(Loc, diag::err_my_profile_rule) << "my::profile";
 
-The call runs the single violation gate,
-``SemaProfiles::shouldEmitProfileViolation``: the enforce/exempt/suppress
-rung ``ASTContext::isProfileRuleActiveAt`` (which CodeGen's runtime checks
-run as is) plus the parse-time rungs -- a templated declaration, an
-unevaluated context, and a discarded statement never fire.  Every pattern's
-check site goes through that one gate.  ``test::type_cast`` is the in-tree
-example.
+The gate is ``SemaProfiles::shouldEmitProfileViolation``: the
+enforce/exempt/suppress rung ``ASTContext::isProfileRuleActiveAt`` (which
+CodeGen's runtime checks run as is) plus the parse-time rungs -- a templated
+declaration, an unevaluated context, and a discarded statement never fire.
+Every pattern's check site goes through that one gate.  ``test::type_cast``
+is the in-tree example.
 
 Inside a template, a profile rule is checked on phase-7 entities only where
 it depends on a declaration, a completed class or constructor, or a function

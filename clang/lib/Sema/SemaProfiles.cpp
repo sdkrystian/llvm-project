@@ -357,15 +357,6 @@ bool SemaProfiles::shouldEmitProfileViolation(unsigned DiagID,
   return true;
 }
 
-bool SemaProfiles::checkProfileViolation(StringRef ProfileName,
-                                         StringRef RuleName, SourceLocation Loc,
-                                         unsigned DiagID) {
-  if (!shouldEmitProfileViolation(DiagID, Loc))
-    return false;
-  Diag(Loc, DiagID) << ProfileName;
-  return true;
-}
-
 namespace {
 /// Row for the unified finalization dispatch shared by class-finalization
 /// (pattern 3) and constructor-finalization (pattern 4): a profile name plus

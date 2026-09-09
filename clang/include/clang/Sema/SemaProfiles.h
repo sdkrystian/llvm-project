@@ -93,12 +93,6 @@ public:
   bool shouldEmitProfileViolation(unsigned DiagID, SourceLocation Loc,
                                   const Decl *D = nullptr,
                                   bool PostParse = false);
-  /// Emit \p DiagID -- the diagnostic of \p RuleName of \p ProfileName,
-  /// which names the rule for the reader; the rule's identity is the
-  /// diagnostic's group -- at \p Loc if shouldEmitProfileViolation passes;
-  /// returns true if the diagnostic was emitted.
-  bool checkProfileViolation(StringRef ProfileName, StringRef RuleName,
-                             SourceLocation Loc, unsigned DiagID);
 
   /// A [[profiles::suppress]] dominion being recorded as diagnostic state:
   /// where it begins and, per diagnostic of the suppressed rules, the mapping
