@@ -19,7 +19,6 @@
 
 #include "clang/AST/ASTFwd.h"
 #include "clang/Basic/DiagnosticIDs.h"
-#include "clang/Basic/Profiles.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Sema/SemaBase.h"
 #include "llvm/ADT/STLExtras.h"
