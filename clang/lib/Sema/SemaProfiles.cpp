@@ -657,8 +657,8 @@ void SemaProfiles::checkInitProfileUninitDecl(const VarDecl *Var) {
       // array of them), or a class/aggregate type -- possibly the element
       // type of an array -- whose default-init leaves a scalar subobject
       // indeterminate (its synthesized constructor call provides an
-      // initializer, so the !getInit() test alone misses it). The
-      // suppression walk stays ahead of the recursive type walk.
+      // initializer, so the !getInit() test alone misses it). The gate
+      // stays ahead of the recursive type walk.
       (!Var->getInit() ||
        (BaseTy->isRecordType() &&
         defaultInitLeavesScalarIndeterminate(Var->getType())))) {
@@ -2768,9 +2768,8 @@ forEachCtorUninitField(Sema &S, const CXXRecordDecl *RD,
 }
 
 // The per-field walk of the ctor_uninit_member constructor callback:
-// diagnoses at the constructor, gated per field on the Decl-aware violation
-// gate (suppression on the constructor or a lexical parent; deferral on
-// templated patterns).
+// diagnoses at the constructor, gated per field on the violation gate, which
+// takes the constructor so a templated pattern defers to its instantiations.
 static void diagnoseCtorUninitFields(
     Sema &S, const CXXConstructorDecl *Ctor, const CXXRecordDecl *RD,
     const llvm::SmallPtrSetImpl<const FieldDecl *> &Written) {
@@ -2921,9 +2920,8 @@ void runStdInitInheritedCtorUninitMemberCallback(Sema &S, CXXRecordDecl *RD) {
   // MEMBERS once per class -- the obligation is identical for every
   // introducer and signature -- anchored at the lexically first introducer.
   // The shared walk runs with an empty written-set: an inherited constructor
-  // writes no member-initializers. The Decl-aware gate on the introducer
-  // honors suppression on it or the enclosing class and defers on templated
-  // patterns (this class callback re-fires on instantiation).
+  // writes no member-initializers. The gate takes the introducer, so a
+  // templated pattern defers (this class callback re-fires on instantiation).
   {
     const UsingDecl *First = Groups.front().Introducer;
     const CXXRecordDecl *FirstBase = Groups.front().NominatedBase;
@@ -3006,10 +3004,10 @@ void runStdInitUninitFieldMarkerCallback(Sema &S, CXXRecordDecl *RD) {
     UninitMarkerClass C = classifyUninitMarker(S.Profiles(), F, nullptr);
     if (C.Verdict != UninitMarkerVerdict::NonVacuousDefault)
       continue;
-    // Decl-aware gate: defers on templated patterns (instantiations re-fire
-    // through CheckCompletedCXXClass) and honors [[profiles::suppress]] on
-    // the field or the enclosing class. Diagnose at the attribute -- the
-    // marker is the thing to delete -- like union_marker / pointer_marker.
+    // The gate takes the field, so a templated pattern defers (instantiations
+    // re-fire through CheckCompletedCXXClass). Diagnose at the attribute --
+    // the marker is the thing to delete -- like union_marker /
+    // pointer_marker.
     if (!S.Profiles().shouldEmitProfileViolation(
             diag::err_init_uninit_not_left_uninitialized, UA->getLocation(), F))
       continue;

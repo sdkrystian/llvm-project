@@ -510,9 +510,8 @@ public:
   /// std::init / uninit_write (paper §5.4-§5.6): diagnose a scalar store to a
   /// proper subobject of a named [[uninit]] entity -- delayed piecemeal
   /// initialization, which only whole-object construct_at could make good.
-  /// Called from Sema::CheckAssignmentOperands (the shared simple/compound
-  /// assignment funnel) and from the built-in increment/decrement arm of
-  /// Sema::CreateBuiltinUnaryOp, with \p LHS the store target. Reuses the
+  /// A step of checkInitProfileAssignmentOperands and of
+  /// checkInitProfileIncDec, with \p LHS the store target. Reuses the
   /// recognizer with its write access preset: a store to the whole named
   /// entity is its initialization (paper §4.5), and storage reached through
   /// [[ref_to_uninit]] is trusted (the deferred construct_at slice), so only
@@ -601,7 +600,7 @@ private:
   /// funnel: every host passes its \p Kind, and a kind whose construct cannot
   /// carry the marker is judged unmarked whatever \p Target is. No-op unless
   /// \p T is a non-dependent pointer or reference. \p D, when available,
-  /// anchors suppression and template deferral: with it the rule fires on
+  /// supplies the template-deferral rung: with it the rule fires on
   /// the instantiation only; without it an instantiation-dependent \p Src
   /// defers to the rebuild and a non-dependent one is judged on the pattern
   /// and again at each instantiation that rebuilds the construct
@@ -650,8 +649,8 @@ public:
   /// std::init / pointer_marker + union_marker (paper §4.1, §5.6): diagnose
   /// [[uninit]] placed on a pointer, a union variable, or a union member.
   /// \p D must already carry the UninitAttr (the marker location is taken
-  /// from it). Decl-aware via shouldEmitProfileViolation, so it defers on a
-  /// templated pattern and is re-checked on the instantiated entity.
+  /// from it). \p D reaches shouldEmitProfileViolation, so the rule defers on
+  /// a templated pattern and is re-checked on the instantiated entity.
   void checkInitProfileMarkerPlacement(const Decl *D);
 
   /// [[ref_to_uninit]] is only meaningful on a pointer or reference to an
