@@ -126,8 +126,8 @@ namespace [[profiles::suppress(test::other)]] wrong_profile_ns {
 }
 
 // SFINAE: a class template whose instantiation would fire the profile
-// diagnostic must not cause the substitution to fail. ProfileRuleError uses
-// SFINAE_Suppress, so the diagnostic is suppressed during deduction; the
+// diagnostic must not cause the substitution to fail. A ProfileRule diagnostic
+// is SFINAE_Suppress, so the diagnostic is suppressed during deduction; the
 // first overload is selected because the substitution succeeds. The
 // diagnostic is then replayed at the class definition (with the usual
 // instantiation-context notes).

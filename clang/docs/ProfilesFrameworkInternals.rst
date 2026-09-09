@@ -46,16 +46,24 @@ against the profile-name production only (``profiles::isValidProfileName``),
 sorts and dedups the list, and sets ``LangOptions::Profiles`` when it is
 non-empty.
 
-Profile-rule diagnostics are defined with the ``ProfileRuleError`` diagnostic
-class rather than plain ``Error``.  It marks them SFINAE-suppressed: they do not
-count as substitution failures and cannot change overload resolution, but
-selected specializations replay them when actually used.  The framework
-passes the profile name as ``%0``:
+Profile-rule diagnostics are defined with the ``ProfileRule`` diagnostic
+class rather than plain ``Error``.  A rule diagnostic is a ``Warning``-class
+diagnostic mapped to an error by default, so that it belongs to a diagnostic
+group (an ``Error`` cannot) while a violation remains an error that ``-w``
+does not silence.  The ``Warning`` class also marks it SFINAE-suppressed:
+violations do not count as substitution failures and cannot change overload
+resolution, but selected specializations replay them when actually used.
+Every rule has its own group, ``profile-<profile>-<rule>``, nested in the
+profile's group ``profile-<profile>`` under ``-Wprofiles``; a rule-less
+diagnostic sits directly in the profile's group.  The names are derived by
+``profiles::getProfileDiagGroupName``.  The framework passes the profile
+name as ``%0``:
 
 .. code-block:: text
 
-   def err_profile_type_cast_reinterpret : ProfileRuleError<
-     "'reinterpret_cast' is unsafe under profile '%0'">;
+   def err_profile_type_cast_reinterpret : ProfileRule<
+     "'reinterpret_cast' is unsafe under profile '%0'",
+     ProfileTestTypeCastReinterpretCast>;
 
 There are five implementation patterns, keyed on when -- and for pattern 5,
 how -- the rule is checked.
@@ -70,9 +78,11 @@ Every profile follows the same recipe:
    semantic entry point (pattern 1), whole-function analysis (pattern 2),
    class or constructor finalization (patterns 3 and 4), or a runtime check
    (pattern 5).
-2. Define the diagnostic: a ``ProfileRuleError`` in
-   ``DiagnosticSemaKinds.td`` for compile-time rules, or a ``Trap`` in
-   ``DiagnosticTrapKinds.td`` for runtime-checked rules.
+2. Define the diagnostic: a ``ProfileRule`` in ``DiagnosticSemaKinds.td``
+   for compile-time rules, or a ``Trap`` in ``DiagnosticTrapKinds.td`` for
+   runtime-checked rules, in the rule's diagnostic group
+   (``DiagnosticGroups.td``; a new profile adds its group tree there, under
+   ``Profiles``).
 3. Add the check: a ``checkProfileViolation`` or ``EmitProfileRuntimeCheck``
    call at the check site (patterns 1 and 5), or a row in the analysis's
    opt-in table (patterns 2-4).

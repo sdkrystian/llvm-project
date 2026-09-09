@@ -2006,3 +2006,19 @@ def ExperimentalOption : DiagGroup<"experimental-option">;
 
 // Warnings about unguarded usages of AMDGPU target specific constructs
 def UnguardedBuiltinUsageAMDGPU : DiagGroup<"amdgpu-unguarded-builtin-usage">;
+
+// C++ profiles framework (P3589R2): one group per profile rule, nested in the
+// profile's group, all under -Wprofiles. Group names follow
+// profiles::getProfileDiagGroupName (clang/include/clang/Basic/Profiles.h).
+def ProfileTestTypeCastReinterpretCast : DiagGroup<"profile-test-type-cast-reinterpret-cast">;
+def ProfileTestTypeCast : DiagGroup<"profile-test-type-cast", [ProfileTestTypeCastReinterpretCast]>;
+def ProfileTestUninitRead : DiagGroup<"profile-test-uninit-read">;
+def ProfileTestCfgHooksLambda : DiagGroup<"profile-test-cfg-hooks-lambda">;
+def ProfileTestCfgHooks : DiagGroup<"profile-test-cfg-hooks", [ProfileTestCfgHooksLambda]>;
+def ProfileTestClassFinal : DiagGroup<"profile-test-class-final">;
+def ProfileTestCtorFinal : DiagGroup<"profile-test-ctor-final">;
+def ProfileTestArithZeroDivide : DiagGroup<"profile-test-arith-zero-divide">;
+def ProfileTestArith : DiagGroup<"profile-test-arith", [ProfileTestArithZeroDivide]>;
+def Profiles : DiagGroup<"profiles", [ProfileTestTypeCast, ProfileTestUninitRead,
+                                      ProfileTestCfgHooks, ProfileTestClassFinal,
+                                      ProfileTestCtorFinal, ProfileTestArith]>;

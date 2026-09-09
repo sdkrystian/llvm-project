@@ -1692,8 +1692,8 @@ namespace {
 /// entry pairs the profile name with the diagnostic to emit when an
 /// uninitialized read is found and not suppressed at the use site. Adding a
 /// new profile that wants to ride this analysis is a single row here plus a
-/// ProfileRuleError diagnostic in DiagnosticSemaKinds.td; the three hook
-/// columns are optional (see ProfilesFrameworkInternals.rst, "Pattern 2").
+/// ProfileRule diagnostic in DiagnosticSemaKinds.td; the three hook columns
+/// are optional (see ProfilesFrameworkInternals.rst, "Pattern 2").
 struct CFGProfileEntry {
   StringRef Name;
   StringRef Rule;
@@ -1752,7 +1752,7 @@ static void runTestCFGHooksPass(Sema &S, const Decl *, AnalysisDeclContext &AC,
 
 constexpr CFGProfileEntry CFGProfiles[] = {
     {"test::uninit_read", /*Rule=*/"", diag::err_profile_uninit_read},
-    {"test::cfg_hooks", /*Rule=*/"", diag::err_profile_uninit_read,
+    {"test::cfg_hooks", /*Rule=*/"", diag::err_profile_cfg_hooks_uninit_read,
      &isTestCFGHooksExemptVar, &configureTestCFGHooksCFG, &runTestCFGHooksPass},
 };
 

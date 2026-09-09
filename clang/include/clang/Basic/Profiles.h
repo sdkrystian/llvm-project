@@ -8,7 +8,8 @@
 /// \file
 /// Shared value types and helpers of the C++ profiles framework (P3589R2):
 /// profile arguments and their canonical spelling, enforced-profile records,
-/// the suppression-matching rule, and the profile-name-convention policies.
+/// the suppression-matching rule, the diagnostic-group naming rule, and the
+/// profile-name-convention policies.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -102,6 +103,32 @@ inline bool isValidProfileName(llvm::StringRef Name) {
 /// Profiles".
 inline bool isProfileNameInert(llvm::StringRef Name, bool TestProfilesEnabled) {
   return !TestProfilesEnabled && Name.starts_with("test::");
+}
+
+/// The diagnostic group of \p Rule of the profile named \p Profile, or of
+/// the whole profile when \p Rule is empty: "profile-<profile>-<rule>" in
+/// lowercase, with "::", "_", and "." spelled "-" (test::arith / zero_divide
+/// is profile-test-arith-zero-divide). A name the implementation does not
+/// know yields a group that does not exist, which the diagnostics engine
+/// ignores, so an unknown profile enforces and suppresses nothing.
+inline std::string getProfileDiagGroupName(llvm::StringRef Profile,
+                                           llvm::StringRef Rule) {
+  std::string Name = "profile";
+  auto Append = [&](llvm::StringRef Part) {
+    Name += '-';
+    for (char C : Part) {
+      if (C == ':' || C == '_' || C == '.') {
+        if (Name.back() != '-')
+          Name += '-';
+      } else {
+        Name += toLowercase(C);
+      }
+    }
+  };
+  Append(Profile);
+  if (!Rule.empty())
+    Append(Rule);
+  return Name;
 }
 
 /// P3589R2 [decl.attr.enforce]p5: profiles are compatible if they are the

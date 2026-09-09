@@ -30,8 +30,12 @@ def trap_ubsan_arith_overflow : Trap<
 
 let CategoryName = "C++ Profiles" in {
 
+// A runtime-checked profile rule's trap diagnostic sits in the rule's
+// diagnostic group like a compile-time rule's (see ProfileRule in
+// DiagnosticSemaKinds.td); its mapping decides whether the check is emitted.
 def trap_profile_zero_divide : Trap<
-  "integer division or remainder by zero under profile '%0'">;
+  "integer division or remainder by zero under profile '%0'">,
+  InGroup<ProfileTestArithZeroDivide>, ShowInSystemHeader;
 
 }
 }

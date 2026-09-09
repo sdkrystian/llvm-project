@@ -395,7 +395,7 @@ namespace {
 /// (pattern 3) and constructor-finalization (pattern 4): a profile name plus
 /// a callback invoked once per finalized, non-dependent, non-invalid Node (a
 /// CXXRecordDecl or a CXXConstructorDecl). Adding a new profile is a single
-/// row in the matching table below plus a ProfileRuleError diagnostic in
+/// row in the matching table below plus a ProfileRule diagnostic in
 /// DiagnosticSemaKinds.td and a callback that consults
 /// SemaProfiles::shouldEmitProfileViolation before emitting.
 template <class Node> struct FinalizationProfile {

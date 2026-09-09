@@ -14350,9 +14350,15 @@ def err_cuda_device_kernel_launch_require_rdc
             "relocatable device code (i.e. requires -fgpu-rdc)">;
 
 // C++ Profiles framework (P3589R2)
-class ProfileRuleError<string str> : Error<str> {
-  let SFINAE = SFINAE_Suppress;
-}
+// A profile rule's diagnostic: Warning class so it lives in the rule's
+// diagnostic group and is mapped per source location (that mapping is how the
+// framework enforces and suppresses the rule); DefaultError so a violation is
+// an error that survives -w and marks the TU uncompilable; ShowInSystemHeader
+// so the engine leaves the system-header exemption to the framework. The
+// Warning class's default SFINAE_Suppress keeps a violation out of overload
+// resolution (P3589R2 §1.1). The framework passes the profile name as %0.
+class ProfileRule<string str, DiagGroup g>
+    : Warning<str>, DefaultError, ShowInSystemHeader, InGroup<g>;
 
 def err_profiles_enforce_not_empty_decl : Error<
   "'profiles::enforce' attribute only allowed on empty-declarations and "
@@ -14380,15 +14386,22 @@ def err_profiles_redecl_incompatible : Error<
 def err_profiles_suppress_justification_not_string : Error<
   "'justification' argument of 'profiles::suppress' must be a string "
   "literal">;
-def err_profile_type_cast_reinterpret : ProfileRuleError<
-  "'reinterpret_cast' is unsafe under profile '%0'">;
-def err_profile_uninit_read : ProfileRuleError<
-  "variable %1 is read before initialization under profile '%0'">;
-def err_profile_class_final_test : ProfileRuleError<
-  "test profile fired on completion of class %1 under profile '%0'">;
-def err_profile_ctor_final_test : ProfileRuleError<
+def err_profile_type_cast_reinterpret : ProfileRule<
+  "'reinterpret_cast' is unsafe under profile '%0'",
+  ProfileTestTypeCastReinterpretCast>;
+def err_profile_uninit_read : ProfileRule<
+  "variable %1 is read before initialization under profile '%0'",
+  ProfileTestUninitRead>;
+def err_profile_class_final_test : ProfileRule<
+  "test profile fired on completion of class %1 under profile '%0'",
+  ProfileTestClassFinal>;
+def err_profile_ctor_final_test : ProfileRule<
   "test profile fired on finalization of a constructor for class %1 under "
-  "profile '%0'">;
-def err_profile_cfg_hooks_test : ProfileRuleError<
-  "test profile fired on a lambda expression under profile '%0'">;
+  "profile '%0'", ProfileTestCtorFinal>;
+def err_profile_cfg_hooks_uninit_read : ProfileRule<
+  "variable %1 is read before initialization under profile '%0'",
+  ProfileTestCfgHooks>;
+def err_profile_cfg_hooks_test : ProfileRule<
+  "test profile fired on a lambda expression under profile '%0'",
+  ProfileTestCfgHooksLambda>;
 } // end of sema component.
