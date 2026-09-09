@@ -521,11 +521,10 @@ static bool defaultInitLeavesScalarIndeterminateImpl(
   return false;
 }
 
-bool SemaProfiles::defaultInitLeavesScalarIndeterminate(
-    QualType T, bool HonorUninitMarkers) {
+bool SemaProfiles::defaultInitLeavesScalarIndeterminate(QualType T) {
   llvm::SmallPtrSet<const CXXRecordDecl *, 8> Visited;
-  return defaultInitLeavesScalarIndeterminateImpl(getASTContext(), T,
-                                                  HonorUninitMarkers, Visited);
+  return defaultInitLeavesScalarIndeterminateImpl(
+      getASTContext(), T, /*HonorUninitMarkers=*/true, Visited);
 }
 
 // Whether RD has a default constructor explicitly defaulted *after* its
@@ -693,8 +692,7 @@ void SemaProfiles::checkInitProfileUninitDecl(const VarDecl *Var) {
       // suppression walk stays ahead of the recursive type walk.
       (!Var->getInit() ||
        (BaseTy->isRecordType() &&
-        defaultInitLeavesScalarIndeterminate(Var->getType(),
-                                             /*HonorUninitMarkers=*/true)))) {
+        defaultInitLeavesScalarIndeterminate(Var->getType())))) {
     // A union variable cannot carry [[uninit]] (union_marker bans it),
     // so it must be initialized; use a message that does not suggest the
     // marker as a remedy. An *anonymous* union's variable has no name and
@@ -2775,8 +2773,7 @@ forEachCtorUninitField(Sema &S, const CXXRecordDecl *RD,
       // consulted: union_marker already rejects markers on union members.
       if (AnonRD->isUnion()) {
         if (!anyLeafFieldWritten(AnonRD->getDefinition(), Written) &&
-            S.Profiles().defaultInitLeavesScalarIndeterminate(
-                F->getType(), /*HonorUninitMarkers=*/true))
+            S.Profiles().defaultInitLeavesScalarIndeterminate(F->getType()))
           DiagnoseAnonUnion(F);
         continue;
       }
@@ -2793,8 +2790,7 @@ forEachCtorUninitField(Sema &S, const CXXRecordDecl *RD,
     if (F->hasAttr<UninitAttr>() || F->hasInClassInitializer() ||
         Written.count(F))
       continue;
-    if (!S.Profiles().defaultInitLeavesScalarIndeterminate(
-            F->getType(), /*HonorUninitMarkers=*/true))
+    if (!S.Profiles().defaultInitLeavesScalarIndeterminate(F->getType()))
       continue;
     DiagnoseField(F);
   }
@@ -2887,9 +2883,7 @@ static void runStdInitCtorUninitMemberCallback(Sema &S,
     if (WrittenBases.count(
             S.Context.getCanonicalType(Base.getType()).getTypePtr()))
       continue;
-    if (!S.Profiles().defaultInitLeavesScalarIndeterminate(
-            Base.getType(),
-            /*HonorUninitMarkers=*/true))
+    if (!S.Profiles().defaultInitLeavesScalarIndeterminate(Base.getType()))
       continue;
     if (!S.Profiles().shouldEmitProfileViolation(
             "std::init", diag::err_init_ctor_uninit_member, Ctor->getLocation(),
@@ -3005,8 +2999,7 @@ static void runStdInitInheritedCtorUninitMemberCallback(Sema &S,
       if (BaseRD && G.NominatedBase &&
           BaseRD->getCanonicalDecl() == G.NominatedBase->getCanonicalDecl())
         continue;
-      if (!S.Profiles().defaultInitLeavesScalarIndeterminate(
-              Base.getType(), /*HonorUninitMarkers=*/true))
+      if (!S.Profiles().defaultInitLeavesScalarIndeterminate(Base.getType()))
         continue;
       if (!S.Profiles().shouldEmitProfileViolation(
               "std::init", diag::err_init_ctor_uninit_member,
