@@ -59,8 +59,8 @@ void lifecycle() {
   (void)v;
 }
 
-// construct_at credits u whole: a second construct_at is rejected by the
-// reverse-direction rule.
+// construct_at initializes u whole: a second construct_at is rejected by
+// the reverse-direction rule.
 void double_construct() {
   int u [[uninit]];
   std::construct_at(&u, 5);

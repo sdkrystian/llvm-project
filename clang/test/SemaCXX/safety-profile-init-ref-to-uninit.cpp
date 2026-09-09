@@ -2326,15 +2326,14 @@ void test_construct_at_bridge() {
 // The §4.5 lifecycle *end*, via [[now_uninit]] -- the recording §4.4 wishes
 // for ("the object subjected to destroy_at() should be considered
 // uninitialized, but there is no way of recording that in the code"): a
-// call to a [[now_uninit]] function withdraws the parse-order credit of the
-// storage bound to each pointer/reference parameter, so the storage is
-// uninitialized again. Re-construction becomes legal, binding the storage
-// to an unmarked target is the ordinary unmarked-direction violation, and
-// a second destruction is the dedicated double_destroy violation: the
-// callee's own parameters take initialized (or credited) storage --
-// destroying storage that is still or again uninitialized is the
-// dedicated destroy_uninit violation, while raw-release callees (free)
-// keep any-state acceptance (see Limitations).
+// call to a [[now_uninit]] function makes the storage bound to each
+// pointer/reference parameter uninitialized again. Re-construction becomes
+// legal, binding the storage to an unmarked target is the ordinary
+// unmarked-direction violation, and a second destruction is the dedicated
+// double_destroy violation: the callee's own parameters take initialized
+// storage -- destroying storage that is still or again uninitialized is the
+// dedicated destroy_uninit violation, while raw-release callees (free) keep
+// any-state acceptance (see Limitations).
 template <class T>
 [[now_uninit]] void destroy_at(T *p);
 [[now_uninit]] void nu_wipe(int *p);
@@ -2346,7 +2345,7 @@ void test_destroy_at_lifecycle() {
   construct_at(&s, 1, 2);
   destroy_at(&s);         // OK: destroys initialized storage
   construct_at(&s, 3, 4); // OK: uninitialized again (the bridge's error above)
-  int v = s.x;            // OK: re-credited
+  int v = s.x;            // OK: reinitialized
   destroy_at(&s);         // OK: re-destroy after re-construction
   (void)v;
 }
@@ -2382,7 +2381,7 @@ void test_store_retires_destroyed() {
   nu_wipe(&u); // OK
 }
 
-// The destroyed state is per shape, exactly like the credit it shadows.
+// The destroyed state is per entity.
 void test_double_destroy_pointee(int *p [[ref_to_uninit]]) {
   *p = 5;
   nu_wipe(p);
@@ -2398,7 +2397,7 @@ void test_double_destroy_member() {
 // Reseating a marked pointer retires its pointee's destroyed state with the
 // rest of the pointee facts: they described the old pointee. The proof is
 // mutual exclusivity: the destroy after the reseat fires destroy_uninit
-// (the new pointee is uncredited marked storage), not double_destroy.
+// (the new pointee is uninitialized marked storage), not double_destroy.
 void test_reseat_clears_destroyed(int *p [[ref_to_uninit]],
                                   int *q [[ref_to_uninit]]) {
   *p = 5;
@@ -2419,9 +2418,8 @@ void test_destroy_ternary_arm(int *p [[ref_to_uninit]], bool c) {
   (void)u2;
 }
 
-// The exact comma shape stays unconditional: both strengths are withdrawn
-// and the destroyed state is recorded, so the storage is uninitialized again
-// and a second destroy is double_destroy.
+// The exact comma shape names one storage: it is destroyed and uninitialized
+// again, so a second destroy is double_destroy.
 void test_destroy_comma(int *p [[ref_to_uninit]]) {
   *p = 1;
   nu_wipe(((void)0, p));
@@ -2491,16 +2489,16 @@ void test_marked_param_exemption_is_per_parameter() {
   nu_release2(&u, &v); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
-// A conditional store earns Maybe credit, which suppresses: the destroy is
-// accepted although one path destroys never-stored storage -- a missed
-// diagnostic relative to the paper's "for acceptance all alternatives must
-// provide the desired solution" ("Guarantees", p4222r2.md:1982-1985), the
-// usual parse-order conservatism.
+// A conditional store leaves the storage initialized on some path, which
+// accepts the destroy although one path destroys never-stored storage -- a
+// missed diagnostic relative to the paper's "for acceptance all alternatives
+// must provide the desired solution" ("Guarantees", p4222r2.md:1982-1985),
+// the same lenient reading as the unmarked binding direction.
 void test_conditional_store_then_destroy(bool c) {
   int u [[uninit]];
   if (c)
     u = 5;
-  nu_wipe(&u); // OK: Maybe credit suppresses
+  nu_wipe(&u); // OK: initialized on some path
 }
 
 // destroy_uninit and double_destroy are mutually exclusive by state: on
@@ -2540,8 +2538,8 @@ void template_destroy_dependent() {
 }
 template void template_destroy_dependent<int>(); // expected-note {{in instantiation of function template specialization 'template_destroy_dependent<int>' requested here}}
 
-// Ctor-body twins: member credit is a parse-order fact, so a destroy of a
-// never-assigned [[uninit]] member fires while an assigned one is clean.
+// Ctor-body twins: a destroy of a never-assigned [[uninit]] member fires
+// while an assigned one is clean.
 struct DestroyInCtor {
   int m [[uninit]];
   DestroyInCtor() {
@@ -2549,13 +2547,13 @@ struct DestroyInCtor {
   }
   DestroyInCtor(int) {
     m = 1;
-    nu_wipe(&m); // OK: parse-order member credit
+    nu_wipe(&m); // OK: assigned above
   }
 };
 
-// A decayed-array argument credits the [[uninit]] array whole, exactly the
-// storage the dedicated acceptance arm already binds (§6's
-// uninitialized_fill(arr, ...) shape): accept and credit agree.
+// A decayed-array argument initializes the [[uninit]] array whole, exactly
+// the storage the dedicated acceptance arm already binds (§6's
+// uninitialized_fill(arr, ...) shape).
 void test_now_init_array_decay_credit() {
   [[uninit]] int arr[8];
   now_init_fill(arr); // OK: marked target, uninitialized source
@@ -2569,8 +2567,8 @@ void test_now_init_array_decay_reverse() {
   now_init_fill(arr); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
 }
 // The element-address shape resolves nothing (§5.4's element ban), and a
-// file-scope [[uninit]] array is not a creditable local: neither earns
-// credit, so the unmarked binding after the call keeps failing.
+// file-scope [[uninit]] array is not flow-tracked: neither is initialized by
+// the call, so the unmarked binding after it keeps failing.
 void test_now_init_array_element_no_credit() {
   [[uninit]] int arr[8];
   now_init_fill(&arr[0]);
@@ -2581,12 +2579,11 @@ void test_now_init_array_static_no_credit() {
   int *q = g_uninit_arr; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   (void)q;
 }
-// [[now_uninit]] withdrawal shares the resolver: a decayed-array argument
-// withdraws the whole-array credit again.
+// A decayed-array [[now_uninit]] argument destroys the whole array again.
 void test_now_uninit_array_decay_withdrawal() {
   [[uninit]] int arr[4];
   now_init_fill(arr);
-  ni_sink(arr); // OK: credited
+  ni_sink(arr); // OK: initialized
   nu_wipe(arr);
   ni_sink(arr); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 }
@@ -2621,9 +2618,8 @@ void test_destroy_pointee(int *p [[ref_to_uninit]]) {
   (void)x; (void)y;
 }
 
-// A by-reference [[now_uninit]] parameter destroys its referent; a marked
-// reference's referent credit -- which no store can clear -- is withdrawn
-// the same way.
+// A by-reference [[now_uninit]] parameter destroys its referent, a marked
+// reference's referent included.
 void test_destroy_by_reference() {
   int u [[uninit]];
   u = 5;
@@ -2638,8 +2634,8 @@ void test_destroy_marked_reference(int &r [[ref_to_uninit]]) {
   (void)x;
 }
 
-// Whole-member credit is withdrawn per base object: destroying a1's member
-// leaves a2's credit intact.
+// A member is destroyed per object: destroying a1's member leaves a2's
+// intact.
 struct NuMember { int m [[uninit]]; };
 void test_destroy_member_per_object() {
   NuMember a1, a2;
@@ -2647,12 +2643,12 @@ void test_destroy_member_per_object() {
   a2.m = 5;
   nu_wipe(&a1.m);
   int *q1 = &a1.m; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
-  int *q2 = &a2.m; // OK: a2's credit is untouched
+  int *q2 = &a2.m; // OK: a2's member is untouched
   (void)q1; (void)q2;
 }
 
-// A multi-parameter [[now_uninit]] function withdraws every pointer
-// argument's credit (the attribute's contract covers all of them).
+// A multi-parameter [[now_uninit]] function destroys every pointer
+// argument's storage (the attribute's contract covers all of them).
 void test_destroy_multi_param() {
   int u [[uninit]], v [[uninit]];
   u = 1;
@@ -2663,19 +2659,18 @@ void test_destroy_multi_param() {
   (void)q; (void)r;
 }
 
-// A destroy in a never-executed context destroys nothing (mirroring the
-// no-credit contexts of the store recorder).
+// A destroy in a never-executed context destroys nothing: an unevaluated
+// operand is not in the body's CFG.
 void test_destroy_never_executed() {
   int u [[uninit]];
   u = 5;
   using X = decltype(nu_wipe(&u));
-  int *q = &u; // OK: the unevaluated destroy withdrew nothing
+  int *q = &u; // OK: the unevaluated destroy destroyed nothing
   (void)q;
 }
 
 // A suppressed destroy still destroys, exactly as a suppressed store still
-// credits: failing to withdraw would turn suppression into later missed
-// double-destroy diagnostics.
+// initializes: suppression gates the diagnostics, not the flow state.
 void test_suppressed_destroy_withdraws() {
   int u [[uninit]];
   u = 5;
@@ -2687,8 +2682,8 @@ void test_suppressed_destroy_withdraws() {
 }
 
 // A destroy through a function pointer presents no ParmVarDecl, so it
-// withdraws nothing -- stale credit, a known missed diagnostic (the same
-// boundary as [[now_init]] call credit).
+// destroys nothing -- a known missed diagnostic (the same boundary as a
+// [[now_init]] call through one).
 void test_destroy_through_function_pointer() {
   int u [[uninit]];
   u = 5;
@@ -2698,25 +2693,23 @@ void test_destroy_through_function_pointer() {
   (void)q;
 }
 
-// A *conditional* destroy is not an unconditional withdrawal: it revokes
-// only the credit's firing strength -- the destroy may have run, so the
-// requires-uninit direction may no longer fire on the credit -- while the
-// suppressing credit survives (the storage may still be initialized), so
-// the unmarked direction gains no new errors either. Both bindings below
-// are accepted.
+// A *conditional* destroy may or may not have run: afterwards the storage is
+// neither definitely initialized (a marked binding is not forced) nor
+// definitely uninitialized (an unmarked binding stays accepted). Both
+// bindings below are accepted.
 void test_conditional_destroy(bool c) {
   int u [[uninit]];
   now_init_fill(&u);
   if (c)
     nu_wipe(&u);
-  int *q = &u;                   // OK: suppressing credit survives
-  int *r [[ref_to_uninit]] = &u; // OK: no definite credit left to fire on
+  int *q = &u;                   // OK: initialized on some path
+  int *r [[ref_to_uninit]] = &u; // OK: not initialized on every path
   (void)q; (void)r;
 }
 
 // A callee carrying both markers is a reinitializer: it destroys and then
 // constructs its argument's storage, so the net post-call state is
-// initialized (withdrawal is recorded before credit). Fresh never-stored
+// initialized (the destroy precedes the construct). Fresh never-stored
 // storage is its canonical input -- destroy-then-construct legalizes it --
 // so a reinitializer is exempt from destroy_uninit (the two calls below
 // on fresh storage are the exemption's canaries).
@@ -2766,6 +2759,62 @@ void test_reinit_on_destroyed() {
 void test_reinit_exemption_is_call_wide() {
   int u [[uninit]], v [[uninit]];
   nu_reinit2(&u, &v); // OK: &v (never stored, unmarked parameter) is exempt
+}
+
+// A destroy inside a member function template or a generic lambda is judged
+// on each instantiation's own CFG, after that body's own store; a comma-
+// wrapped argument names the same storage.
+[[now_uninit]] void nu_wipe_n(int *p, unsigned n);
+struct DestroyInTemplateBody {
+  int m [[uninit]];
+  template <class T> void f() {
+    m = 1;
+    nu_wipe_n(&m, sizeof(T)); // OK
+  }
+  void g() {
+    auto l = [this](auto x) {
+      m = 1;
+      nu_wipe_n(&m, sizeof(x)); // OK
+    };
+    l(0);
+    l(0L);
+  }
+  template <class T> void h() {
+    m = 1;
+    nu_wipe_n(((void)0, &m), sizeof(T)); // OK
+  }
+};
+void test_destroy_in_template_bodies() {
+  DestroyInTemplateBody s;
+  s.f<int>();
+  s.f<long>();
+  s.g();
+  s.h<int>();
+}
+
+// Handing out a mutable alias of the marked pointer (T**, T*&, or a
+// by-reference capture) retires the destroyed state with the rest of the
+// pointee's facts: the holder may have reseated the pointer, so a later
+// destroy is neither a double destroy nor a destroy of uninitialized
+// storage (a direct reseat keeps destroy_uninit, test_reseat_clears_destroyed).
+void test_escape_retires_destroyed_by_pointer(int *p [[ref_to_uninit]]) {
+  *p = 1;
+  nu_wipe(p);
+  alias_by_ptr(&p);
+  nu_wipe(p); // OK
+}
+void test_escape_retires_destroyed_by_reference(int *p [[ref_to_uninit]]) {
+  *p = 1;
+  nu_wipe(p);
+  alias_by_ref(p);
+  nu_wipe(p); // OK
+}
+void test_escape_retires_destroyed_by_capture(int *p [[ref_to_uninit]]) {
+  *p = 1;
+  nu_wipe(p);
+  auto l = [&p] { alias_by_ptr(&p); };
+  l();
+  nu_wipe(p); // OK
 }
 
 // The reverse direction applies through the assignment funnel too: a

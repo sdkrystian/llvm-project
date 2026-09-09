@@ -196,11 +196,11 @@ void test_destroy_then_free(int *p [[ref_to_uninit]]) {
 
 // The reverse order is the destroy_uninit violation on a marked pointer: a
 // release records no destroyed state -- there is no object left for
-// [[now_uninit]] to destroy "again" -- but a trusted release withdraws the
-// pointee's credit, so the storage classifies uninitialized again and the
-// destroy fires on it. In the nobuiltin runs the untrusted free withdraws
-// nothing (the documented missed-diagnostic direction), while the
-// delete-expression withdraws by form in every mode.
+// [[now_uninit]] to destroy "again" -- but a trusted release ends what is
+// known about the pointee, so the storage is uninitialized again and the
+// destroy fires on it. In the nobuiltin runs the untrusted free is not a
+// release (the documented missed-diagnostic direction), while the
+// delete-expression releases by form in every mode.
 void test_free_then_destroy(int *p [[ref_to_uninit]]) {
   *p = 5;
   free(p);
