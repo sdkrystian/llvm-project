@@ -45,3 +45,14 @@ int *unsup() {
   return reinterpret_cast<int *>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
 }
 int *use_u = unsup<int>();
+
+// Statement-level suppression inside a late-parsed body covers its own
+// declaration only.
+template <class T>
+int *stmt_in_body() {
+  [[profiles::suppress(test::type_cast)]] int *p = reinterpret_cast<int *>(0);
+  int *q = reinterpret_cast<int *>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+  (void)q;
+  return p;
+}
+int *use_s = stmt_in_body<int>();

@@ -202,6 +202,8 @@ Parser::DeclGroupPtrTy Parser::ParseDeclarationAfterTemplate(
   // The declaration's prefix-attribute suppress scope (see
   // ProfileSuppressScope).
   SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, DeclAttrs);
+  ProfileSuppressionDominion ProfileDominion(*this, DeclAttrs,
+                                             DeclAttrs.Range.getBegin());
 
   ParseDeclarationSpecifiers(DS, TemplateInfo, AS,
                              getDeclSpecContextFromDeclaratorContext(Context));

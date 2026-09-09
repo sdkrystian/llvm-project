@@ -17,6 +17,7 @@
 #define LLVM_CLANG_SEMA_SEMAPROFILES_H
 
 #include "clang/AST/ASTFwd.h"
+#include "clang/Basic/DiagnosticIDs.h"
 #include "clang/Basic/Profiles.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Sema/SemaBase.h"
@@ -114,6 +115,32 @@ public:
   /// true if the diagnostic was emitted.
   bool checkProfileViolation(StringRef ProfileName, StringRef RuleName,
                              SourceLocation Loc, unsigned DiagID);
+
+  /// A [[profiles::suppress]] dominion being recorded as diagnostic state:
+  /// where it begins and, per diagnostic of the suppressed rules, the mapping
+  /// the begin replaced, which the end restores. Empty when the attributes
+  /// suppressed nothing that was not already ignored.
+  struct SuppressionRecord {
+    SourceLocation Begin;
+    SmallVector<std::pair<diag::kind, DiagnosticMapping>, 8> Restore;
+  };
+
+  /// Record into \p Record that the dominion of the [[profiles::suppress]]
+  /// attributes among \p Attrs begins at \p Begin: every diagnostic of each
+  /// attribute's rule group (the profile's group when it names no rule) is
+  /// mapped to ignored from the expansion site of \p Begin on. See
+  /// ProfilesFrameworkInternals.rst, "Enforcement and Suppression State".
+  void beginSuppression(const ParsedAttributesView &Attrs, SourceLocation Begin,
+                        SuppressionRecord &Record);
+  /// The same for the ProfilesSuppressAttrs attached to \p D; an invalid
+  /// \p Begin starts the dominion at the attributes themselves.
+  void beginSuppression(const Decl *D, SourceLocation Begin,
+                        SuppressionRecord &Record);
+  /// Record that \p Record's dominion ends at \p End: the mappings its
+  /// begin replaced are restored from there on, and in the states a
+  /// diagnostic push inside the dominion saved. An \p End not after the
+  /// begin (nothing was consumed) ends the dominion where it began.
+  void endSuppression(SuppressionRecord &Record, SourceLocation End);
 
   /// P3589R2 [decl.attr.enforce]p5: a declaration and its redeclarations must
   /// appear in the dominions of mutually compatible profiles. Called from

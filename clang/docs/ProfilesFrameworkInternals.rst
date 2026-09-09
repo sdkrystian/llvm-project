@@ -42,7 +42,7 @@ to the end of the translation unit, and ``ASTContext::isProfileRuleActiveAt``
 -- the enforcement half of every violation gate -- asks whether the rule's
 diagnostic is mapped at the check site and the site is not
 system-header-exempt (``isProfileExemptSystemHeaderLoc``).  See
-`Enforcement State`_.
+`Enforcement and Suppression State`_.
 
 ``-fprofiles-enforce=`` is the second Sema-free seed: the ``ASTContext``
 constructor records each name in ``LangOptions::ProfilesEnforce`` with an
@@ -302,8 +302,8 @@ vector-extension integer division and ``_Complex int`` division are not
 checked.
 
 
-Enforcement State
-=================
+Enforcement and Suppression State
+=================================
 
 An enforcement's dominion (P3589R2 [decl.attr.enforce]p4: the tokens from
 the attribute to the end of the translation unit) is represented as
@@ -338,6 +338,40 @@ module's enforcement wherever it is instantiated or emitted, never under
 the importer's, and importer code never under the module's.  A module-map
 module (``-fmodules``) has no initial state of its own and takes the
 importer's, so the importer's ``-fprofiles-enforce=`` reaches it.
+
+A suppression's dominion ([decl.attr.suppress]p3: the attribute's tokens
+through the last token of the declaration or statement it appertains to) is
+recorded the same way, by ``Parser::ProfileSuppressionDominion`` guards.
+``SemaProfiles::beginSuppression`` maps every diagnostic of the attribute's
+rule group (the profile's group for a rule-less attribute) to ignored from
+the attribute's expansion location on, remembering the mappings it
+replaced, and ``endSuppression`` restores them from the end of the last
+consumed token on -- in the states a ``#pragma clang diagnostic push``
+inside the dominion saved as well, so a later ``pop`` does not revive the
+suppression.  A guard whose attributes suppress nothing new (an enclosing
+construct already suppresses the rule) records nothing, so the doubled
+guards of a block-scope declaration cost nothing.  Because the state is
+keyed on positions, a token-cached body, default argument, or member
+initializer parsed after its class, and a template instantiated at any
+later point, find the dominion their tokens lie in without re-establishing
+anything: ``setDiagnosticMappingsAt`` inserts a transition when the lexer
+has already passed the location.
+
+A construct whose attributes reach its Decl only after its leading tokens
+(a declarator-id attribute) is covered by two guards that stitch together:
+the declarator's guard, from the declarator-id to the declarator's end, and
+a Decl-keyed guard around the initializer, default argument, mem-initializers
+and body, or lambda body, beginning at the current token -- beginning at the
+declarator-id again would find the rule already ignored there and record
+nothing, while the first guard has already restored the mapping at the
+declarator's end.  Guards are installed at every parser site that parses a
+construct carrying ``[[profiles::suppress]]``: the prefix attributes of a
+statement, a declaration (at namespace, block, class, and template scope),
+a parameter, a condition, and an enumerator; the class, enum, and namespace
+heads (from the attributes themselves); a declarator's declarator-id
+attributes; and the Decl-keyed continuations.
+clang/test/SemaCXX/safety-profile-suppress-coverage.cpp is the per-context
+regression net for this contract.
 
 
 Suppression Dominion Mechanics
@@ -534,7 +568,7 @@ or the AST file being code-generated (a module unit compiled from its BMI)
 -- never from an import, whatever its module kind, so an importer's list --
 what it advertises, requires, and checks redeclarations against -- is its
 own.  The rule mappings travel separately, in the engine's own
-``DIAG_PRAGMA_MAPPINGS`` record (`Enforcement State`_).  Command-line
+``DIAG_PRAGMA_MAPPINGS`` record (`Enforcement and Suppression State`_).  Command-line
 enforcements are written with the rest and dedup on restore against the
 consumer's own constructor seed.  ``LangOptions::ProfilesEnforce``
 is a Compatible language option, carried in ``LANGUAGE_OPTIONS`` and hashed

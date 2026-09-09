@@ -209,6 +209,8 @@ Parser::DeclGroupPtrTy Parser::ParseNamespace(DeclaratorContext Context,
       T.getOpenLocation(), attrs, ImplicitUsingDirectiveDecl, false);
 
   SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, NamespcDecl);
+  ProfileSuppressionDominion ProfileDominion(*this, NamespcDecl,
+                                             SourceLocation());
 
   PrettyDeclStackTraceEntry CrashInfo(Actions.Context, NamespcDecl,
                                       NamespaceLoc, "parsing namespace");
@@ -260,6 +262,8 @@ void Parser::ParseInnerNamespace(const InnerNamespaceInfoList &InnerNSs,
          "nested namespace definition cannot define anonymous namespace");
 
   SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, NamespcDecl);
+  ProfileSuppressionDominion ProfileDominion(*this, NamespcDecl,
+                                             SourceLocation());
 
   ParseInnerNamespace(InnerNSs, ++index, InlineLoc, attrs, Tracker);
 
@@ -2831,6 +2835,8 @@ Parser::DeclGroupPtrTy Parser::ParseCXXClassMemberDeclaration(
   // The member declaration's prefix-attribute suppress scope (see
   // ProfileSuppressScope).
   SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, DeclAttrs);
+  ProfileSuppressionDominion ProfileDominion(*this, DeclAttrs,
+                                             DeclAttrs.Range.getBegin());
 
   ParseDeclarationSpecifiers(DS, TemplateInfo, AS, DeclSpecContext::DSC_class,
                              &CommonLateParsedAttrs);
@@ -3167,7 +3173,10 @@ Parser::DeclGroupPtrTy Parser::ParseCXXClassMemberDeclaration(
     else if (ThisDecl && VS.getAbstractLoc().isValid())
       Actions.ActOnPureSpecifier(ThisDecl, VS.getAbstractLoc());
 
-    // Handle the initializer.
+    // Handle the initializer. A declarator-id suppression on the member
+    // covers its initializer, token-cached or not.
+    ProfileSuppressionDominion ProfileDominionForInit(*this, ThisDecl,
+                                                      Tok.getLocation());
     if (HasInClassInit != ICIS_NoInit) {
       // The initializer was deferred; parse it and cache the tokens.
       Diag(Tok, getLangOpts().CPlusPlus11
@@ -3690,6 +3699,7 @@ void Parser::ParseCXXMemberSpecification(SourceLocation RecordLoc,
                                             T.getOpenLocation());
 
   SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, TagDecl);
+  ProfileSuppressionDominion ProfileDominion(*this, TagDecl, SourceLocation());
 
   // C++ 11p3: Members of a class defined with the keyword class are private
   // by default. Members of a class defined with the keywords struct or union

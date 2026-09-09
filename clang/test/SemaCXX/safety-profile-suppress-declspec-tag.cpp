@@ -62,15 +62,13 @@ struct Outer {
     D = (bool)reinterpret_cast<int *>(8) // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
   } e2after;
 
-  // FIXME: a *nested* class's NSDMIs and method bodies late-parse at the
-  // outermost class's closing brace, after the member declaration's scope has
-  // died, so they escape the dominion; P3589R2 would have them covered. The
-  // attribute cannot be attached to the nested class post hoc either
-  // (parse-time rules fire during the member-specification parse, before any
-  // attachment point exists).
+  // A nested class's NSDMIs and method bodies late-parse at the outermost
+  // class's closing brace; the member declaration's dominion covers them by
+  // position.
   // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
   [[profiles::suppress(test::type_cast)]] struct Inner {
-    int *p = reinterpret_cast<int *>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+    int *p = reinterpret_cast<int *>(0);
+    int *m() { return reinterpret_cast<int *>(8); }
   } inner;
 };
 

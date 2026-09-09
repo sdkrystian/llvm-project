@@ -36,12 +36,19 @@ namespace ns_control {
 long inner = (long)reinterpret_cast<long *>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
 }
 
-// Member declaration with NSDMI
+// Member declaration with NSDMI, prefix and declarator-id forms
 struct Members {
   [[profiles::suppress(test::type_cast)]] long nsdmi =
       (long)reinterpret_cast<long *>(0);
+  long nsdmi_id [[profiles::suppress(test::type_cast)]] =
+      (long)reinterpret_cast<long *>(0);
   long nsdmi_control = (long)reinterpret_cast<long *>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
 };
+
+// Attribute spelled through a macro
+#define SUPPRESS_TYPE_CAST [[profiles::suppress(test::type_cast)]]
+SUPPRESS_TYPE_CAST long macro_var = (long)reinterpret_cast<long *>(0);
+long macro_var_control = (long)reinterpret_cast<long *>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
 
 // Immediate default argument (namespace scope, parsed in place)
 void immediate_dfl([[profiles::suppress(test::type_cast)]] long p =
@@ -82,4 +89,15 @@ void lambda_body() {
   };
   (void)l;
   (void)l_control;
+}
+
+// A diagnostic pragma inside a suppressed construct stays in effect after it
+void pragma_inside() {
+  [[profiles::suppress(test::type_cast)]] {
+#pragma clang diagnostic warning "-Wunused-variable"
+    long l = (long)reinterpret_cast<long *>(0); // expected-warning {{unused variable 'l'}}
+  }
+  long unused_after; // expected-warning {{unused variable 'unused_after'}}
+  long after = (long)reinterpret_cast<long *>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+  (void)after;
 }

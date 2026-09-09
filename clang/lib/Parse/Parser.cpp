@@ -1062,6 +1062,8 @@ Parser::DeclGroupPtrTy Parser::ParseDeclOrFunctionDefInternal(
   // The declaration's prefix-attribute suppress scope (see
   // ProfileSuppressScope).
   SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, Attrs);
+  ProfileSuppressionDominion ProfileDominion(*this, Attrs,
+                                             Attrs.Range.getBegin());
 
   // Parse the common declaration-specifiers piece.
   ParseDeclarationSpecifiers(DS, TemplateInfo, AS,
@@ -1380,6 +1382,8 @@ Decl *Parser::ParseFunctionDefinition(ParsingDeclarator &D,
   // already on the stack.
   SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(
       Actions, Res ? Res->getAsFunction() : nullptr);
+  ProfileSuppressionDominion ProfileDominion(
+      *this, Res ? Res->getAsFunction() : nullptr, Tok.getLocation());
 
   if (BodyKind != Sema::FnBodyKind::Other) {
     Actions.SetFunctionBodyKind(Res, KWLoc, BodyKind, DeletedMessage);
@@ -1853,6 +1857,27 @@ Parser::TryAnnotateName(CorrectionCandidateCallback *CCC,
   if (SS.isNotEmpty())
     AnnotateScopeToken(SS, !WasScopeAnnotation);
   return AnnotatedNameKind::Unresolved;
+}
+
+Parser::ProfileSuppressionDominion::ProfileSuppressionDominion(
+    Parser &P, const ParsedAttributesView &Attrs, SourceLocation Begin)
+    : P(P) {
+  P.Actions.Profiles().beginSuppression(Attrs, Begin, Record);
+}
+
+Parser::ProfileSuppressionDominion::ProfileSuppressionDominion(
+    Parser &P, const Decl *D, SourceLocation Begin)
+    : P(P) {
+  P.Actions.Profiles().beginSuppression(D, Begin, Record);
+}
+
+Parser::ProfileSuppressionDominion::~ProfileSuppressionDominion() {
+  // The last consumed token's end, at the expansion site of a macro-spelled
+  // token; the record clamps an end that precedes its begin.
+  SourceLocation Last =
+      P.PP.getSourceManager().getExpansionRange(P.PrevTokLocation).getEnd();
+  SourceLocation End = P.PP.getLocForEndOfToken(Last);
+  P.Actions.Profiles().endSuppression(Record, End.isValid() ? End : Last);
 }
 
 SourceLocation Parser::getEndOfPreviousToken() const {

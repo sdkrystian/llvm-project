@@ -269,6 +269,81 @@ SemaProfiles::makeImplicitProfilesSuppressAttr(StringRef ProfileName,
       /*RawArgumentKinds=*/nullptr, /*RawArgumentKindsSize=*/0);
 }
 
+/// Map every diagnostic of the rule groups named by \p Suppressions (profile,
+/// rule) to ignored from \p Begin on, recording the replaced mappings into
+/// \p Record; a diagnostic already ignored at \p Begin needs nothing.
+static void beginSuppressionOf(
+    Sema &S, ArrayRef<std::pair<StringRef, StringRef>> Suppressions,
+    SourceLocation Begin, SemaProfiles::SuppressionRecord &Record) {
+  if (Suppressions.empty() || Begin.isInvalid())
+    return;
+  DiagnosticsEngine &Diags = S.getDiagnostics();
+  Begin = S.getSourceManager().getExpansionLoc(Begin);
+  SmallVector<std::pair<diag::kind, DiagnosticMapping>, 8> Ignore;
+  for (const auto &[Profile, Rule] : Suppressions) {
+    SmallVector<diag::kind, 16> Kinds;
+    if (Diags.getDiagnosticIDs()->getDiagnosticsInGroup(
+            diag::Flavor::WarningOrError,
+            profiles::getProfileDiagGroupName(Profile, Rule), Kinds))
+      continue;
+    for (diag::kind Kind : Kinds) {
+      DiagnosticMapping Current = Diags.getDiagnosticMappingAt(Kind, Begin);
+      if (Current.getSeverity() == diag::Severity::Ignored ||
+          llvm::any_of(Ignore, [&](const auto &M) { return M.first == Kind; }))
+        continue;
+      Record.Restore.push_back({Kind, Current});
+      Ignore.push_back({Kind, DiagnosticMapping::Make(diag::Severity::Ignored,
+                                                      /*IsUser=*/true,
+                                                      /*IsPragma=*/true)});
+    }
+  }
+  if (Ignore.empty())
+    return;
+  Record.Begin = Begin;
+  Diags.setDiagnosticMappingsAt(Ignore, Begin);
+}
+
+void SemaProfiles::beginSuppression(const ParsedAttributesView &Attrs,
+                                    SourceLocation Begin,
+                                    SuppressionRecord &Record) {
+  if (!getLangOpts().Profiles)
+    return;
+  SmallVector<std::pair<StringRef, StringRef>, 2> Suppressions;
+  for (const ParsedAttr &AL : Attrs) {
+    if (AL.getKind() != ParsedAttr::AT_ProfilesSuppress)
+      continue;
+    const auto &Args = AL.getProfileSuppressArgs();
+    if (!Args.Name.empty())
+      Suppressions.push_back({Args.Name, Args.Rule});
+  }
+  beginSuppressionOf(SemaRef, Suppressions, Begin, Record);
+}
+
+void SemaProfiles::beginSuppression(const Decl *D, SourceLocation Begin,
+                                    SuppressionRecord &Record) {
+  if (!getLangOpts().Profiles || !D)
+    return;
+  SmallVector<std::pair<StringRef, StringRef>, 2> Suppressions;
+  for (const auto *A : D->specific_attrs<ProfilesSuppressAttr>()) {
+    Suppressions.push_back({A->getProfileName(), A->getRule()});
+    if (Begin.isInvalid())
+      Begin = A->getLocation();
+  }
+  beginSuppressionOf(SemaRef, Suppressions, Begin, Record);
+}
+
+void SemaProfiles::endSuppression(SuppressionRecord &Record,
+                                  SourceLocation End) {
+  if (Record.Restore.empty())
+    return;
+  const SourceManager &SM = getASTContext().getSourceManager();
+  if (End.isInvalid() || !SM.isBeforeInTranslationUnit(Record.Begin, End))
+    End = Record.Begin;
+  getDiagnostics().setDiagnosticMappingsAt(Record.Restore, End,
+                                           SourceRange(Record.Begin, End));
+  Record.Restore.clear();
+}
+
 bool SemaProfiles::shouldEmitProfileViolation(unsigned DiagID,
                                               StringRef ProfileName,
                                               StringRef RuleName,

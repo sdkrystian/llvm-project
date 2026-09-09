@@ -1039,7 +1039,7 @@ public:
   /// installs the mapping), or everywhere for -fprofiles-enforce= -- so code
   /// from a module is checked under the module's own enforcement, and a
   /// location-less check site under the command line's only. See
-  /// ProfilesFrameworkInternals.rst, "Enforcement State".
+  /// ProfilesFrameworkInternals.rst, "Enforcement and Suppression State".
   bool isProfileRuleActiveAt(unsigned DiagID, SourceLocation Loc) const;
 
   DiagnosticsEngine &getDiagnostics() const;

@@ -1478,6 +1478,8 @@ ExprResult Parser::ParseLambdaExpressionAfterIntroducer(
   {
     SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(
         Actions, Actions.getCurLambda()->CallOperator);
+    ProfileSuppressionDominion ProfileDominion(
+        *this, Actions.getCurLambda()->CallOperator, Tok.getLocation());
     Stmt = ParseCompoundStatementBody();
   }
   BodyScope.Exit();
@@ -1906,6 +1908,9 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
   // declaration.
   ParsedAttributes attrs(AttrFactory);
   bool ParsedAttrs = MaybeParseCXX11Attributes(attrs);
+  // The condition's prefix-attribute dominion covers its declaration.
+  ProfileSuppressionDominion ProfileDominion(*this, attrs,
+                                             attrs.Range.getBegin());
 
   const auto WarnOnInit = [this, &CK] {
     if (getLangOpts().CPlusPlus)
@@ -2063,6 +2068,8 @@ Sema::ConditionResult Parser::ParseCondition(StmtResult *InitStmt,
   // The condition variable's suppress attributes cover its initializer; see
   // ProfileSuppressScope.
   SemaProfiles::ProfileSuppressScope ProfileSuppressForInit(Actions, DeclOut);
+  ProfileSuppressionDominion ProfileDominionForInit(*this, DeclOut,
+                                                    Tok.getLocation());
 
   // '=' assignment-expression
   // If a '==' or '+=' is found, suggest a fixit to '='.

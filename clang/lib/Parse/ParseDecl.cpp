@@ -1973,6 +1973,8 @@ Parser::DeclGroupPtrTy Parser::ParseSimpleDeclaration(
   // pushed the same attributes; duplicate entries are harmless, since any
   // matching entry suppresses.
   SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, DeclAttrs);
+  ProfileSuppressionDominion ProfileDominion(*this, DeclAttrs,
+                                             DeclAttrs.Range.getBegin());
 
   ParsedTemplateInfo TemplateInfo;
   DeclSpecContext DSContext = getDeclSpecContextFromDeclaratorContext(Context);
@@ -2620,6 +2622,8 @@ Decl *Parser::ParseDeclarationAfterDeclaratorAndAttributes(
                                     SemaCUDA::CTCK_InitGlobalVar, ThisDecl);
 
   SemaProfiles::ProfileSuppressScope ProfileSuppressForInit(Actions, ThisDecl);
+  ProfileSuppressionDominion ProfileDominionForInit(*this, ThisDecl,
+                                                    Tok.getLocation());
 
   switch (TheInitKind) {
   // Parse declarator '=' initializer.
@@ -5487,6 +5491,7 @@ void Parser::ParseEnumBody(SourceLocation StartLoc, Decl *EnumDecl,
   // The enum-head suppress scope; the body is mid-parse, so the guard's
   // lifetime bounds the dominion (see ProfileSuppressScope).
   SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, EnumDecl);
+  ProfileSuppressionDominion ProfileDominion(*this, EnumDecl, SourceLocation());
 
   // C does not allow an empty enumerator-list, C++ does [dcl.enum].
   if (Tok.is(tok::r_brace) && !getLangOpts().CPlusPlus) {
@@ -5539,6 +5544,8 @@ void Parser::ParseEnumBody(SourceLocation StartLoc, Decl *EnumDecl,
       // exist until after the initializer, so the guard is built from the
       // prefix attributes (see ProfileSuppressScope).
       SemaProfiles::ProfileSuppressScope ProfileSuppressForInit(Actions, attrs);
+      ProfileSuppressionDominion ProfileDominionForInit(*this, attrs,
+                                                        attrs.Range.getBegin());
       AssignedVal = ParseConstantExpressionInExprEvalContext();
       if (AssignedVal.isInvalid())
         SkipUntil(tok::comma, tok::r_brace, StopBeforeMatch);
@@ -6990,6 +6997,10 @@ void Parser::ParseDirectDeclarator(Declarator &D) {
   // ProfileSuppressScope.
   SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions,
                                                           D.getAttributes());
+  ProfileSuppressionDominion ProfileDominion(
+      *this, D.getAttributes(),
+      D.getIdentifierLoc().isValid() ? D.getIdentifierLoc()
+                                     : D.getAttributes().Range.getBegin());
 
   while (true) {
     if (Tok.is(tok::l_paren)) {
@@ -7672,6 +7683,11 @@ void Parser::ParseParameterDeclarationClause(
       MaybeParseMicrosoftAttributes(ArgDeclSpecAttrs);
     }
 
+    // The parameter's prefix-attribute dominion covers its declaration and
+    // default argument.
+    ProfileSuppressionDominion ProfileDominion(*this, ArgDeclAttrs,
+                                               ArgDeclAttrs.Range.getBegin());
+
     SourceLocation DSStart = Tok.getLocation();
 
     // Parse a C++23 Explicit Object Parameter
@@ -7793,6 +7809,8 @@ void Parser::ParseParameterDeclarationClause(
         // see ProfileSuppressScope.
         SemaProfiles::ProfileSuppressScope ProfileSuppressForInit(Actions,
                                                                   Param);
+        ProfileSuppressionDominion ProfileDominionForInit(*this, Param,
+                                                          Tok.getLocation());
 
         // Parse the default argument
         if (DeclaratorCtx == DeclaratorContext::Member) {

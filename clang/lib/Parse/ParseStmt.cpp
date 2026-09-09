@@ -77,6 +77,8 @@ StmtResult Parser::ParseStatementOrDeclaration(StmtVector &Stmts,
     MaybeParseMicrosoftAttributes(GNUOrMSAttrs);
 
   SemaProfiles::ProfileSuppressScope ProfileSuppressGuard(Actions, CXX11Attrs);
+  ProfileSuppressionDominion ProfileDominion(*this, CXX11Attrs,
+                                             CXX11Attrs.Range.getBegin());
 
   StmtResult Res = ParseStatementOrDeclarationAfterAttributes(
       Stmts, StmtCtx, TrailingElseLoc, CXX11Attrs, GNUOrMSAttrs,

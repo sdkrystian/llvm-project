@@ -22,6 +22,7 @@
 #include "clang/Sema/SemaCodeCompletion.h"
 #include "clang/Sema/SemaObjC.h"
 #include "clang/Sema/SemaOpenMP.h"
+#include "clang/Sema/SemaProfiles.h"
 #include "llvm/ADT/STLForwardCompat.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Frontend/OpenMP/OMPContext.h"
@@ -490,6 +491,33 @@ public:
   /// parser enters the new scope, and this object's constructor will
   /// create that new scope. Similarly, once the object is destroyed
   /// the parser will exit the scope.
+  /// RAII recording the dominion of a construct's [[profiles::suppress]]
+  /// attributes as diagnostic state (P3589R2 [decl.attr.suppress]p3: the
+  /// attribute's tokens through the construct's last token): the dominion
+  /// begins at \p Begin when the guard is created and ends at the end of the
+  /// last token consumed when it is destroyed. A construct whose attributes
+  /// are attached to its Decl only after its leading tokens (a declarator-id
+  /// attribute) gets a Decl-keyed guard around its initializer or body,
+  /// beginning at the current token; the sites are enumerated in
+  /// ProfilesFrameworkInternals.rst, "Enforcement and Suppression State".
+  class ProfileSuppressionDominion {
+    Parser &P;
+    SemaProfiles::SuppressionRecord Record;
+
+  public:
+    /// The dominion of the suppress attributes among \p Attrs, a construct's
+    /// prefix (or declarator-id) attributes.
+    ProfileSuppressionDominion(Parser &P, const ParsedAttributesView &Attrs,
+                               SourceLocation Begin);
+    /// The dominion of the suppress attributes attached to \p D; an invalid
+    /// \p Begin starts it at the attributes themselves.
+    ProfileSuppressionDominion(Parser &P, const Decl *D, SourceLocation Begin);
+    ProfileSuppressionDominion(const ProfileSuppressionDominion &) = delete;
+    ProfileSuppressionDominion &
+    operator=(const ProfileSuppressionDominion &) = delete;
+    ~ProfileSuppressionDominion();
+  };
+
   class ParseScope {
     Parser *Self;
     ParseScope(const ParseScope &) = delete;
