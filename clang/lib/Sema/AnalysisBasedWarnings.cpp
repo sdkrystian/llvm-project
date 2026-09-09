@@ -2853,6 +2853,33 @@ void sema::AnalysisBasedWarnings::issueWarningsForRegisteredVarDecl(
       S, AC, std::make_pair(SecondRange.begin(), SecondRange.end()));
 }
 
+/// Base CFG build options of the per-function analysis pass.
+static void configureBaseCFGBuildOptions(AnalysisDeclContext &AC) {
+  // Don't generate EH edges for CallExprs as we'd like to avoid the n^2
+  // explosion for destructors that can result and the compile time hit.
+  AC.getCFGBuildOptions().PruneTriviallyFalseEdges = true;
+  AC.getCFGBuildOptions().AddEHEdges = false;
+  AC.getCFGBuildOptions().AddInitializers = true;
+  AC.getCFGBuildOptions().AddImplicitDtors = true;
+  AC.getCFGBuildOptions().AddParameterLifetimes = true;
+  AC.getCFGBuildOptions().AddTemporaryDtors = true;
+  AC.getCFGBuildOptions().AddCXXNewAllocator = false;
+  AC.getCFGBuildOptions().AddCXXDefaultInitExprInCtors = true;
+}
+
+/// The always-add statement classes of the per-function analysis pass's
+/// non-linearized CFG configuration.
+static void addNonLinearizedAlwaysAddClasses(AnalysisDeclContext &AC) {
+  AC.getCFGBuildOptions()
+      .setAlwaysAdd(Stmt::BinaryOperatorClass)
+      .setAlwaysAdd(Stmt::CompoundAssignOperatorClass)
+      .setAlwaysAdd(Stmt::BlockExprClass)
+      .setAlwaysAdd(Stmt::CStyleCastExprClass)
+      .setAlwaysAdd(Stmt::DeclRefExprClass)
+      .setAlwaysAdd(Stmt::ImplicitCastExprClass)
+      .setAlwaysAdd(Stmt::UnaryOperatorClass);
+}
+
 // An AST Visitor that calls a callback function on each callable DEFINITION
 // that is NOT in a dependent context:
 class CallableVisitor : public DynamicRecursiveASTVisitor {
@@ -3090,16 +3117,7 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
   // Construct the analysis context with the specified CFG build options.
   AnalysisDeclContext AC(/* AnalysisDeclContextManager */ nullptr, D);
 
-  // Don't generate EH edges for CallExprs as we'd like to avoid the n^2
-  // explosion for destructors that can result and the compile time hit.
-  AC.getCFGBuildOptions().PruneTriviallyFalseEdges = true;
-  AC.getCFGBuildOptions().AddEHEdges = false;
-  AC.getCFGBuildOptions().AddInitializers = true;
-  AC.getCFGBuildOptions().AddImplicitDtors = true;
-  AC.getCFGBuildOptions().AddParameterLifetimes = true;
-  AC.getCFGBuildOptions().AddTemporaryDtors = true;
-  AC.getCFGBuildOptions().AddCXXNewAllocator = false;
-  AC.getCFGBuildOptions().AddCXXDefaultInitExprInCtors = true;
+  configureBaseCFGBuildOptions(AC);
 
   bool EnableLifetimeSafetyAnalysis = lifetimes::IsLifetimeSafetyEnabled(S, D);
 
@@ -3114,14 +3132,7 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
     // Unreachable code analysis and thread safety require a linearized CFG.
     AC.getCFGBuildOptions().setAllAlwaysAdd();
   } else {
-    AC.getCFGBuildOptions()
-      .setAlwaysAdd(Stmt::BinaryOperatorClass)
-      .setAlwaysAdd(Stmt::CompoundAssignOperatorClass)
-      .setAlwaysAdd(Stmt::BlockExprClass)
-      .setAlwaysAdd(Stmt::CStyleCastExprClass)
-      .setAlwaysAdd(Stmt::DeclRefExprClass)
-      .setAlwaysAdd(Stmt::ImplicitCastExprClass)
-      .setAlwaysAdd(Stmt::UnaryOperatorClass);
+    addNonLinearizedAlwaysAddClasses(AC);
   }
   if (EnableLifetimeSafetyAnalysis)
     AC.getCFGBuildOptions().AddLifetime = true;
