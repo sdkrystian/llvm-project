@@ -3542,12 +3542,10 @@ def ProfilesSuppress : DeclOrStmtAttr {
 
 def ProfilesRequire : Attr {
   let Spellings = [CXX11<"profiles", "require">];
-  // The designator strings already carry the canonicalized arguments, as
-  // for ProfilesEnforce; no per-argument arrays are stored here.
-  let Args = [
-    VariadicStringArgument<"ProfileNames">,
-    VariadicStringArgument<"ProfileDesignators">
-  ];
+  // Validated against the imported module's advertised set when the import
+  // is acted on (SemaProfiles::processProfilesRequireAttr) and never attached
+  // to a declaration: no AST node.
+  let ASTNode = 0;
   let LangOpts = [Profiles];
   let HasCustomParsing = 1;
   let Documentation = [ProfilesRequireDocs];
