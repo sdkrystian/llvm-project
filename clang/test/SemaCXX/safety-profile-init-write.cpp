@@ -138,22 +138,22 @@ void test_compound_and_incdec_stores() {
 
 // Writes through a [[ref_to_uninit]] pointer or reference: a whole-pointee
 // scalar write is the pointee's initialization (paper §4.5), so it is
-// legal -- and a whole-`*p` store credits the pointee as initialized in
-// parse order, so the compound assignment below may read the value it
-// wrote. A write to a proper *subobject* below the marker initializes
-// nothing (§5.4's piecemeal ban; only whole-object construct_at could) and
-// is rejected like the named [[uninit]] twin above. An element store
-// (p[3]) is accepted and never credited -- a documented gap against the
-// paper's random-access ban (see Limitations). A compound assignment
-// through a still-uncredited marker reads uninitialized memory (full
-// coverage in safety-profile-init-ref-to-uninit.cpp).
+// legal -- and after it the pointee is initialized, so the compound
+// assignment below may read the value it wrote. A write to a proper
+// *subobject* below the marker initializes nothing (§5.4's piecemeal ban;
+// only whole-object construct_at could) and is rejected like the named
+// [[uninit]] twin above. An element store (p[3]) is accepted and initializes
+// nothing -- a documented gap against the paper's random-access ban (see
+// Limitations). A compound assignment through a still-uninitialized marker
+// reads uninitialized memory (full coverage in
+// safety-profile-init-ref-to-uninit.cpp).
 [[ref_to_uninit]] int &get_uninit_ref();
 void test_write_through_ref_to_uninit(int *p [[ref_to_uninit]],
                                       int &r [[ref_to_uninit]],
                                       Pair *ptr [[ref_to_uninit]]) {
-  *p = 5;              // OK (and credits p's pointee)
-  p[3] = 0;            // OK (no credit, no invalidation): the element-write gap
-  *p += 1;             // OK: the whole-*p store above credited the pointee
+  *p = 5;              // OK (and initializes p's pointee)
+  p[3] = 0;            // OK (initializes and invalidates nothing): the element-write gap
+  *p += 1;             // OK: the whole-*p store above initialized the pointee
   r = 5;               // OK
   ptr->x = 5;          // expected-error {{writing a member of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
   get_uninit_ref() = 5; // OK: whole-referent scalar store
@@ -190,17 +190,17 @@ void test_allocator_member_write() {
   (new Pair)->x = 5;                     // expected-error {{writing a member of uninitialized storage does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
 }
 
-// The whole-pointee credit route stays open: after a [[now_init]] fill the
-// pointee is initialized and member writes are ordinary stores.
+// After a [[now_init]] fill the pointee is initialized and member writes
+// are ordinary stores.
 [[now_init]] void fill_pair(Pair *p [[ref_to_uninit]]);
 void test_fill_then_member_write(Pair *ptr [[ref_to_uninit]]) {
   fill_pair(ptr);
   ptr->x = 5; // OK: the callee initialized the whole pointee
 }
 
-// Two suppress-only corners: a marked pointer MEMBER's pointee is never
-// credited, and an element access skips the credit consult, so even a
-// prior fill legalizes neither -- suppression is the remedy.
+// Two suppress-only corners: a marked pointer MEMBER's pointee and an
+// element access are not flow-tracked, so even a prior fill legalizes
+// neither -- suppression is the remedy.
 struct Holder { Pair *p [[ref_to_uninit]]; };
 void test_member_pointer_write_suppress_only(Holder h) {
   h.p->x = 5; // expected-error {{writing a member of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
@@ -247,9 +247,9 @@ T *construct_at(T *p [[ref_to_uninit]], Args &&...args);
 void test_construct_at_pattern() {
   Pair s [[uninit]];
   construct_at(&s, 1, 2); // OK: the marked parameter accepts &s
-  // The address escape earns no store credit -- paper §6.2 reserves
-  // callee-initialization for now_init(); only whole-entity stores credit
-  // (stores-only policy) -- so the subobject write below stays an error.
+  // A plain callee initializes nothing -- paper §6.2 reserves
+  // callee-initialization for now_init(); this construct_at declaration
+  // carries no [[now_init]] -- so the subobject write below stays an error.
   s.x = 1; // expected-error {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
 }
 
@@ -274,15 +274,13 @@ void test_suppress_decl() {
   s.x = 1; // OK: the function-level suppression covers the body
 }
 
-// Like every Decl-less expression check, the store check fires at definition
-// time when its target is non-dependent, and repeats when the local s is
-// remapped and the assignment rebuilt at instantiation -- the accepted
-// repetition. A dependent target (template_write_dependent_bad) defers on the
-// pattern and fires once per violating specialization.
+// A store below a flow-tracked local is judged on each instantiation's own
+// CFG, whether its target depends on the template's parameters or not: once
+// per violating specialization.
 template <typename T>
 void template_write_bad() {
   Pair s [[uninit]];
-  s.x = 1; // expected-error 2 {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
+  s.x = 1; // expected-error {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
 }
 template void template_write_bad<int>(); // expected-note {{in instantiation of function template specialization 'template_write_bad<int>' requested here}}
 
@@ -293,25 +291,24 @@ void template_write_dependent_bad() {
 }
 template void template_write_dependent_bad<Pair>(); // expected-note {{in instantiation of function template specialization 'template_write_dependent_bad<Pair>' requested here}}
 
-// A never-instantiated pattern diagnoses its non-dependent store at
-// definition time, exactly once.
+// A never-instantiated pattern's store below flow-tracked storage is not
+// diagnosed: the pattern's body is never analyzed.
 template <typename T>
 void template_write_never_instantiated() {
   Pair s [[uninit]];
-  s.x = 1; // expected-error {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
+  s.x = 1; // not diagnosed: never instantiated
 }
 
-// A literal-false if-constexpr condition makes the then-branch a discarded
-// statement context already at pattern parse, so its store stays silent; the
-// live else-branch fires at definition time and repeats when the branch is
-// rebuilt at instantiation.
+// A literal-false if-constexpr condition discards the then-branch, which is
+// absent from the instantiation's CFG; the live else-branch fires once, at
+// instantiation.
 template <typename T>
 void template_write_discarded_branch() {
   Pair s [[uninit]];
   if constexpr (false) {
     s.x = 1;
   } else {
-    s.x = 2; // expected-error 2 {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
+    s.x = 2; // expected-error {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
   }
 }
 template void template_write_discarded_branch<int>(); // expected-note {{in instantiation of function template specialization 'template_write_discarded_branch<int>' requested here}}
@@ -335,9 +332,9 @@ void template_allglobal_write_never_instantiated() {
 }
 
 // A store that violates two rules at one location -- the subobject write into
-// the [[uninit]] object and the unmarked-pointer binding of its member --
-// fires both at definition time, and both repeat on the instantiation
-// rebuild.
+// the flow-tracked [[uninit]] object, judged once at instantiation, and the
+// unmarked-pointer binding of a global's address, which is not flow-tracked
+// and fires at definition time and again on the instantiation rebuild.
 // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
 [[profiles::suppress(std::init, rule: "static_marker")]] [[uninit]] int g_uninit_int;
 struct WithPtrMember { int x; int *p; };
@@ -345,7 +342,7 @@ struct WithPtrMember { int x; int *p; };
 template <typename T>
 void template_two_rules_bad() {
   WithPtrMember s [[uninit]];
-  s.p = &g_uninit_int; // expected-error 2 {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}} \
+  s.p = &g_uninit_int; // expected-error {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}} \
                        // expected-error 2 {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 }
 template void template_two_rules_bad<int>(); // expected-note {{in instantiation of function template specialization 'template_two_rules_bad<int>' requested here}}
@@ -353,18 +350,16 @@ template void template_two_rules_bad<int>(); // expected-note {{in instantiation
 template <typename T>
 void template_two_rules_never_instantiated() {
   WithPtrMember s [[uninit]];
-  s.p = &g_uninit_int; // expected-error {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}} \
-                       // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  s.p = &g_uninit_int; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 }
 
-// Parse-order whole-entity store credit (paper §4.2/§4.5): assigning the
-// whole [[uninit]] entity is its initialization, so bindings after the store
-// (in parse order) treat it as initialized -- and the paper's reverse
-// direction applies: the credited entity now REQUIRES an unmarked target
-// (§4.2's `p4 = &x` error). Purely parse-order, no flow analysis: a store
-// under a condition credits everything after it (§1.2 "consider all branches
-// executed" -- the untaken path is a missed diagnostic, never a false
-// positive).
+// A whole-entity store is the [[uninit]] entity's initialization (paper
+// §4.2/§4.5): bindings after the store treat it as initialized -- and the
+// paper's reverse direction applies: the initialized entity now REQUIRES an
+// unmarked target (§4.2's `p4 = &x` error). A store under a condition
+// initializes on that path only: an unmarked binding after it is accepted
+// (the untaken path is a missed diagnostic, never a false positive) and a
+// marked one is not forced.
 void take_int_ptr(int *q);
 void test_whole_store_credit() {
   int u [[uninit]];
@@ -387,18 +382,18 @@ void test_conditional_store_credit(bool c) {
   int u [[uninit]];
   if (c)
     u = 5;
-  int *q = &u; // OK: parse-order credit (§1.2); the untaken path is an
+  int *q = &u; // OK: initialized on some path; the untaken path is an
                // accepted missed diagnostic
   (void)q;
 }
 
-// Compound assignment and ++/-- store, so they credit the whole entity --
-// while their own old-value read keeps the flow-based read-before-init
-// error (recorded after the pre-store checks: no self-crediting).
+// Compound assignment and ++/-- store, so they initialize the whole entity
+// -- while their own old-value read keeps the flow-based read-before-init
+// error (the read precedes the store).
 void test_compound_store_credit() {
   int u [[uninit]]; // expected-note {{variable 'u' is declared here}}
   u += 1;       // expected-error {{variable 'u' is read before initialization under profile 'std::init'}}
-  int *q = &u;  // OK: the compound store credited u
+  int *q = &u;  // OK: the compound store initialized u
   int v [[uninit]]; // expected-note {{variable 'v' is declared here}}
   ++v;          // expected-error {{variable 'v' is read before initialization under profile 'std::init'}}
   int *qv = &v; // OK
@@ -407,11 +402,10 @@ void test_compound_store_credit() {
   (void)q; (void)qv;
 }
 
-// Class-typed whole-object assignment never credits: it resolves to a member
-// operator= -- already rejected as a call on uninitialized storage -- and
-// never reaches the built-in assignment funnel (crediting an erroneous
-// statement would misstate the object's state). The class remedy remains
-// construct_at through [[ref_to_uninit]] (paper §4.5; unmodeled slice).
+// Class-typed whole-object assignment never initializes: it resolves to a
+// member operator= -- already rejected as a call on uninitialized storage --
+// and never reaches the built-in assignment funnel. The class remedy remains
+// construct_at through [[ref_to_uninit]] (paper §4.5).
 void test_class_store_never_credits() {
   Pair s [[uninit]];
   s = Pair{1, 2}; // expected-error {{calling member function 'operator=' binds its implicit object parameter to uninitialized memory under profile 'std::init'}}
@@ -420,8 +414,8 @@ void test_class_store_never_credits() {
   (void)y;
 }
 
-// A store in an unevaluated or discarded context never executes, so it earns
-// no credit.
+// A store in an unevaluated or discarded context never executes, so it
+// initializes nothing.
 void test_no_credit_contexts() {
   int u [[uninit]];
   (void)sizeof(u = 5); // expected-warning {{expression with side effects has no effect in an unevaluated context}} \
@@ -437,19 +431,18 @@ void test_no_credit_contexts() {
   (void)q; (void)qv; (void)qw;
 }
 
-// A suppressed store still initializes: the credit is recorded regardless
-// of [[profiles::suppress]], so suppression cannot manufacture later false
-// positives.
+// A suppressed store still initializes: suppression gates the diagnostics,
+// not the flow state, so it cannot manufacture later false positives.
 void test_suppressed_store_credits() {
   int u [[uninit]];
   // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
   [[profiles::suppress(std::init)]] { u = 5; }
-  int *q = &u; // OK: the suppressed store still credited u
+  int *q = &u; // OK: the suppressed store still initialized u
   (void)q;
 }
 
-// A nested assignment credits both targets: the inner assignment completes
-// (and records) before the outer one.
+// A nested assignment initializes both targets: the inner assignment
+// completes before the outer one.
 void test_nested_assignment_credit() {
   int u [[uninit]];
   int v [[uninit]];
@@ -459,13 +452,13 @@ void test_nested_assignment_credit() {
   (void)qu; (void)qv;
 }
 
-// The credit keys on the unique VarDecl: a same-named sibling-scope local is
-// a distinct declaration, so credit does not leak between them.
+// Each local is its own entity: a same-named sibling-scope local is a
+// distinct declaration, so its state does not leak between them.
 void test_sibling_scope_credit(bool c) {
   if (c) {
     int u [[uninit]];
     u = 5;
-    int *q = &u; // OK: this u is credited
+    int *q = &u; // OK: this u is initialized
     (void)q;
   } else {
     int u [[uninit]];
