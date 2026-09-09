@@ -513,33 +513,40 @@ void test_null_init_marked_decl() {
   (void)m2;
 }
 
-// A defaulted pointer or reference argument is checked against the parameter's
-// [[ref_to_uninit]] marking at the call site, like an explicit argument. The
-// declarations themselves stay clean; the diagnostic fires at the call.
+// A defaulted pointer or reference argument is judged against the parameter's
+// [[ref_to_uninit]] marking where it is declared, once; a call that uses the
+// default is not a binding site of its own.
 void def_uninit_ptr(int *p [[ref_to_uninit]] = &g_uninit);
-void def_uninit_ptr_bad(int *p [[ref_to_uninit]] = &g_init);
+void def_uninit_ptr_bad(int *p [[ref_to_uninit]] = &g_init); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
 void def_ptr(int *p = &g_init);
-void def_ptr_bad(int *p = &g_uninit);
+void def_ptr_bad(int *p = &g_uninit); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 void def_uninit_ref(int &r [[ref_to_uninit]] = g_uninit);
-void def_uninit_ref_bad(int &r [[ref_to_uninit]] = g_init);
+void def_uninit_ref_bad(int &r [[ref_to_uninit]] = g_init); // expected-error {{reference marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
 void def_ref(int &r = g_init);
-void def_ref_bad(int &r = g_uninit);
+void def_ref_bad(int &r = g_uninit); // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+// A suppression for a default argument belongs on the declaration.
+// no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+[[profiles::suppress(std::init)]] void def_ptr_bad_suppressed(int *p = &g_uninit);
 
 void test_default_arguments() {
-  def_uninit_ptr();     // OK
-  def_uninit_ptr_bad(); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
-  def_ptr();            // OK
-  def_ptr_bad();        // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
-  def_uninit_ref();     // OK
-  def_uninit_ref_bad(); // expected-error {{reference marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
-  def_ref();            // OK
-  def_ref_bad();        // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  def_uninit_ptr();         // OK
+  def_uninit_ptr_bad();     // OK: judged at the declaration
+  def_ptr();                // OK
+  def_ptr_bad();            // OK: judged at the declaration
+  def_uninit_ref();         // OK
+  def_uninit_ref_bad();     // OK: judged at the declaration
+  def_ref();                // OK
+  def_ref_bad();            // OK: judged at the declaration
+  def_ptr_bad_suppressed(); // OK
 
-  // An explicit argument overrides the default and is checked on its own merits.
+  // An explicit argument is a binding of its own.
   def_ptr_bad(&g_init); // OK
+  def_ptr(&g_uninit);   // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 
+  // A suppression around the call has no default-argument tokens in its
+  // dominion; the call binds nothing of its own to suppress.
   // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
-  [[profiles::suppress(std::init)]] { def_ptr_bad(); } // OK: suppressed
+  [[profiles::suppress(std::init)]] { def_ptr_bad(); } // OK
 }
 
 // Call arguments are checked at parameter copy-initialization, which also
@@ -571,30 +578,35 @@ void test_lambda_arguments() {
   l(&g_init);   // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
 }
 
-// A defaulted argument is checked once, at CXXDefaultArgExpr creation, so
-// call forms that never reach GatherArgumentsForCall -- functors in both
-// spellings, lambdas, and C++23 subscript operators -- diagnose it like a
-// plain call, and call-site suppression covers it.
+// A class-scope default argument is judged when its tokens are parsed, at the
+// end of the class; call forms that never reach GatherArgumentsForCall --
+// functors in both spellings, lambdas, and C++23 subscript operators -- are
+// not binding sites of their own.
 struct BadDefaultFunctor {
-  void operator()(int *p = &g_uninit);
-  void operator[](int i, int *p = &g_uninit);
+  void operator()(int *p = &g_uninit);        // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  void operator[](int i, int *p = &g_uninit); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 };
 void test_defaulted_argument_call_forms(BadDefaultFunctor f) {
-  f();            // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
-  f.operator()(); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
-  f[0];           // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
-  auto l = [](int *p = &g_uninit) {};
-  l();            // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
-  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
-  [[profiles::suppress(std::init)]] { f(); l(); } // OK: suppressed
+  f();            // OK: judged at the declaration
+  f.operator()(); // OK
+  f[0];           // OK
+  auto l = [](int *p = &g_uninit) {}; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  l();            // OK: judged at the declaration
 }
 
-// The enable_if machinery builds defaulted arguments under a SFINAE trap,
-// where no profile check runs: the candidate resolves, and the call
-// diagnoses once.
-void enable_if_default(int *p = &g_uninit) __attribute__((enable_if(true, "")));
+// The enable_if machinery builds defaulted arguments under a SFINAE trap; the
+// default argument was judged at its declaration, so the trap sees nothing.
+void enable_if_default(int *p = &g_uninit) __attribute__((enable_if(true, ""))); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 void test_enable_if_defaulted_argument() {
-  enable_if_default(); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  enable_if_default(); // OK: judged at the declaration
+}
+
+// A template's default argument is judged once per instantiation, at its own
+// tokens, when a call first uses it.
+template <class T> void def_tmpl(T *p = &g_uninit); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+void test_template_default_argument() {
+  def_tmpl<int>(); // expected-note {{in instantiation of default function argument expression for 'def_tmpl<int>' required here}}
+  def_tmpl<int>(); // OK: the instantiated default argument is reused
 }
 
 // A call with no declared callee (through a function pointer) has no

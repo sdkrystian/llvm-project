@@ -7426,10 +7426,8 @@ static ExprResult CopyObject(Sema &S,
 
       // Build the default argument expression; we don't actually care
       // if this succeeds or not, because this routine will complain
-      // if there was a problem. No profile check on the speculative node:
-      // the elided copy has no user-written call site.
-      S.BuildCXXDefaultArgExpr(Loc, Constructor, Parm, /*Init=*/nullptr,
-                               /*CheckInitProfile=*/false);
+      // if there was a problem.
+      S.BuildCXXDefaultArgExpr(Loc, Constructor, Parm);
     }
 
     return CurInitExpr;
@@ -10173,22 +10171,6 @@ Sema::PerformCopyInitialization(const InitializedEntity &Entity,
 
   if (ShouldTrackCopy)
     CurrentParameterCopyTypes.pop_back();
-
-  // std::init / ref_to_uninit (P4222R2 §4.2-§4.3): parameter
-  // copy-initialization is the funnel for call arguments from every call form
-  // -- GatherArgumentsForCall, overloaded operators, and calls to objects of
-  // class type -- so the binding check runs here, exactly once per argument.
-  // A type-only parameter entity (a call with no declared callee, e.g.
-  // through a function pointer) has no declaration to carry the marker: a
-  // null target (P4222R2 §4.2: passing uninitialized memory needs an
-  // appropriately declared callee). A default argument does not re-run
-  // copy-initialization at the call site; GatherArgumentsForCall checks those.
-  if (!Result.isInvalid() && Entity.isParameterKind()) {
-    const auto *Parm = dyn_cast_or_null<ParmVarDecl>(Entity.getDecl());
-    Profiles().checkInitProfileBinding(
-        SemaProfiles::InitBindingKind::Parameter, InitE->getExprLoc(), Parm,
-        Parm ? Parm->getType() : Entity.getType(), InitE);
-  }
 
   return Result;
 }
