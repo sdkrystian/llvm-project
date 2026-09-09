@@ -26,8 +26,6 @@
 #include "clang/Basic/SourceManager.h"
 #include "clang/Sema/Initialization.h"
 #include "clang/Sema/ParsedAttr.h"
-#include "clang/Sema/Scope.h"
-#include "clang/Sema/ScopeInfo.h"
 #include "clang/Sema/Sema.h"
 
 using namespace clang;

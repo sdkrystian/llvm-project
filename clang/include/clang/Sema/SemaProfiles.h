@@ -22,7 +22,6 @@
 #include "clang/Basic/DiagnosticIDs.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Sema/SemaBase.h"
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
