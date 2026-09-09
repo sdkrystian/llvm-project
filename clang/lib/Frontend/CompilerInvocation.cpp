@@ -3304,6 +3304,13 @@ static bool ParseFrontendArgs(FrontendOptions &Opts, ArgList &Args,
       IsSystem = Opts.IsSystemModule;
     }
 
+    // -xc++-system-header names a system header: record the input as system
+    // so the header unit's main file gets the system-header characteristic
+    // (serialized into the pcm and thus visible to importers), matching how
+    // the same header behaves when reached by inclusion.
+    if (IK.getHeaderUnitKind() == InputKind::HeaderUnit_System)
+      IsSystem = true;
+
     Opts.Inputs.emplace_back(std::move(Inputs[i]), IK, IsSystem);
   }
 
