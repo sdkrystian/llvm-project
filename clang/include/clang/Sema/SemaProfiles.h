@@ -30,6 +30,8 @@
 
 namespace clang {
 
+class InitializationKind;
+class InitializedEntity;
 class Module;
 class ParsedAttr;
 class ParsedAttributesView;
@@ -495,6 +497,21 @@ public:
   void checkInitProfileBinding(InitBindingKind Kind, SourceLocation Loc,
                                const ValueDecl *Target, QualType T,
                                const Expr *Src, const Decl *D = nullptr);
+
+  /// The entity-driven entry to the binding funnel: judge the binding an
+  /// InitializationSequence performs for \p Entity from \p Init, the
+  /// sequence's converted result (a materialized temporary is initialized
+  /// memory), called once per sequence from InitializationSequence::Perform
+  /// beside checkInitializerLifetime. The entity's kind selects the
+  /// InitBindingKind, its target, and its deferral anchor. A braced or
+  /// parenthesized list initializing an object is left to the sequences its
+  /// elements perform (a reference list-initializes from its lone element); a
+  /// SFINAE context, a rebuild of a default argument or initializer, an
+  /// implicit member initialization, and an entity kind whose binding can
+  /// carry no marker and names no construct of its own are skipped.
+  void checkInitProfileBinding(const InitializedEntity &Entity,
+                               const InitializationKind &Kind,
+                               const Expr *Init);
 
   /// std::init / uninit_read (paper §4.5): diagnose a read *through* a
   /// [[ref_to_uninit]] pointer or reference, whose result is itself

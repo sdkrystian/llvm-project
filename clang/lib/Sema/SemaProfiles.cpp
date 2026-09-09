@@ -24,6 +24,7 @@
 #include "clang/Basic/Builtins.h"
 #include "clang/Basic/Module.h"
 #include "clang/Basic/SourceManager.h"
+#include "clang/Sema/Initialization.h"
 #include "clang/Sema/ParsedAttr.h"
 #include "clang/Sema/Scope.h"
 #include "clang/Sema/ScopeInfo.h"
@@ -1870,6 +1871,37 @@ bool SemaProfiles::thisIsUnderConstruction() const {
   // is parsed or instantiated.
   return isa<CXXConstructorDecl, CXXRecordDecl>(
       SemaRef.getFunctionLevelDeclContext());
+}
+
+void SemaProfiles::checkInitProfileBinding(const InitializedEntity &Entity,
+                                           const InitializationKind &Kind,
+                                           const Expr *Init) {
+  if (!getLangOpts().Profiles || !Init)
+    return;
+  // Each element of a list initializing an object is bound by a sequence of
+  // its own; a reference list-initializes from its lone element here.
+  if (isa<InitListExpr, CXXParenListInitExpr>(Init) &&
+      !Entity.getType()->isReferenceType())
+    return;
+  // A SFINAE trap is not a use, and a default argument or initializer
+  // rebuilt for a nested use was judged where it was written.
+  if (SemaRef.isSFINAEContext() || SemaRef.needsRebuildOfDefaultArgOrInit())
+    return;
+  if (Entity.isImplicitMemberInitializer())
+    return;
+  const Expr *Src = Init;
+  SourceLocation Loc =
+      Kind.getLocation().isValid() ? Kind.getLocation() : Src->getExprLoc();
+  switch (Entity.getKind()) {
+  case InitializedEntity::EK_Variable: {
+    const ValueDecl *Var = Entity.getDecl();
+    checkInitProfileBinding(InitBindingKind::Variable, Loc, Var,
+                            Entity.getType(), Src, Var);
+    return;
+  }
+  default:
+    return;
+  }
 }
 
 void SemaProfiles::judgeInitProfileBinding(InitBindingKind Kind,
