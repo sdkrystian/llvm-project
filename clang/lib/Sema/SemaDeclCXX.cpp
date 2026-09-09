@@ -4260,11 +4260,11 @@ void Sema::ActOnFinishCXXInClassMemberInitializer(Decl *D,
 
   FD->setInClassInitializer(InitExpr.get());
 
-  // Pass the field to the post-initialization profile checks so the Decl-aware
-  // shouldEmitProfileViolation overload resolves [[profiles::suppress]] from
-  // the field and its lexical parents. This does not depend on a parse-time
-  // suppress scope still being active (the late-parsed NSDMI finishes parsing
-  // before this finalization runs).
+  // Pass the field to the post-initialization profile checks so a templated
+  // pattern defers to its instantiations. Suppression comes from the
+  // initializer's own location, whose dominion the parser recorded, so this
+  // does not depend on a parse-time suppress scope still being active (the
+  // late-parsed NSDMI finishes parsing before this finalization runs).
   Profiles().checkInitProfileUninitWithInitializer(FD,
                                                    FD->getInClassInitializer());
 }
