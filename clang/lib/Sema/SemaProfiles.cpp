@@ -60,8 +60,8 @@ bool SemaProfiles::addProfileEnforcement(StringRef Name, StringRef Designator,
   getASTContext().addEnforcedProfile(Name, Designator, Loc);
   // The enforcement's dominion is the rule diagnostics' mapping from the
   // attribute on (the expansion site of a macro-spelled attribute); an inert
-  // profile maps nothing. See ProfilesFrameworkInternals.rst, "Enforcement
-  // State".
+  // profile maps nothing. See ProfilesFrameworkInternals.rst,
+  // "Enforcement and Suppression State".
   if (Loc.isValid() &&
       !profiles::isProfileNameInert(Name, getLangOpts().ProfilesTestProfiles))
     mapProfileGroupFrom(
