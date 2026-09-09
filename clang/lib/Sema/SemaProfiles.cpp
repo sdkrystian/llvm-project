@@ -2621,7 +2621,7 @@ void SemaProfiles::checkInitProfilePointerAssignment(Expr *LHS, Expr *RHS,
 }
 
 void SemaProfiles::checkInitProfileAssignmentOperands(BinaryOperatorKind Opc,
-                                                      Expr *LHSExpr,
+                                                      Expr *LHSExpr, Expr *RHS,
                                                       bool IsCompound,
                                                       SourceLocation OpLoc) {
   // A compound assignment reads the old value but builds no lvalue-to-rvalue
@@ -2633,6 +2633,8 @@ void SemaProfiles::checkInitProfileAssignmentOperands(BinaryOperatorKind Opc,
     checkInitProfileReadThrough(LHSExpr->getExprLoc(), LHSExpr,
                                 LHSExpr->getType());
   checkInitProfileSubobjectWrite(OpLoc, LHSExpr);
+  if (!IsCompound)
+    checkInitProfilePointerAssignment(LHSExpr, RHS, OpLoc);
 }
 
 void SemaProfiles::checkInitProfileIncDec(Expr *Operand, SourceLocation OpLoc) {

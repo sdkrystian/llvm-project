@@ -559,24 +559,17 @@ public:
   void checkInitProfileObjectArgument(const Expr *Object,
                                       const CXXMethodDecl *Method);
 
-  /// The PointerAssignment derive step of checkInitProfileBinding: assigning
-  /// to a pointer must respect the assigned-to pointer's [[ref_to_uninit]]
-  /// marking, resolved from the left operand through transparent casts and
-  /// conditional, comma, and GNU ?: target shapes; a no-op for a non-pointer
-  /// LHS. Hosts the cluster from Sema::CreateBuiltinBinOp's BO_Assign arm.
-  /// An instantiation-dependent LHS defers to the instantiation rebuild (its
-  /// marker cannot be read yet); the source's deferral is the funnel's.
-  void checkInitProfilePointerAssignment(Expr *LHS, Expr *RHS,
-                                         SourceLocation OpLoc);
-
-  /// std::init: the check pair every built-in assignment hosts (paper
-  /// §5.4-§5.6): the compound-assignment old-value load (read-through --
-  /// excluding the shifts, whose LHS promotion already loads through the
-  /// lvalue-to-rvalue chokepoint) and the subobject-write check. Hosts the
-  /// cluster from Sema::CheckAssignmentOperands. \p IsCompound distinguishes
-  /// `op=` from `=` (!CompoundType.isNull() at the host site).
+  /// std::init: the checks every built-in assignment hosts, from
+  /// Sema::CheckAssignmentOperands beside checkAssignmentLifetime, with
+  /// \p RHS the converted right operand: the compound-assignment old-value
+  /// load (read-through -- excluding the shifts, whose LHS promotion already
+  /// loads through the lvalue-to-rvalue chokepoint), the subobject-write
+  /// check (paper §5.4-§5.6), and for a simple assignment to a pointer the
+  /// ref_to_uninit judgment of the source against the assigned-to pointer's
+  /// marking (§4.3). \p IsCompound distinguishes `op=` from `=`
+  /// (!CompoundType.isNull() at the host site).
   void checkInitProfileAssignmentOperands(BinaryOperatorKind Opc, Expr *LHSExpr,
-                                          bool IsCompound,
+                                          Expr *RHS, bool IsCompound,
                                           SourceLocation OpLoc);
 
   /// std::init: the check pair a built-in ++/-- hosts -- the old-value load
@@ -622,6 +615,16 @@ private:
   /// recognizers classify it Unknown rather than Initialized: its members may
   /// not be initialized yet.
   bool thisIsUnderConstruction() const;
+
+  /// The PointerAssignment derive step of checkInitProfileBinding, from
+  /// checkInitProfileAssignmentOperands: assigning to a pointer must respect
+  /// the assigned-to pointer's [[ref_to_uninit]] marking, resolved from the
+  /// left operand through transparent casts and conditional, comma, and GNU
+  /// ?: target shapes; a no-op for a non-pointer LHS. An
+  /// instantiation-dependent LHS defers to the instantiation rebuild (its
+  /// marker cannot be read yet); the source's deferral is the funnel's.
+  void checkInitProfilePointerAssignment(Expr *LHS, Expr *RHS,
+                                         SourceLocation OpLoc);
 
   /// The classify-and-judge half of checkInitProfileBinding, shared with the
   /// derive steps that resolve the target's marking themselves (a conditional
