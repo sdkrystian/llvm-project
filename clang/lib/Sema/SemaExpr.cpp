@@ -14543,15 +14543,6 @@ QualType Sema::CheckAssignmentOperands(Expr *LHSExpr, ExprResult &RHS,
   if (CheckForModifiableLvalue(LHSExpr, Loc, *this))
     return QualType();
 
-  // std::init / uninit_write (paper §5.4-§5.6): a scalar store to a subobject
-  // of a named [[uninit]] object is banned delayed initialization. This is
-  // the shared funnel for simple and every compound assignment, so the check
-  // fires exactly once per built-in assignment; class-typed operator= never
-  // reaches it.
-  if (getLangOpts().Profiles)
-    Profiles().checkInitProfileAssignmentOperands(
-        Opc, LHSExpr, /*IsCompound=*/!CompoundType.isNull(), Loc);
-
   QualType LHSType = LHSExpr->getType();
   QualType RHSType = CompoundType.isNull() ? RHS.get()->getType() :
                                              CompoundType;
@@ -14676,6 +14667,13 @@ QualType Sema::CheckAssignmentOperands(Expr *LHSExpr, ExprResult &RHS,
 
   AssignedEntity AE{LHSExpr};
   checkAssignmentLifetime(*this, AE, RHS.get());
+
+  // std::init: the read-through, subobject-write, and pointer-assignment
+  // checks every built-in assignment hosts; class-typed operator= never
+  // reaches this funnel.
+  if (getLangOpts().Profiles)
+    Profiles().checkInitProfileAssignmentOperands(
+        Opc, LHSExpr, RHS.get(), /*IsCompound=*/!CompoundType.isNull(), Loc);
 
   if (getLangOpts().CPlusPlus20 && LHSType.isVolatileQualified()) {
     if (CompoundType.isNull()) {
@@ -15639,12 +15637,6 @@ ExprResult Sema::CreateBuiltinBinOp(SourceLocation OpLoc,
     if (!ResultTy.isNull()) {
       DiagnoseSelfAssignment(*this, LHS.get(), RHS.get(), OpLoc, true);
       DiagnoseSelfMove(LHS.get(), RHS.get(), OpLoc);
-
-      // std::init / ref_to_uninit (P4222R2 §4.3): assigning a pointer must
-      // respect the [[ref_to_uninit]] marking of the assigned-to pointer.
-      if (getLangOpts().Profiles)
-        Profiles().checkInitProfilePointerAssignment(LHS.get(), RHS.get(),
-                                                     OpLoc);
 
       // Avoid copying a block to the heap if the block is assigned to a local
       // auto variable that is declared in the same scope as the block. This
