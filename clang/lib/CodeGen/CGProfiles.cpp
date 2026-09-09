@@ -72,7 +72,8 @@ void CodeGenFunction::EmitProfileRuntimeCheck(
   // The location-aware gate keeps code before the enforcement --
   // global-module-fragment functions emitted after the purview is parsed, or
   // from a BMI -- outside the dominion.
-  if (!profiles::shouldEmitProfileViolation(getContext(), Profile, Rule, Loc,
+  if (!profiles::shouldEmitProfileViolation(getContext(), TrapDiagID, Profile,
+                                            Rule, Loc,
                                             profileSuppressionQuery()))
     return;
   // The check fires: only now build the site's "no violation" predicate, so

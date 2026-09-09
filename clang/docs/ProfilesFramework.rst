@@ -186,6 +186,36 @@ To exempt an object from a profile's checks everywhere it is used, a profile
 must provide its own per-object, decl-scoped marker attribute.
 
 
+Diagnostic Groups
+=================
+
+Every profile rule's diagnostic belongs to the diagnostic group
+``-Wprofile-<profile>-<rule>``, nested in ``-Wprofile-<profile>`` and, with
+every other profile, in ``-Wprofiles``; the group name lowercases the
+profile and rule names and spells ``::`` and ``_`` as ``-``
+(``std::init`` / ``uninit_read`` is ``-Wprofile-std-init-uninit-read``).
+Enforcement and suppression are expressed through these groups, so the
+ordinary diagnostic controls apply to profile rules as well:
+
+- A violation message ends in its group name, ``[-Wprofile-...]``, unless
+  ``-fno-diagnostics-show-option`` is given.
+- ``-Wprofile-<profile>`` or ``-Wprofile-<profile>-<rule>`` reports the
+  rules as *warnings* without any enforcement, and ``-Werror=profile-...``
+  as errors; ``-Weverything`` does not enable them.
+- ``#pragma clang diagnostic ignored|warning|error "-Wprofile-..."``, with
+  ``push`` and ``pop``, changes a rule's severity for the rest of the file,
+  under an enforcement or without one; ``#pragma clang diagnostic warning
+  "-Weverything"`` enables every rule.
+- ``--warning-suppression-mappings`` exempts the listed paths from a
+  ``-fprofiles-enforce=`` enforcement, not from one written in source.
+
+``-Wno-profiles`` (or a narrower ``-Wno-profile-...``) does not disable an
+enforcement, whose mapping is installed after the command-line options; a
+violation stays an error under ``-w`` as well, and ``-Wno-error=profile-...``
+has no effect on an enforced rule.  A ``#pragma clang diagnostic push``
+before an enforcement and ``pop`` after it leave the enforcement in place.
+
+
 System Headers
 ==============
 
@@ -226,7 +256,13 @@ diagnosed individually:
 
 ``[[profiles::require]]`` only verifies the advertisement; importing an
 enforcing module does **not** enforce its profiles in the importer.
-Enforcement is always explicit and local.  A header unit participates the
+Enforcement is always explicit and local.  A module's own code keeps the
+module's enforcement wherever it is used: a template or inline function
+from an enforcing module is checked -- and gets its runtime checks -- when
+it is instantiated or emitted in a non-enforcing importer, and code from a
+non-enforcing module is not checked in an enforcing importer.  (A
+module-map module under ``-fmodules`` has no enforcement of its own and
+takes the importer's ``-fprofiles-enforce=``.)  A header unit participates the
 same way: an ``[[profiles::enforce(...)]];`` empty-declaration in the header
 is exported by the corresponding header unit and validated by
 ``[[profiles::require]]`` on its import.
@@ -297,13 +333,15 @@ Behavior of a runtime check:
   (ignorelists, ``__attribute__((no_sanitize))``, hot cutoffs) can disable a
   profile's check, which is a language guarantee rather than opt-in
   instrumentation.
-- **Per-TU enforcement.**  A check is emitted exactly when the translation
-  unit *emitting the code* enforces the profile.  An inline function defined
-  in a textual header is therefore compiled with checks in enforcing TUs and
-  without them elsewhere, and the linker keeps one copy arbitrarily -- as
-  when mixing sanitized and unsanitized TUs.  Code imported from a named
-  module follows the same rule: it is checked only if the *importing* TU
-  enforces the profile, even when the module interface itself did.
+- **Per-unit enforcement.**  A check is emitted exactly when the
+  translation unit *whose tokens the code is* enforces the profile there.
+  An inline function defined in a textual header is therefore compiled with
+  checks in enforcing TUs and without them elsewhere, and the linker keeps
+  one copy arbitrarily -- as when mixing sanitized and unsanitized TUs.
+  Code from a named module keeps the module's own enforcement: it is
+  checked wherever it is emitted if the module interface enforced the
+  profile, and not otherwise, whatever the importing TU enforces (see
+  `Profiles and Modules`_).
 
 No real profile with runtime-checked rules ships yet; the in-tree pilot rule
 (``test::arith`` / ``zero_divide``, which traps on integer division or

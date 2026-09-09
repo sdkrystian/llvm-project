@@ -122,13 +122,11 @@ bool profiles::isSuppressed(const SuppressionQuery &Q, llvm::StringRef Profile,
   return isSuppressedFor(Q.ChainAnchor, Profile, Rule);
 }
 
-bool profiles::shouldEmitProfileViolation(const ASTContext &Ctx,
-                                          llvm::StringRef Profile,
-                                          llvm::StringRef Rule,
-                                          SourceLocation Loc,
-                                          const SuppressionQuery &Q) {
+bool profiles::shouldEmitProfileViolation(
+    const ASTContext &Ctx, unsigned DiagID, llvm::StringRef Profile,
+    llvm::StringRef Rule, SourceLocation Loc, const SuppressionQuery &Q) {
   // Enforcement first, so a TU that does not enforce the profile never pays
   // the suppression walk.
-  return Ctx.isProfileActiveAt(Profile, Loc) &&
+  return Ctx.isProfileRuleActiveAt(DiagID, Loc) &&
          !isSuppressed(Q, Profile, Rule, Loc, Ctx.getSourceManager());
 }

@@ -777,10 +777,14 @@ private:
   std::unique_ptr<ProfileList> ProfList;
 
   /// The profiles enforced on this translation unit by [[profiles::enforce]]
-  /// (P3589R2). Sema records entries (and owns the attribute's diagnostics);
-  /// the state lives here so consumers without a Sema -- e.g. code generation
-  /// from an AST file -- can query enforcement, and the ASTReader restores a
-  /// PCH's enforcements directly into it.
+  /// or -fprofiles-enforce= (P3589R2): the list behind isProfileEnforced,
+  /// which serves the whole-unit questions (advertising, require, designator
+  /// mismatches, redeclaration compatibility, the post-parse dispatch gates);
+  /// where a rule is enforced is the rule diagnostic's mapping
+  /// (isProfileRuleActiveAt). Sema records entries (and owns the attribute's
+  /// diagnostics); the list lives here so consumers without a Sema -- e.g.
+  /// code generation from an AST file -- can query it, and the ASTReader
+  /// restores a PCH's enforcements directly into it.
   SmallVector<profiles::ProfileEnforcement, 4> EnforcedProfiles;
 
   /// The allocator used to create AST objects.
@@ -1017,12 +1021,6 @@ public:
   /// suite opted in via -fprofiles-test-profiles.
   bool isProfileEnforced(StringRef ProfileName) const;
 
-  /// Like isProfileEnforced, but additionally false when \p Loc lies before
-  /// the enforcement's dominion (P3589R2 [decl.attr.enforce]p4: the dominion
-  /// starts after the attribute), so a violation located in the global module
-  /// fragment is not diagnosed. Fails open on invalid locations.
-  bool isProfileEnforcedAt(StringRef ProfileName, SourceLocation Loc) const;
-
   /// True if \p Loc is exempt from profile enforcement because it lies in a
   /// system header. Temporary stopgap for the not-yet-implemented
   /// [[profiles::exempt]] (P3589R2 §1.1.6), so enforcing a profile on a
@@ -1032,10 +1030,17 @@ public:
   /// enforcement into system-header code.
   bool isProfileExemptSystemHeaderLoc(SourceLocation Loc) const;
 
-  /// True if \p ProfileName is enforced at \p Loc and \p Loc is not
-  /// system-header-exempt: the enforcement half of the one violation gate,
-  /// profiles::shouldEmitProfileViolation (clang/AST/Profiles.h).
-  bool isProfileActiveAt(StringRef ProfileName, SourceLocation Loc) const;
+  /// True if the profile rule diagnosed by \p DiagID is enforced at \p Loc
+  /// and \p Loc is not system-header-exempt: the enforcement half of the one
+  /// violation gate, profiles::shouldEmitProfileViolation
+  /// (clang/AST/Profiles.h). A rule is enforced where its diagnostic is
+  /// mapped -- from an enforcement's attribute to the end of its translation
+  /// unit (P3589R2 [decl.attr.enforce]p4; SemaProfiles::addProfileEnforcement
+  /// installs the mapping), or everywhere for -fprofiles-enforce= -- so code
+  /// from a module is checked under the module's own enforcement, and a
+  /// location-less check site under the command line's only. See
+  /// ProfilesFrameworkInternals.rst, "Enforcement State".
+  bool isProfileRuleActiveAt(unsigned DiagID, SourceLocation Loc) const;
 
   DiagnosticsEngine &getDiagnostics() const;
 

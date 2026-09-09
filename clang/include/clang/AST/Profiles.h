@@ -116,14 +116,14 @@ bool isSuppressed(const SuppressionQuery &Q, llvm::StringRef Profile,
                   llvm::StringRef Rule, SourceLocation Loc,
                   const SourceManager &SM);
 
-/// The one enforce/exempt/suppress ladder: true if \p Profile is enforced at
-/// \p Loc and not system-header-exempt there (ASTContext::isProfileActiveAt)
-/// and \p Rule is not suppressed under \p Q. CodeGen's runtime-check emission
-/// runs it as is; SemaProfiles::shouldEmitProfileViolation adds the
-/// parse-time rungs.
-bool shouldEmitProfileViolation(const ASTContext &Ctx, llvm::StringRef Profile,
-                                llvm::StringRef Rule, SourceLocation Loc,
-                                const SuppressionQuery &Q);
+/// The one enforce/exempt/suppress ladder: true if the rule diagnosed by
+/// \p DiagID is enforced at \p Loc and not system-header-exempt there
+/// (ASTContext::isProfileRuleActiveAt) and \p Rule of \p Profile is not
+/// suppressed under \p Q. CodeGen's runtime-check emission runs it as is;
+/// SemaProfiles::shouldEmitProfileViolation adds the parse-time rungs.
+bool shouldEmitProfileViolation(const ASTContext &Ctx, unsigned DiagID,
+                                llvm::StringRef Profile, llvm::StringRef Rule,
+                                SourceLocation Loc, const SuppressionQuery &Q);
 
 } // namespace profiles
 } // namespace clang

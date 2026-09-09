@@ -64,9 +64,11 @@ public:
         Entries, [&](const auto &E) { return isProfileEnforced(E.Name); });
   }
 
-  /// Record an enforcement of \p Name into the ASTContext's list, diagnosing
-  /// a designator mismatch with an already-recorded enforcement of the same
-  /// profile (P3589R2 [decl.attr.enforce]p3).
+  /// Record an enforcement of \p Name into the ASTContext's list and map the
+  /// profile's rule diagnostics to errors from \p Loc to the end of the
+  /// translation unit (P3589R2 [decl.attr.enforce]p4), diagnosing a
+  /// designator mismatch with an already-recorded enforcement of the same
+  /// profile ([decl.attr.enforce]p3).
   bool addProfileEnforcement(StringRef Name, StringRef Designator,
                              SourceLocation Loc);
   /// Record every designator of a [[profiles::enforce]] attribute (also onto
@@ -92,18 +94,20 @@ public:
   ProfilesSuppressAttr *makeImplicitProfilesSuppressAttr(StringRef ProfileName,
                                                          StringRef RuleName);
 
-  /// True if a violation of \p RuleName of \p ProfileName at \p Loc is to be
-  /// diagnosed: the shared ladder (profiles::shouldEmitProfileViolation --
-  /// enforced at \p Loc, not system-header-exempt, not suppressed) plus the
-  /// parse-time rungs. Suppression is looked up on the live parse-time
+  /// True if a violation of \p RuleName of \p ProfileName at \p Loc,
+  /// diagnosed by \p DiagID, is to be diagnosed: the shared ladder
+  /// (profiles::shouldEmitProfileViolation -- the rule enforced at \p Loc,
+  /// not system-header-exempt, not suppressed) plus the parse-time rungs.
+  /// Suppression is looked up on the live parse-time
   /// stack, on \p D and its lexical parents, and -- for a post-parse (CFG)
   /// site -- upward from \p UseStmt through \p AC's parent map and then from
   /// the analyzed declaration. A templated \p D never fires (the rule fires
   /// on the instantiation; see ProfilesFrameworkInternals.rst, "Pattern 1"),
   /// and a parse-time site (\p AC null) in an unevaluated or discarded
   /// context never fires.
-  bool shouldEmitProfileViolation(StringRef ProfileName, StringRef RuleName,
-                                  SourceLocation Loc, const Decl *D = nullptr,
+  bool shouldEmitProfileViolation(unsigned DiagID, StringRef ProfileName,
+                                  StringRef RuleName, SourceLocation Loc,
+                                  const Decl *D = nullptr,
                                   const Stmt *UseStmt = nullptr,
                                   AnalysisDeclContext *AC = nullptr);
   /// Emit \p DiagID at \p Loc if shouldEmitProfileViolation passes; returns

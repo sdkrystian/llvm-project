@@ -900,49 +900,15 @@ bool ASTContext::isProfileEnforced(StringRef ProfileName) const {
   return getProfileEnforcement(ProfileName) != nullptr;
 }
 
-bool ASTContext::isProfileEnforcedAt(StringRef ProfileName,
-                                     SourceLocation Loc) const {
-  if (!isProfileEnforced(ProfileName))
-    return false;
-  // P3589R2 [decl.attr.enforce]p4: the enforcement's dominion starts after
-  // the attribute, so a violation located before it -- global-module-fragment
-  // tokens ahead of the module declaration -- is outside it. Enforcements
-  // restored from an AST file carry their serialized locations. The
-  // comparison is made only when the two locations are in the same TU per
-  // SourceManager::isInTheSameTranslationUnit (the same file or one loaded
-  // allocation, where token order is exact); everything else fails open to
-  // plain-enforcement behavior: invalid locations (synthesized code, a
-  // module's advertisement set), locations split across chained AST files
-  // (whose relative order isBeforeInTranslationUnit does not model), and code
-  // deserialized from an import. Locations are compared by *expansion*
-  // location, unlike the suppression comparator's raw token order (see
-  // SemaProfiles::isProfileSuppressed): enforcement dominion is TU-scale, so
-  // a macro defined in the GMF but *invoked* in the purview stays enforced --
-  // its invocation tokens are purview tokens -- while GMF pattern tokens are
-  // skipped.
-  const profiles::ProfileEnforcement *E = getProfileEnforcement(ProfileName);
-  assert(E && "enforced profile has no enforcement entry");
-  const SourceManager &SM = getSourceManager();
-  if (Loc.isInvalid() || E->EnforceLoc.isInvalid())
-    return true;
-  FileIDAndOffset VOffs = SM.getDecomposedLoc(SM.getExpansionLoc(Loc));
-  FileIDAndOffset EOffs =
-      SM.getDecomposedLoc(SM.getExpansionLoc(E->EnforceLoc));
-  if (VOffs.first.isInvalid() || EOffs.first.isInvalid())
-    return true;
-  std::pair<bool, bool> InSameTU = SM.isInTheSameTranslationUnit(VOffs, EOffs);
-  return !InSameTU.first || !InSameTU.second;
-}
-
 bool ASTContext::isProfileExemptSystemHeaderLoc(SourceLocation Loc) const {
   return getLangOpts().ProfilesExemptSystemHeaders && Loc.isValid() &&
          getSourceManager().isInSystemHeader(Loc);
 }
 
-bool ASTContext::isProfileActiveAt(StringRef ProfileName,
-                                   SourceLocation Loc) const {
-  return isProfileEnforcedAt(ProfileName, Loc) &&
-         !isProfileExemptSystemHeaderLoc(Loc);
+bool ASTContext::isProfileRuleActiveAt(unsigned DiagID,
+                                       SourceLocation Loc) const {
+  return getLangOpts().Profiles && !isProfileExemptSystemHeaderLoc(Loc) &&
+         !getDiagnostics().isIgnored(DiagID, Loc);
 }
 
 TargetCXXABI::Kind ASTContext::getCXXABIKind() const {
@@ -1022,11 +988,18 @@ ASTContext::ASTContext(LangOptions &LOpts, SourceManager &SM,
       CompCategories(this_()), LastSDM(nullptr, 0) {
   addTranslationUnitDecl();
 
-  // A -fprofiles-enforce= enforcement records no location, which
-  // isProfileEnforcedAt reads as the whole translation unit.
-  for (const std::string &Name : LangOpts.ProfilesEnforce)
+  // A -fprofiles-enforce= enforcement covers the whole translation unit: it
+  // records no location and maps the profile's rule diagnostics in the
+  // initial diagnostic state (an inert profile maps nothing).
+  for (const std::string &Name : LangOpts.ProfilesEnforce) {
     if (!getProfileEnforcement(Name))
       addEnforcedProfile(Name, Name, SourceLocation());
+    if (!profiles::isProfileNameInert(Name, LangOpts.ProfilesTestProfiles))
+      getDiagnostics().setSeverityForGroup(
+          diag::Flavor::WarningOrError,
+          profiles::getProfileDiagGroupName(Name, /*Rule=*/""),
+          diag::Severity::Error);
+  }
 }
 
 void ASTContext::cleanup() {

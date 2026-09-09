@@ -1743,9 +1743,9 @@ static void runTestCFGHooksPass(Sema &S, const Decl *, AnalysisDeclContext &AC,
     for (const CFGElement &E : *B)
       if (std::optional<CFGStmt> CS = E.getAs<CFGStmt>())
         if (const auto *LE = dyn_cast<LambdaExpr>(CS->getStmt()))
-          if (S.Profiles().shouldEmitProfileViolation(Entry.Name, "lambda",
-                                                      LE->getBeginLoc(),
-                                                      /*D=*/nullptr, LE, &AC))
+          if (S.Profiles().shouldEmitProfileViolation(
+                  diag::err_profile_cfg_hooks_test, Entry.Name, "lambda",
+                  LE->getBeginLoc(), /*D=*/nullptr, LE, &AC))
             S.Diag(LE->getBeginLoc(), diag::err_profile_cfg_hooks_test)
                 << Entry.Name;
 }
@@ -1777,8 +1777,9 @@ tryDiagnoseProfileUninitRead(Sema &S, AnalysisDeclContext &AC,
   if (hasSelfInit && vd->getInit()) {
     const Expr *Init = vd->getInit()->IgnoreParenCasts();
     for (const CFGProfileEntry *E : Rows) {
-      if (!S.Profiles().shouldEmitProfileViolation(
-              E->Name, E->Rule, Init->getBeginLoc(), /*D=*/nullptr, Init, &AC))
+      if (!S.Profiles().shouldEmitProfileViolation(E->DiagID, E->Name, E->Rule,
+                                                   Init->getBeginLoc(),
+                                                   /*D=*/nullptr, Init, &AC))
         continue;
       S.Diag(Init->getBeginLoc(), E->DiagID) << E->Name << vd->getDeclName();
       S.Diag(vd->getLocation(), diag::note_var_declared_here)
@@ -1797,8 +1798,8 @@ tryDiagnoseProfileUninitRead(Sema &S, AnalysisDeclContext &AC,
       continue;
     for (const CFGProfileEntry *E : Rows) {
       if (!S.Profiles().shouldEmitProfileViolation(
-              E->Name, E->Rule, U.getUser()->getBeginLoc(), /*D=*/nullptr,
-              U.getUser(), &AC))
+              E->DiagID, E->Name, E->Rule, U.getUser()->getBeginLoc(),
+              /*D=*/nullptr, U.getUser(), &AC))
         continue;
       S.Diag(U.getUser()->getBeginLoc(), E->DiagID)
           << E->Name << vd->getDeclName();

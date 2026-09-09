@@ -28,23 +28,31 @@ at its semantic check sites.
 
 The enforced-profile list itself is stored on the ``ASTContext`` (recorded
 through ``addEnforcedProfile``; queried through ``isProfileEnforced`` /
-``isProfileEnforcedAt`` / ``isProfileActiveAt`` / ``getProfileEnforcement``
-/ ``isProfileExemptSystemHeaderLoc`` / ``enforced_profiles``) rather than
-on ``Sema``: the ASTReader restores a PCH's ``ENFORCED_PROFILES`` records
-directly into it, so a consumer that never sees a Sema -- e.g. code
-generation directly from an AST file -- observes the same enforcement state.
-``SemaProfiles`` records enforcements into that list and owns the
-attribute's diagnostics.
+``getProfileEnforcement`` / ``enforced_profiles``) rather than on ``Sema``:
+the ASTReader restores a PCH's ``ENFORCED_PROFILES`` records directly into
+it, so a consumer that never sees a Sema -- e.g. code generation directly
+from an AST file -- observes the same list.  The list answers the
+whole-unit questions: what the unit advertises and ``[[profiles::require]]``
+validates, designator mismatches, redeclaration compatibility, and the "is
+any profile of this table enforced" gates of the post-parse dispatchers.
+*Where* a rule is enforced is the diagnostics engine's question:
+``SemaProfiles::addProfileEnforcement`` records the enforcement into the
+list and maps the profile's rule diagnostics to errors from the attribute
+to the end of the translation unit, and ``ASTContext::isProfileRuleActiveAt``
+-- the enforcement half of every violation gate -- asks whether the rule's
+diagnostic is mapped at the check site and the site is not
+system-header-exempt (``isProfileExemptSystemHeaderLoc``).  See
+`Enforcement State`_.
 
 ``-fprofiles-enforce=`` is the second Sema-free seed: the ``ASTContext``
 constructor records each name in ``LangOptions::ProfilesEnforce`` with an
-invalid location, which ``isProfileEnforcedAt`` reads as "whole translation
-unit".  The constructor is the one point every consumer passes through -- a
-source compile, a PCH or BMI build, code generation from an AST file.
-``CompilerInvocation`` validates the names
-against the profile-name production only (``profiles::isValidProfileName``),
-sorts and dedups the list, and sets ``LangOptions::Profiles`` when it is
-non-empty.
+invalid location and maps its rule diagnostics in the initial diagnostic
+state, which covers the whole translation unit.  The constructor is the one
+point every consumer passes through -- a source compile, a PCH or BMI
+build, code generation from an AST file.  ``CompilerInvocation`` validates
+the names against the profile-name production only
+(``profiles::isValidProfileName``), sorts and dedups the list, and sets
+``LangOptions::Profiles`` when it is non-empty.
 
 Profile-rule diagnostics are defined with the ``ProfileRule`` diagnostic
 class rather than plain ``Error``.  A rule diagnostic is a ``Warning``-class
@@ -264,12 +272,12 @@ in-tree pilot:
                Ops.RHS, llvm::Constant::getNullValue(Ops.RHS->getType()));
          });
 
-``EmitProfileRuntimeCheck`` checks that the profile is enforced
-(the ``ASTContext`` enforcement list, so a body deserialized from an AST
-file is decided by the same state the importer restored), that the given
-location is not in an exempt system header, and that the rule is not
-suppressed for
-the code being emitted (the CodeGen suppression state above).  Only when the
+``EmitProfileRuntimeCheck`` checks that the rule is enforced at the check
+site (its trap diagnostic's mapping there, ``ASTContext::isProfileRuleActiveAt``,
+so a body deserialized from an AST file is decided by the state its own unit
+recorded), that the given location is not in an exempt system header, and
+that the rule is not suppressed for the code being emitted (the CodeGen
+suppression state above).  Only when the
 check is active does it invoke the builder for the predicate, so an inactive
 site emits no IR, and then emits a conditional branch to a trap block
 (``SanitizerHandler::ProfileViolation``).  Unevaluated operands and
@@ -292,6 +300,44 @@ one handler kind and merge their locations, like UBSan's trap mode.
 The pilot's zero-divisor check deliberately mirrors UBSan's blind spots: GCC
 vector-extension integer division and ``_Complex int`` division are not
 checked.
+
+
+Enforcement State
+=================
+
+An enforcement's dominion (P3589R2 [decl.attr.enforce]p4: the tokens from
+the attribute to the end of the translation unit) is represented as
+diagnostic state: ``SemaProfiles::addProfileEnforcement`` maps every
+diagnostic of the profile's group (`Diagnostic Groups`_ in
+:doc:`ProfilesFramework`; ``profiles::getProfileDiagGroupName``) to an
+error from the attribute's expansion location on, and
+``ASTContext::isProfileRuleActiveAt`` reads the mapping back at each check
+site with ``DiagnosticsEngine::isIgnored``.  The mapping is installed with
+``DiagnosticsEngine::setDiagnosticMappingsFrom``, which takes effect no
+earlier than the current diagnostic state -- a ``#pragma clang diagnostic``
+lexed as the parser's lookahead behind the enforce declaration is already
+recorded when the attribute is processed -- and also reaches every state a
+``#pragma clang diagnostic push`` saved, so a later ``pop`` cannot restore
+an unenforced state.  ``-fprofiles-enforce=`` maps the group in the initial
+state instead (the ``ASTContext`` constructor, a command-line mapping).  A
+profile the implementation does not know has no group, and mapping it does
+nothing, which is the specified behavior of an unknown profile.  A check
+site with an invalid location sees the initial state, so it is checked
+under command-line enforcement only.
+
+The engine's own rungs then apply: ``-w`` keeps an enforced rule because the
+diagnostic's default mapping is an error, ``-Weverything`` leaves the
+ignored rules alone because their initial ignore is a user mapping
+(``ProcessWarningOptions``), and ``-Wprofile-...`` and the diagnostic pragmas
+move a rule's severity like any other diagnostic's.  Enforcement therefore
+travels with the diagnostic state: through a PCH or preamble as the state
+the main file continues from, through a BMI compiled to object code as the
+unit's own file transitions, and through an imported module as transitions
+installed for the module's files -- so module code is checked under the
+module's enforcement wherever it is instantiated or emitted, never under
+the importer's, and importer code never under the module's.  A module-map
+module (``-fmodules``) has no initial state of its own and takes the
+importer's, so the importer's ``-fprofiles-enforce=`` reaches it.
 
 
 Suppression Dominion Mechanics
@@ -481,16 +527,16 @@ written on an implementation unit's module-declaration is checked against the
 inherited enforcements, so a conflicting one is reported at that attribute.
 
 Serialization is automatic for every profile, through four records.
-The TU's enforcements are written to every AST file as ``ENFORCED_PROFILES``
-records, and the reader restores them only when the file is the
-compilation's own textual prefix or main input -- a PCH, a preamble, or the
-AST file being code-generated (a module unit compiled from its BMI) -- never
-from an import, whatever its module kind.  The no-leak invariant therefore
-lives in the reader's kind gate: it keeps "importing an enforcing module does
-not enforce its profiles in the importer" true while a BMI compiled to object
-code still emits its own pattern-5 checks, TU-local enforcements included.
-Command-line enforcements are written with the rest and dedup on restore
-against the consumer's own constructor seed.  ``LangOptions::ProfilesEnforce``
+The TU's enforcement list is written to every AST file as
+``ENFORCED_PROFILES`` records, and the reader restores it only when the file
+is the compilation's own textual prefix or main input -- a PCH, a preamble,
+or the AST file being code-generated (a module unit compiled from its BMI)
+-- never from an import, whatever its module kind, so an importer's list --
+what it advertises, requires, and checks redeclarations against -- is its
+own.  The rule mappings travel separately, in the engine's own
+``DIAG_PRAGMA_MAPPINGS`` record (`Enforcement State`_).  Command-line
+enforcements are written with the rest and dedup on restore against the
+consumer's own constructor seed.  ``LangOptions::ProfilesEnforce``
 is a Compatible language option, carried in ``LANGUAGE_OPTIONS`` and hashed
 into the implicit-module signature: a PCH, a preamble, or a BMI compiled to
 object code must have been built under the same list as the compilation

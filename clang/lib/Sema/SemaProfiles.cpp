@@ -33,6 +33,21 @@ bool SemaProfiles::isProfileEnforced(StringRef ProfileName) const {
   return getASTContext().isProfileEnforced(ProfileName);
 }
 
+/// Map every diagnostic of the group \p Group to \p Severity from \p Loc to
+/// the end of the translation unit; an unknown group maps nothing.
+static void mapProfileGroupFrom(DiagnosticsEngine &Diags, StringRef Group,
+                                diag::Severity Severity, SourceLocation Loc) {
+  SmallVector<diag::kind, 16> Kinds;
+  if (Diags.getDiagnosticIDs()->getDiagnosticsInGroup(
+          diag::Flavor::WarningOrError, Group, Kinds))
+    return;
+  SmallVector<std::pair<diag::kind, DiagnosticMapping>, 16> Mappings;
+  for (diag::kind Kind : Kinds)
+    Mappings.push_back({Kind, DiagnosticMapping::Make(Severity, /*IsUser=*/true,
+                                                      /*IsPragma=*/true)});
+  Diags.setDiagnosticMappingsFrom(Mappings, Loc);
+}
+
 bool SemaProfiles::addProfileEnforcement(StringRef Name, StringRef Designator,
                                          SourceLocation Loc) {
   if (const auto *Existing = getASTContext().getProfileEnforcement(Name)) {
@@ -47,6 +62,16 @@ bool SemaProfiles::addProfileEnforcement(StringRef Name, StringRef Designator,
     return true;
   }
   getASTContext().addEnforcedProfile(Name, Designator, Loc);
+  // The enforcement's dominion is the rule diagnostics' mapping from the
+  // attribute on (the expansion site of a macro-spelled attribute); an inert
+  // profile maps nothing. See ProfilesFrameworkInternals.rst, "Enforcement
+  // State".
+  if (Loc.isValid() &&
+      !profiles::isProfileNameInert(Name, getLangOpts().ProfilesTestProfiles))
+    mapProfileGroupFrom(
+        getDiagnostics(), profiles::getProfileDiagGroupName(Name, /*Rule=*/""),
+        diag::Severity::Error,
+        getASTContext().getSourceManager().getExpansionLoc(Loc));
   return true;
 }
 
@@ -244,7 +269,8 @@ SemaProfiles::makeImplicitProfilesSuppressAttr(StringRef ProfileName,
       /*RawArgumentKinds=*/nullptr, /*RawArgumentKindsSize=*/0);
 }
 
-bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
+bool SemaProfiles::shouldEmitProfileViolation(unsigned DiagID,
+                                              StringRef ProfileName,
                                               StringRef RuleName,
                                               SourceLocation Loc, const Decl *D,
                                               const Stmt *UseStmt,
@@ -260,8 +286,8 @@ bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
   profiles::SuppressionQuery Q{ProfileSuppressStack,
                                D ? D : (AC ? AC->getDecl() : nullptr), UseStmt,
                                AC ? &AC->getParentMap() : nullptr};
-  if (!profiles::shouldEmitProfileViolation(getASTContext(), ProfileName,
-                                            RuleName, Loc, Q))
+  if (!profiles::shouldEmitProfileViolation(getASTContext(), DiagID,
+                                            ProfileName, RuleName, Loc, Q))
     return false;
   // A templated entity is not a phase-7 entity (P3589R2 §1.1), so a profile
   // rule fires only on the instantiation, never on the pattern (checking the
@@ -284,7 +310,7 @@ bool SemaProfiles::shouldEmitProfileViolation(StringRef ProfileName,
 bool SemaProfiles::checkProfileViolation(StringRef ProfileName,
                                          StringRef RuleName, SourceLocation Loc,
                                          unsigned DiagID) {
-  if (!shouldEmitProfileViolation(ProfileName, RuleName, Loc))
+  if (!shouldEmitProfileViolation(DiagID, ProfileName, RuleName, Loc))
     return false;
   Diag(Loc, DiagID) << ProfileName;
   return true;
@@ -404,16 +430,18 @@ template <class Node> struct FinalizationProfile {
 };
 
 void runTestClassFinalCallback(Sema &S, CXXRecordDecl *RD) {
-  if (!S.Profiles().shouldEmitProfileViolation("test::class_final", /*Rule=*/"",
-                                               RD->getLocation(), RD))
+  if (!S.Profiles().shouldEmitProfileViolation(
+          diag::err_profile_class_final_test, "test::class_final",
+          /*Rule=*/"", RD->getLocation(), RD))
     return;
   S.Diag(RD->getLocation(), diag::err_profile_class_final_test)
       << "test::class_final" << RD;
 }
 
 void runTestCtorFinalCallback(Sema &S, CXXConstructorDecl *Ctor) {
-  if (!S.Profiles().shouldEmitProfileViolation("test::ctor_final", /*Rule=*/"",
-                                               Ctor->getLocation(), Ctor))
+  if (!S.Profiles().shouldEmitProfileViolation(
+          diag::err_profile_ctor_final_test, "test::ctor_final", /*Rule=*/"",
+          Ctor->getLocation(), Ctor))
     return;
   S.Diag(Ctor->getLocation(), diag::err_profile_ctor_final_test)
       << "test::ctor_final" << Ctor->getParent();

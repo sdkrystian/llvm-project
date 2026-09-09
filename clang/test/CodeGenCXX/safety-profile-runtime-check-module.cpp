@@ -2,9 +2,12 @@
 // module unit: the unit's enforcements -- advertised on the module-declaration
 // or recorded TU-locally by a purview empty-declaration -- are restored when
 // the unit is code-generated from its BMI, so both compilation paths emit the
-// same checks, while an importer of the module stays unenforced. A BMI
-// compile takes its language options from the BMI, so the profile flags are
-// given only when the BMI is built.
+// same checks. Module code keeps the module's own enforcement wherever it is
+// emitted: an importer's code is not checked by an imported module's
+// enforcement, an inline function from an enforcing module is checked in a
+// non-enforcing importer, and one from a non-enforcing module is not checked
+// in an enforcing importer. A BMI compile takes its language options from the
+// BMI, so the profile flags are given only when the BMI is built.
 
 // RUN: rm -rf %t && mkdir -p %t
 // RUN: split-file %s %t
@@ -19,8 +22,14 @@
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++23 -fprofiles -fprofiles-test-profiles -emit-module-interface -o %t/n.pcm %t/n.cppm
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++23 -emit-llvm -o - %t/n.pcm | FileCheck %s --check-prefix=LOCAL
 //
-// Importing an enforcing module does not enforce its profiles in the importer.
+// Importing an enforcing module does not enforce its profiles in the importer,
+// while the module's inline function emitted there keeps its checks.
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++23 -fprofiles -fprofiles-test-profiles -fmodule-file=M=%t/m.pcm -emit-llvm -o - %t/use.cpp | FileCheck %s --check-prefix=IMPORTER
+//
+// An enforcing importer does not check an inline function from a
+// non-enforcing module.
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++23 -fprofiles -fprofiles-test-profiles -emit-module-interface -o %t/p.pcm %t/p.cppm
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -std=c++23 -fprofiles -fprofiles-test-profiles -fmodule-file=P=%t/p.pcm -emit-llvm -o - %t/use_p.cpp | FileCheck %s --check-prefix=ENFORCING
 //
 // Global-module-fragment code precedes the enforcement, so it is outside the
 // dominion on both compilation paths.
@@ -30,9 +39,15 @@
 
 //--- m.cppm
 export module M [[profiles::enforce(test::arith)]];
+// A diagnostic pragma lexed right behind the module-declaration, and a pop
+// after it, leave the enforcement in place.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-variable"
+#pragma clang diagnostic pop
 // ADVERTISED-LABEL: define {{.*}} @_ZW1M4mdivii(
 // ADVERTISED: call void @llvm.ubsantrap(i8
 export int mdiv(int a, int b) { return a / b; }
+export inline int minl(int a, int b) { return a / b; }
 
 //--- n.cppm
 export module N;
@@ -46,7 +61,23 @@ import M;
 // IMPORTER-LABEL: define {{.*}} @_Z3useii(
 // IMPORTER-NOT: llvm.ubsantrap
 // IMPORTER: ret i32
-int use(int a, int b) { return mdiv(a, b) / b; }
+// IMPORTER-LABEL: define {{.*}} @_ZW1M4minlii(
+// IMPORTER: call void @llvm.ubsantrap(i8
+int use(int a, int b) { return mdiv(a, b) / b + minl(a, b); }
+
+//--- p.cppm
+export module P;
+export inline int pdiv(int a, int b) { return a / b; }
+
+//--- use_p.cpp
+[[profiles::enforce(test::arith)]];
+import P;
+// ENFORCING-LABEL: define {{.*}} @_Z4usepii(
+// ENFORCING: call void @llvm.ubsantrap(i8
+// ENFORCING-LABEL: define {{.*}} @_ZW1P4pdivii(
+// ENFORCING-NOT: llvm.ubsantrap
+// ENFORCING: ret i32
+int usep(int a, int b) { return pdiv(a, b) / b; }
 
 //--- g.cppm
 // Neither the eagerly emitted nor the deferred inline GMF function is
