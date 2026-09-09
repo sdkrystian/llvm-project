@@ -100,7 +100,6 @@ struct PropertyData {
 struct ProfileDesignator {
   StringRef Name;
   StringRef Spelling;
-  ArrayRef<profiles::ProfileArgument> Arguments;
 };
 
 struct ProfileSuppressArgs {

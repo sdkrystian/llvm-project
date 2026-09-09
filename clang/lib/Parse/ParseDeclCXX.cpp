@@ -5118,7 +5118,6 @@ copyProfileDesignators(AttributePool &Pool, const ProfileDesignators &Parsed) {
   for (unsigned I = 0; I < Parsed.size(); ++I) {
     Desigs[I].Name = Pool.copyString(Parsed[I].Name);
     Desigs[I].Spelling = Pool.copyString(Parsed[I].Spelling);
-    Desigs[I].Arguments = copyProfileArguments(Pool, Parsed[I].Arguments);
   }
   return Desigs;
 }
