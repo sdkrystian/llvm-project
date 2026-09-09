@@ -1899,6 +1899,27 @@ void SemaProfiles::checkInitProfileBinding(const InitializedEntity &Entity,
                             Entity.getType(), Src, Var);
     return;
   }
+  case InitializedEntity::EK_Member:
+  case InitializedEntity::EK_ParenAggInitMember: {
+    // The deferral anchor: an aggregate element (a parent entity) has none
+    // and defers on an instantiation-dependent source; a mem-initializer
+    // anchors on its constructor, a default member initializer on its field.
+    const auto *Field = cast<FieldDecl>(Entity.getDecl());
+    const Decl *D = nullptr;
+    if (!Entity.getParent())
+      D = isa<CXXConstructorDecl>(SemaRef.CurContext)
+              ? cast<Decl>(SemaRef.CurContext)
+              : Field;
+    checkInitProfileBinding(InitBindingKind::DataMember, Loc, Field,
+                            Entity.getType(), Src, D);
+    return;
+  }
+  case InitializedEntity::EK_ArrayElement:
+  case InitializedEntity::EK_VectorElement:
+  case InitializedEntity::EK_ComplexElement:
+    checkInitProfileBinding(InitBindingKind::AggregateElement, Loc,
+                            /*Target=*/nullptr, Entity.getType(), Src);
+    return;
   default:
     return;
   }
