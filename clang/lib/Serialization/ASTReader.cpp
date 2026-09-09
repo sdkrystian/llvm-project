@@ -624,6 +624,9 @@ static bool checkDiagnosticGroupMappings(DiagnosticsEngine &StoredDiags,
   for (DiagnosticsEngine *MappingSource : MappingSources) {
     for (auto DiagIDMappingPair : MappingSource->getDiagnosticMappings()) {
       diag::kind DiagID = DiagIDMappingPair.first;
+      // A latent diagnostic is mapped from source, not by a -Werror option.
+      if (Diags.getDiagnosticIDs()->isLatent(DiagID))
+        continue;
       Level CurLevel = Diags.getDiagnosticLevel(DiagID, SourceLocation());
       if (CurLevel < DiagnosticsEngine::Error)
         continue; // not significant

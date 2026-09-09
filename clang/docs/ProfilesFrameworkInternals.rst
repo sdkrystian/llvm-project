@@ -336,7 +336,10 @@ installed for the module's files -- so module code is checked under the
 module's enforcement wherever it is instantiated or emitted, never under
 the importer's, and importer code never under the module's.  A module-map
 module (``-fmodules``) has no initial state of its own and takes the
-importer's, so the importer's ``-fprofiles-enforce=`` reaches it.
+importer's, so the importer's ``-fprofiles-enforce=`` reaches it; the
+diagnostic-option validation an implicit module's import performs skips
+latent diagnostics, since an enforcement written in source is not a
+``-Werror`` option the module build had to share.
 
 A suppression's dominion ([decl.attr.suppress]p3: the attribute's tokens
 through the last token of the declaration or statement it appertains to) is
