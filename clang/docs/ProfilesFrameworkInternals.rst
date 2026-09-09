@@ -580,7 +580,10 @@ patterns.  Its rules map to mechanisms as follows:
        carried per bit through the meet and both engine replays, roughly
        doubling the engine state and touching the enqueue-skip invariant);
        ``checkInitProfileReadThrough`` at the lvalue-to-rvalue chokepoint,
-       plus compound-assignment and increment/decrement hooks
+       plus compound-assignment and increment/decrement hooks, for a
+       glvalue with no flow-tracked leaf; the ReadThrough sites of
+       ``extractStdInitEvents`` (``judgeAccessSite``, suppressed by
+       ``May``) otherwise
    * - ``uninit_decl``
      - 1
      - ``checkInitProfileUninitDecl``
@@ -634,23 +637,23 @@ patterns.  Its rules map to mechanisms as follows:
        ``classifyUninitSource`` -- run exactly as for an unmarked binding
        target (``Maybe`` credit) -- the uninitialized one
    * - ``uninit_write``
-     - 1
-     - ``checkInitProfileSubobjectWrite`` (its store preset trusts
-       ``[[ref_to_uninit]]`` at the top level only: the member arm of the
-       glvalue recognizer clears the trust, so subobject writes below the
-       marker classify uninitialized)
+     - 2 for flow-tracked targets, 1 otherwise
+     - the SubobjectWrite sites of ``extractStdInitEvents`` for a target
+       with a flow-tracked leaf (``judgeAccessSite``, suppressed by
+       ``May``); otherwise ``checkInitProfileSubobjectWrite`` (its store
+       preset trusts ``[[ref_to_uninit]]`` at the top level only: the
+       member arm of the glvalue recognizer clears the trust, so subobject
+       writes below the marker classify uninitialized)
 
 Two helpers are shared across the rules.  ``classifyUninitSource`` -- the
 pointer and glvalue recognizers -- classifies an expression as referring to
 initialized, uninitialized, or unknown storage purely from its syntactic
-form (parse-order store credit
-refines it, recorded by ``recordInitProfileStore`` and by the
-``recordNowInitArgument`` / ``recordNowUninitArgument`` pair, which share
-one argument-shape walk to add or withdraw the credit of storage a
-``[[now_init]]`` callee initializes or a ``[[now_uninit]]`` callee
-destroys; the store funnel and that walk resolve the target glvalue through
-the one shared resolver ``resolveTrackedGlvalue``, so the credited shapes
-cannot drift apart); its ``UninitAccessOpts``
+form (parse-order store credit refines it for a destroy of storage that is
+not flow-tracked, recorded by the ``recordNowInitArgument`` /
+``recordNowUninitArgument`` pair, which share one argument-shape walk to add
+or withdraw the credit of storage a ``[[now_init]]`` callee initializes or a
+``[[now_uninit]]`` callee destroys, resolving the argument through
+``resolveTrackedGlvalue``); its ``UninitAccessOpts``
 presets distinguish a *binding* source (markers count everywhere), a value
 *read*, and a scalar *store* (which differ in whether the top-level
 ``[[uninit]]`` marker counts and whether ``[[ref_to_uninit]]`` storage is
@@ -693,19 +696,22 @@ a forward dataflow over four bit vectors per entity -- ``Must`` (assigned on
 every path), ``May`` (assigned on some path), ``Esc`` (escaped; read
 leniency for local aggregates), and ``Destroyed`` (destroyed on every path
 and not stored since) -- and reports the ``ref_to_uninit`` judgments of the
-body's bindings and the ``double_destroy`` / ``destroy_uninit`` judgments
-of its ``[[now_uninit]]`` calls at their program points through the shared
-violation gate.  The parse-time checks and the pass split the work by one
-predicate, ``SemaProfiles::isFlowTrackedLeaf``: a binding or destroy source
-with a tracked leaf is the pass's, everything else -- and everything outside
-a function body -- is judged at parse time without flow state.  The pass's resolver
+body's bindings, the ``double_destroy`` / ``destroy_uninit`` judgments of
+its ``[[now_uninit]]`` calls, and the ``uninit_read`` / ``uninit_write``
+judgments of its reads through and stores below tracked storage at their
+program points through the shared violation gate.  The parse-time checks and
+the pass split the work by one predicate, ``SemaProfiles::isFlowTrackedLeaf``:
+a binding, destroy, read, or store with a tracked leaf is the pass's,
+everything else -- and everything outside a function body -- is judged at
+parse time without flow state.  The pass's resolver
 (``TrackedStorage::resolve``) and the predicate share one lvalue-shape walk,
 ``SemaProfiles::flowLeafShape``, so no binding falls between the two.  A
 templated body is never analyzed; each instantiation is analyzed on its own
 CFG, in which statements TreeTransform reused from the pattern are ordinary
 elements.  Consumers read the lattices as follows: a marked-target binding
 fires on ``Must`` and ``double_destroy`` on ``Destroyed``; an
-unmarked-target binding and ``destroy_uninit`` are suppressed by ``May``.  A
+unmarked-target binding, ``destroy_uninit``, a read through a marker, and a
+subobject write are suppressed by ``May``.  A
 destroy or release on one of several arms, like a mutable alias of a marked
 pointer handed out, leaves the entity possibly assigned, not definitely, and
 not destroyed.  A variable of an enclosing function reached by capture,
@@ -717,11 +723,9 @@ remaining blind spots are listed in :doc:`ProfilesFramework`,
 Parse-Order Store Credit (std::init)
 ====================================
 
-The read-through and subobject-write checks, and the destroy rules for a
-source with no flow-tracked leaf, refine the recognizers' classification
-with *parse-order store credit*: the stores and
-lifetime-annotated calls seen earlier in the translation unit.
-``recordInitProfileStore`` records direct stores; the
+The destroy rules for a source with no flow-tracked leaf refine the
+recognizers' classification with *parse-order store credit*: the
+lifetime-annotated calls seen earlier in the translation unit.  The
 ``recordNowInitArgument`` / ``recordNowUninitArgument`` pair records what a
 ``[[now_init]]`` / ``[[now_uninit]]`` callee does to the storage bound to
 its parameters; ``InitStoreCreditMap`` is the façade that owns the recorded
@@ -732,28 +736,28 @@ instantiation-time state stay independent).  This section is the canonical
 rationale for all of them; the code comments carry only site-specific
 deltas.
 
-**Credit is parse-order.**  There is no dominance or flow analysis: a store
+**Credit is parse-order.**  There is no dominance or flow analysis: a call
 counts for every consult that happens later in parse order, whatever the
 control flow between them.  The design consequently errs only toward missed
-diagnostics -- crediting a store the execution might skip can at worst
+diagnostics -- crediting a call the execution might skip can at worst
 *suppress* a diagnostic, never manufacture one.  Every consult reads the
-``Maybe`` strength, which every store records; a ``Definite`` store or
-destroy -- one unconditionally executed in the function body that owns the
-credited entity, decided by ``currentStoreStrength`` (outside template
-instantiation, at conditional depth 0, before the function has branched by
-``goto`` or ``switch``, with the enclosing function's parse-time pattern
-equal to the entity's owning function) -- additionally records the destroyed
-state ``double_destroy`` fires on.
+``Maybe`` strength, which every call records; a ``Definite`` call -- one
+unconditionally executed in the function body that owns the credited entity,
+decided by ``currentStoreStrength`` (outside template instantiation, at
+conditional depth 0, before the function has branched by ``goto`` or
+``switch``, with the enclosing function's parse-time pattern equal to the
+entity's owning function) -- additionally records the destroyed state
+``double_destroy`` fires on.
 
 **Recording is not gated on enforcement or suppression.**  A suppressed
-store still initializes, and failing to credit it would turn suppression
-into later false positives.  There is likewise no in-template gate: an
-expression check with a non-dependent operand fires at the definition and
-must find pattern-time credit (instantiations rebuild their
+call still initializes or destroys, and failing to record it would turn
+suppression into later false positives.  There is likewise no in-template
+gate: an expression check with a non-dependent operand fires at the
+definition and must find pattern-time credit (instantiations rebuild their
 ``DeclRefExpr``\ s against fresh declarations, so they re-record
 independently).  The one gate is never-executed contexts -- unevaluated and
 discarded-statement contexts, mirroring ``shouldEmitProfileViolation``: a
-store there never executes, so it earns no credit and a destroy there
+call there never executes, so it earns no credit and a destroy there
 withdraws none.
 
 **Withdrawal mirrors recording.**  A ``[[now_uninit]]`` or storage-release

@@ -2174,9 +2174,10 @@ TrackedStorage::markedPointerObject(const Expr *E) const {
 /// are trusted from here (the local read leniency) while its assignment
 /// state is unchanged. Binding: a pointer or reference binding whose source
 /// has a tracked leaf (BindingSites[Aux]), judged by the binding rule.
-/// ReadThrough / SubobjectWrite: a read through, or a store below, the
-/// storage of Idx, judged by uninit_read / uninit_write. Every event carries
-/// the anchor expression the diagnostic and the suppression walk use.
+/// ReadThrough / SubobjectWrite: a read through, or a store below, tracked
+/// storage (AccessSites[Aux]), judged by uninit_read / uninit_write. Every
+/// event carries the anchor expression the diagnostic and the suppression
+/// walk use.
 enum class DefAssignEventKind {
   Read,
   Write,
@@ -2197,11 +2198,9 @@ struct DefAssignEvent {
   unsigned Idx;
   const Expr *E;
   /// Copy: the source entity. Binding: the BindingSite index. Destroy: the
-  /// DestroySite index. ReadThrough and SubobjectWrite: the diagnostic's
-  /// provenance select.
+  /// DestroySite index. ReadThrough and SubobjectWrite: the AccessSite
+  /// index.
   unsigned Aux = 0;
-  /// SubobjectWrite: the diagnostic's "not a member access" flag.
-  bool Flag = false;
 };
 
 /// The form classification of a binding leaf: the parse-time recognizers'
@@ -2270,6 +2269,25 @@ struct DestroySite {
   /// The entities destroyed: the whole entity each leaf names, or every
   /// entity of an object destroyed as a whole (`this`, `*this`, `&x`, `x`).
   SmallVector<unsigned, 2> Affected;
+};
+
+/// A read through, or a store below, tracked storage (P4222R2 §4.5, §5.4)
+/// derived from a load, assignment, or increment element: the leaves that
+/// resolve to a marked pointee (`*p`, `p->m`, `r`, `r.m`) or to a subobject
+/// of an [[uninit]] local (`u.x`, `arr[i]`), judged by their flow state, and
+/// the leaves no entity tracks, classified by form. A whole [[uninit]]
+/// local's value read is the flow-based local pass's and a tracked member's
+/// the Read event's, so such leaves count as initialized here, and a store
+/// to a whole entity is a Write, not a subobject write.
+struct AccessSite {
+  SourceLocation Loc;
+  /// The diagnostic's provenance select: for a read, 1 when every judged leaf
+  /// is a subobject of an [[uninit]] object, 0 for a marked pointee; for a
+  /// store, 0 for the [[uninit]] object, 1 for the marked pointee.
+  unsigned Select = 0;
+  /// A store's "not a member access" flag (an element).
+  bool Flag = false;
+  SmallVector<BindingLeaf, 2> Leaves;
 };
 
 /// The dataflow state of every tracked entity at a program point: assigned
@@ -2389,6 +2407,29 @@ static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
         {diag::err_init_destroy_uninit, Site.Loc, nullptr});
 }
 
+/// Judge an access site against \p St: uninit_read (\p IsWrite false) or
+/// uninit_write fires when a leaf is uninitialized -- a tracked leaf on every
+/// path, a form-classified leaf affirmatively or as a Mixed combination
+/// (P4222R2 §4.9) -- exactly as the recognizers' combination of conditional
+/// arms fires on any uninitialized arm.
+static void judgeAccessSite(const AccessSite &Site, bool IsWrite,
+                            const FlowState &St,
+                            SmallVectorImpl<PendingViolation> &Out) {
+  bool Fires = false;
+  for (const BindingLeaf &L : Site.Leaves) {
+    LeafState S = leafState(L, St);
+    Fires |= S == LeafState::Uninitialized || S == LeafState::Mixed;
+  }
+  if (!Fires)
+    return;
+  if (IsWrite)
+    Out.push_back({diag::err_init_uninit_subobject_write,
+                   Site.Loc, nullptr, Site.Select, Site.Flag});
+  else
+    Out.push_back({diag::err_init_uninit_read_through, Site.Loc,
+                   nullptr, Site.Select});
+}
+
 /// Replay a block's events over \p St: the engine's one block-level transfer
 /// function, shared by the fixpoint and the reporting replay so the two can
 /// never disagree. With \p Offending and \p Violations non-null (the
@@ -2398,7 +2439,7 @@ static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
 static void
 applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
                      ArrayRef<BindingSite> Sites, ArrayRef<DestroySite> DSites,
-                     FlowState &St,
+                     ArrayRef<AccessSite> ASites, FlowState &St,
                      std::vector<SmallVector<const Expr *, 2>> *Offending,
                      SmallVectorImpl<PendingViolation> *Violations) {
   auto Write = [&](unsigned I) {
@@ -2477,16 +2518,15 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       }
       break;
     case DefAssignEventKind::ReadThrough:
-      if (Violations && !St.May.test(Ev.Idx))
-        Violations->push_back({diag::err_init_uninit_read_through,
-                               Ev.E->getExprLoc(), Ev.E,
-                               Ev.Aux});
-      break;
     case DefAssignEventKind::SubobjectWrite:
-      if (Violations && !St.May.test(Ev.Idx))
-        Violations->push_back({diag::err_init_uninit_subobject_write,
-                               Ev.E->getExprLoc(), Ev.E, Ev.Aux,
-                               Ev.Flag});
+      if (Violations) {
+        size_t Before = Violations->size();
+        judgeAccessSite(ASites[Ev.Aux],
+                        Ev.Kind == DefAssignEventKind::SubobjectWrite, St,
+                        *Violations);
+        for (PendingViolation &V : llvm::drop_begin(*Violations, Before))
+          V.Anchor = Ev.E;
+      }
       break;
     }
   }
@@ -2513,6 +2553,7 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
                       const TrackedStorage &Storage,
                       ArrayRef<SmallVector<DefAssignEvent, 4>> Events,
                       ArrayRef<BindingSite> Sites, ArrayRef<DestroySite> DSites,
+                      ArrayRef<AccessSite> ASites,
                       SmallVectorImpl<PendingViolation> &Violations) {
   const unsigned NumTracked = Storage.Entities.size();
   const unsigned NumBlocks = cfg.getNumBlockIDs();
@@ -2544,7 +2585,7 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
       }
     }
     EntryState[B->getBlockID()] = In;
-    applyDefAssignEvents(Events[B->getBlockID()], Sites, DSites, In,
+    applyDefAssignEvents(Events[B->getBlockID()], Sites, DSites, ASites, In,
                          /*Offending=*/nullptr, /*Violations=*/nullptr);
     // Enqueue-skip subtlety: ExitState starts at the join identity, and a
     // block whose computed exit *equals* its stored exit enqueues no
@@ -2577,8 +2618,8 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
     if (!Visited[B->getBlockID()])
       continue;
     FlowState St = EntryState[B->getBlockID()];
-    applyDefAssignEvents(Events[B->getBlockID()], Sites, DSites, St, &Offending,
-                         &Violations);
+    applyDefAssignEvents(Events[B->getBlockID()], Sites, DSites, ASites, St,
+                         &Offending, &Violations);
   }
   return Offending;
 }
@@ -2925,16 +2966,19 @@ static void collectCtorBodyStmts(const CXXConstructorDecl *Ctor,
 /// binding that hands out a mutable alias of a marked pointer (`T *&` to
 /// `p`, `T **` to `&p`, a by-reference capture) escapes its pointee, and a
 /// delete-expression kills its operand's storage; a [[now_uninit]] call's
-/// arguments become Destroy sites (appendLifecycleCallEvents). Current-object
-/// events of a constructor (\p Ctor non-null) come from the constructor body
-/// and its written initializers only. \p cfg is the engine's own, fully
-/// linearized CFG (runStdInitMemberReadChecks), so every statement class has
-/// an element.
+/// arguments become Destroy sites (appendLifecycleCallEvents); a load through
+/// a marked pointee or of a subobject of an [[uninit]] local, and a store
+/// below either, become ReadThrough / SubobjectWrite sites (AccessSite).
+/// Current-object events of a constructor (\p Ctor non-null) come from the
+/// constructor body and its written initializers only. \p cfg is the
+/// engine's own, fully linearized CFG (runStdInitMemberReadChecks), so every
+/// statement class has an element.
 static void extractStdInitEvents(
     Sema &S, const Decl *D, const CFG &cfg, const TrackedStorage &Storage,
     const CXXConstructorDecl *Ctor, bool StarThisCopyTrusted,
     std::vector<SmallVector<DefAssignEvent, 4>> &Events,
-    SmallVectorImpl<BindingSite> &Sites, SmallVectorImpl<DestroySite> &DSites) {
+    SmallVectorImpl<BindingSite> &Sites, SmallVectorImpl<DestroySite> &DSites,
+    SmallVectorImpl<AccessSite> &ASites) {
   using K = SemaProfiles::InitBindingKind;
   ASTContext &Ctx = S.Context;
   const auto *DC = cast<DeclContext>(D);
@@ -3120,6 +3164,64 @@ static void extractStdInitEvents(
       BlockEvents.push_back(
           {DefAssignEventKind::Binding, 0, At, (unsigned)(Sites.size() - 1)});
     };
+    // A read through (\p IsWrite false) or a store below tracked storage,
+    // with the parse-time check's location (the glvalue for a read, the
+    // operator for a store): a site when a leaf is flow-tracked (the
+    // parse-time checks judged every other access). A std::byte access is
+    // exempt (P4222R2 §4.6).
+    auto AppendAccess = [&](bool IsWrite, const Expr *G, QualType ValueTy,
+                            SourceLocation Loc, const Expr *At) {
+      if (!G || Ctx.getBaseElementType(ValueTy)->isStdByteType() ||
+          isa<RecoveryExpr>(G->IgnoreParens()))
+        return;
+      AccessSite Site;
+      Site.Loc = Loc;
+      bool AnyTracked = false, AnyPointee = false, AnyUninitObject = false;
+      SemaProfiles::forEachTargetLeaf(
+          G, /*ConditionalArm=*/false, [&](const Expr *Leaf, bool) {
+            BindingLeaf L;
+            if (SemaProfiles::isFlowTrackedLeaf(Ctx, Leaf,
+                                                /*AsPointerValue=*/false, DC)) {
+              AnyTracked = true;
+              TrackedStorage::Resolution R =
+                  Storage.resolveFlowLeaf(Leaf, /*AsPointerValue=*/false);
+              if (R.Entity) {
+                TrackedEntity::Kind K = Storage.Entities[*R.Entity].K;
+                bool Pointee = K == TrackedEntity::Kind::Pointee;
+                bool UninitObject =
+                    K == TrackedEntity::Kind::WholeLocal && R.Subobject;
+                if (UninitObject || (Pointee && (!IsWrite || R.Subobject))) {
+                  L.Entity = R.Entity;
+                  L.Subobject = R.Subobject;
+                  AnyPointee |= Pointee;
+                  AnyUninitObject |= UninitObject;
+                } else {
+                  // A whole [[uninit]] local's read, a tracked member, or a
+                  // whole-entity store: not this rule's.
+                  L.State = LeafState::Initialized;
+                }
+                Site.Leaves.push_back(L);
+                return;
+              }
+            }
+            L.State = formState(S.Profiles().classifyInitAccessLeaf(
+                Leaf,
+                IsWrite ? SemaProfiles::InitAccessKind::Write
+                        : SemaProfiles::InitAccessKind::Read,
+                D));
+            Site.Leaves.push_back(L);
+          });
+      if (!AnyTracked)
+        return;
+      bool UninitObjectOnly = AnyUninitObject && !AnyPointee;
+      Site.Select =
+          IsWrite ? (UninitObjectOnly ? 0u : 1u) : (UninitObjectOnly ? 1u : 0u);
+      Site.Flag = IsWrite && !isa<MemberExpr>(G->IgnoreParenImpCasts());
+      ASites.push_back(std::move(Site));
+      BlockEvents.push_back({IsWrite ? DefAssignEventKind::SubobjectWrite
+                                     : DefAssignEventKind::ReadThrough,
+                             0, At, (unsigned)(ASites.size() - 1)});
+    };
     // The element bindings of an aggregate initializer of type \p T: each
     // pointer or reference field of a record (the bases consume the leading
     // initializers, unnamed bit-fields none) is a member binding, each
@@ -3220,9 +3322,18 @@ static void extractStdInitEvents(
           continue;
         CollectLeaves(ICE->getSubExpr());
         AppendReads(ICE);
+        AppendAccess(/*IsWrite=*/false, ICE->getSubExpr(), ICE->getType(),
+                     ICE->getSubExpr()->getExprLoc(), ICE);
       } else if (const auto *BO = dyn_cast<BinaryOperator>(St)) {
         if (!BO->isAssignmentOp())
           continue;
+        // A compound assignment reads its old value with no
+        // lvalue-to-rvalue node; every assignment then stores.
+        if (BO->isCompoundAssignmentOp())
+          AppendAccess(/*IsWrite=*/false, BO->getLHS(), BO->getLHS()->getType(),
+                       BO->getLHS()->getExprLoc(), BO);
+        AppendAccess(/*IsWrite=*/true, BO->getLHS(), BO->getLHS()->getType(),
+                     BO->getOperatorLoc(), BO);
         // A pointer assignment is judged by the assigned-to pointer's
         // marking; a target of unknown marking checks neither direction
         // (SemaProfiles::resolveAssignTargetMarking).
@@ -3242,6 +3353,11 @@ static void extractStdInitEvents(
         // the Read arm never sees it: a ReadWrite.
         if (!UO->isIncrementDecrementOp())
           continue;
+        AppendAccess(/*IsWrite=*/false, UO->getSubExpr(),
+                     UO->getSubExpr()->getType(),
+                     UO->getSubExpr()->getExprLoc(), UO);
+        AppendAccess(/*IsWrite=*/true, UO->getSubExpr(),
+                     UO->getSubExpr()->getType(), UO->getOperatorLoc(), UO);
         AppendStore(UO->getSubExpr(), UO, /*ReadsFirst=*/true);
       } else if (const auto *CE = dyn_cast<CallExpr>(St)) {
         const FunctionDecl *Callee = CE->getDirectCallee();
@@ -3707,9 +3823,9 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
 }
 
 /// The std::init flow engine over one body: the member read-before-init rule
-/// (P4222R2 §4.2, §5.1-§5.4) and the binding and destroy judgments of
-/// flow-tracked storage (ProfilesFrameworkInternals.rst, "Flow-Tracked
-/// Storage") -- one entity
+/// (P4222R2 §4.2, §5.1-§5.4) and the binding, destroy, read-through, and
+/// subobject-write judgments of flow-tracked storage
+/// (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage") -- one entity
 /// table, one event extraction, one definite-assignment run, one report,
 /// over a CFG of the engine's own. The current object's members are tracked
 /// in every instance member function body (a lambda's or block's body inside
@@ -3767,15 +3883,16 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
   std::vector<SmallVector<DefAssignEvent, 4>> Events(cfg->getNumBlockIDs());
   SmallVector<BindingSite, 8> Sites;
   SmallVector<DestroySite, 4> DSites;
+  SmallVector<AccessSite, 8> ASites;
   extractStdInitEvents(S, D, *cfg, Storage, Ctor, StarThisCopyTrusted, Events,
-                       Sites, DSites);
+                       Sites, DSites, ASites);
   // Nothing is assigned at function entry: written initializers write at
   // their CFGInitializer elements, a tracked local cannot be referenced
   // before its DeclStmt, a by-value parameter starts unassigned by design,
   // and a marked local's marker asserts it.
   SmallVector<PendingViolation, 8> Violations;
   std::vector<SmallVector<const Expr *, 2>> Offending = runDefiniteAssignment(
-      *cfg, InitAC, Storage, Events, Sites, DSites, Violations);
+      *cfg, InitAC, Storage, Events, Sites, DSites, ASites, Violations);
   reportMemberReadsBeforeInit(S, InitAC, Offending, Storage, Entry.Name);
   reportFlowViolations(S, InitAC, Violations, Entry.Name);
 }

@@ -527,8 +527,9 @@ analysis verifies reads of uninitialized locals, of ``[[uninit]]`` members
 within the defining constructor's body, and of ``[[uninit]]`` members of
 constructor-less aggregate locals; reads through ``[[ref_to_uninit]]``
 pointers and references and reads of subobjects of ``[[uninit]]`` objects are
-rejected outright -- unless a prior whole-entity store credits the storage
-as initialized (see `Binding Pointers and References`_):
+rejected unless the storage is initialized on some path reaching the read --
+by a whole-entity store, a ``[[now_init]]`` call, or ``std::construct_at``
+(see `Binding Pointers and References`_):
 
 .. code-block:: c++
 
@@ -569,15 +570,16 @@ decrement reads the old value first, so it is diagnosed like a read.  A
 comma or conditional lvalue reads (or assigns) whichever member the chosen
 arm names; an assignment through a conditional whose arms name different
 members assigns neither for the purpose of a later read.  Inside
-a constructor body only that plain whole-member assignment earns credit:
-passing ``&m`` to a function (even one whose parameter is marked
+a constructor body only that plain whole-member assignment counts as
+initialization: passing ``&m`` to a function (even one whose parameter is
+marked
 ``[[ref_to_uninit]]``), binding a reference to the member, calling a member
 function, or letting ``this`` escape does not count as initializing ``m`` --
 the paper rejects complex constructor code (§5.1) and reserves
 callee-initialization for ``now_init()`` (§6.2); suppress the rule where
 such a flow is intended.  A ``this``-capturing lambda might run immediately,
 so member reads in its body count at the point the lambda is created (and
-writes there earn no credit -- the same strict policy).  For a *local*
+writes there initialize nothing -- the same strict policy).  For a *local*
 variable the analyses instead treat any escape as an assignment (see
 `Limitations`_).  A local copied or moved from a tracked local is tracked
 too: the copy's members inherit the source's per-member state at the copy
@@ -606,8 +608,8 @@ Piecemeal delayed initialization of an ``[[uninit]]`` object through its
 members or elements cannot be validated statically (§5.4, §5.5), so a store
 to a *proper subobject* of an ``[[uninit]]`` entity is rejected (rule
 ``uninit_write``); writing the whole entity is that entity's initialization,
-stays legal, and credits the entity as initialized for everything after it
-in parse order (see `Binding Pointers and References`_):
+stays legal, and initializes the entity for every path after it (see
+`Binding Pointers and References`_):
 
 .. code-block:: c++
 
@@ -1052,9 +1054,9 @@ those entries never cause a rejection.
   (``ptr->x = 5``): below a member step only whole-object ``construct_at``
   could initialize, which is unmodeled.  The remedies are ``construct_at``,
   a whole scalar write for a scalar pointee, or suppression.  Two corners
-  are suppress-only: a marked pointer *member*'s pointee is never
-  credited, and an element access (``ptr[i].x``) skips the store-credit
-  consult, so no prior fill legalizes either.
+  are suppress-only: a marked pointer *member*'s pointee and an element
+  access (``ptr[i].x``) are not flow-tracked, so no prior fill legalizes
+  either.
 - Placement ``new`` into marked storage (``new (&u) T``) is rejected --
   the address binds an unmarked placement parameter -- and earns no
   credit; ``std::construct_at`` is the sanctioned spelling for
@@ -1156,20 +1158,18 @@ those entries never cause a rejection.
   definition has been parsed: a marker written between the class definition
   and the constructor's still sees a declared-but-undefined constructor and
   is rejected as running a constructor.
-- The read-through and subobject-write checks, and the destroy rules,
-  refine the recognizers with parse-order store credit: a store under a
-  condition (or inside a lambda body) credits every later such check in
-  parse order, so a read through a marker on a path that skips the store is
-  a missed diagnostic, and a conditional ``[[now_uninit]]`` destroy revokes
-  only the credit's firing strength.
+- Storage that is not flow-tracked -- a class-type or array ``[[uninit]]``
+  member, a marked pointer member's pointee -- is judged by its form alone
+  at every read and write; only its destroys still consult the
+  ``[[now_init]]`` calls seen earlier in parse order.
 - In a template, the declaration rules, the constructor rules, and the
   flow-based rules fire per instantiation; ``uninit_read`` (through a
-  marker), ``uninit_write``, and a binding of storage that is not
-  flow-tracked fire at the definition when their operands do not depend on
-  the template's parameters, and again at each instantiation that rebuilds
-  the expression.  A binding whose source names flow-tracked storage is
+  marker), ``uninit_write``, and the binding rule fire at the definition
+  when their operands are not flow-tracked and do not depend on the
+  template's parameters, and again at each instantiation that rebuilds the
+  expression.  A binding, read, write, or destroy of flow-tracked storage is
   judged at instantiation only, whatever its operands depend on; a
-  never-instantiated template's such bindings are not diagnosed.
+  never-instantiated template's are not diagnosed.
 
 
 Test Profiles

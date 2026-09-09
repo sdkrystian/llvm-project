@@ -358,6 +358,10 @@ public:
   /// True if any leaf of \p Src, bound as \p T, is flow-tracked in the
   /// current context (isFlowTrackedLeaf).
   bool hasFlowTrackedLeaf(const Expr *Src, QualType T) const;
+  /// True if any leaf of the glvalue \p G is flow-tracked in the current
+  /// context: the read-through and subobject-write checks leave such an
+  /// access to the CFG pass.
+  bool hasFlowTrackedGlvalueLeaf(const Expr *G) const;
   /// The operand a binding of \p Src as \p T classifies, and whether it is
   /// used as a pointer value (\p AsPointerValue): a pointer binding or a
   /// read-only alias of a pointer reads the source's value; a reference
@@ -387,6 +391,17 @@ public:
   /// construction.
   InitSourceState classifyInitBindingLeaf(const Expr *Leaf, QualType T,
                                           const Decl *Body) const;
+  /// The access a leaf is classified for: a value read (the top-level
+  /// [[uninit]] marker is the flow-based read pass's) or a scalar store (the
+  /// whole named entity's store is its initialization; storage reached
+  /// through [[ref_to_uninit]] is trusted at the top level only).
+  enum class InitAccessKind { Read, Write };
+  /// Classify the leaf \p Leaf of a read or store glvalue by its form alone
+  /// with the recognizers' access preset for \p Kind, for the CFG pass's
+  /// judgment of an access with tracked leaves; \p Body as for
+  /// classifyInitBindingLeaf.
+  InitSourceState classifyInitAccessLeaf(const Expr *Leaf, InitAccessKind Kind,
+                                         const Decl *Body) const;
 
   /// The [[ref_to_uninit]] marking of the pointer object an assignment
   /// target names: true/false for a directly named marked/unmarked pointer
@@ -495,9 +510,10 @@ public:
   /// their LHS promotion already funnels through the chokepoint). Reuses the
   /// ref_to_uninit recognizer with its read access preset, so a direct read
   /// of a named [[uninit]] object is left to the flow-based uninit_read
-  /// pass. A std::byte read is exempt (P4222R2 §4.6). Template deferral
-  /// follows the expression-check policy (ProfilesFrameworkInternals.rst,
-  /// "Pattern 1").
+  /// pass; a read with a flow-tracked leaf is the CFG pass's
+  /// (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage"). A std::byte
+  /// read is exempt (P4222R2 §4.6). Template deferral follows the
+  /// expression-check policy (ProfilesFrameworkInternals.rst, "Pattern 1").
   void checkInitProfileReadThrough(SourceLocation Loc, const Expr *Glvalue,
                                    QualType ValueType);
 
@@ -510,16 +526,18 @@ public:
   /// recognizer with its write access preset: a store to the whole named
   /// entity is its initialization (paper §4.5), and storage reached through
   /// [[ref_to_uninit]] is trusted (the deferred construct_at slice), so only
-  /// a below-top-level [[uninit]] marker fires. A std::byte store is exempt
-  /// (P4222R2 §4.6). Template deferral follows the expression-check policy
+  /// a below-top-level [[uninit]] marker fires; a store with a flow-tracked
+  /// leaf is the CFG pass's (ProfilesFrameworkInternals.rst, "Flow-Tracked
+  /// Storage"). A std::byte store is exempt (P4222R2 §4.6). Template
+  /// deferral follows the expression-check policy
   /// (ProfilesFrameworkInternals.rst, "Pattern 1").
   void checkInitProfileSubobjectWrite(SourceLocation Loc, const Expr *LHS);
 
   /// The ByRefCapture derive step of checkInitProfileBinding: a by-reference
   /// lambda capture of \p Var binds the closure's unmarked reference to the
   /// variable's storage, which denotes uninitialized memory when \p Var is
-  /// [[uninit]] or a [[ref_to_uninit]] reference (parse-order store credit
-  /// clears both). Called from \c Sema::BuildLambdaExpr for each by-reference
+  /// [[uninit]] or a [[ref_to_uninit]] reference; a flow-tracked variable is
+  /// the CFG pass's. Called from \c Sema::BuildLambdaExpr for each by-reference
   /// non-init variable capture (init-captures are Variable bindings at
   /// \c createLambdaInitCaptureVarDecl). There is no source expression, so
   /// the deferral keys on an instantiation-dependent captured type.
@@ -561,21 +579,8 @@ public:
 
   /// std::init: the check pair a built-in ++/-- hosts -- the old-value load
   /// (read-through) and the store (subobject-write). Hosts the cluster from
-  /// Sema::CreateBuiltinUnaryOp's increment/decrement arm. Records the store
-  /// credit last, after both pre-store checks.
+  /// Sema::CreateBuiltinUnaryOp's increment/decrement arm.
   void checkInitProfileIncDec(Expr *Operand, SourceLocation OpLoc);
-
-  /// std::init: record parse-order store credit for \p LHS, the left
-  /// operand of a completed built-in assignment (called from the tail of
-  /// Sema::CheckAssignmentOperands) or the operand of a built-in ++/--.
-  /// Assigning a whole [[uninit]] local is its initialization (paper
-  /// §4.2/§4.5), a store through the exact `*p` / `r` lvalue of a marked
-  /// local or parameter initializes the pointee (§4.3), and a store to a
-  /// marked *pointer* itself reseats it and clears its pointee credit;
-  /// element stores (p[i] = e) neither credit nor invalidate (§5.4/§5.5)
-  /// and escapes never credit (§6.2). For the strength and gating rules see
-  /// "Parse-Order Store Credit" in ProfilesFrameworkInternals.rst.
-  void recordInitProfileStore(const Expr *LHS);
 
   /// What a direct callee does to the storage bound to its parameters,
   /// derived once per binding by the funnel (checkInitProfileBinding) from
@@ -1081,12 +1086,6 @@ public:
   static void forEachTargetLeaf(
       const Expr *E, bool ConditionalArm,
       llvm::function_ref<void(const Expr *Leaf, bool ConditionalArm)> F);
-
-  /// The leaf-credit tail of recordInitProfileStore: record the store's
-  /// credit (or reseat) for every leaf of forEachTargetLeaf, at Maybe
-  /// strength on a conditional arm and currentStoreStrength otherwise,
-  /// resolving each leaf through resolveTrackedGlvalue.
-  void recordStoreTarget(const Expr *E, bool ConditionalArm);
 
   /// std::init / pointer_marker + union_marker (paper §4.1, §5.6): diagnose
   /// [[uninit]] placed on a pointer, a union variable, or a union member.

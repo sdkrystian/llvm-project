@@ -190,10 +190,10 @@ void test_const_ptr_use_is_not_a_read() {
 }
 
 // A read of a subobject of an [[uninit]] local -- an aggregate's member or an
-// array's element -- is the read-through check's (this CFG pass does not track
-// member accesses of record locals or arrays at all, and subobject-wise
-// delayed initialization is banned, paper sections 5.4/5.5). Full coverage
-// lives in safety-profile-init-ref-to-uninit.cpp.
+// array's element -- is the read-through rule's (subobject-wise delayed
+// initialization is banned, paper sections 5.4/5.5, so no store could have
+// initialized it). Full coverage lives in
+// safety-profile-init-ref-to-uninit.cpp.
 struct Agg { int m; };
 void test_member_read_of_uninit_aggregate() {
   Agg s [[uninit]];

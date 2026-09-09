@@ -280,8 +280,8 @@ void test_read_after_delete_array(int *p [[ref_to_uninit]]) {
               // nobuiltin-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
   (void)x;
 }
-// A non-dependent delete inside a template withdraws at definition time,
-// like every other non-dependent release.
+// A delete inside a template is judged on the instantiation's own CFG, like
+// every other release of flow-tracked storage.
 template <class T>
 void template_delete(int *p [[ref_to_uninit]]) {
   *p = 5;
@@ -290,6 +290,8 @@ void template_delete(int *p [[ref_to_uninit]]) {
               // nobuiltin-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
   (void)x;
 }
+template void template_delete<int>(int *); // expected-note {{in instantiation of function template specialization 'template_delete<int>' requested here}} \
+                                            // nobuiltin-note {{in instantiation of function template specialization 'template_delete<int>' requested here}}
 
 // __builtin_operator_delete binds its operand against a type-only entity
 // (no ParmVarDecl, no callee in sight), so the release relaxation cannot

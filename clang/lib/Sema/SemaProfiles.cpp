@@ -1879,9 +1879,8 @@ static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
     // identity the recording resolved, so the same member observed through
     // any other object -- including a copy (§5.2: a copy does not inherit
     // credit) -- stays uncredited. It applies at any chain depth: the map
-    // only ever holds whole-member stores (which initialize the entire
-    // member), and in practice only scalar members (see
-    // recordInitProfileStore), which have no subobjects to chain through.
+    // only ever holds whole-member initializations (which initialize the
+    // entire member; recordLifetimeAnnotatedArgument).
     const ValueDecl *MD = ME->getMemberDecl();
     if (const auto *F = dyn_cast<FieldDecl>(MD);
         F && Opts.Credit && F->hasAttr<UninitAttr>() &&
@@ -2056,6 +2055,27 @@ SemaProfiles::classifyInitBindingLeaf(const Expr *Leaf, QualType T,
           .withThisUnderConstruction(isa_and_nonnull<CXXConstructorDecl>(MD));
   switch (
       classifyUninitSource(getASTContext(), Leaf, T->isReferenceType(), Opts)) {
+  case UninitStorage::Initialized:
+    return InitSourceState::Initialized;
+  case UninitStorage::Uninitialized:
+    return InitSourceState::Uninitialized;
+  case UninitStorage::Unknown:
+    return InitSourceState::Unknown;
+  case UninitStorage::Mixed:
+    return InitSourceState::Mixed;
+  }
+  llvm_unreachable("unknown UninitStorage");
+}
+
+SemaProfiles::InitSourceState
+SemaProfiles::classifyInitAccessLeaf(const Expr *Leaf, InitAccessKind Kind,
+                                     const Decl *Body) const {
+  const CXXMethodDecl *MD =
+      enclosingInstanceMethod(dyn_cast_or_null<DeclContext>(Body));
+  UninitAccessOpts Opts =
+      (Kind == InitAccessKind::Read ? UninitReadAccess : UninitWriteAccess)
+          .withThisUnderConstruction(isa_and_nonnull<CXXConstructorDecl>(MD));
+  switch (glvalueDenotesUninitStorage(getASTContext(), Leaf, Opts)) {
   case UninitStorage::Initialized:
     return InitSourceState::Initialized;
   case UninitStorage::Uninitialized:
@@ -2311,6 +2331,17 @@ const Expr *SemaProfiles::bindingSourceOperand(const Expr *Src, QualType T,
     return nullptr;
   AsPointerValue = true;
   return MTE->getSubExpr();
+}
+
+bool SemaProfiles::hasFlowTrackedGlvalueLeaf(const Expr *G) const {
+  if (!G)
+    return false;
+  bool Any = false;
+  forEachTargetLeaf(G, /*ConditionalArm=*/false, [&](const Expr *Leaf, bool) {
+    Any |= isFlowTrackedLeaf(getASTContext(), Leaf, /*AsPointerValue=*/false,
+                             SemaRef.CurContext);
+  });
+  return Any;
 }
 
 bool SemaProfiles::hasFlowTrackedLeaf(const Expr *Src, QualType T) const {
@@ -2846,11 +2877,15 @@ void SemaProfiles::checkInitProfileReadThrough(SourceLocation Loc,
   // P4222R2 §4.6: reading an uninitialized std::byte is permitted.
   if (getASTContext().getBaseElementType(ValueType)->isStdByteType())
     return;
+  // A read with a flow-tracked leaf is the CFG pass's (its ReadThrough
+  // sites), judged against the flow state at its program point.
+  if (hasFlowTrackedGlvalueLeaf(Glvalue))
+    return;
   if (!shouldEmitProfileViolation(diag::err_init_uninit_read_through, Loc))
     return;
   if (!isUninitializedOrMixed(glvalueDenotesUninitStorage(
           getASTContext(), Glvalue,
-          UninitReadAccess.withCredit(this).withThisUnderConstruction(
+          UninitReadAccess.withThisUnderConstruction(
               thisIsUnderConstruction()))))
     return;
   Diag(Loc, diag::err_init_uninit_read_through)
@@ -2870,11 +2905,15 @@ void SemaProfiles::checkInitProfileSubobjectWrite(SourceLocation Loc,
   // P4222R2 §4.6: an uninitialized std::byte may be manipulated freely.
   if (getASTContext().getBaseElementType(LHS->getType())->isStdByteType())
     return;
+  // A store with a flow-tracked leaf is the CFG pass's (its SubobjectWrite
+  // sites), judged against the flow state at its program point.
+  if (hasFlowTrackedGlvalueLeaf(LHS))
+    return;
   if (!shouldEmitProfileViolation(diag::err_init_uninit_subobject_write, Loc))
     return;
   if (!isUninitializedOrMixed(glvalueDenotesUninitStorage(
           getASTContext(), LHS,
-          UninitWriteAccess.withCredit(this).withThisUnderConstruction(
+          UninitWriteAccess.withThisUnderConstruction(
               thisIsUnderConstruction()))))
     return;
   // The provenance phrase: a member chain of a named [[uninit]] object
@@ -2952,9 +2991,6 @@ void SemaProfiles::checkInitProfileIncDec(Expr *Operand, SourceLocation OpLoc) {
   checkInitProfileReadThrough(Operand->getExprLoc(), Operand,
                               Operand->getType());
   checkInitProfileSubobjectWrite(OpLoc, Operand);
-  // Record last: the pre-store checks above must see pre-store state (there
-  // is no RHS). ++u credits the whole entity; ++p reseats a marked pointer.
-  recordInitProfileStore(Operand);
 }
 
 bool SemaProfiles::inNeverExecutedContext() const {
@@ -3039,21 +3075,6 @@ unsigned SemaProfiles::currentConditionalDepth() const {
   return Depth;
 }
 
-void SemaProfiles::recordInitProfileStore(const Expr *LHS) {
-  if (!getLangOpts().Profiles || !LHS)
-    return;
-  // Only the never-executed-context gate applies here -- deliberately no
-  // enforcement, suppression, or in-template gate; see "Parse-Order Store
-  // Credit" in ProfilesFrameworkInternals.rst.
-  if (inNeverExecutedContext())
-    return;
-  // Peel transparent casts so a cast-form store credits like its uncast
-  // form ((int &)u = 5 credits u whole; *(int *)p = 5 credits p's pointee;
-  // (int *&)p = q reseats p), symmetric with the recognizers' cast
-  // pass-through.
-  recordStoreTarget(LHS, /*ConditionalArm=*/false);
-}
-
 void SemaProfiles::forEachTargetLeaf(
     const Expr *E, bool ConditionalArm,
     llvm::function_ref<void(const Expr *, bool)> F) {
@@ -3088,47 +3109,8 @@ void SemaProfiles::forEachTargetLeaf(
   F(E, ConditionalArm);
 }
 
-void SemaProfiles::recordStoreTarget(const Expr *E, bool ConditionalArm) {
-  forEachTargetLeaf(E, ConditionalArm, [&](const Expr *Leaf, bool Arm) {
-    // The leaf target's shape -- *p = e, a.m = e / this->m = e / m = e,
-    // u = e, r = e, p = q (also `@=` and `++`, via the shared hosts) --
-    // resolves through the shared glvalue resolver; each arm's credit action
-    // lives here (paper §4.2: "After initialization, the object is no longer
-    // [[uninit]]"; §6: ordinary assignment initializes a built-in).
-    LifetimeAnnotatedStorage Storage = resolveTrackedGlvalue(Leaf);
-    auto Strength = [&](const Decl *CreditKey) {
-      return Arm ? InitCreditStrength::Maybe : currentStoreStrength(CreditKey);
-    };
-    switch (Storage.StorageKind) {
-    case LifetimeAnnotatedStorage::Kind::None:
-      return;
-    case LifetimeAnnotatedStorage::Kind::Whole:
-      StoreCredit.markWholeStored(Storage.Entity, Strength(Storage.Entity));
-      return;
-    case LifetimeAnnotatedStorage::Kind::Pointee:
-      StoreCredit.markPointeeStored(Storage.Entity, Strength(Storage.Entity));
-      return;
-    case LifetimeAnnotatedStorage::Kind::Member:
-      StoreCredit.markMemberStored(Storage.Base, Storage.Field,
-                                   Strength(Storage.Base));
-      return;
-    case LifetimeAnnotatedStorage::Kind::Reseat:
-      // The reseat retires every pointee fact -- credit and the destroyed
-      // state -- wholesale, whatever its own conditionality (the parse-order
-      // status quo, matching clearPointee's documented semantics -- so a
-      // conditional arm reseats like a direct target): they all described the
-      // old pointee. The clear lives in this tail funnel -- not in
-      // checkInitProfilePointerAssignment, which runs only for plain
-      // assignment and would miss compound reseats.
-      StoreCredit.clearPointee(Storage.Entity);
-      return;
-    }
-    llvm_unreachable("unknown LifetimeAnnotatedStorage kind");
-  });
-}
-
-bool SemaProfiles::hasWholeObjectStoreCredit(
-    const ValueDecl *VD, InitCreditStrength Strength) const {
+bool SemaProfiles::hasWholeObjectStoreCredit(const ValueDecl *VD,
+                                             InitCreditStrength Strength) const {
   const auto *Var = dyn_cast<VarDecl>(VD);
   return Var && StoreCredit.hasWholeStored(Var, Strength);
 }
