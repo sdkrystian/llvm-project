@@ -5808,7 +5808,7 @@ struct EnsureImmediateInvocationInDefaultArgs
 
 ExprResult Sema::BuildCXXDefaultArgExpr(SourceLocation CallLoc,
                                         FunctionDecl *FD, ParmVarDecl *Param,
-                                        Expr *Init, bool CheckInitProfile) {
+                                        Expr *Init) {
   assert(Param->hasDefaultArg() && "can't build nonexistent default arg");
 
   bool NestedDefaultChecking = isCheckingDefaultArgumentOrInitializer();
@@ -5878,21 +5878,8 @@ ExprResult Sema::BuildCXXDefaultArgExpr(SourceLocation CallLoc,
           /*SkipImmediateInvocations=*/NestedDefaultChecking))
     return ExprError();
 
-  auto *DAE =
-      CXXDefaultArgExpr::Create(Context, InitializationContext->Loc, Param,
-                                Init, InitializationContext->Context);
-  // std::init / ref_to_uninit (P4222R2 §4.2-§4.3): a defaulted pointer or
-  // reference argument must match the parameter's marking. A default
-  // argument does not re-run copy-initialization at the use site, so the
-  // shared hook in PerformCopyInitialization never sees it; check the
-  // underlying expression on the freshly created node instead (the
-  // recognizers don't see through the CXXDefaultArgExpr wrapper), once per
-  // use, whatever call form reached it.
-  if (CheckInitProfile && getLangOpts().Profiles)
-    Profiles().checkInitProfileBinding(
-        SemaProfiles::InitBindingKind::DefaultArgument, DAE->getExprLoc(),
-        Param, Param->getType(), DAE->getExpr());
-  return DAE;
+  return CXXDefaultArgExpr::Create(Context, InitializationContext->Loc, Param,
+                                   Init, InitializationContext->Context);
 }
 
 static FieldDecl *FindFieldDeclInstantiationPattern(const ASTContext &Ctx,

@@ -616,24 +616,27 @@ patterns.  Its rules map to mechanisms as follows:
        for every binding site (variable and member initialization, call
        arguments, returns, aggregate elements, pointer assignments, throws,
        new-initializers, variadic arguments, captures, object arguments);
+       every entity-driven binding enters it from
+       ``InitializationSequence::Perform``, beside
+       ``checkInitializerLifetime``, keyed on the ``InitializedEntity``;
        a source with a flow-tracked leaf (``isFlowTrackedLeaf``) is left to
        the binding arms of ``extractStdInitEvents``, which derive the same
        kinds from the CFG's elements and judge each site against the flow
        state (``judgeBindingSite``); ``classifyPointerGlvalue`` judges a
        reference-to-pointer binding by the pointer's value (a read-only
-       alias) or not at all (a mutable alias); a defaulted argument is
-       checked once at ``CXXDefaultArgExpr`` creation, in
-       ``Sema::BuildCXXDefaultArgExpr``, whatever call form reaches it --
-       speculative creations (a SFINAE-trapped candidate, an elided-copy
-       probe, an MS-ABI ctor closure) opt out per call site
+       alias) or not at all (a mutable alias); a defaulted argument is a
+       Parameter binding at its declaration
+       (``Sema::ConvertParamDefaultArgument``), judged once there and once
+       per instantiation of a template, never at a call; a rebuild of a
+       default argument or initializer and a SFINAE context are skipped
    * - ``double_destroy``, ``destroy_uninit``
      - 2 for flow-tracked sources, 1 otherwise
      - the Destroy sites of ``extractStdInitEvents`` for a source with a
        flow-tracked leaf (``judgeDestroySite``: ``double_destroy`` on
        ``Destroyed``, ``destroy_uninit`` unless ``May``, a reinitializer, or
        a marked parameter); otherwise the destroy arm of
-       ``checkInitProfileBinding`` (its Parameter and DefaultArgument
-       kinds), where ``classifyUninitSource`` -- run exactly as for an
+       ``checkInitProfileBinding`` (its Parameter kind), where
+       ``classifyUninitSource`` -- run exactly as for an
        unmarked binding target -- answers ``destroy_uninit`` by form and no
        destroyed state exists
    * - ``uninit_write``

@@ -763,7 +763,9 @@ the enclosing body, and a by-reference capture of an uninitialized
 ``[[uninit]]`` variable is the unmarked-reference violation even when the
 body assigns it.  Storage outside any function body -- a namespace-scope
 object, a default member initializer, a default argument -- has no flow and
-is judged by its form alone.  A transparent cast is as transparent to a
+is judged by its form alone.  A default argument is judged where it is
+declared (once per instantiation of a template), never at a call that uses
+it, so a suppression for it belongs on the declaration.  A transparent cast is as transparent to a
 store as to a binding: ``(int &)u = 5`` initializes ``u`` whole,
 ``*(int *)p = 5`` the pointee, and ``(int *&)p = q`` reseats ``p`` (§4.3).
 Whole-object assignment of a class pointee never initializes: it is a member

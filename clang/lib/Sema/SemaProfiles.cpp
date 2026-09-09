@@ -1811,7 +1811,6 @@ static bool bindingTargetCanCarryMarker(SemaProfiles::InitBindingKind Kind) {
   case K::Variable:
   case K::DataMember:
   case K::Parameter:
-  case K::DefaultArgument:
   case K::Return:
     return true;
   case K::AggregateElement:
@@ -1919,6 +1918,15 @@ void SemaProfiles::checkInitProfileBinding(const InitializedEntity &Entity,
   case InitializedEntity::EK_ComplexElement:
     checkInitProfileBinding(InitBindingKind::AggregateElement, Loc,
                             /*Target=*/nullptr, Entity.getType(), Src);
+    return;
+  case InitializedEntity::EK_Parameter:
+  case InitializedEntity::EK_Parameter_CF_Audited:
+    // A call argument, or a default argument at its declaration
+    // (ConvertParamDefaultArgument); a type-only parameter entity (a call
+    // with no declared callee) has no declaration to carry the marker.
+    checkInitProfileBinding(InitBindingKind::Parameter, Loc,
+                            dyn_cast_or_null<ParmVarDecl>(Entity.getDecl()),
+                            Entity.getType(), Src);
     return;
   default:
     return;

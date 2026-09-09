@@ -440,12 +440,10 @@ public:
     /// A data member's initializer -- NSDMI, mem-initializer, or an
     /// aggregate's field element; the target is the FieldDecl.
     DataMember,
-    /// A call argument's parameter copy-initialization; the target is the
-    /// ParmVarDecl, null for a call with no declared callee.
+    /// A call argument's parameter copy-initialization, or a default
+    /// argument at its declaration; the target is the ParmVarDecl, null for
+    /// a call with no declared callee.
     Parameter,
-    /// A defaulted argument, checked on the CXXDefaultArgExpr; the target is
-    /// the ParmVarDecl.
-    DefaultArgument,
     /// A return statement; the target is the function (its return type's
     /// marker) or the lambda call operator.
     Return,
@@ -489,8 +487,8 @@ public:
   /// the instantiation only; without it an instantiation-dependent \p Src
   /// defers to the rebuild and a non-dependent one is judged on the pattern
   /// and again at each instantiation that rebuilds the construct
-  /// (ProfilesFrameworkInternals.rst, "Pattern 1"). A Parameter or
-  /// DefaultArgument binding of a [[now_uninit]] or storage-release callee
+  /// (ProfilesFrameworkInternals.rst, "Pattern 1"). A Parameter binding of
+  /// a [[now_uninit]] or storage-release callee
   /// runs the destroy rules instead -- at parse time for a source with no
   /// flow-tracked leaf, in the CFG pass otherwise
   /// (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage").
