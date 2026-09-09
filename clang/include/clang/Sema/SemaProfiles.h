@@ -184,22 +184,15 @@ public:
                                              const Expr *Init);
 
   /// True if default-initialization of \p T would leave at least one scalar
-  /// subobject with an indeterminate value. Shared by the std::init rules
-  /// uninit_decl (at the variable declaration), ctor_uninit_member (for a
-  /// class-typed member), and uninit_with_initializer. A class with a
-  /// user-provided default constructor is trusted (that constructor is
-  /// checked at its own definition). Dependent and incomplete types are
-  /// treated as determinate.
-  ///
-  /// When \p HonorUninitMarkers is true, a data member marked [[uninit]]
-  /// is treated as acknowledged and skipped, so a type whose only
-  /// indeterminate scalars are all marked is reported as determinate.
-  /// uninit_decl and ctor_uninit_member pass true (the marker excuses the
-  /// member, paper §6.2); uninit_with_initializer passes false because it
-  /// needs the factual answer (whether the default-initialization is
-  /// genuinely a no-op).
-  bool defaultInitLeavesScalarIndeterminate(QualType T,
-                                            bool HonorUninitMarkers = false);
+  /// subobject with an indeterminate value. A data member marked [[uninit]]
+  /// is treated as acknowledged and skipped (the marker excuses the member,
+  /// paper §6.2), so a type whose indeterminate scalars are all marked is
+  /// determinate here. Shared by the std::init rules uninit_decl (at the
+  /// variable declaration) and ctor_uninit_member (for a class-typed
+  /// member). A class with a user-provided default constructor is trusted
+  /// (that constructor is checked at its own definition). Dependent and
+  /// incomplete types are treated as determinate.
+  bool defaultInitLeavesScalarIndeterminate(QualType T);
 
   /// Why default-initialization of \p T is not the genuine no-op an
   /// [[uninit]] marker claims -- as the select index of
