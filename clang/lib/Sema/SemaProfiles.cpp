@@ -1226,19 +1226,6 @@ const ValueDecl *SemaProfiles::getDirectlyNamedDecl(const Expr *E) {
   return nullptr;
 }
 
-// True if E denotes the current object: `this` (the implicit/explicit pointer
-// of an arrow access) or `*this` (the object lvalue of a dot access). A local
-// twin of AnalysisBasedWarnings.cpp's isCurrentObjectBase (the CFG passes'
-// helper); each file keeps its recognizer vocabulary self-contained.
-static bool isCurrentObjectExpr(const Expr *E) {
-  E = E->IgnoreParenImpCasts();
-  if (isa<CXXThisExpr>(E))
-    return true;
-  const auto *UO = dyn_cast<UnaryOperator>(E);
-  return UO && UO->getOpcode() == UO_Deref &&
-         isa<CXXThisExpr>(UO->getSubExpr()->IgnoreParenImpCasts());
-}
-
 // Strip what the recognizers see through on the way to a named entity:
 // parens, implicit casts, and explicit casts whose operand is a pointer or
 // glvalue (paper §4.3: a cast of a marked pointer is itself marked; a
