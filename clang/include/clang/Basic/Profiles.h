@@ -38,8 +38,6 @@ struct ProfileArgument {
   llvm::StringRef Key;
   llvm::StringRef Value;
   ProfileArgumentKind Kind = ProfileArgumentKind::Positional;
-
-  bool isNamed() const { return Kind == ProfileArgumentKind::Named; }
 };
 
 /// A profile enforced by [[profiles::enforce]]: the profile name plus the
@@ -117,8 +115,8 @@ inline bool areProfilesCompatible(llvm::StringRef A, llvm::StringRef B) {
 /// The canonical spelling of a profile argument: the value token for a
 /// positional argument, "key : value" for a named one. Enforcement identity
 /// (P3589R2 [decl.attr.enforce]p3) compares designators by this spelling.
-/// A template over the argument representation so it serves both
-/// ProfileArgument and the parser's owning-string argument type.
+/// A template over the argument representation, which the parser instantiates
+/// with its own owning-string argument type.
 template <typename ArgumentT>
 std::string getCanonicalProfileArgumentSpelling(const ArgumentT &Argument) {
   if (!Argument.isNamed())
