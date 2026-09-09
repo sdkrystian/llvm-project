@@ -19895,11 +19895,7 @@ bool Sema::BuildCtorClosureDefaultArgs(SourceLocation Loc,
     Args[0] = nullptr; // Copy ctor closure will provide the first argument.
 
   for (unsigned I = IsCopy ? 1 : 0; I != NumParams; ++I) {
-    // No profile check on an MS-ABI synthesized closure: it has no
-    // user-written call site.
-    ExprResult R =
-        BuildCXXDefaultArgExpr(Loc, Ctor, Ctor->getParamDecl(I),
-                               /*Init=*/nullptr, /*CheckInitProfile=*/false);
+    ExprResult R = BuildCXXDefaultArgExpr(Loc, Ctor, Ctor->getParamDecl(I));
     CleanupVarDeclMarking();
     if (R.isInvalid())
       return true;
