@@ -2320,7 +2320,6 @@ struct FlowState {
 struct PendingViolation {
   unsigned DiagID;
   SourceLocation Loc;
-  const Expr *Anchor;
   /// Binding: the pointer/reference select; ReadThrough and SubobjectWrite:
   /// the provenance select.
   unsigned Select = 0;
@@ -2356,8 +2355,7 @@ static void judgeBindingSite(const BindingSite &Site, const FlowState &St,
     Acc = combineLeafStates(Acc, leafState(L, St));
   if (Site.TargetMarked) {
     if (Acc == LeafState::Initialized || Acc == LeafState::Mixed)
-      Out.push_back({diag::err_init_ref_to_uninit_requires_uninit,
-                     Site.Loc, nullptr,
+      Out.push_back({diag::err_init_ref_to_uninit_requires_uninit, Site.Loc,
                      Site.IsReference ? 1u : 0u});
     return;
   }
@@ -2372,8 +2370,7 @@ static void judgeBindingSite(const BindingSite &Site, const FlowState &St,
     DiagID = diag::err_init_member_call_on_uninit;
     Subject = Site.Subject;
   }
-  Out.push_back({DiagID, Site.Loc, nullptr,
-                 Site.IsReference ? 1u : 0u, false, Subject});
+  Out.push_back({DiagID, Site.Loc, Site.IsReference ? 1u : 0u, false, Subject});
 }
 
 /// Judge a destroy site against \p St. Storage destroyed on every path
@@ -2397,14 +2394,12 @@ static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
     Acc = Acc ? combineLeafStates(*Acc, S) : S;
   }
   if (AllDestroyed) {
-    Out.push_back(
-        {diag::err_init_double_destroy, Site.Loc, nullptr});
+    Out.push_back({diag::err_init_double_destroy, Site.Loc});
     return;
   }
   if (!Site.Exempt &&
       (*Acc == LeafState::Uninitialized || *Acc == LeafState::Mixed))
-    Out.push_back(
-        {diag::err_init_destroy_uninit, Site.Loc, nullptr});
+    Out.push_back({diag::err_init_destroy_uninit, Site.Loc});
 }
 
 /// Judge an access site against \p St: uninit_read (\p IsWrite false) or
@@ -2423,11 +2418,10 @@ static void judgeAccessSite(const AccessSite &Site, bool IsWrite,
   if (!Fires)
     return;
   if (IsWrite)
-    Out.push_back({diag::err_init_uninit_subobject_write,
-                   Site.Loc, nullptr, Site.Select, Site.Flag});
+    Out.push_back({diag::err_init_uninit_subobject_write, Site.Loc, Site.Select,
+                   Site.Flag});
   else
-    Out.push_back({diag::err_init_uninit_read_through, Site.Loc,
-                   nullptr, Site.Select});
+    Out.push_back({diag::err_init_uninit_read_through, Site.Loc, Site.Select});
 }
 
 /// Replay a block's events over \p St: the engine's one block-level transfer
@@ -2477,12 +2471,8 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       break;
     case DefAssignEventKind::Destroy: {
       const DestroySite &Site = DSites[Ev.Aux];
-      if (Violations && Site.Judged) {
-        size_t Before = Violations->size();
+      if (Violations && Site.Judged)
         judgeDestroySite(Site, St, *Violations);
-        for (PendingViolation &V : llvm::drop_begin(*Violations, Before))
-          V.Anchor = Ev.E;
-      }
       for (unsigned I : Site.Affected) {
         St.Must.reset(I);
         if (Site.Conditional) {
@@ -2510,23 +2500,15 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       St.Esc.set(Ev.Idx);
       break;
     case DefAssignEventKind::Binding:
-      if (Violations) {
-        size_t Before = Violations->size();
+      if (Violations)
         judgeBindingSite(Sites[Ev.Aux], St, *Violations);
-        for (PendingViolation &V : llvm::drop_begin(*Violations, Before))
-          V.Anchor = Ev.E;
-      }
       break;
     case DefAssignEventKind::ReadThrough:
     case DefAssignEventKind::SubobjectWrite:
-      if (Violations) {
-        size_t Before = Violations->size();
+      if (Violations)
         judgeAccessSite(ASites[Ev.Aux],
                         Ev.Kind == DefAssignEventKind::SubobjectWrite, St,
                         *Violations);
-        for (PendingViolation &V : llvm::drop_begin(*Violations, Before))
-          V.Anchor = Ev.E;
-      }
       break;
     }
   }
@@ -2655,8 +2637,8 @@ static void reportMemberReadsBeforeInit(
 }
 
 /// Emit the collected binding, destroy, read-through, and subobject-write
-/// violations in source order, each through the shared gate with its own
-/// anchor for the suppression walk.
+/// violations in source order, each through the shared gate at its own
+/// location.
 static void reportFlowViolations(Sema &S, AnalysisDeclContext &AC,
                                  MutableArrayRef<PendingViolation> Violations,
                                  StringRef Name) {
