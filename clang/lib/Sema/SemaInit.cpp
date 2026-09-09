@@ -8968,6 +8968,10 @@ ExprResult InitializationSequence::Perform(Sema &S,
   // entity, and if not, either lifetime-extend or warn as appropriate.
   S.checkInitializerLifetime(Entity, Init);
 
+  // std::init / ref_to_uninit (P4222R2 §4.2-§4.3): judge the binding this
+  // sequence performs against the entity's marking.
+  S.Profiles().checkInitProfileBinding(Entity, Kind, Init);
+
   // Diagnose non-fatal problems with the completed initialization.
   if (InitializedEntity::EntityKind EK = Entity.getKind();
       (EK == InitializedEntity::EK_Member ||
