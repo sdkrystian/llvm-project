@@ -2162,7 +2162,9 @@ TrackedStorage::markedPointerObject(const Expr *E) const {
 /// judged by the destroy rules; its storage is then unassigned and destroyed
 /// until stored again -- or, for an argument naming several storages,
 /// escaped. Reseat: the marked pointer or reference Idx refers, from here,
-/// to the storage DefAssignEvent::RT describes. Escape: Idx may have been
+/// to the storage DefAssignEvent::RT describes and, when a marked binding
+/// names an identified referent (Entity, ViaPointer), asserts it unassigned:
+/// Must and May cleared, Destroyed and Esc kept. Escape: Idx may have been
 /// destroyed or released on one of several arms, so it is possibly
 /// assigned, not definitely, and not destroyed. AggregateEscape: the tracked
 /// aggregate local owning member Idx escapes as a whole (a non-benign
@@ -2201,10 +2203,11 @@ enum class ReseatTarget {
   /// pointer object was handed out (P4222R2 §4.3).
   Escaped,
   /// The entity DefAssignEvent::Aux (`&u`, `&a.m`, `&m`, `u` for a
-  /// reference).
+  /// reference), which the binding's marker asserts uninitialized.
   Entity,
   /// What the marked pointer or reference DefAssignEvent::Aux refers to
-  /// there (`q`, `&*q`, `&r`, `*q` for a reference).
+  /// there (`q`, `&*q`, `&r`, `*q` for a reference), which the binding's
+  /// marker asserts uninitialized; an unidentified referent asserts nothing.
   ViaPointer,
   /// Not identified: a conditional source with a tracked arm, or a store
   /// whose target names several pointers or a marked pointer on only some
@@ -2318,7 +2321,8 @@ static constexpr unsigned TopTarget = ~0u;
 /// FlowState::Target of a marked pointer or reference whose referent is not
 /// identified: paths bind it differently, or the anonymous referent it
 /// copied from another pointer was replaced. Nothing fires through such a
-/// pointer in either direction, and a store through it credits nothing.
+/// pointer in either direction, a store through it credits nothing, and a
+/// marked binding to it asserts nothing.
 static constexpr unsigned UnknownTarget = ~1u;
 
 /// The dataflow state of every tracked entity at a program point: assigned
@@ -2596,6 +2600,14 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
         NewTarget = UnknownTarget;
         break;
       }
+      // The binding's marker asserts the referent uninitialized; see
+      // ReseatTarget.
+      if ((Ev.RT == ReseatTarget::Entity ||
+           Ev.RT == ReseatTarget::ViaPointer) &&
+          NewTarget != UnknownTarget && NewTarget != TopTarget) {
+        St.Must.reset(NewTarget);
+        St.May.reset(NewTarget);
+      }
       St.Target[Ev.Idx] = NewTarget;
       break;
     }
@@ -2632,7 +2644,8 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
 /// the event replay above -- the same replay the reporting pass uses. Every
 /// transfer is monotone in each lattice (Read, Write, ReadWrite, MayWrite,
 /// and AggregateEscape only set bits, Copy projects the source's bits, Kill,
-/// Destroy, Reseat, and Escape are constant functions of their bits), so a
+/// Destroy, Reseat, and Escape are constant functions of their bits -- a
+/// Reseat's assertion clears its referent's Must and May like Kill), so a
 /// block's exit only ever descends from the join identity in a finite
 /// lattice and the iteration terminates. A pointer's Target lattice is flat
 /// -- TopTarget below every value, UnknownTarget above -- and meet only

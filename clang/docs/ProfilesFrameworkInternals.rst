@@ -702,7 +702,12 @@ event and site leaf on such an entity through ``Target`` before applying
 it, and a ``Reseat`` event carries the new referent (``ReseatTarget``): the
 entity a single-leaf source names, what another marked pointer refers to,
 a fresh anonymous referent for an untracked source, or unidentified for a
-conditional source with a tracked arm.  The pass reports the
+conditional source with a tracked arm.  An identified referent named by a
+marked binding is asserted unassigned (``Must`` and ``May`` cleared,
+``Destroyed`` and ``Esc`` kept); the ``Reseat`` follows the binding's
+``Binding`` event in block order, so the judgment sees the pre-assertion
+state.  A binding to a marked parameter is a ``Binding`` event only and
+asserts nothing.  The pass reports the
 ``ref_to_uninit`` judgments of the
 body's bindings, the ``double_destroy`` / ``destroy_uninit`` judgments of
 its ``[[now_uninit]]`` calls, and the ``uninit_read`` / ``uninit_write``

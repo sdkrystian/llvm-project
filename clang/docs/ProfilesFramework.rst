@@ -747,11 +747,15 @@ or reference (parameters included), and an ``[[uninit]]`` scalar member of a
 directly named local or of the current object.  A marked pointer's or
 reference's referent is, at each point, the storage its latest binding
 names: after ``int *p [[ref_to_uninit]] = &u;`` the local ``u``, after
-``p = q`` whatever ``q`` refers to there, after ``p = &a.m`` that member.  A
-source the analysis does not track (an allocation, pointer arithmetic, a
-subobject, a decayed array) gives it an anonymous referent that the marker
-asserts uninitialized; paths that bind it differently leave the referent
-unidentified, and nothing fires through the pointer.  For tracked storage
+``p = q`` whatever ``q`` refers to there, after ``p = &a.m`` that member.
+From the binding on, the marker asserts the referent uninitialized under
+every name that reaches it -- after ``int *p [[ref_to_uninit]] = &u;`` an
+unmarked ``&u`` is rejected until ``u`` is stored -- and a destroyed
+referent stays destroyed.  A source the analysis does not track (an
+allocation, pointer arithmetic, a subobject, a decayed array) gives it an
+anonymous referent; paths that bind it differently leave the referent
+unidentified: nothing is asserted and nothing fires through the pointer.
+For tracked storage
 the binding is judged where it occurs, by the same local analysis that
 checks reads (§1.3): a whole-entity store (``u = 5``, ``*p = 5``, ``r = 5``,
 ``a.m = 5``, ``this->m = 5``), a ``[[now_init]]`` call, or
@@ -763,7 +767,9 @@ capture) gives it an anonymous referent of unknown state; a
 ``operator delete``, or a ``delete`` expression acts on the referent
 (below).  A marked target is rejected when the
 storage is initialized on every path reaching the binding; an unmarked
-target is accepted when the storage is initialized on some path.  Element
+target is accepted when the storage is initialized on some path.  Passing
+to a ``[[ref_to_uninit]]`` parameter is judged the same way and asserts
+nothing after the call.  Element
 accesses (``p[i]``, ``a[0]``) are never initialized by an element store, and
 a store through a conditional target (``(c ? p : q) = e``) initializes
 neither arm for the purpose of a later marked binding.  A lambda's or
@@ -1051,9 +1057,9 @@ those entries never cause a rejection.
   reads destroyed memory.
 - Destroying through a ``[[ref_to_uninit]]`` pointer that was never stored
   through is rejected by ``destroy_uninit``: the marker asserts an
-  uninitialized referent at entry.  If a helper filled the referent first,
-  mark the helper ``[[now_init]]``, store through the marker before the
-  destroy, or suppress.
+  uninitialized referent at entry or at its latest marked binding.  If a
+  helper filled the referent first, mark the helper ``[[now_init]]``, store
+  through the marker before the destroy, or suppress.
 - Passing ``&u`` to a ``[[ref_to_uninit]]`` parameter of an *ordinary*
   function initializes nothing (see the constructor-body bullet above), so a
   later ``destroy_at(&u)`` is rejected by ``destroy_uninit`` even if the
@@ -1174,9 +1180,9 @@ those entries never cause a rejection.
   (``c ? &u : &v``), a store whose target names several pointers or a
   marked pointer on only some of its arms (``(c ? p : q) = &u``,
   ``(c ? p : r) = &u``), a ``__block`` pointer -- fires in neither
-  direction through the pointer, and a store or ``[[now_init]]`` call
-  through it credits nothing: a later ``int *w = &u`` stays the
-  unmarked-direction error.
+  direction through the pointer, a store or ``[[now_init]]`` call through
+  it credits nothing, and a marked binding to it asserts nothing: a later
+  ``int *w = &u`` stays the unmarked-direction error.
 - ``[[uninit]]`` on a type whose default constructor is explicitly defaulted
   *after* its first declaration is accepted only once the ``= default``
   definition has been parsed: a marker written between the class definition

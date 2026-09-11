@@ -236,6 +236,19 @@ void wording_by_spelling() {
   (void)a; (void)b;
 }
 
+// A marked binding asserts the local it names uninitialized, whatever a
+// conditional construct_at left it.
+void construct_conditional_then_bind(bool c) {
+  Payload x [[uninit]];
+  if (c)
+    std::construct_at(&x, 1);
+  Payload *p [[ref_to_uninit]] = &x; // OK: constructed on one path only
+  int z = x.y; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  std::construct_at(p, 2);
+  int z2 = x.y; // OK
+  (void)z; (void)z2;
+}
+
 //--- sys/init_mem.h
 namespace std {
 template <class T, class... A> T *construct_at(T *p, A &&...args);
