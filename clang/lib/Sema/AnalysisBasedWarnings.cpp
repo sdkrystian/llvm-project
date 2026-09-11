@@ -3157,12 +3157,15 @@ static void extractStdInitEvents(
       BlockEvents.push_back(Ev);
     };
     // What a marked pointer or reference bound to \p Src as \p T refers to,
-    // as a ReseatTarget and its Aux, through the binding judgment's operand
-    // and leaf walk (AddBinding) so the two agree on the source's shape: the
-    // one tracked entity a single leaf names (`&u`, `&a.m`, `u` for a
-    // reference), what a single marked pointer or reference leaf refers to
-    // (`q`, `&*q`, `&r`), nothing identifiable when several leaves include a
-    // tracked one, and otherwise an anonymous referent.
+    // as a ReseatTarget and its Aux, through the binding judgment's operand,
+    // leaf walk, and resolver (AddBinding, TrackedStorage::resolveFlowLeaf)
+    // so the two agree on the source's shape: the one tracked entity a
+    // single leaf names (`&u`, `&a.m`, `u` for a reference), what a single
+    // marked pointer or reference leaf refers to (`q`, `&*q`, `&r`), nothing
+    // identifiable when several leaves include a tracked one, and otherwise
+    // an anonymous referent -- also for a decayed [[uninit]] array, which
+    // the binding judges by the array's state but which names one element
+    // (P4222R2 §5.4).
     auto ReseatTargetFor =
         [&](const Expr *Src, QualType T) -> std::pair<ReseatTarget, unsigned> {
       std::pair<ReseatTarget, unsigned> Fresh{ReseatTarget::Fresh, 0};
@@ -3183,19 +3186,12 @@ static void extractStdInitEvents(
             return {ReseatTarget::Unknown, 0};
         return Fresh;
       }
-      TrackedStorage::Resolution R;
-      if (AsPointerValue) {
-        const Expr *G = SemaProfiles::ignoreTransparentCasts(SrcLeaves.front());
-        const auto *UO = dyn_cast<UnaryOperator>(G);
-        if (UO && UO->getOpcode() == UO_AddrOf)
-          R = Storage.resolve(UO->getSubExpr());
-        else if (std::optional<unsigned> Idx = Storage.markedPointerObject(G))
-          return {ReseatTarget::ViaPointer, *Idx};
-        else
-          return Fresh;
-      } else {
-        R = Storage.resolve(SrcLeaves.front());
-      }
+      const Expr *Leaf = SrcLeaves.front();
+      if (AsPointerValue &&
+          SemaProfiles::ignoreTransparentCasts(Leaf)->getType()->isArrayType())
+        return Fresh;
+      TrackedStorage::Resolution R =
+          Storage.resolveFlowLeaf(Leaf, AsPointerValue);
       if (!R.Entity || R.Subobject)
         return Fresh;
       if (Storage.Entities[*R.Entity].K == TrackedEntity::Kind::Pointee)
