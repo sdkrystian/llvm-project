@@ -695,7 +695,9 @@ public:
 
   /// std::init: attach the lifecycle markers to a matching std::construct_at
   /// (RefToUninit on the first parameter + NowInit) or std::destroy_at
-  /// (NowUninit) declaration, so the real library functions work under
+  /// (NowUninit) declaration, and the parameter marker alone to a
+  /// std::now_init with one pointer parameter and a pointer return type
+  /// (P4222R2 §4.4), so the real library functions work under
   /// enforcement -- there is no portable way to annotate namespace-std
   /// declarations from user code. Keyed on form (a first parameter of
   /// pointer type, dependent or not), so the marker subject rules hold by

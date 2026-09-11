@@ -2473,19 +2473,21 @@ void template_now_init_dependent() {
 }
 template void template_now_init_dependent<int>();
 
-// R2 §4.4's now_init() library function works today as a *pure declaration*
-// with no compiler support at all: its unmarked return classifies as
-// initialized (trusted, §4.3), so the returned pointer launders the storage
-// -- the paper's own deliberate profile hole (its `return p;` definition is
-// written once, under suppression). What the declaration alone cannot do is
-// legalize the *original name* after the call; that is exactly what the §6.2
-// [[now_init]] attribute adds when placed on the same declaration.
+// R2 §4.4's now_init() library function works by form once its parameter
+// carries the marker: its unmarked return classifies as initialized
+// (trusted, §4.3), so the returned pointer launders the storage -- the
+// paper's "cast in disguise" (its `return p;` definition is written once,
+// under suppression). Clang supplies the marker for the library's
+// std::now_init itself (safety-profile-init-std-lifecycle.cpp). What the
+// declaration cannot do is legalize the *original name* after the call;
+// that is exactly what the §6.2 [[now_init]] attribute adds when placed on
+// the same declaration.
 template <class T> T *now_init(T *p [[ref_to_uninit]]);
 template <class T> [[now_init]] T *now_init_annotated(T *p [[ref_to_uninit]]);
 
 void test_now_init_library_pattern() {
   int m [[uninit]];
-  int v = *now_init(&m); // OK today: the unmarked return is trusted
+  int v = *now_init(&m); // OK: the unmarked return is trusted
   int *s = now_init(&m); // OK: unmarked pointer from an unmarked return
   ni_cref(m); // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   (void)v; (void)s;

@@ -3,6 +3,8 @@
 // RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -std=c++23 %t/local.cpp
 // RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -std=c++23 %t/referent.cpp
 // RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -isystem %t/sys -std=c++23 %t/system.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected,strict -fprofiles -fno-profiles-exempt-system-headers -isystem %t/sys -std=c++23 %t/system.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -std=c++23 %t/now_init_body.cpp
 //
 // The lifecycle attributes are injected only under -fprofiles (enforcement
 // not required), and appear on both the pattern and its instantiations.
@@ -11,8 +13,9 @@
 
 // Clang attaches the std::init lifecycle markers to std::construct_at
 // (RefToUninit on the first parameter + NowInit) and std::destroy_at
-// (NowUninit) itself, keyed on a pointer-typed first parameter, so the real
-// library functions are usable under enforcement.
+// (NowUninit) itself, keyed on a pointer-typed first parameter, and the
+// parameter marker alone to std::now_init (one pointer parameter, pointer
+// return), so the real library functions are usable under enforcement.
 
 // INJECT: FunctionDecl {{.*}} construct_at 'T *(T *, A &&...)'
 // INJECT: RefToUninitAttr {{.*}} Implicit
@@ -22,6 +25,11 @@
 // INJECT: NowInitAttr {{.*}} Implicit
 // INJECT: FunctionDecl {{.*}} destroy_at 'void (T *)'
 // INJECT: NowUninitAttr {{.*}} Implicit
+// INJECT: FunctionDecl {{.*}} now_init 'T *(T *)'
+// INJECT: RefToUninitAttr {{.*}} Implicit
+// INJECT: FunctionDecl {{.*}} now_init 'int *(int *)' implicit_instantiation
+// INJECT: RefToUninitAttr {{.*}} Implicit
+// INJECT-NOT: NowInitAttr
 
 // PLAIN-NOT: RefToUninitAttr
 // PLAIN-NOT: NowInitAttr
@@ -31,11 +39,13 @@
 namespace std {
 template <class T, class... A> T *construct_at(T *p, A &&...args);
 template <class T> void destroy_at(T *p);
+template <class T> T *now_init(T *p);
 } // namespace std
 
 void instantiate(int *p) {
   std::construct_at(p, 5);
   std::destroy_at(p);
+  std::now_init(p);
 }
 
 //--- local.cpp
@@ -46,10 +56,15 @@ template <class T, class... A> T *construct_at(T *p, A &&...args);
 template <class T> void destroy_at(T *p);
 // A non-pointer first parameter is outside the form key: not annotated.
 template <class T> void construct_at(T &r, int);
+template <class T> T *now_init(T *p);
+// Outside now_init's form key: a second parameter, a reference parameter.
+template <class T> T *now_init(T *p, int);
+template <class T> T *now_init(T &r);
 } // namespace std
 
-// A global-namespace construct_at is not annotated either.
+// A global-namespace construct_at or now_init is not annotated either.
 template <class T, class... A> T *construct_at(T *p, A &&...args);
+template <class T> T *now_init(T *p);
 
 // The paper's central lifecycle idiom compiles clean.
 void lifecycle() {
@@ -110,6 +125,65 @@ void explicit_specialization() {
   std::construct_at<int>(&u, 5);
   int v = u; // OK
   (void)v;
+}
+
+struct Payload { int y; };
+void sink(int *);
+
+// now_init launders its argument through the return (P4222R2 §4.4): the
+// returned pointer is trusted, the original name keeps its state (§6.1).
+void now_init_return_only() {
+  int u [[uninit]];
+  int v = *std::now_init(&u); // OK: the unmarked return is trusted
+  int *s = std::now_init(&u); // OK
+  sink(&u); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  std::construct_at(&u, 5); // OK: u still refers to uninitialized memory
+  (void)v; (void)s;
+}
+
+// A pointer to initialized storage cannot be passed to now_init (§4.2).
+void now_init_initialized_source() {
+  int x = 1;
+  std::now_init(&x); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// The trusted return cannot initialize a marked pointer.
+void now_init_marked_target() {
+  int u [[uninit]];
+  int *q [[ref_to_uninit]] = std::now_init(&u); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)q;
+}
+
+// Through a marked pointer the referent keeps its state.
+void now_init_through_marked_pointer() {
+  int u [[uninit]];
+  int *p [[ref_to_uninit]] = &u;
+  int *s = std::now_init(p); // OK
+  int r = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  (void)s; (void)r;
+}
+
+// A decayed [[uninit]] array is a marked source (§6.1's now_init(arr10)).
+void now_init_array() {
+  Payload arr [[uninit]] [4];
+  Payload *a = std::now_init(arr); // OK
+  int z = a[2].y; // OK
+  (void)z;
+}
+
+// The §4.6 slot idiom: arithmetic on a marked member pointer is
+// unclassified, and the returned referent is trusted.
+struct Slots { Payload *elem [[ref_to_uninit]]; int n; };
+Payload &slot_at(Slots &s, int i) {
+  return *std::now_init(s.elem + i); // OK
+}
+
+// Declarations outside the form key are not annotated.
+void now_init_form_key() {
+  int u [[uninit]];
+  std::now_init(&u, 0); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  std::now_init(u); // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  ::now_init(&u); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 }
 
 //--- referent.cpp
@@ -253,12 +327,17 @@ void construct_conditional_then_bind(bool c) {
 namespace std {
 template <class T, class... A> T *construct_at(T *p, A &&...args);
 template <class T> void destroy_at(T *p);
+template <class T> T *now_init(T *p) {
+  return p; // strict-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
 } // namespace std
 
 //--- system.cpp
 // Declarations in a system header are annotated the same way, and the checks
 // still fire: the violation is located at the user's call site, outside the
-// system-header exemption.
+// system-header exemption. The library's now_init definition violates the
+// binding rule inside the header, which only
+// -fno-profiles-exempt-system-headers diagnoses.
 [[profiles::enforce(std::init)]];
 #include <init_mem.h>
 
@@ -269,4 +348,32 @@ void user() {
   std::destroy_at(&u);
   std::destroy_at(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
   (void)v;
+}
+
+// The now_init definition's violation lies in the system header; the call
+// site's marker check is the user's.
+void now_init_user() {
+  int u [[uninit]];
+  int *s = std::now_init(&u); // OK
+  // strict-note@-1 {{in instantiation of function template specialization 'std::now_init<int>' requested here}}
+  int x = 1;
+  std::now_init(&x); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)s;
+}
+
+//--- now_init_body.cpp
+// P4222R2 §4.4: the identity definition cannot compile with the profile
+// enforced. Outside a system header its instantiation is diagnosed.
+[[profiles::enforce(std::init)]];
+
+namespace std {
+template <class T> T *now_init(T *p) {
+  return p; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+} // namespace std
+
+void user() {
+  int u [[uninit]];
+  int *s = std::now_init(&u); // expected-note {{in instantiation of function template specialization 'std::now_init<int>' requested here}}
+  (void)s;
 }

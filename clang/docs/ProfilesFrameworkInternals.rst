@@ -742,17 +742,19 @@ Clang itself supplies the standard library's lifecycle annotations:
 ``Sema::AddKnownFunctionAttributes`` for every function declaration, attaches
 an implicit ``RefToUninitAttr`` (first parameter) plus ``NowInitAttr`` to a
 ``std::construct_at``, and ``NowUninitAttr`` to a ``std::destroy_at``, whose
-first parameter is of pointer type.  The form key keeps the marker subject
-rules holding by construction (a ``T*`` parameter is a pointer by form even
-when ``T`` is dependent), and the seam runs after declaration merging and
-after ``checkNowInitVacuity``, so the vacuity check never sees a
-half-injected pair.  Implicit attributes are indistinguishable from
-hand-written ones, so the funnels, the CFG pass's lifecycle arm,
-serialization, and suppression apply unchanged, and specializations
-inherit them from the pattern via attribute instantiation.  Iterator-shaped
-relatives (``destroy_n``, the ``uninitialized_*`` family) and ``ranges::``
-CPOs sit outside the form key; the user-facing scope note lives in
-:doc:`ProfilesFramework`.
+first parameter is of pointer type, and the ``RefToUninitAttr`` alone to a
+``std::now_init`` with one pointer parameter and a pointer return type (no
+lifecycle attribute: the function credits nothing, P4222R2 §4.4).  The form
+key keeps the marker subject rules holding by construction (a ``T*``
+parameter is a pointer by form even when ``T`` is dependent), and the seam
+runs after declaration merging and after ``checkNowInitVacuity``, so the
+vacuity check never sees a half-injected pair.  Implicit attributes are
+indistinguishable from hand-written ones, so the funnels, the CFG pass's
+lifecycle arm, serialization, and suppression apply unchanged, and
+specializations inherit them from the pattern via attribute instantiation.
+Iterator-shaped relatives (``destroy_n``, the ``uninitialized_*`` family) and
+``ranges::`` CPOs sit outside the form key; the user-facing scope note lives
+in :doc:`ProfilesFramework`.
 
 
 Flow-Tracked Storage (std::init)

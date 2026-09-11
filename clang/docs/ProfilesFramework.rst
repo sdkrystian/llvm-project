@@ -814,11 +814,19 @@ longer refers to uninitialized memory, which incidentally catches double
 ``std::construct_at`` declaration whose first parameter is of pointer type
 receives ``[[now_init]]`` and the parameter marker implicitly, so the real
 ``<memory>`` declaration checks the lifecycle *start* with no user
-declaration.  The §4.4 ``now_init()`` identity function
-needs no compiler support at all -- declared as ``template<class T> T*
-now_init(T* p [[ref_to_uninit]]);``, its unmarked return is already trusted
-as initialized -- but only the attribute legalizes the original *name* after
-the call.
+declaration.  The §4.4 ``now_init()`` identity function is annotated the
+same way: a ``std::now_init`` declaration with one pointer parameter and a
+pointer return type receives the parameter marker, so its argument must
+refer to uninitialized memory, its unmarked return is trusted as initialized
+(``*std::now_init(p)`` reads the storage ``p`` refers to without
+verification -- the paper's "cast in disguise"), and the argument's own
+storage keeps its state (§6.1: use the returned pointer, not the original
+name); only the attribute legalizes the original *name* after the call.
+The library's ``return p;`` definition violates the binding rule: in a
+system header it is covered by the `System Headers`_ exemption, and under
+``-fno-profiles-exempt-system-headers`` the library must write
+``[[profiles::suppress(std::init)]]`` on the definition.  A definition
+outside a system header is diagnosed per instantiation.
 
 The lifecycle *end* is the mirror attribute ``[[now_uninit]]`` -- the
 recording §4.4 notes is missing for ``destroy_at`` ("the object subjected to

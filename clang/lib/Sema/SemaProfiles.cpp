@@ -1063,7 +1063,9 @@ void SemaProfiles::addKnownInitLifecycleAttributes(FunctionDecl *FD) {
   // them from the pattern via attribute instantiation. The injected pair is
   // consistent by construction (marker and NowInit added together, first
   // parameter checked as a pointer), so checkNowInitVacuity -- which runs
-  // before this seam -- is never contradicted.
+  // before this seam -- is never contradicted. std::now_init receives the
+  // parameter marker alone: its unmarked return is the trusted pointer and
+  // the argument's storage keeps its state (P4222R2 §4.4, §6.1).
   if (!getLangOpts().Profiles || !FD->getIdentifier() ||
       !FD->isInStdNamespace() || FD->getNumParams() < 1)
     return;
@@ -1080,6 +1082,11 @@ void SemaProfiles::addKnownInitLifecycleAttributes(FunctionDecl *FD) {
   } else if (FD->getName() == "destroy_at") {
     if (!FD->hasAttr<NowUninitAttr>())
       FD->addAttr(NowUninitAttr::CreateImplicit(Context, FD->getLocation()));
+  } else if (FD->getName() == "now_init") {
+    if (FD->getNumParams() == 1 && FD->getReturnType()->isPointerType() &&
+        !P0->hasAttr<RefToUninitAttr>())
+      FD->getParamDecl(0)->addAttr(
+          RefToUninitAttr::CreateImplicit(Context, P0->getLocation()));
   }
 }
 
