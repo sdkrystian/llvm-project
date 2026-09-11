@@ -748,7 +748,7 @@ void test_ref_captures() {
   auto c3 = [&ok] { ok = 1; }; // OK: initialized
   int *rtu [[ref_to_uninit]] = &g_uninit;
   auto c4 = [&rtu] { (void)rtu; }; // OK: the pointer object itself is initialized
-  int &ur [[ref_to_uninit]] = g_uninit;
+  int &ur [[ref_to_uninit]] = *rtu;
   auto c5 = [&ur] { (void)ur; }; // expected-error {{capturing 'ur' by reference binds a reference to uninitialized memory under profile 'std::init'}}
   // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
   [[profiles::suppress(std::init, rule: "ref_to_uninit")]] {
@@ -1860,8 +1860,8 @@ void alias_by_const_ref(int *const &);
 void test_alias_escape_by_reference(int *p [[ref_to_uninit]]) {
   *p = 5;
   alias_by_ref(p);
-  int *m [[ref_to_uninit]] = p; // OK: the callee may have reseated p
   int *u2 = p;                  // OK: the referent may still be initialized
+  int *m [[ref_to_uninit]] = p; // OK: the callee may have reseated p; asserts the referent uninitialized from here
   (void)m; (void)u2;
 }
 void test_alias_escape_by_pointer(int *p [[ref_to_uninit]]) {
@@ -1929,8 +1929,8 @@ void test_alias_escape_throw(int *p [[ref_to_uninit]]) {
 void test_alias_escape_by_ref_capture(int *p [[ref_to_uninit]]) {
   *p = 5;
   auto c = [&p] {};
-  int *m [[ref_to_uninit]] = p; // OK: the closure may have reseated p
   int *u2 = p;                  // OK: the referent may still be initialized
+  int *m [[ref_to_uninit]] = p; // OK: the closure may have reseated p; asserts the referent uninitialized from here
   (void)c; (void)m; (void)u2;
 }
 void test_alias_escape_by_ref_capture_default(int *p [[ref_to_uninit]]) {
@@ -2342,12 +2342,13 @@ void test_referent_in_loop(bool c) {
   }
 }
 
-// A copy of a captured marked pointer refers to what the capture refers to,
-// whose state the enclosing body decides.
+// A copy of a captured marked pointer refers to what the capture refers to:
+// the enclosing body decides its state until the copy's marker asserts it
+// uninitialized.
 void test_referent_copy_of_capture(int *q [[ref_to_uninit]]) {
   auto l = [&q] {
-    int *p [[ref_to_uninit]] = q;
-    int v = *p; // OK: q's referent may be initialized by the enclosing body
+    int *p [[ref_to_uninit]] = q; // OK: unknown state
+    int v = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
     *p = 1;
     int *m [[ref_to_uninit]] = q; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
     (void)v; (void)m;
@@ -2376,6 +2377,53 @@ void test_referent_mixed_marking_store_target(bool c, int *r) {
   int *m [[ref_to_uninit]] = p; // OK: unknown referent
   int *w = &u;                  // OK: u keeps its state
   (void)m; (void)w;
+}
+
+// A marked binding asserts its referent uninitialized from there on, under
+// every name that reaches the storage.
+void test_assert_copy_of_escaped(int *q [[ref_to_uninit]]) {
+  alias_by_ref(q);
+  int *p [[ref_to_uninit]] = q; // OK: unknown state
+  int *w = p;  // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  int x = *p;  // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  int *w2 = q; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)w; (void)x; (void)w2;
+}
+void test_assert_may_initialized_local(bool c) {
+  int u [[uninit]];
+  if (c)
+    u = 1;
+  int *p [[ref_to_uninit]] = &u; // OK: not initialized on every path
+  int y = *p;  // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  int *w = &u; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  *p = 1;
+  int *w2 = &u; // OK: stored through p
+  (void)y; (void)w; (void)w2;
+}
+void test_assert_marked_reference(bool c) {
+  int u [[uninit]];
+  if (c)
+    u = 1;
+  int &r [[ref_to_uninit]] = u;
+  int *w = &u; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)r; (void)w;
+}
+
+// The assertion holds after a rejected marked binding too.
+void test_assert_after_rejected_binding() {
+  int u [[uninit]];
+  u = 1;
+  int *p [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int *w = &u;                   // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)p; (void)w;
+}
+
+// A binding to a marked parameter asserts nothing after the call.
+void test_assert_not_by_parameter_binding(int *p [[ref_to_uninit]]) {
+  alias_by_ref(p);
+  take_uninit_ptr(p);
+  int *u2 = p; // OK: the referent may still be initialized
+  (void)u2;
 }
 
 // The callee's initialization survives statement reuse in instantiated
@@ -2501,6 +2549,25 @@ void test_double_destroy() {
   now_init_fill(&u);
   nu_wipe(&u); // OK
   nu_wipe(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+}
+
+// A marked binding keeps its referent's destroyed state: a destroy through
+// the pointer is a double destroy, and after a destroy on one path only it
+// destroys storage the marker asserts uninitialized.
+void test_assert_keeps_destroyed() {
+  int u [[uninit]];
+  u = 1;
+  nu_wipe(&u);
+  int *p [[ref_to_uninit]] = &u; // OK: destroyed storage is uninitialized
+  nu_wipe(p); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+}
+void test_assert_conditional_destroy(bool c) {
+  int u [[uninit]];
+  u = 1;
+  if (c)
+    nu_wipe(&u);
+  int *p [[ref_to_uninit]] = &u; // OK: destroyed on one path
+  nu_wipe(p); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
 // Destroying storage that was never initialized is rejected: destruction
@@ -3011,8 +3078,8 @@ void test_conditional_store_if(bool c) {
   int u [[uninit]];
   if (c)
     u = 5;
-  int *r [[ref_to_uninit]] = &u; // OK: the store may not have run
   int *q = &u;                   // OK: initialized on some path
+  int *r [[ref_to_uninit]] = &u; // OK: the store may not have run
   (void)r; (void)q;
 }
 void test_conditional_store_else(bool c) {
@@ -3103,8 +3170,8 @@ void test_conditional_store_ternary(bool c) {
 void test_conditional_store_gnu_ternary(int c) {
   int u [[uninit]];
   (void)(c ?: (u = 5));
-  int *r [[ref_to_uninit]] = &u; // OK: the :-arm is conditional
   int *q = &u;                   // OK: initialized on some path
+  int *r [[ref_to_uninit]] = &u; // OK: the :-arm is conditional
   (void)r; (void)q;
 }
 // A lambda body is a separate function that may never run: its store
@@ -3168,8 +3235,8 @@ void test_store_in_condition_suppresses_only(bool c) {
   int u [[uninit]];
   if ((u = 5))
     ;
-  int *r [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   int *q = &u;                   // OK: initialized
+  int *r [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   (void)r; (void)q;
 }
 // A goto can skip a later store, which is then initialized on some path
@@ -3180,8 +3247,8 @@ void test_store_after_goto(bool c) {
     goto skip;
   u = 5;
 skip:;
-  int *r [[ref_to_uninit]] = &u; // OK: the goto path skips the store
   int *q = &u;                   // OK: initialized on some path
+  int *r [[ref_to_uninit]] = &u; // OK: the goto path skips the store
   (void)r; (void)q;
 }
 // ...while a store *before* the goto is on every path that reaches the
@@ -3264,10 +3331,10 @@ void test_store_in_never_evaluated_operand() {
 void test_tracked_and_untracked_sources(bool c) {
   int u [[uninit]];
   u = 5;
-  int *r1 [[ref_to_uninit]] = &u;       // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
-  int *r2 [[ref_to_uninit]] = &g_init;  // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
-  int *r3 [[ref_to_uninit]] = &g_uninit; // OK
-  int *r4 [[ref_to_uninit]] = c ? &u : &g_uninit; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int *r1 [[ref_to_uninit]] = c ? &u : &g_uninit; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int *r2 [[ref_to_uninit]] = &u;       // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int *r3 [[ref_to_uninit]] = &g_init;  // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int *r4 [[ref_to_uninit]] = &g_uninit; // OK
   (void)r1; (void)r2; (void)r3; (void)r4;
 }
 // A flow-tracked binding inside a function template is judged on each
