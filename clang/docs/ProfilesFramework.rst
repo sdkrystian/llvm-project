@@ -744,15 +744,24 @@ initializer it is unclassified.
 The recognizer's answer is refined by *flow-tracked storage*: an
 ``[[uninit]]`` local, the referent of a ``[[ref_to_uninit]]`` local pointer
 or reference (parameters included), and an ``[[uninit]]`` scalar member of a
-directly named local or of the current object.  For these the binding is
-judged where it occurs, by the same local analysis that checks reads (§1.3):
-a whole-entity store (``u = 5``, ``*p = 5``, ``r = 5``, ``a.m = 5``,
-``this->m = 5``), a ``[[now_init]]`` call, or ``std::construct_at``
-initializes the storage; reseating a marked pointer (``p = q``, ``p += n``,
-``p++``), handing out a mutable alias of it (``T *&``, ``T **``, a
-by-reference capture), a ``[[now_uninit]]`` call, ``std::destroy_at``,
-``free``, ``realloc``, ``operator delete``, or a ``delete`` expression ends
-what the analysis knows about it.  A marked target is rejected when the
+directly named local or of the current object.  A marked pointer's or
+reference's referent is, at each point, the storage its latest binding
+names: after ``int *p [[ref_to_uninit]] = &u;`` the local ``u``, after
+``p = q`` whatever ``q`` refers to there, after ``p = &a.m`` that member.  A
+source the analysis does not track (an allocation, pointer arithmetic, a
+subobject, a decayed array) gives it an anonymous referent that the marker
+asserts uninitialized; paths that bind it differently leave the referent
+unidentified, and nothing fires through the pointer.  For tracked storage
+the binding is judged where it occurs, by the same local analysis that
+checks reads (§1.3): a whole-entity store (``u = 5``, ``*p = 5``, ``r = 5``,
+``a.m = 5``, ``this->m = 5``), a ``[[now_init]]`` call, or
+``std::construct_at`` initializes the storage under whichever name reaches
+it -- ``*p = 5`` initializes ``u``, and ``u = 5`` what ``*p`` reads; handing
+out a mutable alias of a marked pointer (``T *&``, ``T **``, a by-reference
+capture) gives it an anonymous referent of unknown state; a
+``[[now_uninit]]`` call, ``std::destroy_at``, ``free``, ``realloc``,
+``operator delete``, or a ``delete`` expression acts on the referent
+(below).  A marked target is rejected when the
 storage is initialized on every path reaching the binding; an unmarked
 target is accepted when the storage is initialized on some path.  Element
 accesses (``p[i]``, ``a[0]``) are never initialized by an element store, and
@@ -767,11 +776,11 @@ is judged by its form alone.  A default argument is judged where it is
 declared (once per instantiation of a template), never at a call that uses
 it, so a suppression for it belongs on the declaration.  A transparent cast is as transparent to a
 store as to a binding: ``(int &)u = 5`` initializes ``u`` whole,
-``*(int *)p = 5`` the pointee, and ``(int *&)p = q`` reseats ``p`` (§4.3).
-Whole-object assignment of a class pointee never initializes: it is a member
-``operator=`` call on uninitialized storage, rejected as above.  (A
+``*(int *)p = 5`` the referent, and ``(int *&)p = q`` reseats ``p`` (§4.3).
+Whole-object assignment of a class-type referent never initializes: it is a
+member ``operator=`` call on uninitialized storage, rejected as above.  (A
 ``void*`` escape of ``&p`` is not recognized: the missed reseat leaves the
-pointee definitely initialized, which errs toward a false positive of the
+referent definitely initialized, which errs toward a false positive of the
 marked-target rule.)
 
 One kind of call *does* count as initialization: §6.2's ``[[now_init]]``
@@ -780,8 +789,8 @@ declares that a function initializes the storage passed to each of its
 ``[[ref_to_uninit]]`` parameters, and it requires at least one such
 parameter.  A call to a ``[[now_init]]`` function initializes the
 argument's storage exactly as the equivalent direct store would --
-``fill(&u)`` initializes ``u`` whole, ``fill(p)`` the marked pointer's
-pointee (until ``p`` is reseated), ``fill(&a.m)`` the member ``m`` of ``a``,
+``fill(&u)`` initializes ``u`` whole, ``fill(p)`` the storage ``p`` refers
+to there, ``fill(&a.m)`` the member ``m`` of ``a``,
 and ``fill(arr)`` a local ``[[uninit]]`` array whole (§6's
 ``uninitialized_fill`` shape; the element form ``fill(&arr[0])`` initializes
 nothing, §5.4) -- with the same reverse-direction consequence (after a
@@ -822,9 +831,7 @@ destroyed on every path reaching the call and not stored since: a double
 destruction (rule ``double_destroy``).  A destroy on one path only leaves
 the storage neither definitely initialized nor definitely destroyed: a
 marked binding is not forced, an unmarked binding stays accepted, and a
-second destroy is not a double destroy.  Reseating a marked pointer, or
-handing out a mutable alias of it, retires its pointee's destroyed state
-with the rest of what is known about the pointee.  Clang declares
+second destroy is not a double destroy.  Clang declares
 ``std::destroy_at`` this way itself -- a ``std::destroy_at`` whose first
 parameter is of pointer type receives ``[[now_uninit]]`` implicitly -- so
 the construct/destroy/construct cycle is legal, a second destruction is
@@ -1044,7 +1051,7 @@ those entries never cause a rejection.
   reads destroyed memory.
 - Destroying through a ``[[ref_to_uninit]]`` pointer that was never stored
   through is rejected by ``destroy_uninit``: the marker asserts an
-  uninitialized pointee at entry.  If a helper filled the pointee first,
+  uninitialized referent at entry.  If a helper filled the referent first,
   mark the helper ``[[now_init]]``, store through the marker before the
   destroy, or suppress.
 - Passing ``&u`` to a ``[[ref_to_uninit]]`` parameter of an *ordinary*
@@ -1053,12 +1060,12 @@ those entries never cause a rejection.
   callee filled the storage -- the same strictness, and the same remedies,
   as the unmarked-direction binding after such a call: ``[[now_init]]`` on
   the callee or suppression.
-- Member-wise initialization of a class pointee through
-  ``[[ref_to_uninit]]`` is rejected even for trivially-copyable pointees
+- Member-wise initialization of a class-type referent through
+  ``[[ref_to_uninit]]`` is rejected even for trivially-copyable referents
   (``ptr->x = 5``): below a member step only whole-object ``construct_at``
   could initialize, which is unmodeled.  The remedies are ``construct_at``,
-  a whole scalar write for a scalar pointee, or suppression.  Two corners
-  are suppress-only: a marked pointer *member*'s pointee and an element
+  a whole scalar write for a scalar referent, or suppression.  Two corners
+  are suppress-only: a marked pointer *member*'s referent and an element
   access (``ptr[i].x``) are not flow-tracked, so no prior fill legalizes
   either.
 - Placement ``new`` into marked storage (``new (&u) T``) is rejected --
@@ -1161,13 +1168,21 @@ those entries never cause a rejection.
   model: a member assigned before the jump still counts as assigned after it.
 - A store through an alias of a pointer object (``int *&r = p; r = &u;``,
   ``*pp = &u``) is not checked: the alias cannot carry the target's marking.
+- A marked pointer whose referent the analysis cannot identify -- a copy
+  (``int *p2 [[ref_to_uninit]] = q;``) whose source ``q`` is later reseated
+  to an untracked source, a conditional initializer with a tracked arm
+  (``c ? &u : &v``), a store whose target names several pointers
+  (``(c ? p : q) = &u``), a ``__block`` pointer -- fires in neither
+  direction through the pointer, and a store or ``[[now_init]]`` call
+  through it credits nothing: a later ``int *w = &u`` stays the
+  unmarked-direction error.
 - ``[[uninit]]`` on a type whose default constructor is explicitly defaulted
   *after* its first declaration is accepted only once the ``= default``
   definition has been parsed: a marker written between the class definition
   and the constructor's still sees a declared-but-undefined constructor and
   is rejected as running a constructor.
 - Storage that is not flow-tracked -- a class-type or array ``[[uninit]]``
-  member, a marked pointer member's pointee -- is judged by its form alone
+  member, a marked pointer member's referent -- is judged by its form alone
   at every read, write, and destroy: a ``construct_at`` into it legalizes no
   later access, and a second ``destroy_at`` of it is not a double destroy.
 - In a template, the declaration rules, the constructor rules, and the

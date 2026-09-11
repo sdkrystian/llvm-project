@@ -687,13 +687,23 @@ The ``std::init`` recognizers classify storage from an expression's
 syntactic form alone.  Inside a function body that answer is refined by the
 definite-assignment engine in AnalysisBasedWarnings.cpp: the ``ExtraPass``
 of the ``std::init`` ``CFGProfiles`` row harvests the body's flow-tracked
-entities (``TrackedEntity``: ``[[uninit]]`` locals, marked local pointees,
-and marked scalar members of locals and of the current object), extracts one
-event stream from a CFG of its own (exception edges, fully linearized), runs
-a forward dataflow over four bit vectors per entity -- ``Must`` (assigned on
-every path), ``May`` (assigned on some path), ``Esc`` (escaped; read
-leniency for local aggregates), and ``Destroyed`` (destroyed on every path
-and not stored since) -- and reports the ``ref_to_uninit`` judgments of the
+entities (``TrackedEntity``: ``[[uninit]]`` locals, the referents of marked
+local pointers and references, and marked scalar members of locals and of
+the current object), extracts one event stream from a CFG of its own
+(exception edges, fully linearized), runs a forward dataflow over four bit
+vectors per entity -- ``Must`` (assigned on every path), ``May`` (assigned
+on some path), ``Esc`` (escaped; read leniency for local aggregates), and
+``Destroyed`` (destroyed on every path and not stored since) -- plus, per
+marked pointer or reference, ``Target``, the entity it refers to at that
+point: an ``[[uninit]]`` local, a tracked member, another pointer's
+anonymous referent, itself (an anonymous referent whose state is the
+entity's own bits), or unidentified.  The transfer function resolves every
+event and site leaf on such an entity through ``Target`` before applying
+it, and a ``Reseat`` event carries the new referent (``ReseatTarget``): the
+entity a single-leaf source names, what another marked pointer refers to,
+a fresh anonymous referent for an untracked source, or unidentified for a
+conditional source with a tracked arm.  The pass reports the
+``ref_to_uninit`` judgments of the
 body's bindings, the ``double_destroy`` / ``destroy_uninit`` judgments of
 its ``[[now_uninit]]`` calls, and the ``uninit_read`` / ``uninit_write``
 judgments of its reads through and stores below tracked storage at their
@@ -710,9 +720,10 @@ elements.  Consumers read the lattices as follows: a marked-target binding
 fires on ``Must`` and ``double_destroy`` on ``Destroyed``; an
 unmarked-target binding, ``destroy_uninit``, a read through a marker, and a
 subobject write are suppressed by ``May``.  A
-destroy or release on one of several arms, like a mutable alias of a marked
-pointer handed out, leaves the entity possibly assigned, not definitely, and
-not destroyed.  A variable of an enclosing function reached by capture,
+destroy or release on one of several arms leaves the entity possibly
+assigned, not definitely, and not destroyed; a mutable alias of a marked
+pointer handed out gives the pointer an anonymous referent in that state.  A
+variable of an enclosing function reached by capture,
 whose state the enclosing body decides, enters with ``May`` set and ``Must``
 clear, so neither direction fires on it until the body itself stores.  The
 remaining blind spots are listed in :doc:`ProfilesFramework`,

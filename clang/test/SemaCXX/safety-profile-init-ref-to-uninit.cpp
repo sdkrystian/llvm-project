@@ -385,16 +385,16 @@ void test_conditional_store_credit(bool c) {
   (void)a; (void)b;
 }
 
-// A reseat through a conditional target retires everything known about the
-// marked pointer's pointee, whichever arm: every fact described the old
-// pointee.
+// A store whose conditional target names one pointer on every arm reseats
+// it to the store's source: p refers to u2 from there on, and u keeps its
+// state.
 void test_conditional_reseat(bool c) {
   int u [[uninit]], u2 [[uninit]];
   int *p [[ref_to_uninit]] = &u;
   *p = 1;
   int *m0 [[ref_to_uninit]] = p; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   (c ? p : p) = &u2;
-  int *m [[ref_to_uninit]] = p;  // OK: the reseat retired the pointee's state
+  int *m [[ref_to_uninit]] = p;  // OK: p refers to u2, which is uninitialized
   (void)m0; (void)m;
 }
 
@@ -748,7 +748,7 @@ void test_ref_captures() {
   auto c3 = [&ok] { ok = 1; }; // OK: initialized
   int *rtu [[ref_to_uninit]] = &g_uninit;
   auto c4 = [&rtu] { (void)rtu; }; // OK: the pointer object itself is initialized
-  int &ur [[ref_to_uninit]] = *rtu;
+  int &ur [[ref_to_uninit]] = g_uninit;
   auto c5 = [&ur] { (void)ur; }; // expected-error {{capturing 'ur' by reference binds a reference to uninitialized memory under profile 'std::init'}}
   // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
   [[profiles::suppress(std::init, rule: "ref_to_uninit")]] {
@@ -1763,8 +1763,8 @@ template void template_compound_read_bad<int>(int *); // expected-note {{in inst
 // initialization (paper §4.3/§4.5): whole-`*p` reads after it are legal, and
 // the paper's reverse direction applies to bindings: the pointer now refers
 // to initialized memory and REQUIRES an unmarked target. Element accesses
-// are never initialized by it (§5.4's random-access ban), and reseating the
-// pointer retires it.
+// are never initialized by it (§5.4's random-access ban), and after a reseat
+// `*p` names the new referent.
 void test_pointee_store_credit(int *p [[ref_to_uninit]]) {
   *p = 5;      // OK: the write initializes the pointee
   *p = 7;      // OK: further whole-entity stores stay legal
@@ -1805,7 +1805,8 @@ void test_subscript_read_not_credited(int *p [[ref_to_uninit]], int i) {
 }
 
 // Reseating the pointer -- plain assignment, compound arithmetic, or ++ --
-// retires its pointee's state: it described the old pointee.
+// makes `*p` name the new referent: another marked pointer's never-stored
+// referent, or anonymous storage the marker asserts uninitialized.
 void test_reseat_clears_credit(int *p [[ref_to_uninit]],
                                int *q [[ref_to_uninit]], int n) {
   *p = 5;
@@ -1849,7 +1850,7 @@ void test_cast_reseat_clears(int *p [[ref_to_uninit]],
 }
 
 // Handing out a *mutable alias* of the marked pointer object (T*& or T**)
-// lets the holder reseat it, so after the escape the pointee is neither
+// lets the holder reseat it, so after the escape the referent is neither
 // definitely initialized (a marked binding is not forced) nor definitely
 // uninitialized (an unmarked binding stays accepted: the callee may equally
 // leave the pointer alone).
@@ -1860,7 +1861,7 @@ void test_alias_escape_by_reference(int *p [[ref_to_uninit]]) {
   *p = 5;
   alias_by_ref(p);
   int *m [[ref_to_uninit]] = p; // OK: the callee may have reseated p
-  int *u2 = p;                  // OK: the pointee may still be initialized
+  int *u2 = p;                  // OK: the referent may still be initialized
   (void)m; (void)u2;
 }
 void test_alias_escape_by_pointer(int *p [[ref_to_uninit]]) {
@@ -1924,12 +1925,12 @@ void test_alias_escape_throw(int *p [[ref_to_uninit]]) {
 }
 
 // A lambda capturing the marked pointer by reference holds the same mutable
-// alias as `pp = &p` above and escapes the pointee the same way.
+// alias as `pp = &p` above and escapes the pointer the same way.
 void test_alias_escape_by_ref_capture(int *p [[ref_to_uninit]]) {
   *p = 5;
   auto c = [&p] {};
   int *m [[ref_to_uninit]] = p; // OK: the closure may have reseated p
-  int *u2 = p;                  // OK: the pointee may still be initialized
+  int *u2 = p;                  // OK: the referent may still be initialized
   (void)c; (void)m; (void)u2;
 }
 void test_alias_escape_by_ref_capture_default(int *p [[ref_to_uninit]]) {
@@ -2201,7 +2202,7 @@ void test_now_init_pointee(int *p [[ref_to_uninit]]) {
 
 void test_now_init_reseat(int *p [[ref_to_uninit]], int *q [[ref_to_uninit]]) {
   now_init_fill(p);
-  p = q;      // reseating retires the pointee's state
+  p = q;      // p refers to q's referent, never stored through
   int x = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
   (void)x;
 }
@@ -2235,6 +2236,133 @@ void test_now_init_member() {
 void test_now_init_member_boundary(MemberCredit &r) {
   now_init_fill(&r.m); // OK: marked target, uninitialized source
   mc_sink_ptr(&r.m);   // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// A marked local pointer or reference refers to the storage its latest
+// binding names, so a store, a [[now_init]] call, or a binding through
+// either name sees one state.
+void test_referent_now_init_through_pointer() {
+  int u [[uninit]];
+  int *p [[ref_to_uninit]] = &u;
+  now_init_fill(p);
+  ni_sink(&u);                   // OK: the callee initialized u through p
+  int *m [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)m;
+}
+void test_referent_store_through_pointer() {
+  int u [[uninit]];
+  int *p [[ref_to_uninit]] = &u;
+  *p = 1;
+  int *q = &u;                   // OK: initialized through p
+  int *m [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)q; (void)m;
+}
+void test_referent_store_to_local() {
+  int u [[uninit]];
+  int *p [[ref_to_uninit]] = &u;
+  u = 5;
+  int v = *p;                   // OK: u is initialized
+  int *m [[ref_to_uninit]] = p; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)v; (void)m;
+}
+void test_referent_marked_reference() {
+  int u [[uninit]];
+  int &r [[ref_to_uninit]] = u;
+  r = 5;
+  int *q = &u;                    // OK: initialized through r
+  int *pr [[ref_to_uninit]] = &r; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)q; (void)pr;
+}
+void test_referent_tracked_member() {
+  MemberCredit a;
+  int *p [[ref_to_uninit]] = &a.m;
+  *p = 1;
+  mc_sink_ptr(&a.m); // OK: initialized through p
+}
+
+// The referent is resolved at each program point: a reseat changes what the
+// pointer refers to from there on and keeps what it credited before.
+void test_referent_reseat_keeps_credit() {
+  int u [[uninit]], v [[uninit]];
+  int *p [[ref_to_uninit]] = &u;
+  *p = 1;
+  int *q = &u; // OK: initialized through p
+  p = &v;
+  *p = 2;
+  int *w = &v;                   // OK: initialized through p
+  int *m [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)q; (void)w; (void)m;
+}
+
+// Handing out a mutable alias of the pointer gives it an anonymous referent
+// of unknown state; the local it referred to keeps its state.
+void test_referent_alias_escape() {
+  int u [[uninit]];
+  int *p [[ref_to_uninit]] = &u;
+  *p = 1;
+  alias_by_ref(p);
+  int *w = &u;                  // OK: u stays initialized
+  int *m [[ref_to_uninit]] = p; // OK: unknown state
+  (void)w; (void)m;
+}
+
+// A copy of a marked pointer refers to the same anonymous referent; once the
+// source is reseated to an untracked source, nothing describes that
+// referent, so nothing fires through the copy.
+void test_referent_copy_then_source_reseat(int *q [[ref_to_uninit]]) {
+  int *p2 [[ref_to_uninit]] = q;
+  *p2 = 1;
+  q = &g_uninit;
+  int v = *p2;                   // OK: unknown referent
+  int *m [[ref_to_uninit]] = p2; // OK: unknown referent
+  (void)v; (void)m;
+}
+
+// A store whose target names several pointers leaves each referent
+// unidentified.
+void test_referent_conditional_store_target(bool c) {
+  int u [[uninit]], v [[uninit]];
+  int *p [[ref_to_uninit]] = &v;
+  int *q [[ref_to_uninit]] = &v;
+  (c ? p : q) = &u;
+  int x = *p; // OK: unknown referent
+  (void)x; (void)q;
+}
+
+// A pointer declared in a loop body refers to its initializer's storage on
+// every iteration.
+[[now_uninit]] void nu_wipe_in_loop(int *p);
+void test_referent_in_loop(bool c) {
+  int u [[uninit]];
+  while (c) {
+    int *p [[ref_to_uninit]] = &u;
+    now_init_fill(p);
+    ni_sink(&u);         // OK: initialized through p
+    nu_wipe_in_loop(&u); // OK: initialized storage is destroyed
+  }
+}
+
+// A copy of a captured marked pointer refers to what the capture refers to,
+// whose state the enclosing body decides.
+void test_referent_copy_of_capture(int *q [[ref_to_uninit]]) {
+  auto l = [&q] {
+    int *p [[ref_to_uninit]] = q;
+    int v = *p; // OK: q's referent may be initialized by the enclosing body
+    *p = 1;
+    int *m [[ref_to_uninit]] = q; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+    (void)v; (void)m;
+  };
+  (void)l;
+}
+
+// A __block marked pointer can be reseated by a block body the analysis does
+// not see, so it never refers to named storage.
+void test_referent_block_pointer() {
+  int u [[uninit]];
+  __block int *p [[ref_to_uninit]] = &u;
+  *p = 1;
+  int *w = &u; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)w;
 }
 
 // The callee's initialization survives statement reuse in instantiated
@@ -2399,10 +2527,9 @@ void test_double_destroy_member() {
   nu_wipe(&a.m); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
 }
 
-// Reseating a marked pointer retires its pointee's destroyed state with the
-// rest of the pointee facts: they described the old pointee. The proof is
-// mutual exclusivity: the destroy after the reseat fires destroy_uninit
-// (the new pointee is uninitialized marked storage), not double_destroy.
+// After a reseat the pointer refers to q's referent, whose state is its own:
+// the destroy after the reseat fires destroy_uninit (q's referent is
+// uninitialized marked storage), not double_destroy.
 void test_reseat_clears_destroyed(int *p [[ref_to_uninit]],
                                   int *q [[ref_to_uninit]]) {
   *p = 5;
@@ -2447,8 +2574,8 @@ void test_destroy_ternary_mixed_arms(int *p [[ref_to_uninit]],
 }
 
 // Destroying through a marked pointer with no prior store is rejected: the
-// marker asserts an uninitialized pointee at entry. A deliberate
-// strictness -- if a helper filled the pointee, mark the helper
+// marker asserts an uninitialized referent at entry. A deliberate
+// strictness -- if a helper filled the referent, mark the helper
 // [[now_init]], store through the marker first, or suppress (see
 // Limitations).
 void test_destroy_marked_no_store(int *p [[ref_to_uninit]]) {
@@ -2797,10 +2924,10 @@ void test_destroy_in_template_bodies() {
 }
 
 // Handing out a mutable alias of the marked pointer (T**, T*&, or a
-// by-reference capture) retires the destroyed state with the rest of the
-// pointee's facts: the holder may have reseated the pointer, so a later
-// destroy is neither a double destroy nor a destroy of uninitialized
-// storage (a direct reseat keeps destroy_uninit, test_reseat_clears_destroyed).
+// by-reference capture) gives it an anonymous referent of unknown state:
+// the holder may have reseated the pointer, so a later destroy is neither a
+// double destroy nor a destroy of uninitialized storage (a direct reseat
+// keeps destroy_uninit, test_reseat_clears_destroyed).
 void test_escape_retires_destroyed_by_pointer(int *p [[ref_to_uninit]]) {
   *p = 1;
   nu_wipe(p);
