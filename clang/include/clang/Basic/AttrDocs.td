@@ -1072,6 +1072,10 @@ original name:
     int v = u;  // OK: fill() initialized u
   }
 
+The library function ``std::now_init`` (P4222R2 §4.4) is a different
+facility: it launders a pointer *value* and leaves the argument's storage as
+it was; see :doc:`ProfilesFramework`.
+
 The attribute requires at least one parameter marked ``[[ref_to_uninit]]``
 (it would be vacuous otherwise); this is diagnosed regardless of
 ``-fprofiles``. It does not cover the implicit object parameter of a member
