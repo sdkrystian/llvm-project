@@ -2207,7 +2207,8 @@ enum class ReseatTarget {
   /// there (`q`, `&*q`, `&r`, `*q` for a reference).
   ViaPointer,
   /// Not identified: a conditional source with a tracked arm, or a store
-  /// whose target names several pointers.
+  /// whose target names several pointers or a marked pointer on only some
+  /// of its arms.
   Unknown
 };
 struct DefAssignEvent {
@@ -3207,8 +3208,10 @@ static void extractStdInitEvents(
     // store below a whole entity (a subobject) initializes nothing. Every
     // marked pointer a leaf names as its object is reseated to what
     // \p ReseatSource -- the assigned value; null for an increment or a
-    // compound assignment -- refers to; a target naming several pointers
-    // leaves each referent unidentified.
+    // compound assignment -- refers to; a target naming several pointers, or
+    // a marked pointer on only some of its arms, leaves each referent
+    // unidentified (no binding is judged for such a target:
+    // SemaProfiles::resolveAssignTargetMarking).
     auto AppendStore = [&](const Expr *G, const Expr *At, bool ReadsFirst,
                            const Expr *ReseatSource) {
       CollectLeaves(G);
@@ -3238,15 +3241,18 @@ static void extractStdInitEvents(
                 {DefAssignEventKind::MayWrite, *R.Entity, At});
       }
       SmallVector<unsigned, 2> Reseated;
+      bool AllMarked = true;
       SemaProfiles::forEachTargetLeaf(G, [&](const Expr *Leaf) {
-        if (std::optional<unsigned> Idx = Storage.markedPointerObject(Leaf);
-            Idx && !llvm::is_contained(Reseated, *Idx))
+        std::optional<unsigned> Idx = Storage.markedPointerObject(Leaf);
+        if (!Idx)
+          AllMarked = false;
+        else if (!llvm::is_contained(Reseated, *Idx))
           Reseated.push_back(*Idx);
       });
       if (Reseated.empty())
         return;
       std::pair<ReseatTarget, unsigned> RT{ReseatTarget::Unknown, 0};
-      if (Reseated.size() == 1)
+      if (Reseated.size() == 1 && AllMarked)
         RT = ReseatTargetFor(ReseatSource, G->getType());
       for (unsigned Idx : Reseated)
         AppendReseat(Idx, At, RT.first, RT.second);

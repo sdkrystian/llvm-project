@@ -1171,8 +1171,9 @@ those entries never cause a rejection.
 - A marked pointer whose referent the analysis cannot identify -- a copy
   (``int *p2 [[ref_to_uninit]] = q;``) whose source ``q`` is later reseated
   to an untracked source, a conditional initializer with a tracked arm
-  (``c ? &u : &v``), a store whose target names several pointers
-  (``(c ? p : q) = &u``), a ``__block`` pointer -- fires in neither
+  (``c ? &u : &v``), a store whose target names several pointers or a
+  marked pointer on only some of its arms (``(c ? p : q) = &u``,
+  ``(c ? p : r) = &u``), a ``__block`` pointer -- fires in neither
   direction through the pointer, and a store or ``[[now_init]]`` call
   through it credits nothing: a later ``int *w = &u`` stays the
   unmarked-direction error.
