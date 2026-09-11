@@ -2365,6 +2365,19 @@ void test_referent_block_pointer() {
   (void)w;
 }
 
+// A store whose target names a marked pointer on only some of its arms
+// leaves that pointer's referent unidentified: no binding is judged for
+// such a target, and the pointer may not have been reseated at all.
+void test_referent_mixed_marking_store_target(bool c, int *r) {
+  int u [[uninit]];
+  u = 1;
+  int *p [[ref_to_uninit]] = &g_uninit;
+  (c ? p : r) = &u;
+  int *m [[ref_to_uninit]] = p; // OK: unknown referent
+  int *w = &u;                  // OK: u keeps its state
+  (void)m; (void)w;
+}
+
 // The callee's initialization survives statement reuse in instantiated
 // lambda bodies exactly like a direct store (see GenericLambdaMemberCredit
 // above).
