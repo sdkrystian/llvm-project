@@ -506,7 +506,7 @@ public:
   /// pass; a read with a flow-tracked leaf is the CFG pass's
   /// (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage"). A std::byte
   /// read is exempt (P4222R2 §4.6). Template deferral follows the
-  /// expression-check policy (ProfilesFrameworkInternals.rst, "Pattern 1").
+  /// expression-check policy (ProfilesFrameworkInternals.rst, "Check Sites").
   void checkInitProfileReadThrough(SourceLocation Loc, const Expr *Glvalue,
                                    QualType ValueType);
 
@@ -522,7 +522,7 @@ public:
   /// leaf is the CFG pass's (ProfilesFrameworkInternals.rst, "Flow-Tracked
   /// Storage"). A std::byte store is exempt (P4222R2 §4.6). Template
   /// deferral follows the expression-check policy
-  /// (ProfilesFrameworkInternals.rst, "Pattern 1").
+  /// (ProfilesFrameworkInternals.rst, "Check Sites").
   void checkInitProfileSubobjectWrite(SourceLocation Loc, const Expr *LHS);
 
   /// The ObjectArgument derive step of checkInitProfileBinding: a member call
@@ -607,7 +607,7 @@ private:
   /// the instantiation only; without it an instantiation-dependent \p Src
   /// defers to the rebuild and a non-dependent one is judged on the pattern
   /// and again at each instantiation that rebuilds the construct
-  /// (ProfilesFrameworkInternals.rst, "Pattern 1"). A Parameter binding of
+  /// (ProfilesFrameworkInternals.rst, "Check Sites"). A Parameter binding of
   /// a [[now_uninit]] or storage-release callee
   /// runs the destroy rules instead -- at parse time for a source with no
   /// flow-tracked leaf, in the CFG pass otherwise

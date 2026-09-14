@@ -625,18 +625,18 @@ any of them would invalidate those tests.
 The std::init Implementation Map
 ================================
 
-``std::init`` (documented in :doc:`ProfilesFramework`) uses all four
-patterns.  Its rules map to mechanisms as follows:
+``std::init`` (documented in :doc:`ProfilesFramework`) hosts its rules as
+follows:
 
 .. list-table::
    :header-rows: 1
-   :widths: 24 12 64
+   :widths: 22 20 58
 
    * - Rule
-     - Pattern
+     - Host
      - Primary entry points
    * - ``uninit_read``
-     - 2 and 1
+     - CFG rider; expression site
      - ``CFGProfiles`` row for local variables; ``runStdInitMemberReadChecks``
        for the same row through its ``ExtraPass`` hook: one
        ``TrackedStorage`` entity table (the current object's and tracked
@@ -660,33 +660,37 @@ patterns.  Its rules map to mechanisms as follows:
        ``extractStdInitEvents`` (``judgeAccessSite``, suppressed by
        ``May``) otherwise
    * - ``uninit_decl``
-     - 1
+     - declaration site
      - ``checkInitProfileUninitDecl``
    * - ``uninit_with_initializer``
-     - 1
-     - ``checkInitProfileUninitWithInitializer``
+     - declaration site; class completion
+     - ``checkInitProfileUninitWithInitializer``;
+       ``checkStdInitUninitFieldMarker`` from the class-completion wrapper
+       for an initializer-less ``[[uninit]]`` data member
    * - ``static_runtime_init``
-     - 1
+     - declaration site
      - ``checkInitProfileStaticRuntimeInit``
    * - ``static_marker``
-     - 1
+     - declaration site
      - ``checkInitProfileStaticMarker``, hosted at every point a
        static-duration declaration's initializer state becomes final: both
        arms of ``ActOnUninitializedDecl`` (definitions and non-defining
        declarations) and the instantiated in-class static data member arm of
        ``InstantiateVariableInitializer``
    * - ``union_marker``, ``pointer_marker``
-     - attribute handler (enforcement-gated)
+     - attribute handler
      - ``checkInitProfileMarkerPlacement``
    * - ``ctor_uninit_member``
-     - 4; 3 for inherited constructors
-     - ``ConstructorFinalizationProfiles`` row for user-provided
-       constructors; ``checkStdInitInheritedCtorUninitMember`` (a
-       second ``std::init`` ``ClassFinalizationProfiles`` row) checks the
-       members and non-nominated bases an inherited constructor leaves
-       uninitialized, once per class at the ``using``-declaration
+     - constructor finalization; class completion for inherited
+       constructors
+     - ``checkStdInitCtorUninitMember`` from the constructor-finalization
+       wrapper for user-provided constructors;
+       ``checkStdInitInheritedCtorUninitMember`` from the class-completion
+       wrapper checks the members and non-nominated bases an inherited
+       constructor leaves uninitialized, once per class at the
+       ``using``-declaration
    * - ``ref_to_uninit``
-     - 2 for flow-tracked sources, 1 otherwise
+     - CFG rider for flow-tracked sources, expression site otherwise
      - ``checkInitProfileBinding``, one funnel keyed on ``InitBindingKind``
        for every binding site (variable and member initialization, call
        arguments, returns, aggregate elements, pointer assignments, throws,
@@ -705,7 +709,7 @@ patterns.  Its rules map to mechanisms as follows:
        per instantiation of a template, never at a call; a rebuild of a
        default argument or initializer and a SFINAE context are skipped
    * - ``double_destroy``, ``destroy_uninit``
-     - 2 for flow-tracked sources, 1 otherwise
+     - CFG rider for flow-tracked sources, expression site otherwise
      - the Destroy sites of ``extractStdInitEvents`` for a source with a
        flow-tracked leaf (``judgeDestroySite``: ``double_destroy`` on
        ``Destroyed``, ``destroy_uninit`` unless ``May``, a reinitializer, or
@@ -715,7 +719,7 @@ patterns.  Its rules map to mechanisms as follows:
        unmarked binding target -- answers ``destroy_uninit`` by form and no
        destroyed state exists
    * - ``uninit_write``
-     - 2 for flow-tracked targets, 1 otherwise
+     - CFG rider for flow-tracked targets, expression site otherwise
      - the SubobjectWrite sites of ``extractStdInitEvents`` for a target
        with a flow-tracked leaf (``judgeAccessSite``, suppressed by
        ``May``); otherwise ``checkInitProfileSubobjectWrite`` (its store
