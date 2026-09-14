@@ -4048,7 +4048,7 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
   // the assignment that follows it (P4222R2 §1.3: every path is considered),
   // and every expression as an element, so the extraction arms match any
   // statement class. The shared CFG the other analyses see is untouched (see
-  // ProfilesFrameworkInternals.rst, "Pattern 2").
+  // ProfilesFrameworkInternals.rst, "CFG Riders").
   AnalysisDeclContext InitAC(/*Mgr=*/nullptr, D);
   CFG::BuildOptions &Options = InitAC.getCFGBuildOptions();
   Options.PruneTriviallyFalseEdges = true;

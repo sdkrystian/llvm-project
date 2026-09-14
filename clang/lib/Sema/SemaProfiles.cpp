@@ -2099,7 +2099,7 @@ void SemaProfiles::judgeInitProfileBinding(InitBindingKind Kind,
   if (hasFlowTrackedLeaf(Src, T))
     return;
   // The expression-check template policy (ProfilesFrameworkInternals.rst,
-  // "Pattern 1"): without a Decl an instantiation-dependent source defers to
+  // "Check Sites"): without a Decl an instantiation-dependent source defers to
   // the rebuild; with one, the gate's templated rung defers instead.
   if (!D && Src->isInstantiationDependent())
     return;
@@ -2616,7 +2616,7 @@ void SemaProfiles::checkInitProfileReadThrough(SourceLocation Loc,
   if (!Glvalue || isa<RecoveryExpr>(Glvalue->IgnoreParens()))
     return;
   // The expression-check template policy (ProfilesFrameworkInternals.rst,
-  // "Pattern 1").
+  // "Check Sites").
   if (Glvalue->isInstantiationDependent())
     return;
   // P4222R2 §4.6: reading an uninitialized std::byte is permitted.
@@ -2647,7 +2647,7 @@ void SemaProfiles::checkInitProfileSubobjectWrite(SourceLocation Loc,
   if (!LHS || isa<RecoveryExpr>(LHS->IgnoreParens()))
     return;
   // The expression-check template policy (ProfilesFrameworkInternals.rst,
-  // "Pattern 1").
+  // "Check Sites").
   if (LHS->isInstantiationDependent())
     return;
   // P4222R2 §4.6: an uninitialized std::byte may be manipulated freely.
