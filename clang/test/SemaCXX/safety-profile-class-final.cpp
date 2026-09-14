@@ -37,9 +37,9 @@ struct [[profiles::suppress(test::other)]] NotSuppressedWrongProfile { // expect
   int m;
 };
 
-// Lambdas are filtered out by the dispatcher: the implicit closure types
-// are not diagnosed even though they are CXXRecordDecls that go through
-// CheckCompletedCXXClass.
+// Lambdas are filtered out by the class-completion wrapper: the implicit
+// closure types are not diagnosed even though they are CXXRecordDecls that
+// go through CheckCompletedCXXClass.
 void test_lambda_skip() {
   auto f = []() { return 1; };
   auto g = [](int x) { return x; };

@@ -18830,7 +18830,7 @@ void Sema::SetDeclDefaulted(Decl *Dcl, SourceLocation DefaultLoc) {
 
     // C++ profiles: a constructor explicitly defaulted after its first
     // declaration is user-provided ([class.default.ctor]) yet never reaches
-    // the parsed-definition dispatch, so its constructor-finalization checks
+    // the parsed-definition funnels, so its constructor-finalization checks
     // run here. In-class '= default' returned above; implicit constructors
     // never pass through here.
     if (auto *Ctor = dyn_cast<CXXConstructorDecl>(MD))

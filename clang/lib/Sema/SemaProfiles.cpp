@@ -8,7 +8,7 @@
 /// \file
 /// This file implements semantic analysis for the C++ profiles framework
 /// (P3589R2): enforcement and suppression recording, the violation gate, and
-/// the class- and constructor-finalization dispatch.
+/// the class-completion and constructor-finalization check wrappers.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -356,20 +356,8 @@ bool SemaProfiles::shouldEmitProfileViolation(unsigned DiagID,
   return true;
 }
 
-namespace {
-/// Row for the unified finalization dispatch shared by class-finalization
-/// (pattern 3) and constructor-finalization (pattern 4): a profile name plus
-/// a callback invoked once per finalized, non-dependent, non-invalid Node (a
-/// CXXRecordDecl or a CXXConstructorDecl). Adding a new profile is a single
-/// row in the matching table below plus a ProfileRule diagnostic in
-/// DiagnosticSemaKinds.td and a callback that consults
-/// SemaProfiles::shouldEmitProfileViolation before emitting.
-template <class Node> struct FinalizationProfile {
-  StringRef Name;
-  void (*Callback)(Sema &, Node *);
-};
-
-void runTestClassFinalCallback(Sema &S, CXXRecordDecl *RD) {
+/// The test::class_final pilot: fires on every completed non-lambda class.
+static void checkTestClassFinal(Sema &S, CXXRecordDecl *RD) {
   if (!S.Profiles().shouldEmitProfileViolation(
           diag::err_profile_class_final_test, RD->getLocation(), RD))
     return;
@@ -377,7 +365,9 @@ void runTestClassFinalCallback(Sema &S, CXXRecordDecl *RD) {
       << "test::class_final" << RD;
 }
 
-void runTestCtorFinalCallback(Sema &S, CXXConstructorDecl *Ctor) {
+/// The test::ctor_final pilot: fires once per user-provided, non-delegating
+/// constructor.
+static void checkTestCtorFinal(Sema &S, CXXConstructorDecl *Ctor) {
   if (!S.Profiles().shouldEmitProfileViolation(
           diag::err_profile_ctor_final_test, Ctor->getLocation(), Ctor))
     return;
@@ -385,37 +375,13 @@ void runTestCtorFinalCallback(Sema &S, CXXConstructorDecl *Ctor) {
       << "test::ctor_final" << Ctor->getParent();
 }
 
-constexpr FinalizationProfile<CXXRecordDecl> ClassFinalizationProfiles[] = {
-    {"test::class_final", &runTestClassFinalCallback},
-};
-
-constexpr FinalizationProfile<CXXConstructorDecl>
-    ConstructorFinalizationProfiles[] = {
-        {"test::ctor_final", &runTestCtorFinalCallback},
-};
-
-/// Run the enforced finalization-profile callbacks in \p Table for \p D; the
-/// per-node filter (dependent, lambda, delegating, ...) stays at each call
-/// site. Each callback consults shouldEmitProfileViolation with \p D and its
-/// location.
-template <class Node, std::size_t N>
-void dispatchFinalizationProfiles(Sema &S, Node *D,
-                                  const FinalizationProfile<Node> (&Table)[N]) {
-  if (!S.Profiles().anyProfileEnforced(Table))
-    return;
-  for (const auto &E : Table)
-    if (S.Profiles().isProfileEnforced(E.Name))
-      E.Callback(S, D);
-}
-} // namespace
-
 void SemaProfiles::checkProfileViolationsAtClassFinalization(
     CXXRecordDecl *RD) {
   if (!getLangOpts().Profiles || !RD)
     return;
   if (RD->isInvalidDecl() || RD->isDependentType() || RD->isLambda())
     return;
-  dispatchFinalizationProfiles(SemaRef, RD, ClassFinalizationProfiles);
+  checkTestClassFinal(SemaRef, RD);
 }
 
 void SemaProfiles::checkProfileViolationsAtConstructorFinalization(
@@ -427,5 +393,5 @@ void SemaProfiles::checkProfileViolationsAtConstructorFinalization(
   if (Ctor->isInvalidDecl() || Ctor->isDependentContext() ||
       Ctor->isDelegatingConstructor())
     return;
-  dispatchFinalizationProfiles(SemaRef, Ctor, ConstructorFinalizationProfiles);
+  checkTestCtorFinal(SemaRef, Ctor);
 }

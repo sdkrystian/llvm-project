@@ -10,7 +10,7 @@ struct Written {
   Written() : x(0) {} // expected-error {{test profile fired on finalization of a constructor for class 'Written' under profile 'test::ctor_final'}}
 };
 
-// A constructor with no member-initializer list reaches the same dispatch.
+// A constructor with no member-initializer list reaches the same funnel.
 struct NoList {
   int x;
   NoList() { x = 0; } // expected-error {{test profile fired on finalization of a constructor for class 'NoList' under profile 'test::ctor_final'}}
@@ -23,24 +23,24 @@ struct OutOfLine {
 OutOfLine::OutOfLine() {} // expected-error {{test profile fired on finalization of a constructor for class 'OutOfLine' under profile 'test::ctor_final'}}
 
 // An in-class defaulted constructor has no definition of its own to reach
-// the dispatch (it is not user-provided).
+// the funnel (it is not user-provided).
 struct Defaulted {
   int x;
   Defaulted() = default;
 };
 
 // An out-of-line '= default' *is* the constructor's definition
-// (user-provided per [class.default.ctor]) and dispatches there, like a
-// written body.
+// (user-provided per [class.default.ctor]) and reaches the funnel there,
+// like a written body.
 struct DefaultedOutOfLine {
   int x;
   DefaultedOutOfLine();
 };
 DefaultedOutOfLine::DefaultedOutOfLine() = default; // expected-error {{test profile fired on finalization of a constructor for class 'DefaultedOutOfLine' under profile 'test::ctor_final'}}
 
-// The dispatch is uniform over constructor kinds: an out-of-line defaulted
+// The funnel is uniform over constructor kinds: an out-of-line defaulted
 // copy or move constructor is equally user-provided and fires too (a
-// profile that must not see them filters in its own callback).
+// profile that must not see them filters in its own check).
 struct DefaultedCopyOutOfLine {
   int x;
   DefaultedCopyOutOfLine();
@@ -51,7 +51,7 @@ DefaultedCopyOutOfLine::DefaultedCopyOutOfLine() = default; // expected-error {{
 DefaultedCopyOutOfLine::DefaultedCopyOutOfLine(const DefaultedCopyOutOfLine &) = default; // expected-error {{test profile fired on finalization of a constructor for class 'DefaultedCopyOutOfLine' under profile 'test::ctor_final'}}
 DefaultedCopyOutOfLine::DefaultedCopyOutOfLine(DefaultedCopyOutOfLine &&) = default; // expected-error {{test profile fired on finalization of a constructor for class 'DefaultedCopyOutOfLine' under profile 'test::ctor_final'}}
 
-// A class with no user-declared constructor never reaches the dispatch.
+// A class with no user-declared constructor never reaches the funnel.
 struct NoCtor {
   int x;
 };

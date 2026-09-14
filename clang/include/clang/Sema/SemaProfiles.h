@@ -8,7 +8,7 @@
 /// \file
 /// This file declares semantic analysis for the C++ profiles framework
 /// (P3589R2): enforcement and suppression recording, the violation gate, and
-/// the class- and constructor-finalization dispatch.
+/// the class-completion and constructor-finalization check wrappers.
 /// See clang/docs/ProfilesFrameworkInternals.rst for the design and
 /// clang/docs/ProfilesFramework.rst for the user-facing documentation.
 ///
@@ -48,9 +48,8 @@ public:
   bool isProfileEnforced(StringRef ProfileName) const;
 
   /// True if any entry of \p Entries names an enforced profile. \p Entries is
-  /// any profile opt-in table whose elements expose a \c Name member; shared
-  /// by the post-parse dispatch gates (the CFG analysis pass guard and the
-  /// finalization dispatcher).
+  /// any profile opt-in table whose elements expose a \c Name member (the CFG
+  /// analysis pass guard).
   template <typename Table>
   bool anyProfileEnforced(const Table &Entries) const {
     return llvm::any_of(
@@ -131,20 +130,21 @@ public:
   void checkRedeclarationProfileCompatibility(const NamedDecl *New,
                                               const NamedDecl *Old);
 
-  /// Dispatch class-finalization profile callbacks for a completed class.
-  /// Called from \c Sema::CheckCompletedCXXClass so parser, template
-  /// instantiation, and lambda finalization paths all reach the same hook.
-  /// Dependent, invalid, and lambda classes are filtered out.
+  /// Run every profile's class-completion checks for a completed class.
+  /// Called from \c Sema::CheckCompletedCXXClass, which every
+  /// class-completion path (parsing, template instantiation, lambda
+  /// completion) reaches. Dependent, invalid, and lambda classes are filtered
+  /// here; a check adds its own filters.
   void checkProfileViolationsAtClassFinalization(CXXRecordDecl *RD);
 
-  /// Dispatch constructor-finalization profile callbacks once a constructor's
-  /// member-initializer list is complete. Called from \c ActOnMemInitializers
-  /// and \c ActOnDefaultCtorInitializers, which also serve template
-  /// instantiations (via \c InstantiateMemInitializers), so every
-  /// user-defined constructor is covered at the point its \c inits() is fully
-  /// populated -- unlike class finalization, which runs before any
-  /// constructor body is parsed. Dependent, invalid, and delegating
-  /// constructors are filtered out.
+  /// Run every profile's constructor-finalization checks once a constructor's
+  /// member-initializer list is complete. Called from
+  /// \c ActOnMemInitializers, \c ActOnDefaultCtorInitializers (both also
+  /// serving template instantiation through \c InstantiateMemInitializers),
+  /// and \c SetDeclDefaulted for an out-of-line '= default'. Class completion
+  /// runs before any constructor body is parsed; this hook runs with
+  /// \c inits() fully populated. Dependent, invalid, and delegating
+  /// constructors are filtered here; a check adds its own filters.
   void
   checkProfileViolationsAtConstructorFinalization(CXXConstructorDecl *Ctor);
 };

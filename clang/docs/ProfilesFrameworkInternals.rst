@@ -93,9 +93,10 @@ Every profile follows the same recipe:
    runtime-checked rules, in the rule's diagnostic group
    (``DiagnosticGroups.td``; a new profile adds its group tree there, under
    ``Profiles``).
-3. Add the check: a ``shouldEmitProfileViolation`` gate before the diagnostic,
-   or an ``EmitProfileRuntimeCheck`` call, at the check site (patterns 1 and
-   5), or a row in the analysis's opt-in table (patterns 2-4).
+3. Add the check: a ``shouldEmitProfileViolation`` gate before the diagnostic
+   at the check site (pattern 1; for patterns 3 and 4, a call to the check
+   from the finalization wrapper), a row in the analysis's opt-in table
+   (pattern 2), or an ``EmitProfileRuntimeCheck`` call (pattern 5).
 4. Add tests; a test-only profile must be named under ``test::`` (see `Test
    Profiles`_).
 
@@ -209,38 +210,34 @@ Patterns 3 and 4: Class and Constructor Finalization
 ====================================================
 
 For rules that run once per completed class definition (pattern 3,
-``test::class_final``) or once per user-defined constructor with its complete
-member-initializer list (pattern 4, ``test::ctor_final``).  Both share one
-dispatcher and one per-pass table shape:
+``test::class_final``) or once per user-provided constructor with its
+complete member-initializer list (pattern 4, ``test::ctor_final``).  Both are
+Sema check sites hosted by one wrapper each
+(``SemaProfiles::checkProfileViolationsAtClassFinalization`` and
+``checkProfileViolationsAtConstructorFinalization``), whose body calls every
+profile's check in turn; adding a profile is one call there plus the check
+itself.
 
-.. code-block:: c++
-
-   constexpr FinalizationProfile<CXXRecordDecl> ClassFinalizationProfiles[] = {
-       {"my::profile", &runMyProfileCallback},
-   };
-
-A profile may register several rows in one table -- one per independent
-rule -- and the dispatcher runs every row whose profile is enforced.
-
-The class hook runs from the single function every class-completion path
-funnels through (parsing, template instantiation, lambda completion); the
-constructor hook runs from the three functions every user-provided
+Each wrapper runs from a *funnel*: a Sema function every instance of its
+construct passes through.  The class wrapper runs from the single function
+every class-completion path funnels through (parsing, template
+instantiation, lambda completion), ``Sema::CheckCompletedCXXClass``; the
+constructor wrapper runs from the three functions every user-provided
 constructor definition funnels through -- ``ActOnMemInitializers``,
 ``ActOnDefaultCtorInitializers``, and ``SetDeclDefaulted`` (an out-of-line
-``= default``) -- including instantiation.  The per-pattern entry points
-filter out dependent entities (the hooks re-fire on each instantiation),
-invalid ones, lambdas (pattern 3), and delegating constructors (pattern 4)
-before the shared dispatcher runs the enforced callbacks; a filter that is
-one profile's policy rather than the pattern's contract lives in that
-profile's callback.  Each callback gates its diagnostics on
+``= default``) -- including instantiation.  The wrappers filter out
+dependent entities (the checks re-fire on each instantiation), invalid ones,
+lambdas (pattern 3), and delegating constructors (pattern 4) before calling
+the checks; a filter that is one profile's policy rather than the funnel's
+contract lives in that profile's check.  Each check gates its diagnostics on
 ``shouldEmitProfileViolation`` with the finalized declaration and its
 location.
 
-The split between the two patterns matters: class finalization runs *before
+The split between the two patterns matters: class completion runs *before
 any constructor body or member-initializer list has been parsed*, so a
-pattern-3 callback must not inspect a constructor's ``inits()``.  Rules that
-depend on what a constructor initializes belong on pattern 4; rules that need
-flow analysis belong on pattern 2.
+class-completion check must not inspect a constructor's ``inits()``.  Rules
+that depend on what a constructor initializes belong on pattern 4; rules that
+need flow analysis belong on pattern 2.
 
 
 Pattern 5: Runtime-Checked Rules
