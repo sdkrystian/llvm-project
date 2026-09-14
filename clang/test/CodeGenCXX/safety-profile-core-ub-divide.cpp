@@ -1,5 +1,5 @@
 // The std::core_ub profile's zero_divide rule (P4317 {expr.mul.div.by.zero},
-// framework pattern 5): under enforcement, integer division and remainder
+// a CodeGen check site): under enforcement, integer division and remainder
 // get a runtime zero-divisor check that branches to a trap (llvm.ubsantrap
 // with the ProfileViolation handler's own immediate). std::core_ub is a real
 // (std::-prefixed) profile: plain -fprofiles suffices, no test-profiles gate.
@@ -10,6 +10,10 @@
 // Not enforced, or no -fprofiles: no checks.
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fprofiles -std=c++23 -emit-llvm -o - %s | FileCheck %s --check-prefix=NONE
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -DENFORCE -std=c++23 -emit-llvm -o - %s | FileCheck %s --check-prefix=NONE
+//
+// A diagnostic option previews compile-time rules only; it never
+// instruments code.
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fprofiles -Wprofile-std-core-ub -std=c++23 -emit-llvm -o - %s | FileCheck %s --check-prefix=NONE
 //
 // Under -fsanitize-debug-trap-reasons (default Detailed) with debug info, the
 // trap's debug location names the violated profile.

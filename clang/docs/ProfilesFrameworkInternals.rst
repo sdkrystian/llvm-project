@@ -616,7 +616,8 @@ any of them would invalidate those tests.
 The std::core_ub Implementation Map
 ===================================
 
-``std::core_ub`` (documented in :doc:`ProfilesFramework`) is all pattern 5:
+``std::core_ub`` (documented in :doc:`ProfilesFramework`) is all CodeGen
+check sites:
 each rule is an ``EmitProfileRuntimeCheck`` call at the CodeGen site that
 emits the guarded operation.
 
@@ -640,9 +641,10 @@ emits the guarded operation.
        pre-C++20 signed base arm lives in ``EmitShl`` only)
    * - ``misaligned_access``, ``null_dereference``
      - ``CodeGenFunction::EmitTypeCheck``, reached with no sanitizer on
-       through ``profilePerformTypeCheck`` (which also relaxes the
-       caller-side ``sanitizePerformTypeCheck`` gates)
-       caller-side ``sanitizePerformTypeCheck`` gates); the null rule skips
+       through ``profilePerformTypeCheck`` -- the profile enforced by this
+       unit or an imported module unit
+       (``ASTContext::isProfileEnforcedByAnyUnit``), which also relaxes the
+       caller-side ``sanitizePerformTypeCheck`` gates; the null rule skips
        the ``isNullPointerAllowed`` check kinds
    * - ``out_of_bounds``
      - ``CodeGenFunction::EmitBoundsCheck``, now self-gating on the

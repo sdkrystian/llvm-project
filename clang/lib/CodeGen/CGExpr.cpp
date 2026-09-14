@@ -757,11 +757,11 @@ bool CodeGenFunction::sanitizePerformTypeCheck() const {
 }
 
 bool CodeGenFunction::profilePerformTypeCheck() const {
-  // Cheap enough to consult per access: isProfileEnforced is a small linear
-  // scan of the TU's enforced-profile set; the seam where a memoization
-  // could sit is documented in CGProfiles.cpp (EmitProfileRuntimeCheck).
-  return getLangOpts().Profiles &&
-         getContext().isProfileEnforced("std::core_ub");
+  // Enforced by this unit or an imported module unit, whose code is emitted
+  // here under its own enforcement; the positional rung of each check decides
+  // per site. Cheap enough to consult per access: a small linear scan of this
+  // unit's enforcement list and one hash lookup of the imported units'.
+  return getContext().isProfileEnforcedByAnyUnit("std::core_ub");
 }
 
 void CodeGenFunction::EmitTypeCheck(TypeCheckKind TCK, SourceLocation Loc,
