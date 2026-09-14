@@ -895,7 +895,7 @@ public:
   /// Currently only supports +, - and *.
   Value *EmitOverflowCheckedBinOp(const BinOpInfo &Ops);
 
-  /// The std::core_ub signed_overflow profile checks (framework pattern 5):
+  /// The std::core_ub signed_overflow profile checks (CodeGen check sites):
   /// the additive/multiplicative form for +, -, * and ++/-- (\p IID is the
   /// llvm.s{add,sub,mul}.with.overflow intrinsic matching the operation),
   /// and the INT_MIN/-1 form for integer / and %.
