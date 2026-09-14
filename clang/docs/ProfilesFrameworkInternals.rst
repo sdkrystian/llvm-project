@@ -268,12 +268,17 @@ in-tree pilot:
                Ops.RHS, llvm::Constant::getNullValue(Ops.RHS->getType()));
          });
 
-``EmitProfileRuntimeCheck`` checks that the rule is enforced and not
-suppressed at the check site and that the site is not in an exempt system
-header (``ASTContext::isProfileRuleActiveAt``: the trap diagnostic's mapping
-at that location, so a body deserialized from an AST file is decided by the
-state its own unit recorded, and an NSDMI or default argument by its
-member's or parameter's dominion wherever it is emitted).  Only when the
+``EmitProfileRuntimeCheck`` checks that the profile is enforced by this
+unit or by an imported module unit whose code is emitted here under its own
+enforcement (``ASTContext::isProfileEnforcedByAnyUnit``: a diagnostic
+option can preview a compile-time rule; only an enforcement instruments
+code) and that the rule
+is enforced and not suppressed at the check site and the site is not in an
+exempt system header (``ASTContext::isProfileRuleActiveAt``: the trap
+diagnostic's mapping at that location, so a body deserialized from an AST
+file is decided by the state its own unit recorded, and an NSDMI or default
+argument by its member's or parameter's dominion wherever it is emitted).
+Only when the
 check is active does it invoke the builder for the predicate, so an inactive
 site emits no IR, and then emits a conditional branch to a trap block
 (``SanitizerHandler::ProfileViolation``).  Unevaluated operands and
@@ -371,7 +376,10 @@ can turn it on mid-unit.  A ``#pragma clang diagnostic warning
 profile live: the preview is a build-flag decision, and honoring a pragma
 alone would need a query of the engine's latest state and a cache keyed on
 state identity at every hot entry point.  A pragma changes the severity of
-a live profile's rule and enables nothing by itself.
+a live profile's rule and enables nothing by itself.  Liveness gates
+compile-time rules only: a diagnostic option can preview a compile-time
+rule; only an enforcement instruments code (`Pattern 5: Runtime-Checked
+Rules`_).
 
 A suppression's dominion ([decl.attr.suppress]p3: the attribute's tokens
 through the last token of the declaration or statement it appertains to) is

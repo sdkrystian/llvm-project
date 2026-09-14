@@ -14,6 +14,10 @@
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -DENFORCE -fprofiles -std=c++23 -emit-llvm -o - %s | FileCheck %s --check-prefix=NONE
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -DENFORCE -std=c++23 -emit-llvm -o - %s | FileCheck %s --check-prefix=NONE
 //
+// A diagnostic option previews compile-time rules only; it never
+// instruments code.
+// RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -fprofiles -fprofiles-test-profiles -Wprofile-test-arith -std=c++23 -emit-llvm -o - %s | FileCheck %s --check-prefix=NONE
+//
 // Under -fsanitize-debug-trap-reasons (default Detailed) with debug info, the
 // trap's debug location names the violated profile.
 // RUN: %clang_cc1 -triple x86_64-unknown-linux-gnu -DENFORCE -fprofiles -fprofiles-test-profiles -std=c++23 -debug-info-kind=limited -emit-llvm -o - %s | FileCheck %s --check-prefix=TRAPMSG

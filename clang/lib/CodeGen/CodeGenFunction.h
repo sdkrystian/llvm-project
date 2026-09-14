@@ -634,7 +634,10 @@ public:
   /// debug location points at \p Loc and -- under the default Detailed
   /// -fsanitize-debug-trap-reasons mode, when debug info is emitted --
   /// carries \p TrapDiagID (a DiagnosticTrapKinds.td diagnostic) naming the
-  /// violated profile. No-op without -fprofiles.
+  /// violated profile. No-op unless \p Profile is enforced by this unit or
+  /// an imported module unit (ASTContext::isProfileEnforcedByAnyUnit): a
+  /// diagnostic option previews a compile-time rule and never instruments
+  /// code.
   void EmitProfileRuntimeCheck(StringRef Profile, unsigned TrapDiagID,
                                SourceLocation Loc,
                                llvm::function_ref<llvm::Value *()> BuildPassed);

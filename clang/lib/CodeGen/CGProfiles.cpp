@@ -22,7 +22,11 @@ using namespace clang::CodeGen;
 void CodeGenFunction::EmitProfileRuntimeCheck(
     StringRef Profile, unsigned TrapDiagID, SourceLocation Loc,
     llvm::function_ref<llvm::Value *()> BuildPassed) {
-  if (!getLangOpts().Profiles)
+  // A runtime check is emitted only under an enforcement -- this unit's or
+  // an imported module unit's, whose code is emitted here under its own
+  // enforcement: a diagnostic option previews a compile-time rule and never
+  // instruments code.
+  if (!getContext().isProfileEnforcedByAnyUnit(Profile))
     return;
   // The positional gate keeps code before the enforcement --
   // global-module-fragment functions emitted after the purview is parsed, or

@@ -209,6 +209,8 @@ ordinary diagnostic controls apply to profile rules as well:
   pragma, never touches a rule.
 - ``--warning-suppression-mappings`` exempts the listed paths from a
   ``-fprofiles-enforce=`` enforcement, not from one written in source.
+- A ``-W`` option previews compile-time rules only; it never emits runtime
+  checks (see `Runtime-Checked Rules`_).
 
 ``-Wno-profiles`` (or a narrower ``-Wno-profile-...``) does not disable an
 enforcement, whose mapping is installed after the command-line options; a
@@ -318,6 +320,10 @@ UBSan's trap mode.
 
 Behavior of a runtime check:
 
+- **Enforcement only.**  A runtime check is emitted only under an
+  enforcement -- ``[[profiles::enforce]]`` or ``-fprofiles-enforce=``.
+  Enabling a trap rule's diagnostic group with ``-W`` does nothing: an
+  option can preview a compile-time rule but never instruments code.
 - **Suppression applies identically.**  ``[[profiles::suppress]]`` removes a
   runtime check under the same dominion rule as a compile-time diagnostic: a
   suppression around a use site does not silence checks in a default member
