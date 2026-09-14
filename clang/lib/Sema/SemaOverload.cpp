@@ -6350,8 +6350,7 @@ ExprResult Sema::PerformImplicitObjectArgumentInitialization(
 
   // std::init / ref_to_uninit (P4222R2 §4.2): the implicit object parameter
   // binding; see SemaProfiles::InitBindingKind.
-  if (getLangOpts().Profiles)
-    Profiles().checkInitProfileObjectArgument(From, Method);
+  Profiles().checkInitProfileObjectArgument(From, Method);
 
   if (ICS.Standard.Second == ICK_Derived_To_Base) {
     ExprResult FromRes =
