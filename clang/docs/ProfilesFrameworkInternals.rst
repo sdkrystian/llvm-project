@@ -681,7 +681,7 @@ patterns.  Its rules map to mechanisms as follows:
    * - ``ctor_uninit_member``
      - 4; 3 for inherited constructors
      - ``ConstructorFinalizationProfiles`` row for user-provided
-       constructors; ``runStdInitInheritedCtorUninitMemberCallback`` (a
+       constructors; ``checkStdInitInheritedCtorUninitMember`` (a
        second ``std::init`` ``ClassFinalizationProfiles`` row) checks the
        members and non-nominated bases an inherited constructor leaves
        uninitialized, once per class at the ``using``-declaration

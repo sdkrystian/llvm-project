@@ -710,7 +710,7 @@ void SemaProfiles::checkInitProfileUninitDecl(const VarDecl *Var) {
 // pointers, and block pointers. Deliberately not nullptr_t (reading one
 // produces null without touching storage). All three keyed sites --
 // pointer_marker itself, static_marker's skip, and the field-marker
-// callback's skip -- share this predicate so the exactly-one-diagnostic
+// check's skip -- share this predicate so the exactly-one-diagnostic
 // invariants hold by construction. ObjC object pointers are a follow-on
 // (needs ObjC++ scaffolding).
 static bool isPointerMarkerBannedType(QualType T) {
@@ -908,7 +908,7 @@ void SemaProfiles::checkInitProfileUninitWithInitializer(const ValueDecl *D,
   // initializes something without the user writing anything, so saying the
   // entity "has an initializer" would be wrong; report the type and why, as
   // the initializer-less data member flavor in
-  // runStdInitUninitFieldMarkerCallback does.
+  // checkStdInitUninitFieldMarker does.
   switch (C.Verdict) {
   case UninitMarkerVerdict::NonVacuousDefault: {
     QualType BaseTy = getASTContext().getBaseElementType(D->getType());
@@ -2752,8 +2752,8 @@ anyLeafFieldWritten(const CXXRecordDecl *RD,
 }
 
 // The shared per-field walk of the ctor_uninit_member checks (the
-// user-provided-constructor callback and the inherited-constructor class
-// callback): visit every checkable field of \p RD left without an
+// user-provided-constructor check and the inherited-constructor
+// class-completion check): visit every checkable field of \p RD left without an
 // initializer against \p Written, recursing into anonymous struct members --
 // their leaves initialize exactly like direct members of the walked class (a
 // written initializer for one is an *indirect* member-initializer, which the
@@ -2807,7 +2807,7 @@ forEachCtorUninitField(Sema &S, const CXXRecordDecl *RD,
   }
 }
 
-// The per-field walk of the ctor_uninit_member constructor callback:
+// The per-field walk of the ctor_uninit_member constructor check:
 // diagnoses at the constructor, gated per field on the violation gate, which
 // takes the constructor so a templated pattern defers to its instantiations.
 static void diagnoseCtorUninitFields(
@@ -2836,8 +2836,7 @@ static void diagnoseCtorUninitFields(
       });
 }
 
-static void runStdInitCtorUninitMemberCallback(Sema &S,
-                                               CXXConstructorDecl *Ctor) {
+static void checkStdInitCtorUninitMember(Sema &S, CXXConstructorDecl *Ctor) {
   if (!S.Profiles().isProfileLive("std::init"))
     return;
   // Paper §6.1: a user-provided constructor must initialize every member via
@@ -2848,7 +2847,7 @@ static void runStdInitCtorUninitMemberCallback(Sema &S,
     return;
 
   // An explicitly defaulted copy or move constructor (out-of-line
-  // '= default'; the uniform pattern-4 dispatch sends every defaulted
+  // '= default'; the constructor-finalization funnel sends every defaulted
   // definition here) initializes every member member-wise while *writing*
   // no initializer -- exempt, or the written-initializer rule below would
   // false-positive on it. The defaulted *default* constructor stays: its
@@ -2908,8 +2907,7 @@ static void runStdInitCtorUninitMemberCallback(Sema &S,
   }
 }
 
-static void runStdInitInheritedCtorUninitMemberCallback(Sema &S,
-                                                        CXXRecordDecl *RD) {
+static void checkStdInitInheritedCtorUninitMember(Sema &S, CXXRecordDecl *RD) {
   if (!S.Profiles().isProfileLive("std::init"))
     return;
   // Paper §6.1's obligation applied to inheriting constructors
@@ -2917,7 +2915,7 @@ static void runStdInitInheritedCtorUninitMemberCallback(Sema &S,
   // nominated base; the inheriting class's own members and its other bases
   // get NSDMI-or-default-initialization -- invariantly, for every inherited
   // signature. uninit_decl cannot catch a defaulted-argument use (`D d(1)`
-  // has an initializer) and the constructor-finalization callback skips the
+  // has an initializer) and the constructor-finalization check skips the
   // synthesized constructors (!isUserProvided), so the obligation is checked
   // here, once per class at finalization, attributed to the
   // using-declaration -- not at lazy constructor synthesis, which is
@@ -2970,7 +2968,8 @@ static void runStdInitInheritedCtorUninitMemberCallback(Sema &S,
   // introducer and signature -- anchored at the lexically first introducer.
   // The shared walk runs with an empty written-set: an inherited constructor
   // writes no member-initializers. The gate takes the introducer, so a
-  // templated pattern defers (this class callback re-fires on instantiation).
+  // templated pattern defers (this class-completion check re-fires on
+  // instantiation).
   {
     const UsingDecl *First = Groups.front().Introducer;
     const CXXRecordDecl *FirstBase = Groups.front().NominatedBase;
@@ -3002,7 +3001,7 @@ static void runStdInitInheritedCtorUninitMemberCallback(Sema &S,
   // BASES per introducer: the inherited constructor initializes exactly its
   // nominated base, so every *other* direct non-virtual base whose
   // default-initialization is indeterminate is left that way (mirror of the
-  // constructor callback's base loop; virtual bases stay deferred as the
+  // constructor check's base loop; virtual bases stay deferred as the
   // most-derived constructor's responsibility).
   for (const InheritedCtorGroup &G : Groups) {
     for (const CXXBaseSpecifier &Base : RD->bases()) {
@@ -3027,7 +3026,7 @@ static void runStdInitInheritedCtorUninitMemberCallback(Sema &S,
   }
 }
 
-static void runStdInitUninitFieldMarkerCallback(Sema &S, CXXRecordDecl *RD) {
+static void checkStdInitUninitFieldMarker(Sema &S, CXXRecordDecl *RD) {
   if (!S.Profiles().isProfileLive("std::init"))
     return;
   // std::init / uninit_with_initializer, field flavor (paper §4.2 rule 2,
@@ -3079,8 +3078,8 @@ void SemaProfiles::checkProfileViolationsAtClassFinalization(
   if (RD->isInvalidDecl() || RD->isDependentType() || RD->isLambda())
     return;
   checkTestClassFinal(SemaRef, RD);
-  runStdInitUninitFieldMarkerCallback(SemaRef, RD);
-  runStdInitInheritedCtorUninitMemberCallback(SemaRef, RD);
+  checkStdInitUninitFieldMarker(SemaRef, RD);
+  checkStdInitInheritedCtorUninitMember(SemaRef, RD);
 }
 
 void SemaProfiles::checkProfileViolationsAtConstructorFinalization(
@@ -3093,5 +3092,5 @@ void SemaProfiles::checkProfileViolationsAtConstructorFinalization(
       Ctor->isDelegatingConstructor())
     return;
   checkTestCtorFinal(SemaRef, Ctor);
-  runStdInitCtorUninitMemberCallback(SemaRef, Ctor);
+  checkStdInitCtorUninitMember(SemaRef, Ctor);
 }
