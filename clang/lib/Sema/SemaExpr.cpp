@@ -747,8 +747,7 @@ ExprResult Sema::DefaultLvalueConversion(Expr *E) {
   // pointer or reference accesses uninitialized memory. This is the single
   // lvalue-to-rvalue chokepoint that by-value reads (copy-init, by-value
   // arguments, returns, operator operands) all funnel through.
-  if (getLangOpts().Profiles)
-    Profiles().checkInitProfileReadThrough(E->getExprLoc(), E, T);
+  Profiles().checkInitProfileReadThrough(E->getExprLoc(), E, T);
 
   // C++ [conv.lval]p3:
   //   If T is cv std::nullptr_t, the result is a null pointer constant.
@@ -14666,9 +14665,8 @@ QualType Sema::CheckAssignmentOperands(Expr *LHSExpr, ExprResult &RHS,
   // std::init: the read-through, subobject-write, and pointer-assignment
   // checks every built-in assignment hosts; class-typed operator= never
   // reaches this funnel.
-  if (getLangOpts().Profiles)
-    Profiles().checkInitProfileAssignmentOperands(
-        Opc, LHSExpr, RHS.get(), /*IsCompound=*/!CompoundType.isNull(), Loc);
+  Profiles().checkInitProfileAssignmentOperands(
+      Opc, LHSExpr, RHS.get(), /*IsCompound=*/!CompoundType.isNull(), Loc);
 
   if (getLangOpts().CPlusPlus20 && LHSType.isVolatileQualified()) {
     if (CompoundType.isNull()) {
@@ -16320,7 +16318,7 @@ ExprResult Sema::CreateBuiltinUnaryOp(SourceLocation OpLoc,
       // than in CheckIncrementDecrementOperand, which self-recurses on
       // placeholder operands and would fire twice; overloaded class ++/--
       // never reaches CreateBuiltinUnaryOp.
-      if (getLangOpts().Profiles && !resultType.isNull())
+      if (!resultType.isNull())
         Profiles().checkInitProfileIncDec(Input.get(), OpLoc);
       break;
     case UO_AddrOf:

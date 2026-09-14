@@ -654,13 +654,9 @@ void SemaProfiles::checkInitProfileUninitDecl(const VarDecl *Var) {
   // be initialized by a language rule. Static / thread storage duration is
   // excluded -- those are zero-initialized; runtime-init concerns are R3's.
   static constexpr StringRef Profile = "std::init";
-  // Enforcement first: the call site (ActOnUninitializedDecl) is ungated, so
-  // every compile would otherwise pay the type walk below. The hoisted gate
-  // is evaluated in the same call as shouldEmitProfileViolation's identical
-  // first conjunct, with nothing but const queries in between, so it cannot
-  // change any answer; the cheap decl-state tests likewise run before the
-  // type walk.
-  if (!isProfileEnforced(Profile))
+  // Hoisted first rung of the gate: the call site is ungated and the work
+  // below is not free.
+  if (!isProfileLive(Profile))
     return;
   // A synthesized variable is no user declaration: the user can neither
   // initialize it nor mark it [[uninit]] (a coroutine's __promise, an OpenMP
@@ -824,11 +820,9 @@ void SemaProfiles::checkInitProfileStaticMarker(const VarDecl *Var) {
   // ActOnUninitializedDecl, after the synthesized default-initialization is
   // attached).
   static constexpr StringRef Profile = "std::init";
-  // Enforcement first (same rationale as checkInitProfileUninitDecl: the
-  // call site is ungated, the hoisted gate is shouldEmitProfileViolation's
-  // own first conjunct, and only const queries run in between), then the
-  // cheap decl-state tests, then the type walk.
-  if (!isProfileEnforced(Profile))
+  // Hoisted first rung of the gate: the call site is ungated and the work
+  // below is not free.
+  if (!isProfileLive(Profile))
     return;
   if (Var->isInvalidDecl() || (Var->getStorageDuration() != SD_Static &&
                                Var->getStorageDuration() != SD_Thread))
@@ -856,6 +850,9 @@ void SemaProfiles::checkInitProfileStaticMarker(const VarDecl *Var) {
 
 bool SemaProfiles::checkInitProfileStaticRuntimeInit(
     const VarDecl *Var, llvm::function_ref<bool()> CheckConstInit) {
+  static constexpr StringRef Profile = "std::init";
+  if (!isProfileLive(Profile))
+    return false;
   // Thread-locals have thread (not static) storage duration; paper §3 scopes
   // this rule to non-local *static* objects (uninit_decl likewise excludes
   // thread storage).
@@ -868,7 +865,6 @@ bool SemaProfiles::checkInitProfileStaticRuntimeInit(
   // `struct S { int x; }; S g;` is not a violation. Runs before
   // -Wglobal-constructors so the profile error (when enforced) takes
   // precedence over the standalone warning.
-  static constexpr StringRef Profile = "std::init";
   // Gate on enforcement before evaluating the initializer: this call site
   // sits ahead of -Wglobal-constructors' isIgnored guard, so evaluating
   // first would charge every global with a non-constant initializer for the
@@ -885,6 +881,9 @@ bool SemaProfiles::checkInitProfileStaticRuntimeInit(
 
 void SemaProfiles::checkInitProfileUninitWithInitializer(const ValueDecl *D,
                                                          const Expr *Init) {
+  static constexpr StringRef Profile = "std::init";
+  if (!isProfileLive(Profile))
+    return;
   // [[uninit]] documents that the entity is intentionally left
   // uninitialized, so it contradicts an explicit initializer. A RecoveryExpr
   // is a placeholder for an initialization that already failed (e.g.
@@ -894,7 +893,6 @@ void SemaProfiles::checkInitProfileUninitWithInitializer(const ValueDecl *D,
       isa<RecoveryExpr>(Init->IgnoreParens()))
     return;
   SourceLocation Loc = D->getLocation();
-  static constexpr StringRef Profile = "std::init";
   // Gate the (possibly recursive) type walk below on enforcement.
   if (!shouldEmitProfileViolation(
           Profile, diag::err_init_uninit_with_initializer, Loc, D))
@@ -936,6 +934,8 @@ void SemaProfiles::checkInitProfileUninitWithInitializer(const ValueDecl *D,
 }
 
 void SemaProfiles::checkInitProfileMarkerPlacement(const Decl *D) {
+  if (!isProfileLive("std::init"))
+    return;
   const auto *UA = D->getAttr<UninitAttr>();
   if (!UA)
     return;
@@ -1894,6 +1894,8 @@ bool SemaProfiles::thisIsUnderConstruction() const {
 }
 
 void SemaProfiles::checkInitProfileVariadicArgument(const Expr *Arg) {
+  if (!isProfileLive("std::init"))
+    return;
   checkInitProfileBinding(InitBindingKind::VariadicArgument, Arg->getExprLoc(),
                           /*Target=*/nullptr, Arg->getType(), Arg);
 }
@@ -1901,7 +1903,7 @@ void SemaProfiles::checkInitProfileVariadicArgument(const Expr *Arg) {
 void SemaProfiles::checkInitProfileBinding(const InitializedEntity &Entity,
                                            const InitializationKind &Kind,
                                            const Expr *Init) {
-  if (!getLangOpts().Profiles || !Init)
+  if (!isProfileLive("std::init") || !Init)
     return;
   // Each element of a list initializing an object is bound by a sequence of
   // its own; a reference list-initializes from its lone element here.
@@ -2361,7 +2363,7 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
                                            SourceLocation Loc,
                                            const ValueDecl *Target, QualType T,
                                            const Expr *Src, const Decl *D) {
-  if (!getLangOpts().Profiles || T.isNull() || T->isDependentType() ||
+  if (!isProfileLive("std::init") || T.isNull() || T->isDependentType() ||
       (!T->isPointerType() && !T->isReferenceType()))
     return;
   bool TargetMarked = Target && Target->hasAttr<RefToUninitAttr>() &&
@@ -2424,7 +2426,7 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
 
 void SemaProfiles::checkInitProfileObjectArgument(const Expr *Object,
                                                   const CXXMethodDecl *Method) {
-  if (!getLangOpts().Profiles || !Object)
+  if (!isProfileLive("std::init") || !Object)
     return;
   // Destroying uninitialized storage is the deferred destroy_at slice (the
   // paper models destruction, like construct_at, as a lifetime operation);
@@ -2536,13 +2538,9 @@ static bool uninitWriteChainSeesMarker(const Expr *E) {
 void SemaProfiles::checkInitProfileReadThrough(SourceLocation Loc,
                                                const Expr *Glvalue,
                                                QualType ValueType) {
-  // Enforcement first: the lvalue-to-rvalue chokepoint calls this for every
-  // load (behind only the call site's LangOpts.Profiles gate), so nothing
-  // below should run without the profile. The hoisted gate is
-  // shouldEmitProfileViolation's own first conjunct, evaluated in the same
-  // call with only const queries in between, so it cannot change any
-  // answer.
-  if (!isProfileEnforced("std::init"))
+  // Hoisted first rung of the gate: the call site is ungated and the work
+  // below is not free.
+  if (!isProfileLive("std::init"))
     return;
   // A RecoveryExpr is a placeholder for an expression that already failed, not
   // a read the user wrote, so it must not drive this rule.
@@ -2573,6 +2571,8 @@ void SemaProfiles::checkInitProfileReadThrough(SourceLocation Loc,
 
 void SemaProfiles::checkInitProfileSubobjectWrite(SourceLocation Loc,
                                                   const Expr *LHS) {
+  if (!isProfileLive("std::init"))
+    return;
   // A RecoveryExpr is a placeholder for an expression that already failed, not
   // a store the user wrote, so it must not drive this rule.
   if (!LHS || isa<RecoveryExpr>(LHS->IgnoreParens()))
@@ -2630,6 +2630,8 @@ std::optional<bool> SemaProfiles::resolveAssignTargetMarking(const Expr *E) {
 
 void SemaProfiles::checkInitProfilePointerAssignment(Expr *LHS, Expr *RHS,
                                                      SourceLocation OpLoc) {
+  if (!isProfileLive("std::init"))
+    return;
   // References cannot be reseated, so only pointer assignment applies.
   if (!LHS->getType()->isPointerType())
     return;
@@ -2654,6 +2656,8 @@ void SemaProfiles::checkInitProfileAssignmentOperands(BinaryOperatorKind Opc,
                                                       Expr *LHSExpr, Expr *RHS,
                                                       bool IsCompound,
                                                       SourceLocation OpLoc) {
+  if (!isProfileLive("std::init"))
+    return;
   // A compound assignment reads the old value but builds no lvalue-to-rvalue
   // node for it, so the DefaultLvalueConversion read-through chokepoint never
   // sees the load; check it here. The shift forms are the exception:
@@ -2668,6 +2672,8 @@ void SemaProfiles::checkInitProfileAssignmentOperands(BinaryOperatorKind Opc,
 }
 
 void SemaProfiles::checkInitProfileIncDec(Expr *Operand, SourceLocation OpLoc) {
+  if (!isProfileLive("std::init"))
+    return;
   // ++/-- reads the old value with no lvalue-to-rvalue node (unlike -x or
   // !x), then stores to its operand like an assignment does to its LHS.
   checkInitProfileReadThrough(Operand->getExprLoc(), Operand,
@@ -2832,6 +2838,8 @@ static void diagnoseCtorUninitFields(
 
 static void runStdInitCtorUninitMemberCallback(Sema &S,
                                                CXXConstructorDecl *Ctor) {
+  if (!S.Profiles().isProfileLive("std::init"))
+    return;
   // Paper §6.1: a user-provided constructor must initialize every member via
   // its member-initializer list or an NSDMI, unless the member is marked
   // [[uninit]] (whose body initialization is the deferred R7 check).
@@ -2902,6 +2910,8 @@ static void runStdInitCtorUninitMemberCallback(Sema &S,
 
 static void runStdInitInheritedCtorUninitMemberCallback(Sema &S,
                                                         CXXRecordDecl *RD) {
+  if (!S.Profiles().isProfileLive("std::init"))
+    return;
   // Paper §6.1's obligation applied to inheriting constructors
   // ([class.inhctor.init]): an inherited constructor initializes only the
   // nominated base; the inheriting class's own members and its other bases
@@ -3018,6 +3028,8 @@ static void runStdInitInheritedCtorUninitMemberCallback(Sema &S,
 }
 
 static void runStdInitUninitFieldMarkerCallback(Sema &S, CXXRecordDecl *RD) {
+  if (!S.Profiles().isProfileLive("std::init"))
+    return;
   // std::init / uninit_with_initializer, field flavor (paper §4.2 rule 2,
   // §5.3): [[uninit]] on a data member claims default-initialization leaves
   // the member uninitialized. When the member type's default-initialization
