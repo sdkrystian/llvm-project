@@ -1,4 +1,4 @@
-// The test::arith profile's zero_divide rule (framework pattern 5): under
+// The test::arith profile's zero_divide rule (a CodeGen check site): under
 // enforcement, integer division and remainder get a runtime zero-divisor
 // check that branches to a trap (llvm.ubsantrap with the ProfileViolation
 // handler's own immediate).

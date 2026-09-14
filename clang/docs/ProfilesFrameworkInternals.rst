@@ -76,8 +76,19 @@ name as ``%0``:
      "'reinterpret_cast' is unsafe under profile '%0'",
      ProfileTestTypeCastReinterpretCast>;
 
-There are five implementation patterns, keyed on when -- and for pattern 5,
-how -- the rule is checked.
+Every rule is checked at a *check site* behind one gate, in one of two
+hosts.  A Sema check site -- an expression or declaration site, or the
+class-completion or constructor-finalization *funnel* -- calls
+``SemaProfiles::shouldEmitProfileViolation`` and emits a ``ProfileRule``
+diagnostic; a CodeGen check site calls
+``CodeGenFunction::EmitProfileRuntimeCheck`` and emits a runtime check.  A
+rule that needs whole-function analysis rides the uninitialized-variables
+analysis as a row of the ``CFGProfiles`` table, the framework's one
+table-driven extension point, whose reporter and hooks call the same Sema
+gate.  The gate's first rung is the profile's *liveness*: a profile is live
+when it is enforced by this unit or an imported module unit, or a rule
+diagnostic of it is enabled by a command-line option (`Enforcement and
+Suppression State`_); the rungs after it decide per site.
 
 
 Adding a Profile
@@ -85,32 +96,31 @@ Adding a Profile
 
 Every profile follows the same recipe:
 
-1. Pick the pattern that matches when the rule can be decided: a single
-   semantic entry point (pattern 1), whole-function analysis (pattern 2),
-   class or constructor finalization (patterns 3 and 4), or a runtime check
-   (pattern 5).
-2. Define the diagnostic: a ``ProfileRule`` in ``DiagnosticSemaKinds.td``
-   for compile-time rules, or a ``Trap`` in ``DiagnosticTrapKinds.td`` for
-   runtime-checked rules, in the rule's diagnostic group
+1. Define the diagnostics: a ``ProfileRule`` in ``DiagnosticSemaKinds.td``
+   for a compile-time rule, or a ``Trap`` in ``DiagnosticTrapKinds.td`` for
+   a runtime-checked rule, in the rule's diagnostic group
    (``DiagnosticGroups.td``; a new profile adds its group tree there, under
    ``Profiles``).
-3. Add the check: a ``shouldEmitProfileViolation("my::profile", diag::...,
-   Loc)`` gate before the diagnostic at the check site (pattern 1; for
-   patterns 3 and 4, a call to the check from the finalization wrapper), a
-   row in the analysis's opt-in table (pattern 2), or an
-   ``EmitProfileRuntimeCheck`` call (pattern 5).
-4. Add tests; a test-only profile must be named under ``test::`` (see `Test
+2. Pick each rule's host.  A rule decided where Sema knows the fact is a
+   Sema check site -- an expression site, a declaration site, the
+   class-completion funnel, or the constructor-finalization funnel (`Check
+   Sites`_) -- gated by ``shouldEmitProfileViolation("my::profile",
+   diag::..., Loc, D)`` before its diagnostic; a rule that needs
+   whole-function analysis is a row in the ``CFGProfiles`` table (`CFG
+   Riders`_); a rule enforced by instrumenting the generated code is a
+   CodeGen check site calling ``EmitProfileRuntimeCheck`` (`Runtime Check
+   Sites`_).
+3. Add tests; a test-only profile must be named under ``test::`` (see `Test
    Profiles`_).
 
-Enforcement, suppression, module propagation, and serialization then work
-without further profile-specific code.
+Enforcement, suppression, liveness, module propagation, and serialization
+then work without further profile-specific code.
 
 
-Pattern 1: Parse-Time Check Sites
-=================================
+Check Sites
+===========
 
-For a rule checkable at a single semantic entry point, the entire profile
-implementation is a gate and a diagnostic at that site:
+A Sema check site is a gate and a diagnostic:
 
 .. code-block:: c++
 
@@ -118,13 +128,21 @@ implementation is a gate and a diagnostic at that site:
                                              diag::err_my_profile_rule, Loc))
      Diag(Loc, diag::err_my_profile_rule) << "my::profile";
 
-The gate is ``SemaProfiles::shouldEmitProfileViolation``: the profile's
-liveness (`Enforcement and Suppression State`_), the
-enforce/exempt/suppress rung ``ASTContext::isProfileRuleActiveAt`` (which
-CodeGen's runtime checks run as is), and the parse-time rungs -- a templated
-declaration, an unevaluated context, and a discarded statement never fire.
-Every pattern's check site goes through that one gate.  ``test::type_cast``
-is the in-tree example.
+The gate is ``SemaProfiles::shouldEmitProfileViolation``, whose rungs run
+in order: the profile is live (`Enforcement and Suppression State`_); the
+rule's diagnostic is mapped at ``Loc`` and ``Loc`` is not
+system-header-exempt (``ASTContext::isProfileRuleActiveAt``, the positional
+rung, which CodeGen's runtime checks run as is); the declaration passed as
+``D`` is not templated; and the site is not in an unevaluated or discarded
+context (a post-parse site, which has no evaluation context of its own,
+skips these two).  Every check site in either host goes through that one
+gate.  An entry point that does work before its first gate -- collecting
+facts, walking an initializer -- hoists the liveness rung as its first
+statement, ``if (!Profiles().isProfileLive("my::profile")) return;``, so a
+profile that is not live costs nothing.  ``test::type_cast`` (an expression
+site), ``test::class_final`` (the class-completion funnel), and
+``test::ctor_final`` (the constructor-finalization funnel) are the in-tree
+pilots.
 
 Inside a template, a profile rule is checked on phase-7 entities only where
 it depends on a declaration, a completed class or constructor, or a function
@@ -147,13 +165,54 @@ diagnosis does not occur in that mode.  ``test::type_cast`` follows the
 expression policy exactly: a ``reinterpret_cast`` of a non-dependent operand
 fires at the definition, of a dependent operand once per instantiation.
 
+Funnels
+-------
 
-Pattern 2: Post-Parse / CFG-Based
-=================================
+An *expression site* is reached while an expression is built
+(``test::type_cast`` in ``Sema::BuildCXXNamedCast``).  It has no declaration
+to anchor the templated-declaration rung, so its own wrapper defers in a
+dependent context and it follows the expression policy above.
 
-For a rule that needs whole-function analysis.  Each post-parse analysis owns
-a small opt-in table of the profiles that ride it, one row per profile
-(profile name, diagnostic); the framework never learns the profile's name.
+A *declaration site* is reached while a declaration is acted on.  It passes
+the declaration as the gate's ``D``, so it fires once per instantiation and
+never on a template pattern.
+
+*Class completion* is
+``SemaProfiles::checkProfileViolationsAtClassFinalization``, run from
+``Sema::CheckCompletedCXXClass``, the single function every
+class-completion path funnels through (parsing, template instantiation,
+lambda completion).  The wrapper filters out dependent classes (the checks
+re-fire on each instantiation), invalid ones, and lambdas, and calls every
+profile's class-completion check in turn; adding a profile is one call
+there plus the check itself.  Class completion runs *before any constructor
+body or member-initializer list has been parsed*, so a class-completion
+check must not inspect a constructor's ``inits()``.
+
+*Constructor finalization* is
+``SemaProfiles::checkProfileViolationsAtConstructorFinalization``, run from
+the three functions every user-provided constructor definition funnels
+through -- ``ActOnMemInitializers``, ``ActOnDefaultCtorInitializers``, and
+``SetDeclDefaulted`` (an out-of-line ``= default``) -- including
+instantiation, with ``inits()`` fully populated.  The wrapper filters out
+dependent constructors, invalid ones, and delegating constructors (which
+leave member initialization to their target) and calls every profile's
+constructor check in turn.  An out-of-line ``= default`` copy or move
+constructor arrives here like any other; a check that must not see one
+filters for itself, as does any filter that is one profile's policy rather
+than the funnel's contract.  Each check gates its diagnostics on
+``shouldEmitProfileViolation`` with the finalized declaration and its
+location.  Rules that depend on what a constructor initializes belong at
+this funnel; rules that need flow analysis are CFG riders.
+
+
+CFG Riders
+==========
+
+A *CFG rider* is a rule that needs whole-function analysis and rides Clang's
+uninitialized-variables analysis as a row of the ``CFGProfiles`` table, the
+framework's one table-driven extension point.  The analysis owns the small
+opt-in table of the profiles that ride it, one row per profile (profile
+name, diagnostic); the framework never learns the profile's name.
 ``test::uninit_read`` is the in-tree example:
 
 .. code-block:: c++
@@ -210,45 +269,13 @@ likewise keeps running per-function analysis after a TU error when such a
 profile is live; without this, the first error would disable the profile for
 every later function.
 
-Patterns 3 and 4: Class and Constructor Finalization
-====================================================
 
-For rules that run once per completed class definition (pattern 3,
-``test::class_final``) or once per user-provided constructor with its
-complete member-initializer list (pattern 4, ``test::ctor_final``).  Both are
-Sema check sites hosted by one wrapper each
-(``SemaProfiles::checkProfileViolationsAtClassFinalization`` and
-``checkProfileViolationsAtConstructorFinalization``), whose body calls every
-profile's check in turn; adding a profile is one call there plus the check
-itself.
+Runtime Check Sites
+===================
 
-Each wrapper runs from a *funnel*: a Sema function every instance of its
-construct passes through.  The class wrapper runs from the single function
-every class-completion path funnels through (parsing, template
-instantiation, lambda completion), ``Sema::CheckCompletedCXXClass``; the
-constructor wrapper runs from the three functions every user-provided
-constructor definition funnels through -- ``ActOnMemInitializers``,
-``ActOnDefaultCtorInitializers``, and ``SetDeclDefaulted`` (an out-of-line
-``= default``) -- including instantiation.  The wrappers filter out
-dependent entities (the checks re-fire on each instantiation), invalid ones,
-lambdas (pattern 3), and delegating constructors (pattern 4) before calling
-the checks; a filter that is one profile's policy rather than the funnel's
-contract lives in that profile's check.  Each check gates its diagnostics on
-``shouldEmitProfileViolation`` with the finalized declaration and its
-location.
-
-The split between the two patterns matters: class completion runs *before
-any constructor body or member-initializer list has been parsed*, so a
-class-completion check must not inspect a constructor's ``inits()``.  Rules
-that depend on what a constructor initializes belong on pattern 4; rules that
-need flow analysis belong on pattern 2.
-
-
-Pattern 5: Runtime-Checked Rules
-================================
-
-For a rule whose enforcement means emitting a *runtime check* during code
-generation rather than a compile-time diagnostic -- P3589R2 sanctions
+A CodeGen check site is for a rule whose enforcement means emitting a
+*runtime check* during code generation rather than a compile-time diagnostic
+-- P3589R2 sanctions
 dynamic semantics for profiles (a profile "may have an effect on the runtime
 behavior of a program", e.g. bound checking, §1.1/§2.2.2).  The entire
 profile implementation is one call at the check site, naming the profile
@@ -378,8 +405,7 @@ alone would need a query of the engine's latest state and a cache keyed on
 state identity at every hot entry point.  A pragma changes the severity of
 a live profile's rule and enables nothing by itself.  Liveness gates
 compile-time rules only: a diagnostic option can preview a compile-time
-rule; only an enforcement instruments code (`Pattern 5: Runtime-Checked
-Rules`_).
+rule; only an enforcement instruments code (`Runtime Check Sites`_).
 
 A suppression's dominion ([decl.attr.suppress]p3: the attribute's tokens
 through the last token of the declaration or statement it appertains to) is
@@ -556,21 +582,22 @@ profile as not enforced and not live, so no ``test::`` rule ever fires.
 Because that gate keys on the
 ``test::`` prefix, a new test-only profile must also live under ``test::``.
 
-- ``test::type_cast`` -- pattern 1; diagnoses ``reinterpret_cast<>`` (the
-  keyword form only).
-- ``test::uninit_read`` -- pattern 2; rides the existing CFG
+- ``test::type_cast`` -- an expression site; diagnoses ``reinterpret_cast<>``
+  (the keyword form only).
+- ``test::uninit_read`` -- a CFG rider; rides the existing CFG
   uninitialized-variables analysis.
-- ``test::cfg_hooks`` -- pattern 2; exercises the optional hook columns: its
+- ``test::cfg_hooks`` -- a CFG rider; exercises the optional hook columns: its
   ``VarExempt`` hook exempts variables named with an ``exempt`` prefix from
   its uninitialized-read rule, its ``ConfigureCFG`` hook always-adds lambda
   expressions, and its ``ExtraPass`` diagnoses every lambda-expression CFG
   element under its ``lambda`` rule.
-- ``test::class_final`` -- pattern 3; fires on completion of every non-lambda
-  class, on instantiations rather than dependent patterns.
-- ``test::ctor_final`` -- pattern 4; fires once per user-defined,
-  non-delegating constructor.
-- ``test::arith`` -- pattern 5; its ``zero_divide`` rule emits a runtime
-  zero-divisor trap check on integer division and remainder.
+- ``test::class_final`` -- the class-completion funnel; fires on completion
+  of every non-lambda class, on instantiations rather than dependent
+  patterns.
+- ``test::ctor_final`` -- the constructor-finalization funnel; fires once per
+  user-provided, non-delegating constructor.
+- ``test::arith`` -- a CodeGen check site; its ``zero_divide`` rule emits a
+  runtime zero-divisor trap check on integer division and remainder.
 
 The names ``test::other``, ``test::bounds``, ``test::new_profile``, and
 ``test::not_enforced`` are deliberately *not* implemented and appear in

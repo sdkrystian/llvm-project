@@ -1,4 +1,4 @@
-// A pattern-5 runtime profile check (test::arith / zero_divide) in a named
+// A runtime profile check (test::arith / zero_divide) in a named
 // module unit: the unit's enforcements -- advertised on the module-declaration
 // or recorded TU-locally by a purview empty-declaration -- are restored when
 // the unit is code-generated from its BMI, so both compilation paths emit the

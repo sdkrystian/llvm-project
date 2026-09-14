@@ -370,7 +370,7 @@ bool SemaProfiles::shouldEmitProfileViolation(StringRef Profile,
   // rule fires only on the instantiation, never on the pattern (checking the
   // pattern would diagnose never-instantiated templates and double-fire). A
   // Decl-less expression check site must instead defer in a dependent context
-  // from its own wrapper; see ProfilesFrameworkInternals.rst, "Pattern 1".
+  // from its own wrapper; see ProfilesFrameworkInternals.rst, "Check Sites".
   if (D && D->isTemplated())
     return false;
   // The evaluation-context rungs are parse-time facts; a post-parse site has

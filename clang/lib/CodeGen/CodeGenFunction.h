@@ -624,8 +624,9 @@ public:
   /// True if the current statement has noconvergent attribute.
   bool InNoConvergentAttributedStmt = false;
 
-  /// Emit the runtime check of a pattern-5 profile rule when it is active --
-  /// the rule of \p Profile that \p TrapDiagID diagnoses enforced and not
+  /// Emit the runtime check of a profile rule (a CodeGen check site; see
+  /// ProfilesFrameworkInternals.rst, "Runtime Check Sites") when it is active
+  /// -- the rule of \p Profile that \p TrapDiagID diagnoses enforced and not
   /// suppressed at \p Loc, which is not in an exempt system header
   /// (ASTContext::isProfileRuleActiveAt on \p TrapDiagID) -- as a conditional
   /// branch to a trap (SanitizerHandler::ProfileViolation) taken when the

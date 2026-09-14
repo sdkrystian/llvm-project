@@ -86,7 +86,7 @@ public:
   /// enforced or enabled and not suppressed at \p Loc and \p Loc is not
   /// system-header-exempt (ASTContext::isProfileRuleActiveAt), plus the
   /// parse-time rungs -- a templated \p D never fires (the rule fires on the
-  /// instantiation; see ProfilesFrameworkInternals.rst, "Pattern 1"), nor
+  /// instantiation; see ProfilesFrameworkInternals.rst, "Check Sites"), nor
   /// does a site in an unevaluated or discarded context. A \p PostParse
   /// site (a CFG analysis, which has no evaluation context of its own) skips
   /// the context rungs.

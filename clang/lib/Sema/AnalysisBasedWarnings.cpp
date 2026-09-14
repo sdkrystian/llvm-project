@@ -1693,7 +1693,7 @@ namespace {
 /// uninitialized read is found and not suppressed at the use site. Adding a
 /// new profile that wants to ride this analysis is a single row here plus a
 /// ProfileRule diagnostic in DiagnosticSemaKinds.td; the three hook columns
-/// are optional (see ProfilesFrameworkInternals.rst, "Pattern 2").
+/// are optional (see ProfilesFrameworkInternals.rst, "CFG Riders").
 struct CFGProfileEntry {
   StringRef Name;
   /// The uninitialized-read diagnostic; 0 opts the row out of the
@@ -1732,7 +1732,7 @@ static void configureTestCFGHooksCFG(CFG::BuildOptions &Options) {
 /// CFG element under its own "lambda" rule. The match keys on a class the
 /// row's ConfigureCFG hook always-adds (extraction arms may only match
 /// always-add classes or unconditional elements; see
-/// ProfilesFrameworkInternals.rst, "Pattern 2").
+/// ProfilesFrameworkInternals.rst, "CFG Riders").
 static void runTestCFGHooksPass(Sema &S, const Decl *, AnalysisDeclContext &AC,
                                 const CFGProfileEntry &Entry) {
   CFG *cfg = AC.getCFG();
@@ -3045,8 +3045,8 @@ static void runProfileExtraCFGPasses(Sema &S, const Decl *D,
       E.ExtraPass(S, D, AC, E);
 }
 
-/// Pattern-2 profiles (the CFGProfiles table) ride the uninitialized-
-/// variables analysis, but profile rules emit errors, so they must run even
+/// The CFGProfiles rows ride the uninitialized-variables analysis, but
+/// profile rules emit errors, so they must run even
 /// where IssueWarnings skips the warning pipeline: once the TU has an
 /// uncompilable error, and when warnings are disabled for the declaration
 /// (-w, or a system-header decl under -fno-profiles-exempt-system-headers).

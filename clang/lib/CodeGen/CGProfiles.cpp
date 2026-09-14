@@ -7,8 +7,8 @@
 //===----------------------------------------------------------------------===//
 /// \file
 /// This file implements the CodeGen side of the C++ profiles framework
-/// (P3589R2): the emission of pattern-5 runtime checks. See
-/// clang/docs/ProfilesFrameworkInternals.rst.
+/// (P3589R2): the emission of runtime checks, the CodeGen check sites. See
+/// clang/docs/ProfilesFrameworkInternals.rst, "Runtime Check Sites".
 ///
 //===----------------------------------------------------------------------===//
 

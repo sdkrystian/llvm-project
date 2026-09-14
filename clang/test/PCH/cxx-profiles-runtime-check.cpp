@@ -1,4 +1,4 @@
-// A pattern-5 runtime profile check (test::arith / zero_divide) behind a PCH
+// A runtime profile check (test::arith / zero_divide) behind a PCH
 // boundary: enforcement recorded in a PCH is restored into the including
 // compile's ASTContext, so an inline function deserialized from the PCH is
 // emitted with its runtime check, a [[profiles::suppress]] serialized in the
