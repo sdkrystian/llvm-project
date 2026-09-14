@@ -667,9 +667,9 @@ public:
   /// The names of every profile the translation unit that built this module
   /// enforced anywhere -- by attribute, by -fprofiles-enforce=, or by
   /// inheritance from its interface: that unit's enforcement dominion, read by
-  /// the redeclaration-compatibility check (P3589R2 [decl.attr.enforce]p5).
-  /// Restored from SUBMODULE_DOMINION_PROFILES; empty for the module being
-  /// built.
+  /// the redeclaration-compatibility check (P3589R2 [decl.attr.enforce]p5)
+  /// and recorded into ASTContext::ImportedDominionProfiles. Restored from
+  /// SUBMODULE_DOMINION_PROFILES; empty for the module being built.
   SmallVector<std::string, 0> DominionProfiles;
 
   /// The set of top-level modules that affected the compilation of this module,

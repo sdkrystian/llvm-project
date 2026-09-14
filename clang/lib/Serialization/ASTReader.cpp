@@ -6716,6 +6716,10 @@ Module *ASTReader::getSubmodule(uint32_t GlobalID) {
 
     case SUBMODULE_DOMINION_PROFILES:
       CurrentModule->DominionProfiles.push_back(Blob.str());
+      // Registered as the block is read: a module loaded lazily at an import
+      // must count toward isProfileEnforcedByAnyUnit from then on.
+      if (ContextObj)
+        ContextObj->addImportedDominionProfile(Blob);
       break;
     }
   }

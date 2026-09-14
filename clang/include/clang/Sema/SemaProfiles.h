@@ -21,8 +21,8 @@
 #include "clang/Basic/DiagnosticIDs.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Sema/SemaBase.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 
 namespace clang {
@@ -47,14 +47,15 @@ public:
   /// lives on the ASTContext).
   bool isProfileEnforced(StringRef ProfileName) const;
 
-  /// True if any entry of \p Entries names an enforced profile. \p Entries is
-  /// any profile opt-in table whose elements expose a \c Name member (the CFG
-  /// analysis pass guard).
-  template <typename Table>
-  bool anyProfileEnforced(const Table &Entries) const {
-    return llvm::any_of(
-        Entries, [&](const auto &E) { return isProfileEnforced(E.Name); });
-  }
+  /// True if \p Profile is live in this compilation: enforced by this unit
+  /// or an imported module unit (ASTContext::isProfileEnforcedByAnyUnit), or
+  /// with a rule diagnostic enabled by a command-line option
+  /// (ASTContext::isProfileRuleEnabledByOption). Every check of a profile
+  /// runs behind its liveness (the first rung of shouldEmitProfileViolation);
+  /// an entry point that does work before its first gate hoists the same
+  /// test. Never true for an inert test:: profile. See
+  /// ProfilesFrameworkInternals.rst, "Enforcement and Suppression State".
+  bool isProfileLive(StringRef Profile);
 
   /// Record an enforcement of \p Name into the ASTContext's list and map the
   /// profile's rule diagnostics to errors from \p Loc to the end of the
@@ -80,16 +81,17 @@ public:
   /// returns null if the attribute carries no profile name (parse error).
   ProfilesSuppressAttr *makeProfilesSuppressAttr(const ParsedAttr &AL);
 
-  /// True if a violation at \p Loc diagnosed by \p DiagID is to be
-  /// diagnosed: the rule is enforced and not suppressed at \p Loc and \p Loc
-  /// is not system-header-exempt (ASTContext::isProfileRuleActiveAt), plus
-  /// the parse-time rungs -- a templated \p D never fires (the rule fires on
-  /// the instantiation; see ProfilesFrameworkInternals.rst, "Pattern 1"), nor
+  /// True if a violation of \p Profile at \p Loc diagnosed by \p DiagID is
+  /// to be diagnosed: the profile is live (isProfileLive), the rule is
+  /// enforced or enabled and not suppressed at \p Loc and \p Loc is not
+  /// system-header-exempt (ASTContext::isProfileRuleActiveAt), plus the
+  /// parse-time rungs -- a templated \p D never fires (the rule fires on the
+  /// instantiation; see ProfilesFrameworkInternals.rst, "Pattern 1"), nor
   /// does a site in an unevaluated or discarded context. A \p PostParse
   /// site (a CFG analysis, which has no evaluation context of its own) skips
   /// the context rungs.
-  bool shouldEmitProfileViolation(unsigned DiagID, SourceLocation Loc,
-                                  const Decl *D = nullptr,
+  bool shouldEmitProfileViolation(StringRef Profile, unsigned DiagID,
+                                  SourceLocation Loc, const Decl *D = nullptr,
                                   bool PostParse = false);
 
   /// A [[profiles::suppress]] dominion being recorded as diagnostic state:
@@ -147,6 +149,11 @@ public:
   /// constructors are filtered here; a check adds its own filters.
   void
   checkProfileViolationsAtConstructorFinalization(CXXConstructorDecl *Ctor);
+
+private:
+  /// Per profile, whether a rule diagnostic of it is enabled by a
+  /// command-line option; see isProfileLive.
+  llvm::StringMap<bool> RulesEnabledByOption;
 };
 
 } // namespace clang

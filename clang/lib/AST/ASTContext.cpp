@@ -900,6 +900,20 @@ bool ASTContext::isProfileEnforced(StringRef ProfileName) const {
   return getProfileEnforcement(ProfileName) != nullptr;
 }
 
+void ASTContext::addImportedDominionProfile(StringRef ProfileName) {
+  ImportedDominionProfiles.insert(ProfileName);
+}
+
+bool ASTContext::isProfileEnforcedByAnyUnit(StringRef ProfileName) const {
+  if (isProfileEnforced(ProfileName))
+    return true;
+  if (!getLangOpts().Profiles ||
+      profiles::isProfileNameInert(ProfileName,
+                                   getLangOpts().ProfilesTestProfiles))
+    return false;
+  return ImportedDominionProfiles.contains(ProfileName);
+}
+
 bool ASTContext::isProfileExemptSystemHeaderLoc(SourceLocation Loc) const {
   return getLangOpts().ProfilesExemptSystemHeaders && Loc.isValid() &&
          getSourceManager().isInSystemHeader(Loc);
@@ -987,6 +1001,17 @@ ASTContext::ASTContext(LangOptions &LOpts, SourceManager &SM,
       Comments(SM), CommentCommandTraits(BumpAlloc, LOpts.CommentOpts),
       CompCategories(this_()), LastSDM(nullptr, 0) {
   addTranslationUnitDecl();
+
+  // No diagnostic state has been recorded yet, so an unlocated query reads
+  // the command-line state (DiagStateMap::lookup with no files).
+  if (LangOpts.Profiles) {
+    SmallVector<diag::kind, 64> Kinds;
+    getDiagnostics().getDiagnosticIDs()->getDiagnosticsInGroup(
+        diag::Flavor::WarningOrError, "profiles", Kinds);
+    for (diag::kind K : Kinds)
+      if (!getDiagnostics().isIgnored(K, SourceLocation()))
+        ProfileRulesEnabledByOption.insert(K);
+  }
 
   // A -fprofiles-enforce= enforcement covers the whole translation unit: it
   // records no location and maps the profile's rule diagnostics in the

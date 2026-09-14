@@ -779,13 +779,28 @@ private:
   /// The profiles enforced on this translation unit by [[profiles::enforce]]
   /// or -fprofiles-enforce= (P3589R2): the list behind isProfileEnforced,
   /// which serves the whole-unit questions (advertising, require, designator
-  /// mismatches, redeclaration compatibility, the post-parse dispatch gates);
-  /// where a rule is enforced is the rule diagnostic's mapping
+  /// mismatches, redeclaration compatibility, and -- joined with
+  /// ImportedDominionProfiles -- the enforcement half of a profile's
+  /// liveness); where a rule is enforced is the rule diagnostic's mapping
   /// (isProfileRuleActiveAt). Sema records entries (and owns the attribute's
   /// diagnostics); the list lives here so consumers without a Sema -- e.g.
   /// code generation from an AST file -- can query it, and the ASTReader
   /// restores a PCH's enforcements directly into it.
   SmallVector<profiles::ProfileEnforcement, 4> EnforcedProfiles;
+
+  /// The names of every profile an imported module unit enforced anywhere
+  /// (Module::DominionProfiles of each loaded module), recorded by the
+  /// ASTReader as the module's block is read. Module code is instantiated
+  /// and emitted in this unit under the module's own enforcement, so these
+  /// count toward isProfileEnforcedByAnyUnit.
+  llvm::StringSet<> ImportedDominionProfiles;
+
+  /// The profile-rule diagnostics a command-line option of this compilation
+  /// enabled: every member of the -Wprofiles group tree not ignored in the
+  /// command-line diagnostic state, snapshotted by the constructor before
+  /// any diagnostic state is recorded. The option half of a profile's
+  /// liveness (SemaProfiles::isProfileLive).
+  llvm::SmallDenseSet<unsigned, 8> ProfileRulesEnabledByOption;
 
   /// The allocator used to create AST objects.
   ///
@@ -1021,6 +1036,23 @@ public:
   /// suite opted in via -fprofiles-test-profiles.
   bool isProfileEnforced(StringRef ProfileName) const;
 
+  /// Record that an imported module unit enforced \p ProfileName somewhere
+  /// (ImportedDominionProfiles).
+  void addImportedDominionProfile(StringRef ProfileName);
+
+  /// True if \p ProfileName is enforced by this unit (isProfileEnforced) or
+  /// was enforced by an imported module unit whose code this unit may
+  /// instantiate or emit. The enforcement half of a profile's liveness and
+  /// the gate of a runtime check. False for an inert test:: profile and
+  /// without -fprofiles.
+  bool isProfileEnforcedByAnyUnit(StringRef ProfileName) const;
+
+  /// True if a command-line option of this compilation enabled the profile
+  /// rule diagnostic \p DiagID (ProfileRulesEnabledByOption).
+  bool isProfileRuleEnabledByOption(unsigned DiagID) const {
+    return ProfileRulesEnabledByOption.contains(DiagID);
+  }
+
   /// True if \p Loc is exempt from profile enforcement because it lies in a
   /// system header. Temporary stopgap for the not-yet-implemented
   /// [[profiles::exempt]] (P3589R2 §1.1.6), so enforcing a profile on a
@@ -1040,7 +1072,8 @@ public:
   /// -fprofiles-enforce= -- and suppressed where a [[profiles::suppress]]
   /// dominion maps it to ignored ([decl.attr.suppress]p3); SemaProfiles
   /// records both. Code from a module is therefore checked under the module's
-  /// own state, and a location-less check site under the command line's only.
+  /// own state, and a location-less check site under the latest recorded
+  /// state.
   /// See ProfilesFrameworkInternals.rst, "Enforcement and Suppression State".
   bool isProfileRuleActiveAt(unsigned DiagID, SourceLocation Loc) const;
 

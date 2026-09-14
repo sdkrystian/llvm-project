@@ -203,8 +203,9 @@ ordinary diagnostic controls apply to profile rules as well:
   rules as *warnings* without any enforcement, and ``-Werror=profile-...``
   as errors; ``-Weverything`` does not enable them.
 - ``#pragma clang diagnostic ignored|warning|error "-Wprofile-..."``, with
-  ``push`` and ``pop``, changes a rule's severity for the rest of the file,
-  under an enforcement or without one; ``-Weverything``, as an option or a
+  ``push`` and ``pop``, changes the severity of a rule that an enforcement
+  or a ``-W`` option has enabled, for the rest of the file; a pragma alone
+  does not enable a profile's checks.  ``-Weverything``, as an option or a
   pragma, never touches a rule.
 - ``--warning-suppression-mappings`` exempts the listed paths from a
   ``-fprofiles-enforce=`` enforcement, not from one written in source.

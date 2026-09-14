@@ -1743,8 +1743,8 @@ static void runTestCFGHooksPass(Sema &S, const Decl *, AnalysisDeclContext &AC,
       if (std::optional<CFGStmt> CS = E.getAs<CFGStmt>())
         if (const auto *LE = dyn_cast<LambdaExpr>(CS->getStmt()))
           if (S.Profiles().shouldEmitProfileViolation(
-                  diag::err_profile_cfg_hooks_test, LE->getBeginLoc(),
-                  /*D=*/nullptr, /*PostParse=*/true))
+                  Entry.Name, diag::err_profile_cfg_hooks_test,
+                  LE->getBeginLoc(), /*D=*/nullptr, /*PostParse=*/true))
             S.Diag(LE->getBeginLoc(), diag::err_profile_cfg_hooks_test)
                 << Entry.Name;
 }
@@ -1755,17 +1755,19 @@ constexpr CFGProfileEntry CFGProfiles[] = {
      &isTestCFGHooksExemptVar, &configureTestCFGHooksCFG, &runTestCFGHooksPass},
 };
 
-/// Diagnose an uninitialized read of \p vd under the CFGProfiles rows,
+/// Diagnose an uninitialized read of \p vd under the live CFGProfiles rows,
 /// reporting a self-init at its root cause and otherwise the first recorded
-/// real use; returns true if a diagnostic was emitted. A row whose VarExempt
-/// hook exempts \p vd takes no part in either arm.
+/// real use; returns true if a diagnostic was emitted. A row whose profile is
+/// not live, or whose VarExempt hook exempts \p vd, takes no part in either
+/// arm.
 static bool
 tryDiagnoseProfileUninitRead(Sema &S, AnalysisDeclContext &AC,
                              const VarDecl *vd, bool hasSelfInit,
                              const SmallVectorImpl<UninitUse> &vec) {
   SmallVector<const CFGProfileEntry *, 4> Rows;
   for (const CFGProfileEntry &E : CFGProfiles)
-    if (E.DiagID != 0 && (!E.VarExempt || !E.VarExempt(S, vd)))
+    if (E.DiagID != 0 && S.Profiles().isProfileLive(E.Name) &&
+        (!E.VarExempt || !E.VarExempt(S, vd)))
       Rows.push_back(&E);
   if (Rows.empty())
     return false;
@@ -1777,7 +1779,7 @@ tryDiagnoseProfileUninitRead(Sema &S, AnalysisDeclContext &AC,
     const Expr *Init = vd->getInit()->IgnoreParenCasts();
     for (const CFGProfileEntry *E : Rows) {
       if (!S.Profiles().shouldEmitProfileViolation(
-              E->DiagID, Init->getBeginLoc(), /*D=*/nullptr,
+              E->Name, E->DiagID, Init->getBeginLoc(), /*D=*/nullptr,
               /*PostParse=*/true))
         continue;
       S.Diag(Init->getBeginLoc(), E->DiagID) << E->Name << vd->getDeclName();
@@ -1787,9 +1789,9 @@ tryDiagnoseProfileUninitRead(Sema &S, AnalysisDeclContext &AC,
     }
   }
 
-  // If a CFG-uninit-analysis-requesting profile is enforced at any real use
-  // site and is not suppressed there, emit the profile diagnostic and skip
-  // the default warning path entirely.
+  // If a row's rule is active at any real use site (enforced or enabled, and
+  // not suppressed there), emit the profile diagnostic and skip the default
+  // warning path entirely.
   for (const UninitUse &U : vec) {
     // A const-reference binding or address-taking use is not a read; it is
     // pointer/reference-binding territory, checked at the binding site.
@@ -1797,7 +1799,7 @@ tryDiagnoseProfileUninitRead(Sema &S, AnalysisDeclContext &AC,
       continue;
     for (const CFGProfileEntry *E : Rows) {
       if (!S.Profiles().shouldEmitProfileViolation(
-              E->DiagID, U.getUser()->getBeginLoc(), /*D=*/nullptr,
+              E->Name, E->DiagID, U.getUser()->getBeginLoc(), /*D=*/nullptr,
               /*PostParse=*/true))
         continue;
       S.Diag(U.getUser()->getBeginLoc(), E->DiagID)
@@ -2922,8 +2924,10 @@ void sema::AnalysisBasedWarnings::clearOverrides() {
   PolicyOverrides.enableThreadSafetyAnalysis = false;
 }
 
-bool sema::AnalysisBasedWarnings::hasEnforcedCFGProfile() const {
-  return S.Profiles().anyProfileEnforced(CFGProfiles);
+bool sema::AnalysisBasedWarnings::hasLiveCFGProfile() const {
+  return llvm::any_of(CFGProfiles, [&](const CFGProfileEntry &E) {
+    return S.Profiles().isProfileLive(E.Name);
+  });
 }
 
 static void flushDiagnostics(Sema &S, const sema::FunctionScopeInfo *fscope) {
@@ -3024,20 +3028,20 @@ static void addNonLinearizedAlwaysAddClasses(AnalysisDeclContext &AC) {
       .setAlwaysAdd(Stmt::UnaryOperatorClass);
 }
 
-/// Apply the ConfigureCFG hooks of the enforced CFGProfiles rows to \p
-/// Options; both analysis paths call it so they build the same CFG shape.
+/// Apply the ConfigureCFG hooks of the live CFGProfiles rows to \p Options;
+/// both analysis paths call it so they build the same CFG shape.
 static void configureProfileCFGOptions(Sema &S, CFG::BuildOptions &Options) {
   for (const CFGProfileEntry &E : CFGProfiles)
-    if (E.ConfigureCFG && S.Profiles().isProfileEnforced(E.Name))
+    if (E.ConfigureCFG && S.Profiles().isProfileLive(E.Name))
       E.ConfigureCFG(Options);
 }
 
-/// Run the ExtraPass hooks of the enforced CFGProfiles rows; both analysis
-/// paths call it after the uninitialized-variables reporter has flushed.
+/// Run the ExtraPass hooks of the live CFGProfiles rows; both analysis paths
+/// call it after the uninitialized-variables reporter has flushed.
 static void runProfileExtraCFGPasses(Sema &S, const Decl *D,
                                      AnalysisDeclContext &AC) {
   for (const CFGProfileEntry &E : CFGProfiles)
-    if (E.ExtraPass && S.Profiles().isProfileEnforced(E.Name))
+    if (E.ExtraPass && S.Profiles().isProfileLive(E.Name))
       E.ExtraPass(S, D, AC, E);
 }
 
@@ -3291,17 +3295,16 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
     // The dependent-context skip is unconditional (handled at instantiation
     // time); the -w and system-header skips must not silence profile rules,
     // which are errors (see runProfileOnlyCFGAnalysis).
-    if (!cast<DeclContext>(D)->isDependentContext() &&
-        hasEnforcedCFGProfile() &&
+    if (!cast<DeclContext>(D)->isDependentContext() && hasLiveCFGProfile() &&
         !S.Context.isProfileExemptSystemHeaderLoc(D->getLocation()) &&
         !D->isInvalidDecl() && !Diags.hasFatalErrorOccurred())
       runProfileOnlyCFGAnalysis(S, D);
     return;
   }
 
-  // Cached for the uses below (the enforced set cannot change within one
-  // invocation); the skip path above queries hasEnforcedCFGProfile directly.
-  const bool CFGProfileEnforced = hasEnforcedCFGProfile();
+  // Cached for the uses below (liveness cannot change within one
+  // invocation); the skip path above queries hasLiveCFGProfile directly.
+  const bool CFGProfileLive = hasLiveCFGProfile();
 
   if (S.hasUncompilableErrorOccurred()) {
     // Flush out any possibly unreachable diagnostics.
@@ -3309,8 +3312,7 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
     // Profile rules are errors: keep the CFG profile pass alive after a TU
     // error, on a valid decl so the CFG is buildable (see
     // runProfileOnlyCFGAnalysis). Other analyses keep the early-out.
-    if (CFGProfileEnforced && !D->isInvalidDecl() &&
-        !Diags.hasFatalErrorOccurred())
+    if (CFGProfileLive && !D->isInvalidDecl() && !Diags.hasFatalErrorOccurred())
       runProfileOnlyCFGAnalysis(S, D);
     return;
   }
@@ -3337,7 +3339,7 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
     AC.getCFGBuildOptions().setAllAlwaysAdd();
   } else {
     addNonLinearizedAlwaysAddClasses(AC);
-    if (CFGProfileEnforced)
+    if (CFGProfileLive)
       configureProfileCFGOptions(S, AC.getCFGBuildOptions());
   }
   if (EnableLifetimeSafetyAnalysis)
@@ -3403,7 +3405,7 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
     Analyzer.run(AC);
   }
 
-  if (CFGProfileEnforced ||
+  if (CFGProfileLive ||
       !Diags.isIgnored(diag::warn_uninit_var, D->getBeginLoc()) ||
       !Diags.isIgnored(diag::warn_sometimes_uninit_var, D->getBeginLoc()) ||
       !Diags.isIgnored(diag::warn_maybe_uninit_var, D->getBeginLoc()) ||
@@ -3429,7 +3431,7 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
     }
   }
 
-  if (CFGProfileEnforced)
+  if (CFGProfileLive)
     runProfileExtraCFGPasses(S, D, AC);
 
   if (EnableLifetimeSafetyAnalysis) {

@@ -122,10 +122,10 @@ public:
   // normal IssueWarnings path.
   void IssueWarningsForImplicitFunction(const Decl *D);
 
-  /// True if a profile that rides the uninitialized-variables analysis (see
-  /// the CFGProfiles table) is enforced; consulted wherever that analysis
-  /// would otherwise be skipped (see runProfileOnlyCFGAnalysis).
-  bool hasEnforcedCFGProfile() const;
+  /// True if a profile that rides the uninitialized-variables analysis (the
+  /// CFGProfiles table) is live; consulted wherever that analysis would
+  /// otherwise be skipped (see runProfileOnlyCFGAnalysis).
+  bool hasLiveCFGProfile() const;
 
   void registerVarDeclWarning(VarDecl *VD, PossiblyUnreachableDiag PUD);
 

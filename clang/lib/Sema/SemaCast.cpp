@@ -403,7 +403,8 @@ Sema::BuildCXXNamedCast(SourceLocation OpLoc, tok::TokenKind Kind,
         return ExprError();
       DiscardMisalignedMemberAddress(DestType.getTypePtr(), E);
       if (Profiles().shouldEmitProfileViolation(
-              diag::err_profile_type_cast_reinterpret, OpLoc))
+              "test::type_cast", diag::err_profile_type_cast_reinterpret,
+              OpLoc))
         Diag(OpLoc, diag::err_profile_type_cast_reinterpret)
             << "test::type_cast";
     }

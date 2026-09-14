@@ -33,16 +33,17 @@ the ASTReader restores a PCH's ``ENFORCED_PROFILES`` records directly into
 it, so a consumer that never sees a Sema -- e.g. code generation directly
 from an AST file -- observes the same list.  The list answers the
 whole-unit questions: what the unit advertises and ``[[profiles::require]]``
-validates, designator mismatches, redeclaration compatibility, and the "is
-any profile of this table enforced" gates of the post-parse dispatchers.
-*Where* a rule is enforced is the diagnostics engine's question:
-``SemaProfiles::addProfileEnforcement`` records the enforcement into the
-list and maps the profile's rule diagnostics to errors from the attribute
-to the end of the translation unit, and ``ASTContext::isProfileRuleActiveAt``
--- the enforcement half of every violation gate -- asks whether the rule's
-diagnostic is mapped at the check site and the site is not
-system-header-exempt (``isProfileExemptSystemHeaderLoc``).  See
-`Enforcement and Suppression State`_.
+validates, designator mismatches, redeclaration compatibility, and, joined
+with the imported module units' recorded dominions, the enforcement half of
+a profile's liveness.  *Where* a rule is enforced is the
+diagnostics engine's question: ``SemaProfiles::addProfileEnforcement``
+records the enforcement into the list and maps the profile's rule
+diagnostics to errors from the attribute to the end of the translation unit,
+and ``ASTContext::isProfileRuleActiveAt`` -- the positional rung of every
+violation gate -- asks whether the rule's diagnostic is mapped at the check
+site and the site is not system-header-exempt
+(``isProfileExemptSystemHeaderLoc``).  See `Enforcement and Suppression
+State`_.
 
 ``-fprofiles-enforce=`` is the second Sema-free seed: the ``ASTContext``
 constructor records each name in ``LangOptions::ProfilesEnforce`` with an
@@ -93,10 +94,11 @@ Every profile follows the same recipe:
    runtime-checked rules, in the rule's diagnostic group
    (``DiagnosticGroups.td``; a new profile adds its group tree there, under
    ``Profiles``).
-3. Add the check: a ``shouldEmitProfileViolation`` gate before the diagnostic
-   at the check site (pattern 1; for patterns 3 and 4, a call to the check
-   from the finalization wrapper), a row in the analysis's opt-in table
-   (pattern 2), or an ``EmitProfileRuntimeCheck`` call (pattern 5).
+3. Add the check: a ``shouldEmitProfileViolation("my::profile", diag::...,
+   Loc)`` gate before the diagnostic at the check site (pattern 1; for
+   patterns 3 and 4, a call to the check from the finalization wrapper), a
+   row in the analysis's opt-in table (pattern 2), or an
+   ``EmitProfileRuntimeCheck`` call (pattern 5).
 4. Add tests; a test-only profile must be named under ``test::`` (see `Test
    Profiles`_).
 
@@ -112,12 +114,14 @@ implementation is a gate and a diagnostic at that site:
 
 .. code-block:: c++
 
-   if (Profiles().shouldEmitProfileViolation(diag::err_my_profile_rule, Loc))
+   if (Profiles().shouldEmitProfileViolation("my::profile",
+                                             diag::err_my_profile_rule, Loc))
      Diag(Loc, diag::err_my_profile_rule) << "my::profile";
 
-The gate is ``SemaProfiles::shouldEmitProfileViolation``: the
+The gate is ``SemaProfiles::shouldEmitProfileViolation``: the profile's
+liveness (`Enforcement and Suppression State`_), the
 enforce/exempt/suppress rung ``ASTContext::isProfileRuleActiveAt`` (which
-CodeGen's runtime checks run as is) plus the parse-time rungs -- a templated
+CodeGen's runtime checks run as is), and the parse-time rungs -- a templated
 declaration, an unevaluated context, and a discarded statement never fire.
 Every pattern's check site goes through that one gate.  ``test::type_cast``
 is the in-tree example.
@@ -158,8 +162,8 @@ a small opt-in table of the profiles that ride it, one row per profile
        {"my::profile", diag::err_my_profile_rule},
    };
 
-The analysis's diagnostic reporter walks the table calling the single gate
-as ``shouldEmitProfileViolation(DiagID, Loc, /*D=*/nullptr,
+The analysis's diagnostic reporter walks the live rows calling the single
+gate as ``shouldEmitProfileViolation(Name, DiagID, Loc, /*D=*/nullptr,
 /*PostParse=*/true)`` per use site, emitting the entry's diagnostic (and
 skipping the default warning) when it returns true; the use site's location
 finds the suppression dominion it lies in, so the post-parse site needs no
@@ -186,7 +190,7 @@ owns every diagnostic of its profile.
 
 An ``ExtraPass`` must tolerate both CFG shapes the dispatch points can
 build: the non-linearized shape (the base always-add classes plus whatever
-the enforced rows' ``ConfigureCFG`` hooks add) and the fully linearized
+the live rows' ``ConfigureCFG`` hooks add) and the fully linearized
 shape (another analysis in the same run forced ``setAllAlwaysAdd``, which
 adds arbitrary extra elements).  A pass's extraction arms may therefore only
 match always-add classes or unconditional CFG elements: an element class
@@ -195,16 +199,16 @@ it would produce diagnostics on one path only.  ``test::cfg_hooks`` is the
 in-tree pilot for the hook columns.
 
 Profile rules are errors, so the pass must also run where the warning
-pipeline is skipped.  ``AnalysisBasedWarnings::hasEnforcedCFGProfile()``
+pipeline is skipped.  ``AnalysisBasedWarnings::hasLiveCFGProfile()``
 gates those paths: after an uncompilable TU error, and when warnings are
 disabled for the declaration (``-w``, or a system-header declaration under
 ``-fno-profiles-exempt-system-headers``), the per-function dispatch runs
 ``runProfileOnlyCFGAnalysis`` instead of skipping -- the same analysis with
 the reporter in ``ProfileOnly`` mode, so an ordinary warning the error or
 flag is meant to silence cannot resurface.  ``Sema::ActOnFinishFunctionBody``
-likewise keeps dispatching per-function analysis after a TU error when such
-a profile is enforced; without this, the first error would disable the
-profile for every later function.
+likewise keeps running per-function analysis after a TU error when such a
+profile is live; without this, the first error would disable the profile for
+every later function.
 
 Patterns 3 and 4: Class and Constructor Finalization
 ====================================================
@@ -314,8 +318,9 @@ an unenforced state.  ``-fprofiles-enforce=`` maps the group in the initial
 state instead (the ``ASTContext`` constructor, a command-line mapping).  A
 profile the implementation does not know has no group, and mapping it does
 nothing, which is the specified behavior of an unknown profile.  A check
-site with an invalid location sees the initial state, so it is checked
-under command-line enforcement only.
+site with an invalid location sees the latest recorded state: command-line
+enforcement plus whatever enforcement or suppression was most recently
+recorded anywhere in the unit.
 
 The engine's own rungs then apply: the rule diagnostics are latent, so
 ``-w`` keeps an enforced rule, ``-Weverything`` in either form leaves the
@@ -335,6 +340,38 @@ importer's, so the importer's ``-fprofiles-enforce=`` reaches it; the
 diagnostic-option validation an implicit module's import performs skips
 latent diagnostics, since an enforcement written in source is not a
 ``-Werror`` option the module build had to share.
+
+A profile is *live* in a compilation when it is enforced by this unit or by
+an imported module unit -- recorded in this unit's ``ASTContext`` list by
+attribute, by ``-fprofiles-enforce=``, or by inheritance, or in the
+``Module::DominionProfiles`` of any module unit the compilation loaded
+(``ASTContext::isProfileEnforcedByAnyUnit``) -- or a rule diagnostic of it
+is enabled by a command-line option of this compilation
+(``-Wprofile-<profile>``, ``-Wprofile-<profile>-<rule>``,
+``-Werror=profile-...``, ``-Wprofiles``;
+``ASTContext::isProfileRuleEnabledByOption``).  An inert ``test::`` profile
+is never live.  ``SemaProfiles::isProfileLive`` combines the two halves and
+is the first rung of ``shouldEmitProfileViolation``; an entry point that
+does work before its first gate hoists the same test.  Liveness is a
+whole-compilation superset pre-filter: a live profile's check sites still
+decide by the positional mapping at their location, and a profile that is
+not live does no work at all.  The imported-unit half is what keeps module
+code's checks when the module enforced a profile and the importer did not:
+the module's positional mappings travel with its files, and this unit's
+list, which is per unit, would otherwise filter the site off before they
+are consulted.  The option half is snapshotted in the ``ASTContext``
+constructor, before ``-fprofiles-enforce=`` maps anything and before any
+diagnostic state is recorded, where an unlocated
+``DiagnosticsEngine::isIgnored`` query reads the command-line state; it is
+a constant of the compilation, so ``isProfileLive`` caches its per-profile
+answer (``RulesEnabledByOption``), while the enforcement half is evaluated
+on every call because an in-source enforcement or a lazily loaded import
+can turn it on mid-unit.  A ``#pragma clang diagnostic warning
+"-Wprofile-..."`` with neither an enforcement nor an option does not make a
+profile live: the preview is a build-flag decision, and honoring a pragma
+alone would need a query of the engine's latest state and a cache keyed on
+state identity at every hot entry point.  A pragma changes the severity of
+a live profile's rule and enables nothing by itself.
 
 A suppression's dominion ([decl.attr.suppress]p3: the attribute's tokens
 through the last token of the declaration or statement it appertains to) is
@@ -394,11 +431,13 @@ Where the recorded dominion departs from the construct's token range:
 - A ``#pragma clang diagnostic pop`` inside a suppressed construct, of a
   push before it, restores the unsuppressed state for the rest of the
   construct.
-- A check site with an invalid location sees the initial state: no
-  suppression, and command-line enforcement only.
+- A check site with an invalid location sees the latest recorded state:
+  command-line enforcement plus whatever enforcement or suppression was most
+  recently recorded anywhere in the unit -- an over- or under-check
+  depending on what was last recorded.
 
-Each of the last three is an over-check (a check that suppression fails to
-remove), never a missing check.
+The second and third are over-checks (a check that suppression fails to
+remove), never missing checks.
 
 
 Modules and Serialization
@@ -443,7 +482,10 @@ imported explicit module may differ.
 anywhere -- is written for the module being built as
 ``SUBMODULE_DOMINION_PROFILES`` records, one name each, from the TU's
 enforcement list at the end of the unit; the redeclaration-compatibility
-check below reads it, ``[[profiles::require]]`` never does.
+check below reads it, ``[[profiles::require]]`` never does.  The ASTReader
+also records each loaded module's names into
+``ASTContext::ImportedDominionProfiles``, the imported-unit half of
+``isProfileEnforcedByAnyUnit``.
 ``PROFILES_TU_HAS_NONEMPTY_DECL`` records whether a PCH contributed a
 non-empty top-level declaration, so the empty-declaration placement check
 works across a PCH boundary without deserializing the PCH's declarations; it
@@ -501,8 +543,9 @@ The six built-in ``test::`` profiles exist only to exercise the framework in
 the test suite.  They are gated on the ``-cc1``-only
 ``-fprofiles-test-profiles`` flag: under ``-fprofiles`` alone their
 designators are still parsed, recorded, and exported across modules, but
-``isProfileEnforced`` reports any ``test::``-prefixed profile as not
-enforced, so no ``test::`` rule ever fires.  Because that gate keys on the
+``isProfileEnforced`` and ``isProfileLive`` report any ``test::``-prefixed
+profile as not enforced and not live, so no ``test::`` rule ever fires.
+Because that gate keys on the
 ``test::`` prefix, a new test-only profile must also live under ``test::``.
 
 - ``test::type_cast`` -- pattern 1; diagnoses ``reinterpret_cast<>`` (the

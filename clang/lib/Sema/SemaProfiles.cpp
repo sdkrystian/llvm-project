@@ -20,6 +20,7 @@
 #include "clang/Basic/SourceManager.h"
 #include "clang/Sema/ParsedAttr.h"
 #include "clang/Sema/Sema.h"
+#include "llvm/ADT/STLExtras.h"
 
 using namespace clang;
 
@@ -27,6 +28,30 @@ SemaProfiles::SemaProfiles(Sema &S) : SemaBase(S) {}
 
 bool SemaProfiles::isProfileEnforced(StringRef ProfileName) const {
   return getASTContext().isProfileEnforced(ProfileName);
+}
+
+bool SemaProfiles::isProfileLive(StringRef Profile) {
+  ASTContext &Ctx = getASTContext();
+  if (Ctx.isProfileEnforcedByAnyUnit(Profile))
+    return true;
+  if (!getLangOpts().Profiles ||
+      profiles::isProfileNameInert(Profile, getLangOpts().ProfilesTestProfiles))
+    return false;
+  // The option half is a constant of the compilation, computed once per
+  // profile.
+  auto It = RulesEnabledByOption.find(Profile);
+  if (It != RulesEnabledByOption.end())
+    return It->second;
+  SmallVector<diag::kind, 16> Kinds;
+  bool Enabled =
+      !getDiagnostics().getDiagnosticIDs()->getDiagnosticsInGroup(
+          diag::Flavor::WarningOrError,
+          profiles::getProfileDiagGroupName(Profile, /*Rule=*/""), Kinds) &&
+      llvm::any_of(Kinds, [&](diag::kind K) {
+        return Ctx.isProfileRuleEnabledByOption(K);
+      });
+  RulesEnabledByOption.try_emplace(Profile, Enabled);
+  return Enabled;
 }
 
 /// Map every diagnostic of the group \p Group to \p Severity from \p Loc to
@@ -333,9 +358,12 @@ void SemaProfiles::endSuppression(SuppressionRecord &Record,
   Record.Restore.clear();
 }
 
-bool SemaProfiles::shouldEmitProfileViolation(unsigned DiagID,
+bool SemaProfiles::shouldEmitProfileViolation(StringRef Profile,
+                                              unsigned DiagID,
                                               SourceLocation Loc, const Decl *D,
                                               bool PostParse) {
+  if (!isProfileLive(Profile))
+    return false;
   if (!getASTContext().isProfileRuleActiveAt(DiagID, Loc))
     return false;
   // A templated entity is not a phase-7 entity (P3589R2 §1.1), so a profile
@@ -359,7 +387,8 @@ bool SemaProfiles::shouldEmitProfileViolation(unsigned DiagID,
 /// The test::class_final pilot: fires on every completed non-lambda class.
 static void checkTestClassFinal(Sema &S, CXXRecordDecl *RD) {
   if (!S.Profiles().shouldEmitProfileViolation(
-          diag::err_profile_class_final_test, RD->getLocation(), RD))
+          "test::class_final", diag::err_profile_class_final_test,
+          RD->getLocation(), RD))
     return;
   S.Diag(RD->getLocation(), diag::err_profile_class_final_test)
       << "test::class_final" << RD;
@@ -369,7 +398,8 @@ static void checkTestClassFinal(Sema &S, CXXRecordDecl *RD) {
 /// constructor.
 static void checkTestCtorFinal(Sema &S, CXXConstructorDecl *Ctor) {
   if (!S.Profiles().shouldEmitProfileViolation(
-          diag::err_profile_ctor_final_test, Ctor->getLocation(), Ctor))
+          "test::ctor_final", diag::err_profile_ctor_final_test,
+          Ctor->getLocation(), Ctor))
     return;
   S.Diag(Ctor->getLocation(), diag::err_profile_ctor_final_test)
       << "test::ctor_final" << Ctor->getParent();

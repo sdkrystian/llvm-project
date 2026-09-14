@@ -17176,10 +17176,9 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body, bool IsInstantiation,
       }
       if (!isa<FunctionTemplateDecl>(dcl) &&
           (!hasUncompilableErrorOccurred() ||
-           (!dcl->isInvalidDecl() &&
-            AnalysisWarnings.hasEnforcedCFGProfile()))) {
-        // CFG-based profile rules are errors and must keep diagnosing after
-        // an earlier TU error, so keep dispatching the per-function pass;
+           (!dcl->isInvalidDecl() && AnalysisWarnings.hasLiveCFGProfile()))) {
+        // CFG-based profile rules keep diagnosing after an earlier TU error
+        // when such a profile is live, so keep running the per-function pass;
         // IssueWarnings restricts it to profile diagnostics (see
         // runProfileOnlyCFGAnalysis).
         ActivePolicy = &WP;
