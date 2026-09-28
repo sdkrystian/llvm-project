@@ -871,9 +871,11 @@ the call goes inert.  The attribute route makes the family bidirectional,
 like ``construct_at`` (P4222R2 §4.7 rejects an initialized range).  The
 default-construct forms get the marker without ``[[now_init]]``: a credit
 there would legalize reads of the indeterminate scalars that
-default-initialization leaves.  ``destroy_n`` and ``ranges::`` CPOs sit
-outside both keys; the user-facing scope note lives in
-:doc:`ProfilesFramework`.
+default-initialization leaves.  ``destroy`` and ``destroy_n`` are rows too,
+with ``[[now_uninit]]`` and no marker; they have no execution-policy rows,
+because the attribute destroys every pointer or reference argument,
+including the policy's forwarding reference.  ``ranges::`` CPOs sit outside
+both keys; the user-facing scope note lives in :doc:`ProfilesFramework`.
 
 Library callees whose semantics the profile needs without an attribute are
 rows of the known-callee table (``KnownCallees`` in SemaProfiles.cpp), keyed

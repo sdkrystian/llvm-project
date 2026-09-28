@@ -886,7 +886,9 @@ the storage neither definitely initialized nor definitely destroyed: a
 marked binding is not forced, an unmarked binding stays accepted, and a
 second destroy is not a double destroy.  Clang declares
 ``std::destroy_at`` this way itself -- a ``std::destroy_at`` whose first
-parameter is of pointer type receives ``[[now_uninit]]`` implicitly -- so
+parameter is of pointer type receives ``[[now_uninit]]`` implicitly, and so
+do ``std::destroy`` and ``std::destroy_n`` (P4222R2 §6) where their iterator
+is a pointer -- so
 the construct/destroy/construct cycle is legal, a second destruction is
 rejected, a destroy of never-constructed storage is rejected too, and
 binding the destroyed storage to an ordinary pointer or reference is
@@ -1183,9 +1185,11 @@ those entries never cause a rejection.
   parameters only: ``std::construct_at`` and ``std::destroy_at`` with a
   pointer first parameter, and the ``std::uninitialized_*`` family where its
   iterator is a pointer.  A class-type iterator drops the marker, so such a
-  call checks nothing, and ``std::destroy_n`` is not annotated.  A whole
-  ``[[uninit]]`` array passed as a range is initialized whatever the range's
-  length.
+  call checks nothing.  A whole ``[[uninit]]`` array passed as a range is
+  initialized or destroyed whatever the range's length.  ``std::destroy``'s
+  end iterator is a destroyed argument too: its usual spelling
+  (``arr + n``) is unclassified and inert, while a marked local pointer
+  passed there would be judged like the first.
 - The raw storage-release callees (``free``, ``realloc``, replaceable
   global ``operator delete``) accept storage that was never constructed:
   that is ``free``'s contract, not a gap -- only a ``[[now_uninit]]``

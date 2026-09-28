@@ -15,10 +15,11 @@
 // (RefToUninit on the first parameter + NowInit) and std::destroy_at
 // (NowUninit) itself, keyed on a pointer-typed first parameter, the
 // parameter marker alone to std::now_init (one pointer parameter, pointer
-// return), and RefToUninit on the output range plus NowInit to the
+// return), RefToUninit on the output range plus NowInit to the
 // std::uninitialized_* family (by name and arity; the default_construct
-// forms get the marker alone), so the real library functions are usable
-// under enforcement.
+// forms get the marker alone), and NowUninit to std::destroy and
+// std::destroy_n, so the real library functions are usable under
+// enforcement.
 
 // INJECT: FunctionDecl {{.*}} construct_at 'T *(T *, A &&...)'
 // INJECT: RefToUninitAttr {{.*}} Implicit
@@ -49,6 +50,12 @@
 // INJECT: ParmVarDecl {{.*}} result 'Out'
 // INJECT-NEXT: RefToUninitAttr {{.*}} Implicit
 // INJECT: NowInitAttr {{.*}} Implicit
+// INJECT: FunctionDecl {{.*}} destroy 'void (It, It)'
+// INJECT-NOT: RefToUninitAttr
+// INJECT: NowUninitAttr {{.*}} Implicit
+// INJECT: FunctionDecl {{.*}} destroy_n 'It (It, Size)'
+// INJECT-NOT: RefToUninitAttr
+// INJECT: NowUninitAttr {{.*}} Implicit
 
 // PLAIN-NOT: RefToUninitAttr
 // PLAIN-NOT: NowInitAttr
@@ -61,6 +68,8 @@ template <class T> void destroy_at(T *p);
 template <class T> T *now_init(T *p);
 template <class It, class T> void uninitialized_fill(It first, It last, const T &x);
 template <class In, class Out> Out uninitialized_copy(In first, In last, Out result);
+template <class It> void destroy(It first, It last);
+template <class It, class Size> It destroy_n(It first, Size n);
 } // namespace std
 
 struct Iter { int *p; };
@@ -97,6 +106,8 @@ template <class It, class Size> It uninitialized_default_construct_n(It first, S
 template <class It> void uninitialized_value_construct(It first, It last);
 template <class It, class Size> It uninitialized_value_construct_n(It first, Size n);
 template <class P, class It, class T> void uninitialized_fill(P &&policy, It first, It last, const T &x);
+template <class It> void destroy(It first, It last);
+template <class It, class Size> It destroy_n(It first, Size n);
 template <class T, __SIZE_TYPE__ N> T *begin(T (&a)[N]);
 template <class T, __SIZE_TYPE__ N> T *end(T (&a)[N]);
 template <class T> struct allocator { T *allocate(__SIZE_TYPE__ n); };
@@ -358,6 +369,48 @@ void global_ns_fill() {
 void allocator_range(std::allocator<int> &alloc) {
   int *b = alloc.allocate(3);
   std::uninitialized_fill_n(b, 3, 0); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// destroy ends the lifetime of the range
+void destroy_range() {
+  int arr [[uninit]] [4];
+  std::uninitialized_fill(arr, arr + 4, 0);
+  std::destroy(arr, arr + 4);
+  int x = arr[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  std::uninitialized_fill(arr, arr + 4, 1); // OK: uninitialized again
+  (void)x;
+}
+
+// destroy of never-constructed storage
+void destroy_never_constructed() {
+  int arr [[uninit]] [4];
+  std::destroy(arr, arr + 4); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+}
+
+// A second destroy is a double destruction
+void destroy_twice() {
+  int arr [[uninit]] [4];
+  std::uninitialized_fill(arr, arr + 4, 0);
+  std::destroy(arr, arr + 4);
+  std::destroy(arr, arr + 4); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+}
+
+// destroy_n through a marked pointer
+void destroy_n_marked_pointer() {
+  int arr [[uninit]] [4];
+  int *p [[ref_to_uninit]] = arr;
+  std::uninitialized_fill_n(p, 4, 0);
+  int y = *p; // OK
+  std::destroy_n(p, 4);
+  int x = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  (void)x; (void)y;
+}
+
+// The end iterator's arithmetic spelling is unclassified
+void destroy_end_iterator() {
+  int arr [[uninit]] [4];
+  std::uninitialized_fill(arr, arr + 4, 0);
+  std::destroy(arr, arr + 4); // OK
 }
 
 //--- referent.cpp

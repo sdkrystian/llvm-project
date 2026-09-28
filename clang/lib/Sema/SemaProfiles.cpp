@@ -1151,6 +1151,8 @@ enum class KnownStdLifecycleEffect {
   Initialize,
   /// [[ref_to_uninit]] on the range parameter alone.
   AssertUninit,
+  /// [[now_uninit]] on the function: the range is destroyed.
+  Destroy,
 };
 
 /// A namespace-std function addKnownInitLifecycleAttributes annotates by name
@@ -1164,8 +1166,10 @@ struct KnownStdLifecycleRow {
   KnownStdLifecycleEffect Effect;
 };
 
-/// The std::uninitialized_* rows (P4222R2 §6). The default_construct forms
-/// credit nothing: default-initialization leaves a scalar indeterminate.
+/// The std::uninitialized_* rows (P4222R2 §6) and std::destroy / destroy_n.
+/// The default_construct forms credit nothing: default-initialization leaves
+/// a scalar indeterminate. The destroy forms have no policy rows: a policy's
+/// forwarding reference would be destroyed with the range.
 static constexpr KnownStdLifecycleRow KnownStdLifecycleRows[] = {
     {"uninitialized_copy", 3, 2, KnownStdLifecycleEffect::Initialize},
     {"uninitialized_copy", 4, 3, KnownStdLifecycleEffect::Initialize},
@@ -1195,6 +1199,8 @@ static constexpr KnownStdLifecycleRow KnownStdLifecycleRows[] = {
      KnownStdLifecycleEffect::AssertUninit},
     {"uninitialized_default_construct_n", 3, 1,
      KnownStdLifecycleEffect::AssertUninit},
+    {"destroy", 2, 0, KnownStdLifecycleEffect::Destroy},
+    {"destroy_n", 2, 0, KnownStdLifecycleEffect::Destroy},
 };
 
 void SemaProfiles::addKnownInitLifecycleAttributes(FunctionDecl *FD) {
@@ -1219,6 +1225,11 @@ void SemaProfiles::addKnownInitLifecycleAttributes(FunctionDecl *FD) {
     ParmVarDecl *P = FD->getParamDecl(Row.RangeParam);
     if (!P->getType()->isDependentType() && !P->getType()->isPointerType())
       return;
+    if (Row.Effect == KnownStdLifecycleEffect::Destroy) {
+      if (!FD->hasAttr<NowUninitAttr>())
+        FD->addAttr(NowUninitAttr::CreateImplicit(Context, FD->getLocation()));
+      return;
+    }
     if (!P->hasAttr<RefToUninitAttr>())
       P->addAttr(RefToUninitAttr::CreateImplicit(Context, P->getLocation()));
     if (Row.Effect == KnownStdLifecycleEffect::Initialize &&
