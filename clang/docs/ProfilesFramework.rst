@@ -1106,9 +1106,11 @@ those entries never cause a rejection.
   are suppress-only: a marked pointer *member*'s referent and an element
   access (``ptr[i].x``) are not flow-tracked, so no prior fill legalizes
   either.
-- Placement ``new`` into marked storage (``new (&u) T``) is rejected --
-  the address binds an unmarked placement parameter -- and earns no
-  credit; ``std::construct_at`` is the sanctioned spelling for
+- Placement ``new`` into marked storage (``new (&u) T``) is rejected
+  while the storage is uninitialized on some path reaching it -- the
+  address binds an unmarked placement parameter, judged by flow like any
+  binding, so a store on every path first makes it an ordinary placement --
+  and earns no credit; ``std::construct_at`` is the sanctioned spelling for
   constructing into ``[[uninit]]`` storage (it carries the lifecycle
   annotations implicitly, above).
 

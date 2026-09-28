@@ -1236,6 +1236,64 @@ void template_new_pointer_bad() {
 }
 template void template_new_pointer_bad<int>(); // expected-note {{in instantiation of function template specialization 'template_new_pointer_bad<int>' requested here}}
 
+void *operator new(__SIZE_TYPE__, void *) noexcept;
+void *operator new[](__SIZE_TYPE__, void *) noexcept;
+void *operator new(__SIZE_TYPE__, void *p [[ref_to_uninit]], int) noexcept;
+struct PlacedT { int x; PlacedT(int); };
+
+// Placement new into flow-tracked storage binds the unmarked placement parameter
+void test_placement_new_uninit() {
+  int u [[uninit]];
+  new (&u) int(5); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  new (&u) int;    // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  alignas(PlacedT) unsigned char buf [[uninit]] [sizeof(PlacedT)];
+  new (buf) PlacedT(1); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  new (buf) int[2];     // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  int *p [[ref_to_uninit]] = (int *)malloc(4);
+  new (p) int(5); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+void test_placement_new_marked_param(int *p [[ref_to_uninit]]) {
+  new (p) int(5); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// Stored storage is accepted, judged by flow like any binding
+void test_placement_new_stored() {
+  int u [[uninit]];
+  u = 1;
+  new (&u) int(5); // OK
+  int *p [[ref_to_uninit]] = (int *)malloc(4);
+  *p = 1;
+  new (p) int(5); // OK
+}
+
+// A marked placement parameter accepts uninitialized storage and rejects initialized storage
+void test_placement_new_marked_operator() {
+  int u [[uninit]];
+  new (&u, 0) int(5); // OK
+  int v [[uninit]];
+  v = 1;
+  new (&v, 0) int(5); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int i = 0;
+  new (&i, 0) int(5); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// The allocation function runs before the initializer
+[[now_init]] void *operator new(__SIZE_TYPE__, int *p [[ref_to_uninit]], int, int) noexcept;
+void test_placement_new_order() {
+  int *p [[ref_to_uninit]] = (int *)malloc(4);
+  int *q = new (p, 0, 0) int(*p); // OK: the allocation function initialized *p
+  int u [[uninit]];
+  new (&u) int(u = 1); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)q;
+}
+
+// Suppression covers the placement argument
+void test_placement_new_suppressed() {
+  int u [[uninit]];
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  [[profiles::suppress(std::init)]] new (&u) int(5); // OK: suppressed
+}
+
 void test_new_call_arguments() {
   take_uninit_ptr(new int);    // OK
   take_uninit_ptr(new int(5)); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}

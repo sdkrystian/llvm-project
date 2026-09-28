@@ -2815,8 +2815,10 @@ static LeafState formState(SemaProfiles::InitSourceState S) {
 /// skips a member operator's object argument (an explicit-object member
 /// declares it as parameter 0) and takes the parameter types from the
 /// prototype of a call with no declared callee (through a function pointer or
-/// a pointer to member function); a CXXConstructExpr zips with
-/// its constructor. A defaulted argument, judged at its declaration, is
+/// a pointer to member function); a CXXConstructExpr zips with its
+/// constructor; a CXXNewExpr zips its placement arguments with its
+/// allocation function's parameters after the implicit size, type-identity,
+/// and alignment ones. A defaulted argument, judged at its declaration, is
 /// skipped. A builtin with custom type checking binds nothing except
 /// __builtin_operator_new / __builtin_operator_delete, whose arguments bind
 /// type-only parameters. The one parameter walk behind every argument arm of
@@ -2882,6 +2884,10 @@ static void forEachArgumentBinding(
     }
   } else if (const auto *CCE = dyn_cast<CXXConstructExpr>(CallLike)) {
     Zip(CCE->getConstructor()->parameters(), 0, CCE->arguments());
+  } else if (const auto *NE = dyn_cast<CXXNewExpr>(CallLike)) {
+    if (const FunctionDecl *OperatorNew = NE->getOperatorNew())
+      Zip(OperatorNew->parameters(), NE->getNumImplicitArgs(),
+          NE->placement_arguments());
   }
 }
 
@@ -3148,8 +3154,9 @@ static void collectCtorBodyStmts(const CXXConstructorDecl *Ctor,
 /// Uninitialized Objects"); a tracked copy's DeclStmt copies each member's
 /// state. Every pointer or reference binding the body performs -- a variable or
 /// member initializer, an aggregate element, a call or constructor argument
-/// (declared, variadic, or the implicit object argument), a return, a throw, a
-/// new-expression's initializer, a pointer assignment, a lambda capture --
+/// (declared, variadic, or the implicit object argument), a placement
+/// argument, a return, a throw, a new-expression's initializer, a pointer
+/// assignment, a lambda capture --
 /// becomes a Binding site when a leaf of its source names tracked storage
 /// (SemaProfiles::isFlowTrackedLeaf: the parse-time funnel left exactly those
 /// to this pass), its other leaves classified by form; a binding that hands out
@@ -3490,6 +3497,20 @@ static void extractStdInitEvents(
             AppendAliasEscapes(Arg, T, CallLike);
           });
     };
+    // A call of \p Callee (null when there is no declared callee) through
+    // the call-like \p CallLike: its argument bindings and its lifecycle
+    // effects.
+    auto AppendCallEvents = [&](const Expr *CallLike,
+                                const FunctionDecl *Callee) {
+      SemaProfiles::CalleeLifecycleRoles Roles =
+          Callee ? SemaProfiles::getCalleeLifecycleRoles(Callee)
+                 : SemaProfiles::CalleeLifecycleRoles();
+      AppendArgumentBindings(CallLike, Roles.DestroysPointerParams ||
+                                           Roles.ReleasesStorageTrusted ||
+                                           Roles.ReleasesStorageByName);
+      appendLifecycleCallEvents(S, D, CallLike, Roles, Storage, BlockEvents,
+                                DSites);
+    };
     // The element bindings of an aggregate initializer of type \p T: each
     // pointer or reference field of a record (the bases consume the leading
     // initializers, unnamed bit-fields none) is a member binding, each
@@ -3577,6 +3598,14 @@ static void extractStdInitEvents(
         }
         continue;
       }
+      if (auto Alloc = Elem.getAs<CFGNewAllocator>()) {
+        // The allocation function runs after the placement arguments and
+        // before the initializer: the placement arguments are a call of it.
+        const CXXNewExpr *NE = Alloc->getAllocatorExpr();
+        if (!Ctor || BodyStmts.count(NE))
+          AppendCallEvents(NE, NE->getOperatorNew());
+        continue;
+      }
       auto CS = Elem.getAs<CFGStmt>();
       if (!CS)
         continue;
@@ -3662,14 +3691,7 @@ static void extractStdInitEvents(
           AddBinding(K::ObjectArgument, Object->IgnoreImplicit()->getExprLoc(),
                      /*TargetMarked=*/false, T, Object, ObjectMethod, CE);
         }
-        SemaProfiles::CalleeLifecycleRoles Roles =
-            Callee ? SemaProfiles::getCalleeLifecycleRoles(Callee)
-                   : SemaProfiles::CalleeLifecycleRoles();
-        AppendArgumentBindings(CE, Roles.DestroysPointerParams ||
-                                       Roles.ReleasesStorageTrusted ||
-                                       Roles.ReleasesStorageByName);
-        appendLifecycleCallEvents(S, D, CE, Roles, Storage, BlockEvents,
-                                  DSites);
+        AppendCallEvents(CE, Callee);
       } else if (const auto *CCE = dyn_cast<CXXConstructExpr>(St)) {
         // A constructor call's parameter bindings, the copy of a class object
         // out of tracked storage included.
@@ -4071,8 +4093,9 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
   // The engine's own CFG, built only for a body with tracked storage:
   // exception edges, so a call inside a try block reaches its handler before
   // the assignment that follows it (P4222R2 §1.3: every path is considered),
-  // and every expression as an element, so the extraction arms match any
-  // statement class. The shared CFG the other analyses see is untouched (see
+  // every expression as an element, so the extraction arms match any
+  // statement class, and a new-expression's allocation call as an element of
+  // its own. The shared CFG the other analyses see is untouched (see
   // ProfilesFrameworkInternals.rst, "CFG Riders").
   AnalysisDeclContext InitAC(/*Mgr=*/nullptr, D);
   CFG::BuildOptions &Options = InitAC.getCFGBuildOptions();
@@ -4082,6 +4105,7 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
   Options.AddImplicitDtors = true;
   Options.AddTemporaryDtors = true;
   Options.AddCXXDefaultInitExprInCtors = true;
+  Options.AddCXXNewAllocator = true;
   Options.setAllAlwaysAdd();
   CFG *cfg = InitAC.getCFG();
   if (!cfg)
