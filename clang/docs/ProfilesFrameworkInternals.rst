@@ -802,9 +802,10 @@ follows:
        a source with a flow-tracked leaf (``isFlowTrackedLeaf``) is left to
        the binding arms of ``extractStdInitEvents``, which derive the same
        kinds from the CFG's elements and judge each site against the flow
-       state (``judgeBindingSite``); the call, construction, and
-       new-expression arms zip arguments with parameters (a placement
-       argument with its allocation function's) through one walk,
+       state (``judgeBindingSite``); the call, construction,
+       new-expression, and Objective-C message arms zip arguments with
+       parameters (a placement argument with its allocation function's)
+       through one walk,
        ``forEachArgumentBinding``, which the lifecycle arm
        (``appendLifecycleCallEvents``) shares; ``classifyPointerGlvalue`` judges a
        reference-to-pointer binding by the pointer's value (a read-only

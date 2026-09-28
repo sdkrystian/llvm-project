@@ -2818,7 +2818,9 @@ static LeafState formState(SemaProfiles::InitSourceState S) {
 /// a pointer to member function); a CXXConstructExpr zips with its
 /// constructor; a CXXNewExpr zips its placement arguments with its
 /// allocation function's parameters after the implicit size, type-identity,
-/// and alignment ones. A defaulted argument, judged at its declaration, is
+/// and alignment ones; an ObjCMessageExpr zips with its method, a variadic
+/// method's extra arguments binding nothing (they are default-promoted, never
+/// copy-initialized). A defaulted argument, judged at its declaration, is
 /// skipped. A builtin with custom type checking binds nothing except
 /// __builtin_operator_new / __builtin_operator_delete, whose arguments bind
 /// type-only parameters. The one parameter walk behind every argument arm of
@@ -2888,6 +2890,10 @@ static void forEachArgumentBinding(
     if (const FunctionDecl *OperatorNew = NE->getOperatorNew())
       Zip(OperatorNew->parameters(), NE->getNumImplicitArgs(),
           NE->placement_arguments());
+  } else if (const auto *ME = dyn_cast<ObjCMessageExpr>(CallLike)) {
+    if (const ObjCMethodDecl *MD = ME->getMethodDecl())
+      for (auto [Parm, Arg] : llvm::zip(MD->parameters(), ME->arguments()))
+        F(Parm, Parm->getType(), Arg, /*Variadic=*/false);
   }
 }
 
@@ -3155,8 +3161,8 @@ static void collectCtorBodyStmts(const CXXConstructorDecl *Ctor,
 /// state. Every pointer or reference binding the body performs -- a variable or
 /// member initializer, an aggregate element, a call or constructor argument
 /// (declared, variadic, or the implicit object argument), a placement
-/// argument, a return, a throw, a new-expression's initializer, a pointer
-/// assignment, a lambda capture --
+/// argument, an Objective-C message argument, a return, a throw, a
+/// new-expression's initializer, a pointer assignment, a lambda capture --
 /// becomes a Binding site when a leaf of its source names tracked storage
 /// (SemaProfiles::isFlowTrackedLeaf: the parse-time funnel left exactly those
 /// to this pass), its other leaves classified by form; a binding that hands out
@@ -3696,6 +3702,10 @@ static void extractStdInitEvents(
         // A constructor call's parameter bindings, the copy of a class object
         // out of tracked storage included.
         AppendArgumentBindings(CCE, /*ParamsDestroyed=*/false);
+      } else if (const auto *ME = dyn_cast<ObjCMessageExpr>(St)) {
+        // A message's parameter bindings; a method carries no lifecycle
+        // attribute.
+        AppendArgumentBindings(ME, /*ParamsDestroyed=*/false);
       } else if (const auto *LE = dyn_cast<LambdaExpr>(St)) {
         if (Ctor)
           appendThisCaptureLambdaReadEvents(LE, Storage, StarThisCopyTrusted,

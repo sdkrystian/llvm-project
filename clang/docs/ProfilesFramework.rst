@@ -716,7 +716,9 @@ to it stays a marked source:
 
 The check applies wherever a pointer or reference is bound: variable, member,
 and aggregate initialization, assignment, call arguments (including defaulted
-and variadic ones), ``return`` and ``throw`` statements (including returns
+and variadic ones), Objective-C message arguments (except a variadic
+method's extra arguments and the value a property assignment ``a.p = &u``
+passes to its setter), ``return`` and ``throw`` statements (including returns
 inside lambdas and blocks -- a lambda's marker is written on its call
 operator, in the C++23 attribute position after the lambda-introducer:
 ``[] [[ref_to_uninit]] () { ... }``, with a deduced or trailing return type),
