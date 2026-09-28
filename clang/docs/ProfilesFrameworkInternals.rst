@@ -747,7 +747,11 @@ follows:
        the storage bound to the callee's marked parameters (P4222R2 §6.2)
        and a ``[[now_uninit]]`` call into a ``Kill`` that clears the
        assigned bit again (a local's escape credit already subsumes
-       ``[[now_init]]``).  A "destroyed here"
+       ``[[now_init]]``).  Constructors cannot carry either attribute: a
+       construction can run with no call spelling (copy-initialization, a
+       by-value argument, a member initializer), so a lifecycle effect there
+       would be invisible at the site, and the engine would have to
+       enumerate every construction spelling.  A "destroyed here"
        note on the read is deferred -- a kill witness would have to be
        carried per bit through the meet and both engine replays, roughly
        doubling the engine state and touching the enqueue-skip invariant);

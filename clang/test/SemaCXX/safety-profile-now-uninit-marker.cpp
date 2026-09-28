@@ -65,6 +65,26 @@ struct BadField {
 [[now_uninit]] void bad_fn_ptr_param(void (*fp)()); // expected-error {{'now_uninit' attribute requires at least one parameter of pointer or reference type}} \
                                                     // no-profiles-error {{'now_uninit' attribute requires at least one parameter of pointer or reference type}}
 
+// A constructor cannot carry the attribute
+struct Killer {
+  [[now_uninit]] Killer(int *p); // expected-error {{'now_uninit' attribute cannot be applied to a constructor}} \
+                                 // no-profiles-error {{'now_uninit' attribute cannot be applied to a constructor}}
+  [[now_uninit]] Killer(); // expected-error {{'now_uninit' attribute cannot be applied to a constructor}} \
+                           // no-profiles-error {{'now_uninit' attribute cannot be applied to a constructor}}
+  template <typename T>
+  [[now_uninit]] Killer(T *p, T *q); // expected-error {{'now_uninit' attribute cannot be applied to a constructor}} \
+                                     // no-profiles-error {{'now_uninit' attribute cannot be applied to a constructor}}
+  [[now_uninit]] Killer(int *p, int n); // expected-error {{'now_uninit' attribute cannot be applied to a constructor}} \
+                                        // no-profiles-error {{'now_uninit' attribute cannot be applied to a constructor}}
+};
+Killer::Killer(int *p, int n) {}
+
+// A member function and a lambda still can
+struct StillKills {
+  [[now_uninit]] void wipe(int *p);
+};
+auto wipe_lambda = [] [[now_uninit]] (int *p) {};
+
 // Inert without an enforced profile: a valid placement changes nothing about
 // how either run type-checks these calls.
 void use() {

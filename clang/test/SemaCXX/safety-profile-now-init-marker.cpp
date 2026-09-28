@@ -86,6 +86,26 @@ struct BadField {
                                                                // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
                                                                // no-profiles-error {{'now_init' attribute requires at least one parameter marked '[[ref_to_uninit]]'}}
 
+// A constructor cannot carry the attribute
+struct Filler {
+  [[now_init]] Filler(int *p [[ref_to_uninit]]); // expected-error {{'now_init' attribute cannot be applied to a constructor}} \
+                                                 // no-profiles-error {{'now_init' attribute cannot be applied to a constructor}}
+  [[now_init]] Filler(int *p [[ref_to_uninit]], int n); // expected-error {{'now_init' attribute cannot be applied to a constructor}} \
+                                                        // no-profiles-error {{'now_init' attribute cannot be applied to a constructor}}
+  template <typename T>
+  [[now_init]] Filler(T *p [[ref_to_uninit]], T *q); // expected-error {{'now_init' attribute cannot be applied to a constructor}} \
+                                                     // no-profiles-error {{'now_init' attribute cannot be applied to a constructor}}
+  [[now_init]] static Filler make(int *p [[ref_to_uninit]]);
+};
+[[now_init]] Filler::Filler(int *p, int n) {} // expected-error {{'now_init' attribute cannot be applied to a constructor}} \
+                                              // no-profiles-error {{'now_init' attribute cannot be applied to a constructor}}
+
+// A member function and a lambda still can
+struct StillFills {
+  [[now_init]] void fill(int *p [[ref_to_uninit]]);
+};
+auto fill_lambda = [] [[now_init]] (int *p [[ref_to_uninit]]) {};
+
 // Inert without an enforced profile: a valid placement changes nothing about
 // how either run type-checks these calls.
 void use() {

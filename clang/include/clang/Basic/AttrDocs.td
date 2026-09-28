@@ -1083,7 +1083,10 @@ it was; see :doc:`ProfilesFramework`.
 The attribute requires at least one parameter marked ``[[ref_to_uninit]]``
 (it would be vacuous otherwise); this is diagnosed regardless of
 ``-fprofiles``. It does not cover the implicit object parameter of a member
-function, which cannot carry ``[[ref_to_uninit]]``.
+function, which cannot carry ``[[ref_to_uninit]]``. The attribute cannot be
+applied to a constructor (also diagnosed regardless of ``-fprofiles``); a
+static member function carries it instead:
+``[[now_init]] static Filler make(int *p [[ref_to_uninit]]);``.
 
 Outside the initialization profile the attribute is otherwise silently
 accepted and has no effect, so code that uses it remains valid when compiled
@@ -1138,8 +1141,9 @@ itself.
 Because the attribute covers *every* pointer or reference parameter, apply
 it only to functions that end the lifetime of every such argument's
 storage. It requires at least one parameter of pointer or reference type
-(it would be vacuous otherwise); this is diagnosed regardless of
-``-fprofiles``. A function may carry both ``[[now_uninit]]`` and
+(it would be vacuous otherwise), and it cannot be applied to a constructor
+(a static member or free function carries it instead); both are diagnosed
+regardless of ``-fprofiles``. A function may carry both ``[[now_uninit]]`` and
 ``[[now_init]]``: such a reinitializer models destroy-then-construct, so
 the storage bound to its ``[[ref_to_uninit]]`` parameters is initialized
 after the call -- and calling it on already-initialized storage is exactly

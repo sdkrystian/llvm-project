@@ -4050,6 +4050,30 @@ void test_pointer_to_member_call(PmfTarget s, void (PmfTarget::*pm)(int *)) {
   (s.*pm)(&u); // OK
 }
 
+// A rejected constructor attribute credits nothing
+struct RejectedFiller {
+  [[now_init]] RejectedFiller(int *p [[ref_to_uninit]]); // expected-error {{'now_init' attribute cannot be applied to a constructor}} \
+                                                         // no-profiles-error {{'now_init' attribute cannot be applied to a constructor}}
+  [[now_init]] static RejectedFiller make(int *p [[ref_to_uninit]]);
+};
+void test_rejected_ctor_credit() {
+  int *p [[ref_to_uninit]] = (int *)malloc(4);
+  RejectedFiller f(p);
+  int x = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  int *q [[ref_to_uninit]] = (int *)malloc(4);
+  RejectedFiller{q};
+  int y = *q; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  (void)x; (void)y;
+}
+
+// A [[now_init]] static member function is the construction-site spelling
+void test_static_make_credit() {
+  int *p [[ref_to_uninit]] = (int *)malloc(4);
+  RejectedFiller::make(p);
+  int x = *p; // OK
+  (void)x;
+}
+
 // A marked function's [[ref_to_uninit]] describes its *return value*: the
 // function's own decayed pointer value is not uninitialized memory, so
 // binding it to an (unmarkable) function pointer -- or casting it to void*

@@ -7274,8 +7274,22 @@ static void handleRefToUninitAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   D->addAttr(::new (S.Context) RefToUninitAttr(S.Context, AL));
 }
 
+/// Diagnose \p AL, a [[now_init]] or [[now_uninit]] attribute, on a
+/// constructor \p D; see ProfilesFrameworkInternals.rst, "The std::init
+/// Implementation Map". Not profile policy -- fires regardless of -fprofiles.
+static bool diagnoseLifecycleAttrOnConstructor(Sema &S, const Decl *D,
+                                               const ParsedAttr &AL) {
+  if (!isa<CXXConstructorDecl>(D))
+    return false;
+  S.Diag(AL.getLoc(), diag::err_lifecycle_attr_on_constructor) << AL;
+  AL.setInvalid();
+  return true;
+}
+
 static void handleNowInitAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
-  // The SubjectList restricts D to a function. The vacuity rule -- a
+  if (diagnoseLifecycleAttrOnConstructor(S, D, AL))
+    return;
+  // D is a non-constructor function. The vacuity rule -- a
   // [[now_init]] declaration needs at least one [[ref_to_uninit]] parameter
   // (P4222R2 §6.2) -- is checked by SemaProfiles::checkNowInitVacuity, from
   // ActOnFunctionDeclarator once CheckFunctionDeclaration has merged the
@@ -7286,7 +7300,9 @@ static void handleNowInitAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
 }
 
 static void handleNowUninitAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
-  // The SubjectList restricts D to a function. [[now_uninit]] asserts that
+  if (diagnoseLifecycleAttrOnConstructor(S, D, AL))
+    return;
+  // D is a non-constructor function. [[now_uninit]] asserts that
   // the callee ends the lifetime of the storage bound to each of its
   // pointer/reference parameters -- the recording P4222R2 §4.4 wishes for
   // ("the object subjected to destroy_at() should be considered

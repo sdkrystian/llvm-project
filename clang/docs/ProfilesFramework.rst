@@ -877,8 +877,11 @@ attributes -- a reinitializer that destroys and then reconstructs its
 argument's storage -- and models destroy-then-construct: the storage bound
 to its ``[[ref_to_uninit]]`` parameters is initialized after the call, and
 calling it on already-initialized storage is exactly its purpose, so it is
-accepted.  Storage outside any function body is judged by its form: a
-destroy of a namespace-scope ``[[uninit]]`` object is ``destroy_uninit``.
+accepted.  Neither attribute can be applied to a constructor; a static
+member or free function carries it instead
+(``[[now_init]] static Filler make(int *p [[ref_to_uninit]]);``).  Storage
+outside any function body is judged by its form: a destroy of a
+namespace-scope ``[[uninit]]`` object is ``destroy_uninit``.
 
 The standard storage-release callees are recognized without annotation and
 treated like ``[[now_uninit]]`` at the call: ``free``, ``realloc`` (its

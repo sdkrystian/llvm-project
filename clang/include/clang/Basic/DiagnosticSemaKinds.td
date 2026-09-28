@@ -14457,6 +14457,8 @@ def err_now_init_attr_no_marked_parameter : Error<
 def err_now_uninit_attr_no_pointer_parameter : Error<
   "'now_uninit' attribute requires at least one parameter of pointer or "
   "reference type">;
+def err_lifecycle_attr_on_constructor : Error<
+  "%0 attribute cannot be applied to a constructor">;
 def err_init_union_marker : ProfileRule<
   "'[[uninit]]' cannot be applied to %select{a variable of union type|"
   "a union member|a data member of union type}1 under profile '%0'",
