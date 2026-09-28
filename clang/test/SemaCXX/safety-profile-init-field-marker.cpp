@@ -130,6 +130,28 @@ void test_invalid_subjects(int p [[uninit]]) { // expected-error {{'uninit' attr
   (void)p; (void)lr; (void)a; (void)b;
 }
 
+// A deduced reference type is rejected once deduced
+void test_deduced_reference() {
+  int n = 0;
+  decltype(auto) r [[uninit]] = (n); // expected-error {{'uninit' attribute cannot be applied to a reference}} \
+                                     // no-profiles-error {{'uninit' attribute cannot be applied to a reference}}
+  (void)r;
+}
+
+// A deduced pointer or union is checked once deduced
+union DeducedUnion { int a; float b; };
+template <typename T> void deduced_pointer_local() {
+  auto q [[uninit]] = (T *)nullptr; // expected-error {{'[[uninit]]' cannot be applied to a pointer under profile 'std::init'; initialize the pointer (for example to 'nullptr')}}
+  (void)q;
+}
+void test_deduced_pointer_and_union() {
+  auto p [[uninit]] = &g_ref_target; // expected-error {{'[[uninit]]' cannot be applied to a pointer under profile 'std::init'; initialize the pointer (for example to 'nullptr')}}
+  auto *ps [[uninit]] = &g_ref_target; // expected-error {{'[[uninit]]' cannot be applied to a pointer under profile 'std::init'; initialize the pointer (for example to 'nullptr')}}
+  auto u [[uninit]] = DeducedUnion{}; // expected-error {{'[[uninit]]' cannot be applied to a variable of union type under profile 'std::init'}}
+  deduced_pointer_local<int>(); // expected-note {{in instantiation of function template specialization 'deduced_pointer_local<int>' requested here}}
+  (void)p; (void)ps; (void)u;
+}
+
 // The marker re-check on the instantiated field is not suppressed by a
 // [[profiles::suppress(std::init)]] live at the point of instantiation --
 // the pattern's tokens are outside that dominion (P3589R2 s2.4p3).

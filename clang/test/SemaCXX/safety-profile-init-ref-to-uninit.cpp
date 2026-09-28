@@ -944,6 +944,22 @@ extern "C" void *malloc(__SIZE_TYPE__);
 int *both_arms_uninit(int x) {
   return (0 < x) ? (int *)malloc(x * sizeof(int)) : new int[x]; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 }
+// A marker on a deduced pointer is honored by the binding rule
+void test_deduced_marked_local() {
+  auto p [[ref_to_uninit]] = (int *)malloc(4);
+  int x = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  auto q [[ref_to_uninit]] = &g_init; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)x; (void)q;
+}
+
+// A marker on a deduced local of a template is honored per instantiation
+template <typename T> void deduced_marked_local() {
+  auto p [[ref_to_uninit]] = (T *)malloc(sizeof(T));
+  T x = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  (void)x;
+}
+template void deduced_marked_local<int>(); // expected-note {{in instantiation of function template specialization 'deduced_marked_local<int>' requested here}}
+
 int *mixed_arms_unmarked(bool c) {
   return c ? new int : &g_init; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 }

@@ -1006,7 +1006,8 @@ void SemaProfiles::checkInitProfileMarkerPlacement(const Decl *D) {
   if (!isProfileLive("std::init"))
     return;
   const auto *UA = D->getAttr<UninitAttr>();
-  if (!UA)
+  // An undeduced subject is checked once deduced (checkDeducedMarkers).
+  if (!UA || cast<ValueDecl>(D)->getType()->isUndeducedType())
     return;
   SourceLocation Loc = UA->getLocation();
 
@@ -1060,9 +1061,9 @@ bool SemaProfiles::diagnoseInvalidUninitMarker(const Decl *D,
     return false;
   QualType T = VD->getType();
 
-  // A dependent subject is validated at instantiation instead, once the
-  // substituted type is known (Sema::InstantiateAttrs).
-  if (T->isDependentType())
+  // A dependent or undeduced subject is validated once its type is known; see
+  // the declaration.
+  if (T->isDependentType() || T->isUndeducedType())
     return false;
 
   if (T->isReferenceType()) {
@@ -1082,9 +1083,9 @@ bool SemaProfiles::diagnoseInvalidRefToUninitMarker(const Decl *D,
   else
     T = cast<ValueDecl>(D)->getType();
 
-  // A dependent subject is validated at instantiation instead, once the
-  // substituted type is known (Sema::InstantiateAttrs).
-  if (T->isDependentType())
+  // A dependent or undeduced subject is validated once its type is known; see
+  // the declaration.
+  if (T->isDependentType() || (T->isUndeducedType() && !isa<FunctionDecl>(D)))
     return false;
 
   if ((!T->isPointerType() && !T->isReferenceType()) ||
@@ -1094,6 +1095,24 @@ bool SemaProfiles::diagnoseInvalidRefToUninitMarker(const Decl *D,
     return true;
   }
   return false;
+}
+
+void SemaProfiles::checkDeducedMarkers(Decl *D) {
+  const auto *VD = dyn_cast<ValueDecl>(D);
+  if (!VD || !VD->getType()->getContainedDeducedType())
+    return;
+  // Silently in a SFINAE context, like the instantiation re-check: the marker
+  // must not affect overload resolution.
+  bool Diagnose = !SemaRef.isSFINAEContext();
+  if (const auto *A = D->getAttr<RefToUninitAttr>();
+      A && diagnoseInvalidRefToUninitMarker(D, A->getLocation(), Diagnose))
+    D->dropAttr<RefToUninitAttr>();
+  if (const auto *A = D->getAttr<UninitAttr>()) {
+    if (diagnoseInvalidUninitMarker(D, A->getLocation(), Diagnose))
+      D->dropAttr<UninitAttr>();
+    else
+      checkInitProfileMarkerPlacement(D);
+  }
 }
 
 void SemaProfiles::checkNowInitVacuity(FunctionDecl *FD) {

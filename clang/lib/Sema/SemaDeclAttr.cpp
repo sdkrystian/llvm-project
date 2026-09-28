@@ -7242,7 +7242,7 @@ static void handleUninitAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   }
 
   // A reference subject is rejected by the shared helper, which defers on a
-  // dependent type to the instantiation re-check in Sema::InstantiateAttrs.
+  // dependent or undeduced type; see SemaProfiles::diagnoseInvalidUninitMarker.
   if (S.Profiles().diagnoseInvalidUninitMarker(D, AL.getLoc())) {
     AL.setInvalid();
     return;
@@ -7264,8 +7264,8 @@ static void handleRefToUninitAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   // never uninitialized storage, so the marker could never be satisfied; reject
   // it too (like a pointer-to-member, which is not a pointer type here). Like
   // the [[uninit]] subject checks, this is not profile policy and so fires
-  // regardless of -fprofiles. A dependent subject defers to the instantiation
-  // re-check in Sema::InstantiateAttrs, once the substituted type is known.
+  // regardless of -fprofiles. A dependent or undeduced subject defers; see
+  // SemaProfiles::diagnoseInvalidRefToUninitMarker.
   if (S.Profiles().diagnoseInvalidRefToUninitMarker(D, AL.getLoc())) {
     AL.setInvalid();
     return;

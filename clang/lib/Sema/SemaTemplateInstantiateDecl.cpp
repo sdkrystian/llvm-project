@@ -1851,8 +1851,9 @@ Decl *TemplateDeclInstantiator::VisitVarDecl(VarDecl *D,
 
   // std::init / pointer_marker + union_marker: like the field case, re-check
   // the instantiated variable now that its type is known (the parse-time
-  // handler deferred on the template pattern).
-  if (!Var->isInvalidDecl())
+  // handler deferred on the template pattern); a deduced type was checked at
+  // its deduction (SemaProfiles::checkDeducedMarkers).
+  if (!Var->isInvalidDecl() && !Var->getType()->getContainedDeducedType())
     SemaRef.Profiles().checkInitProfileMarkerPlacement(Var);
 
   return Var;

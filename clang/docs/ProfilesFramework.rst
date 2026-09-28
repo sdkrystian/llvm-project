@@ -402,8 +402,10 @@ or the declarator-id position (``int u [[uninit]];``,
 the paper's examples use -- after a ``*`` or ``&``, after an array bound,
 or after a parameter list -- are rejected: neither
 ``int arr[10] [[uninit]];`` nor ``void destroy_at(T* p) [[now_uninit]];``
-compiles.  The markers' exact placement and spelling track an open
-committee question (P4222R2 §4.7).
+compiles.  A marker on a variable whose type is deduced
+(``auto p [[ref_to_uninit]] = ...;``) is validated against the deduced
+type.  The markers' exact placement and spelling track an open committee
+question (P4222R2 §4.7).
 
 Each rule has a name, so it can be suppressed individually with
 ``[[profiles::suppress(std::init, rule: "name")]]`` (see `Suppressing

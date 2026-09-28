@@ -658,7 +658,8 @@ public:
   /// [[uninit]] placed on a pointer, a union variable, or a union member.
   /// \p D must already carry the UninitAttr (the marker location is taken
   /// from it). \p D reaches shouldEmitProfileViolation, so the rule defers on
-  /// a templated pattern and is re-checked on the instantiated entity.
+  /// a templated pattern and is re-checked on the instantiated entity; an
+  /// undeduced type defers to checkDeducedMarkers.
   void checkInitProfileMarkerPlacement(const Decl *D);
 
   /// [[ref_to_uninit]] is only meaningful on a pointer or reference to an
@@ -669,8 +670,9 @@ public:
   /// Sema::InstantiateAttrs, which drops the marker when the substituted type
   /// is invalid -- silently in a SFINAE context (\p Diagnose false there), so
   /// the marker can never affect overload resolution; a dropped marker is
-  /// inert. Not profile policy -- fires regardless of -fprofiles, like the
-  /// parse-time handler it serves.
+  /// inert. A variable of undeduced type returns false too: validation defers
+  /// to checkDeducedMarkers. Not profile policy -- fires regardless of
+  /// -fprofiles, like the parse-time handler it serves.
   bool diagnoseInvalidRefToUninitMarker(const Decl *D, SourceLocation AttrLoc,
                                         bool Diagnose = true);
 
@@ -680,11 +682,20 @@ public:
   /// false. A dependent type returns false: validation defers to the
   /// instantiation re-check in Sema::InstantiateAttrs, which drops the marker
   /// when the substituted type is a reference (silently in a SFINAE context).
-  /// The parameter / structured-binding rejections stay in the parse-time
-  /// handler -- they do not depend on the type. Not profile policy -- fires
-  /// regardless of -fprofiles.
+  /// An undeduced type returns false too: validation defers to
+  /// checkDeducedMarkers. The parameter / structured-binding rejections stay
+  /// in the parse-time handler -- they do not depend on the type. Not profile
+  /// policy -- fires regardless of -fprofiles.
   bool diagnoseInvalidUninitMarker(const Decl *D, SourceLocation AttrLoc,
                                    bool Diagnose = true);
+
+  /// Validate the [[ref_to_uninit]] and [[uninit]] markers on \p D, whose
+  /// type contains a deduced placeholder, against the deduced type -- an
+  /// invalid one is dropped, after a diagnostic outside a SFINAE context --
+  /// and run checkInitProfileMarkerPlacement on a kept [[uninit]]. Called from
+  /// Sema::CheckAttributesOnDeducedType once a variable's initializer has
+  /// fixed its type.
+  void checkDeducedMarkers(Decl *D);
 
   /// A [[now_init]] function with no [[ref_to_uninit]] parameter is a
   /// vacuous promise (P4222R2 §6.2): diagnose

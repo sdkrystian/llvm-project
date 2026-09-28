@@ -999,8 +999,9 @@ a user-provided constructor reached through any other object is trusted (the
 constructor body may have assigned it, which local analysis cannot see).
 
 The attribute cannot be applied where leaving the entity uninitialized is
-meaningless -- a reference, a function parameter, or a structured binding --
-and these placements are diagnosed regardless of ``-fprofiles``. The
+meaningless -- a reference (including one deduced by ``decltype(auto)``), a
+function parameter, or a structured binding -- and these placements are
+diagnosed regardless of ``-fprofiles``. The
 initialization profile additionally rejects the marker on a union object or
 union member.
 
@@ -1037,6 +1038,8 @@ parameter, or function (for its return value) whose type is a pointer or
 reference to an object; applying it elsewhere is diagnosed regardless of
 ``-fprofiles``. A function pointer or reference (or a pointer-to-member)
 denotes a function or member, never uninitialized memory, so it is rejected.
+A variable whose type is deduced (``auto``, ``decltype(auto)``) is checked
+once its initializer has deduced it.
 
 Outside the initialization profile the attribute is otherwise silently
 accepted and has no effect, so code that uses it remains valid when compiled

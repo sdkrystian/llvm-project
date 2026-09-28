@@ -3418,6 +3418,7 @@ void Sema::mergeDeclAttributes(NamedDecl *New, Decl *Old,
 void Sema::CheckAttributesOnDeducedType(Decl *D) {
   for (const Attr *A : D->attrs())
     checkAttrIsTypeDependent(D, A);
+  Profiles().checkDeducedMarkers(D);
 }
 
 // Returns the number of added attributes.

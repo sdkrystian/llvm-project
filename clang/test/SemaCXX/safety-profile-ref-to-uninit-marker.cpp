@@ -92,3 +92,29 @@ template <typename T> void dependent_local() {
 template void dependent_local<int *>();
 template void dependent_local<int>(); // expected-note {{in instantiation of function template specialization 'dependent_local<int>' requested here}} \
                                       // no-profiles-note {{in instantiation of function template specialization 'dependent_local<int>' requested here}}
+
+// A deduced pointer or reference type carries the marker
+auto deduced_ptr [[ref_to_uninit]] = &g;
+auto *deduced_star [[ref_to_uninit]] = &g;
+decltype(auto) deduced_ref [[ref_to_uninit]] = (g);
+
+// A deduced non-pointer type is rejected once deduced
+auto deduced_int [[ref_to_uninit]] = 1; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
+                                        // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+
+// A deduced local of a template is validated per instantiation
+template <typename T> void deduced_local() {
+  auto v [[ref_to_uninit]] = T{}; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
+                                  // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+}
+template void deduced_local<int *>();
+template void deduced_local<int>(); // expected-note {{in instantiation of function template specialization 'deduced_local<int>' requested here}} \
+                                    // no-profiles-note {{in instantiation of function template specialization 'deduced_local<int>' requested here}}
+
+// An invalid marker on a deduced variable is dropped silently during deduction
+template <typename T> auto deduced_var_tmpl [[ref_to_uninit]] = T{};
+template <typename T>
+constexpr auto deduced_pick(int) -> decltype(deduced_var_tmpl<T>, 1) { return 1; }
+template <typename T> constexpr int deduced_pick(...) { return 2; }
+static_assert(deduced_pick<int>(0) == 1);
+static_assert(deduced_pick<int *>(0) == 1);
