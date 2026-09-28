@@ -807,15 +807,16 @@ public:
 
   /// std::init: attach the lifecycle markers to a matching std::construct_at
   /// (RefToUninit on the first parameter + NowInit) or std::destroy_at
-  /// (NowUninit) declaration, and the parameter marker alone to a
-  /// std::now_init with one pointer parameter and a pointer return type
-  /// (P4222R2 §4.4), so the real library functions work under
+  /// (NowUninit) declaration, the parameter marker alone to a std::now_init
+  /// with one pointer parameter and a pointer return type (P4222R2 §4.4),
+  /// and RefToUninit on the output range plus NowInit to the
+  /// std::uninitialized_* family, so the real library functions work under
   /// enforcement -- there is no portable way to annotate namespace-std
-  /// declarations from user code. Keyed on form (a first parameter of
-  /// pointer type, dependent or not), so the marker subject rules hold by
-  /// construction; iterator-shaped relatives (destroy_n, the uninitialized_*
-  /// family) and ranges:: CPOs are out of scope. Idempotent across
-  /// redeclarations and future library annotations. Called from
+  /// declarations from user code. The first three are keyed on form (a
+  /// first parameter of pointer type, dependent or not), the family on name
+  /// and arity with a pointer or dependent range parameter, so the marker
+  /// subject rules hold by construction or are re-checked at instantiation.
+  /// Idempotent across redeclarations and library annotations. Called from
   /// Sema::AddKnownFunctionAttributes; see ProfilesFrameworkInternals.rst.
   void addKnownInitLifecycleAttributes(FunctionDecl *FD);
 

@@ -1144,6 +1144,59 @@ void SemaProfiles::checkNowInitVacuity(FunctionDecl *FD) {
   FD->dropAttr<NowInitAttr>();
 }
 
+/// What addKnownInitLifecycleAttributes attaches for a KnownStdLifecycleRow.
+enum class KnownStdLifecycleEffect {
+  /// [[ref_to_uninit]] on the range parameter and [[now_init]]: the range
+  /// must be uninitialized and is initialized by the call.
+  Initialize,
+  /// [[ref_to_uninit]] on the range parameter alone.
+  AssertUninit,
+};
+
+/// A namespace-std function addKnownInitLifecycleAttributes annotates by name
+/// and arity; \c RangeParam receives the storage the function acts on. An
+/// execution-policy overload takes the policy first, shifting the range by
+/// one.
+struct KnownStdLifecycleRow {
+  StringRef Name;
+  unsigned Arity;
+  unsigned RangeParam;
+  KnownStdLifecycleEffect Effect;
+};
+
+/// The std::uninitialized_* rows (P4222R2 §6). The default_construct forms
+/// credit nothing: default-initialization leaves a scalar indeterminate.
+static constexpr KnownStdLifecycleRow KnownStdLifecycleRows[] = {
+    {"uninitialized_copy", 3, 2, KnownStdLifecycleEffect::Initialize},
+    {"uninitialized_copy", 4, 3, KnownStdLifecycleEffect::Initialize},
+    {"uninitialized_copy_n", 3, 2, KnownStdLifecycleEffect::Initialize},
+    {"uninitialized_copy_n", 4, 3, KnownStdLifecycleEffect::Initialize},
+    {"uninitialized_move", 3, 2, KnownStdLifecycleEffect::Initialize},
+    {"uninitialized_move", 4, 3, KnownStdLifecycleEffect::Initialize},
+    {"uninitialized_move_n", 3, 2, KnownStdLifecycleEffect::Initialize},
+    {"uninitialized_move_n", 4, 3, KnownStdLifecycleEffect::Initialize},
+    {"uninitialized_fill", 3, 0, KnownStdLifecycleEffect::Initialize},
+    {"uninitialized_fill", 4, 1, KnownStdLifecycleEffect::Initialize},
+    {"uninitialized_fill_n", 3, 0, KnownStdLifecycleEffect::Initialize},
+    {"uninitialized_fill_n", 4, 1, KnownStdLifecycleEffect::Initialize},
+    {"uninitialized_value_construct", 2, 0,
+     KnownStdLifecycleEffect::Initialize},
+    {"uninitialized_value_construct", 3, 1,
+     KnownStdLifecycleEffect::Initialize},
+    {"uninitialized_value_construct_n", 2, 0,
+     KnownStdLifecycleEffect::Initialize},
+    {"uninitialized_value_construct_n", 3, 1,
+     KnownStdLifecycleEffect::Initialize},
+    {"uninitialized_default_construct", 2, 0,
+     KnownStdLifecycleEffect::AssertUninit},
+    {"uninitialized_default_construct", 3, 1,
+     KnownStdLifecycleEffect::AssertUninit},
+    {"uninitialized_default_construct_n", 2, 0,
+     KnownStdLifecycleEffect::AssertUninit},
+    {"uninitialized_default_construct_n", 3, 1,
+     KnownStdLifecycleEffect::AssertUninit},
+};
+
 void SemaProfiles::addKnownInitLifecycleAttributes(FunctionDecl *FD) {
   // Injected implicit attributes are indistinguishable from hand-written
   // ones, so the funnels, the CFG pass, serialization, and suppression all
@@ -1157,10 +1210,25 @@ void SemaProfiles::addKnownInitLifecycleAttributes(FunctionDecl *FD) {
   if (!getLangOpts().Profiles || !FD->getIdentifier() ||
       !FD->isInStdNamespace() || FD->getNumParams() < 1)
     return;
+  ASTContext &Context = getASTContext();
+  // A row applies when its range parameter is a pointer or dependent; the
+  // instantiation re-check drops the marker of a class-type iterator.
+  for (const KnownStdLifecycleRow &Row : KnownStdLifecycleRows) {
+    if (FD->getName() != Row.Name || FD->getNumParams() != Row.Arity)
+      continue;
+    ParmVarDecl *P = FD->getParamDecl(Row.RangeParam);
+    if (!P->getType()->isDependentType() && !P->getType()->isPointerType())
+      return;
+    if (!P->hasAttr<RefToUninitAttr>())
+      P->addAttr(RefToUninitAttr::CreateImplicit(Context, P->getLocation()));
+    if (Row.Effect == KnownStdLifecycleEffect::Initialize &&
+        !FD->hasAttr<NowInitAttr>())
+      FD->addAttr(NowInitAttr::CreateImplicit(Context, FD->getLocation()));
+    return;
+  }
   const ParmVarDecl *P0 = FD->getParamDecl(0);
   if (!P0->getType()->isPointerType())
     return;
-  ASTContext &Context = getASTContext();
   if (FD->getName() == "construct_at") {
     if (!P0->hasAttr<RefToUninitAttr>())
       FD->getParamDecl(0)->addAttr(

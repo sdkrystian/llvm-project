@@ -863,9 +863,17 @@ vacuity check never sees a half-injected pair.  Implicit attributes are
 indistinguishable from hand-written ones, so the funnels, the CFG pass's
 lifecycle arm, serialization, and suppression apply unchanged, and
 specializations inherit them from the pattern via attribute instantiation.
-Iterator-shaped relatives (``destroy_n``, the ``uninitialized_*`` family) and
-``ranges::`` CPOs sit outside the form key; the user-facing scope note lives
-in :doc:`ProfilesFramework`.
+The ``uninitialized_*`` family is keyed by name and arity instead
+(``KnownStdLifecycleRows``): the output range's parameter is marked when it
+is a pointer or dependent, and a specialization whose iterator is a class
+type drops the implicit marker silently at the instantiation re-check, so
+the call goes inert.  The attribute route makes the family bidirectional,
+like ``construct_at`` (P4222R2 §4.7 rejects an initialized range).  The
+default-construct forms get the marker without ``[[now_init]]``: a credit
+there would legalize reads of the indeterminate scalars that
+default-initialization leaves.  ``destroy_n`` and ``ranges::`` CPOs sit
+outside both keys; the user-facing scope note lives in
+:doc:`ProfilesFramework`.
 
 Library callees whose semantics the profile needs without an attribute are
 rows of the known-callee table (``KnownCallees`` in SemaProfiles.cpp), keyed

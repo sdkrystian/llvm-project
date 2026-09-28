@@ -833,7 +833,20 @@ longer refers to uninitialized memory, which incidentally catches double
 ``std::construct_at`` declaration whose first parameter is of pointer type
 receives ``[[now_init]]`` and the parameter marker implicitly, so the real
 ``<memory>`` declaration checks the lifecycle *start* with no user
-declaration.  The §4.4 ``now_init()`` identity function is annotated the
+declaration.  The ``std::uninitialized_*`` family (P4222R2 §4.7, §6) is
+annotated the same way on the parameter that receives the output range:
+``uninitialized_fill``, ``uninitialized_copy``, ``uninitialized_move``, and
+``uninitialized_value_construct``, each with its ``_n`` form and its
+execution-policy overload, receive the marker there and ``[[now_init]]``,
+so the range must refer to uninitialized memory -- an initialized range is
+rejected, like the paper's ``uninitialized_fill(a1, 10)`` -- and is
+initialized whole by the call, while the source range of the copy and move
+forms is an ordinary unmarked parameter.  ``uninitialized_default_construct``
+and its ``_n`` form receive the marker alone: default-initialization leaves
+a scalar indeterminate, so the range stays uninitialized.  The annotation
+takes effect where the iterator is a pointer (``arr, arr + n``); a
+class-type iterator drops the marker, and such a call checks and
+initializes nothing.  The §4.4 ``now_init()`` identity function is annotated the
 same way: a ``std::now_init`` declaration with one pointer parameter and a
 pointer return type receives the parameter marker, so its argument must
 refer to uninitialized memory, its unmarked return is trusted as initialized
@@ -1135,6 +1148,24 @@ those entries never cause a rejection.
   and earns no credit; ``std::construct_at`` is the sanctioned spelling for
   constructing into ``[[uninit]]`` storage (it carries the lifecycle
   annotations implicitly, above).
+- A range from an unannotated allocator is initialized memory, so
+  ``T *buf = alloc.allocate(n); std::uninitialized_fill_n(buf, n, v);`` is
+  rejected at ``buf``: the output range must refer to uninitialized memory,
+  and ``std::allocator<T>::allocate`` carries no ``[[ref_to_uninit]]``.
+  The remedies are a ``[[ref_to_uninit]]``-returning wrapper around
+  ``allocate`` or suppression.
+- The ``std::uninitialized_*`` credit reaches only what the whole-storage
+  write reaches: an element-form range (``&arr[0]``, §5.4) or a class-type
+  iterator earns nothing, and a marked pointer's further elements
+  (``p[1]``) are never credited.  ``std::begin(arr)`` / ``std::end(arr)`` on
+  an ``[[uninit]]`` array is rejected on both sides (the array binds
+  ``begin``'s unmarked reference parameter, and the trusted return cannot
+  feed a marked range), so ``arr, arr + n`` is the spelling that works.  The
+  ``std::ranges::`` lifecycle CPOs are class objects, not named functions:
+  passing an ``[[uninit]]`` range to one binds its unmarked forwarding
+  reference.  ``std::fill`` assigns rather than initializes: into a
+  still-uninitialized ``[[uninit]]`` array it is rejected like any unmarked
+  binding (``std::uninitialized_fill`` and ``memset`` initialize).
 
 **Missed diagnostics (never rejections):**
 
@@ -1148,13 +1179,13 @@ those entries never cause a rejection.
   plain ``[[uninit]]`` *local* after a destroy stays with the flow-based
   local-variable analysis, which treats the call as an escape in every
   mode, so it is a missed diagnostic).
-- The implicit standard-library annotation covers ``std::construct_at``
-  and ``std::destroy_at`` with pointer first parameters only.
-  ``std::destroy_n`` and the ``std::uninitialized_*`` family take
-  iterator-typed parameters -- not pointers by form, and iterator shapes
-  have no credit representation -- and the ``std::ranges::`` lifecycle
-  CPOs are class objects, not named functions, so none of them are
-  annotated: their calls earn and withdraw nothing.
+- The implicit standard-library annotation takes effect on pointer
+  parameters only: ``std::construct_at`` and ``std::destroy_at`` with a
+  pointer first parameter, and the ``std::uninitialized_*`` family where its
+  iterator is a pointer.  A class-type iterator drops the marker, so such a
+  call checks nothing, and ``std::destroy_n`` is not annotated.  A whole
+  ``[[uninit]]`` array passed as a range is initialized whatever the range's
+  length.
 - The raw storage-release callees (``free``, ``realloc``, replaceable
   global ``operator delete``) accept storage that was never constructed:
   that is ``free``'s contract, not a gap -- only a ``[[now_uninit]]``

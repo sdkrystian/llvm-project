@@ -13,9 +13,12 @@
 
 // Clang attaches the std::init lifecycle markers to std::construct_at
 // (RefToUninit on the first parameter + NowInit) and std::destroy_at
-// (NowUninit) itself, keyed on a pointer-typed first parameter, and the
+// (NowUninit) itself, keyed on a pointer-typed first parameter, the
 // parameter marker alone to std::now_init (one pointer parameter, pointer
-// return), so the real library functions are usable under enforcement.
+// return), and RefToUninit on the output range plus NowInit to the
+// std::uninitialized_* family (by name and arity; the default_construct
+// forms get the marker alone), so the real library functions are usable
+// under enforcement.
 
 // INJECT: FunctionDecl {{.*}} construct_at 'T *(T *, A &&...)'
 // INJECT: RefToUninitAttr {{.*}} Implicit
@@ -30,6 +33,22 @@
 // INJECT: FunctionDecl {{.*}} now_init 'int *(int *)' implicit_instantiation
 // INJECT: RefToUninitAttr {{.*}} Implicit
 // INJECT-NOT: NowInitAttr
+// INJECT: FunctionDecl {{.*}} uninitialized_fill 'void (It, It, const T &)'
+// INJECT-NEXT: ParmVarDecl {{.*}} first 'It'
+// INJECT-NEXT: RefToUninitAttr {{.*}} Implicit
+// INJECT: NowInitAttr {{.*}} Implicit
+// INJECT: FunctionDecl {{.*}} uninitialized_fill 'void (int *, int *, const int &)' implicit_instantiation
+// INJECT: ParmVarDecl {{.*}} first 'int *'
+// INJECT-NEXT: RefToUninitAttr {{.*}} Implicit
+// INJECT: NowInitAttr {{.*}} Implicit
+// INJECT: FunctionDecl {{.*}} uninitialized_fill 'void (Iter, Iter, const int &)' implicit_instantiation
+// INJECT-NOT: RefToUninitAttr
+// INJECT: NowInitAttr {{.*}} Implicit
+// INJECT: FunctionDecl {{.*}} uninitialized_copy 'Out (In, In, Out)'
+// INJECT-NOT: RefToUninitAttr
+// INJECT: ParmVarDecl {{.*}} result 'Out'
+// INJECT-NEXT: RefToUninitAttr {{.*}} Implicit
+// INJECT: NowInitAttr {{.*}} Implicit
 
 // PLAIN-NOT: RefToUninitAttr
 // PLAIN-NOT: NowInitAttr
@@ -40,12 +59,19 @@ namespace std {
 template <class T, class... A> T *construct_at(T *p, A &&...args);
 template <class T> void destroy_at(T *p);
 template <class T> T *now_init(T *p);
+template <class It, class T> void uninitialized_fill(It first, It last, const T &x);
+template <class In, class Out> Out uninitialized_copy(In first, In last, Out result);
 } // namespace std
+
+struct Iter { int *p; };
 
 void instantiate(int *p) {
   std::construct_at(p, 5);
   std::destroy_at(p);
   std::now_init(p);
+  std::uninitialized_fill(p, p + 1, 0);
+  std::uninitialized_copy(p, p + 1, p);
+  std::uninitialized_fill(Iter{p}, Iter{p}, 0);
 }
 
 //--- local.cpp
@@ -60,11 +86,31 @@ template <class T> T *now_init(T *p);
 // Outside now_init's form key: a second parameter, a reference parameter.
 template <class T> T *now_init(T *p, int);
 template <class T> T *now_init(T &r);
+template <class It, class T> void uninitialized_fill(It first, It last, const T &x);
+template <class It, class Size, class T> It uninitialized_fill_n(It first, Size n, const T &x);
+template <class In, class Out> Out uninitialized_copy(In first, In last, Out result);
+template <class In, class Size, class Out> Out uninitialized_copy_n(In first, Size n, Out result);
+template <class In, class Out> Out uninitialized_move(In first, In last, Out result);
+template <class In, class Size, class Out> void uninitialized_move_n(In first, Size n, Out result);
+template <class It> void uninitialized_default_construct(It first, It last);
+template <class It, class Size> It uninitialized_default_construct_n(It first, Size n);
+template <class It> void uninitialized_value_construct(It first, It last);
+template <class It, class Size> It uninitialized_value_construct_n(It first, Size n);
+template <class P, class It, class T> void uninitialized_fill(P &&policy, It first, It last, const T &x);
+template <class T, __SIZE_TYPE__ N> T *begin(T (&a)[N]);
+template <class T, __SIZE_TYPE__ N> T *end(T (&a)[N]);
+template <class T> struct allocator { T *allocate(__SIZE_TYPE__ n); };
+namespace ranges {
+inline constexpr struct {
+  template <class R, class T> void operator()(R &&r, const T &x) const;
+} uninitialized_fill;
+} // namespace ranges
 } // namespace std
 
 // A global-namespace construct_at or now_init is not annotated either.
 template <class T, class... A> T *construct_at(T *p, A &&...args);
 template <class T> T *now_init(T *p);
+template <class It, class T> void uninitialized_fill(It first, It last, const T &x);
 
 // The paper's central lifecycle idiom compiles clean.
 void lifecycle() {
@@ -184,6 +230,134 @@ void now_init_form_key() {
   std::now_init(&u, 0); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   std::now_init(u); // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   ::now_init(&u); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// The paper's §4.7 pair: an initialized range is rejected, an uninitialized one is initialized
+void fill_pair() {
+  int a1[] = {1, 2, 3};
+  std::uninitialized_fill(a1, a1 + 3, 10); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int a2 [[uninit]] [3];
+  std::uninitialized_fill(a2, a2 + 3, 10);
+  int y = a2[0]; // OK
+  (void)y;
+}
+
+// A read before the fill reads uninitialized memory
+void read_before_fill() {
+  int a2 [[uninit]] [3];
+  int x = a2[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  std::uninitialized_fill(a2, a2 + 3, 10);
+  (void)x;
+}
+
+// A second fill is a double initialization
+void double_fill() {
+  int a [[uninit]] [3];
+  std::uninitialized_fill_n(a, 3, 1);
+  std::uninitialized_fill_n(a, 3, 2); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// uninitialized_copy reads its source range
+void copy_source() {
+  int s [[uninit]] [3];
+  int d [[uninit]] [3];
+  std::uninitialized_copy(s, s + 3, d); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  int *p [[ref_to_uninit]] = s;
+  int e [[uninit]] [3];
+  std::uninitialized_copy(p, p + 3, e); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// The output range of uninitialized_copy_n, move, and move_n is the third parameter
+void copy_move_output() {
+  int src[3] = {1, 2, 3};
+  int d1 [[uninit]] [3], d2 [[uninit]] [3], d3 [[uninit]] [3], d4 [[uninit]] [3];
+  std::uninitialized_copy(src, src + 3, d1);
+  std::uninitialized_copy_n(src, 3, d2);
+  std::uninitialized_move(src, src + 3, d3);
+  std::uninitialized_move_n(src, 3, d4);
+  int y = d1[0] + d2[0] + d3[0] + d4[0]; // OK
+  (void)y;
+}
+
+// value_construct and its _n form initialize the range
+void value_construct() {
+  int a [[uninit]] [3], b [[uninit]] [3];
+  std::uninitialized_value_construct(a, a + 3);
+  std::uninitialized_value_construct_n(b, 3);
+  int y = a[0] + b[0]; // OK
+  (void)y;
+}
+
+// default_construct and its _n form take an uninitialized range and credit nothing
+void default_construct() {
+  int a [[uninit]] [3], b [[uninit]] [3];
+  std::uninitialized_default_construct(a, a + 3);
+  std::uninitialized_default_construct_n(b, 3);
+  int y = a[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  int z = b[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  int c[3] = {};
+  std::uninitialized_default_construct(c, c + 3); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)y; (void)z;
+}
+
+// A class-type iterator is outside the marker: the call is inert
+struct Iter {
+  int *p [[ref_to_uninit]];
+  bool operator!=(Iter) const;
+  Iter &operator++();
+  int &operator*() const;
+};
+void class_iterator() {
+  int arr [[uninit]] [4];
+  Iter b{arr}, e{arr + 4};
+  std::uninitialized_fill(b, e, 0); // OK
+  int x = arr[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  (void)x;
+}
+
+// The §6.1 arr9 shape
+struct X { int v; };
+void arr9_shape(const X &xval) {
+  X arr9 [[uninit]] [20];
+  std::uninitialized_fill(arr9, arr9 + 20, xval);
+  int v = arr9[3].v; // OK
+  (void)v;
+}
+
+// The parallel-policy overload's range is its second parameter
+struct Policy {};
+void policy_overload() {
+  int a [[uninit]] [3];
+  std::uninitialized_fill(Policy{}, a, a + 3, 1);
+  int y = a[0]; // OK
+  int b[3] = {};
+  std::uninitialized_fill(Policy{}, b, b + 3, 1); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)y;
+}
+
+// A ranges CPO object is not annotated
+void ranges_cpo() {
+  int a2 [[uninit]] [3];
+  std::ranges::uninitialized_fill(a2, 10); // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// std::begin on an [[uninit]] array is rejected on both sides
+void begin_end() {
+  int a [[uninit]] [3];
+  std::uninitialized_fill(std::begin(a), std::end(a), 0); // expected-error 2 {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}} \
+                                                          // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A global-namespace uninitialized_fill is not annotated
+void global_ns_fill() {
+  int a [[uninit]] [3];
+  ::uninitialized_fill(a, a + 3, 0); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// A range from an unannotated allocator is initialized memory
+void allocator_range(std::allocator<int> &alloc) {
+  int *b = alloc.allocate(3);
+  std::uninitialized_fill_n(b, 3, 0); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
 }
 
 //--- referent.cpp
@@ -330,6 +504,8 @@ template <class T> void destroy_at(T *p);
 template <class T> T *now_init(T *p) {
   return p; // strict-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 }
+template <class It, class T> void uninitialized_fill(It first, It last, const T &x);
+template <class In, class Out> Out uninitialized_copy(In first, In last, Out result);
 } // namespace std
 
 //--- system.cpp
@@ -359,6 +535,17 @@ void now_init_user() {
   int x = 1;
   std::now_init(&x); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   (void)s;
+}
+
+// The uninitialized_* verdicts are located at the user's call
+void uninitialized_user() {
+  int a [[uninit]] [3];
+  std::uninitialized_fill(a, a + 3, 1);
+  int b [[uninit]] [3];
+  std::uninitialized_copy(a, a + 3, b);
+  int y = b[0]; // OK
+  std::uninitialized_fill(a, a + 3, 2); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)y;
 }
 
 //--- now_init_body.cpp
