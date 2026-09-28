@@ -670,8 +670,8 @@ public:
   /// Sema::InstantiateAttrs, which drops the marker when the substituted type
   /// is invalid -- silently in a SFINAE context (\p Diagnose false there), so
   /// the marker can never affect overload resolution; a dropped marker is
-  /// inert. A variable of undeduced type returns false too: validation defers
-  /// to checkDeducedMarkers. Not profile policy -- fires regardless of
+  /// inert. An undeduced type returns false too: validation defers to
+  /// checkDeducedMarkers. Not profile policy -- fires regardless of
   /// -fprofiles, like the parse-time handler it serves.
   bool diagnoseInvalidRefToUninitMarker(const Decl *D, SourceLocation AttrLoc,
                                         bool Diagnose = true);
@@ -689,12 +689,15 @@ public:
   bool diagnoseInvalidUninitMarker(const Decl *D, SourceLocation AttrLoc,
                                    bool Diagnose = true);
 
-  /// Validate the [[ref_to_uninit]] and [[uninit]] markers on \p D, whose
-  /// type contains a deduced placeholder, against the deduced type -- an
-  /// invalid one is dropped, after a diagnostic outside a SFINAE context --
-  /// and run checkInitProfileMarkerPlacement on a kept [[uninit]]. Called from
+  /// Validate the [[ref_to_uninit]] and [[uninit]] markers on \p D -- a
+  /// variable whose type contains a deduced placeholder, or a function whose
+  /// return type was deduced -- against the deduced type: an invalid one is
+  /// dropped, after a diagnostic outside a SFINAE context, and a variable's
+  /// kept [[uninit]] runs checkInitProfileMarkerPlacement. Called from
   /// Sema::CheckAttributesOnDeducedType once a variable's initializer has
-  /// fixed its type.
+  /// fixed its type, and from Sema::ActOnFinishFunctionBody once a function's
+  /// body has fixed its return type. checkNowInitVacuity counts parameters
+  /// only, so a dropped return marker never affects it.
   void checkDeducedMarkers(Decl *D);
 
   /// A [[now_init]] function with no [[ref_to_uninit]] parameter is a

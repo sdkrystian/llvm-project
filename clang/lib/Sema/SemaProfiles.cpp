@@ -1085,7 +1085,7 @@ bool SemaProfiles::diagnoseInvalidRefToUninitMarker(const Decl *D,
 
   // A dependent or undeduced subject is validated once its type is known; see
   // the declaration.
-  if (T->isDependentType() || (T->isUndeducedType() && !isa<FunctionDecl>(D)))
+  if (T->isDependentType() || T->isUndeducedType())
     return false;
 
   if ((!T->isPointerType() && !T->isReferenceType()) ||
@@ -1098,8 +1098,8 @@ bool SemaProfiles::diagnoseInvalidRefToUninitMarker(const Decl *D,
 }
 
 void SemaProfiles::checkDeducedMarkers(Decl *D) {
-  const auto *VD = dyn_cast<ValueDecl>(D);
-  if (!VD || !VD->getType()->getContainedDeducedType())
+  if (const auto *VD = dyn_cast<VarDecl>(D);
+      VD && !VD->getType()->getContainedDeducedType())
     return;
   // Silently in a SFINAE context, like the instantiation re-check: the marker
   // must not affect overload resolution.

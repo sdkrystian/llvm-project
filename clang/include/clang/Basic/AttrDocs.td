@@ -1038,8 +1038,9 @@ parameter, or function (for its return value) whose type is a pointer or
 reference to an object; applying it elsewhere is diagnosed regardless of
 ``-fprofiles``. A function pointer or reference (or a pointer-to-member)
 denotes a function or member, never uninitialized memory, so it is rejected.
-A variable whose type is deduced (``auto``, ``decltype(auto)``) is checked
-once its initializer has deduced it.
+A deduced type (``auto``, ``decltype(auto)``) is checked once deduced: a
+variable's at its initializer, a function's or lambda's return type at the
+end of its body.
 
 Outside the initialization profile the attribute is otherwise silently
 accepted and has no effect, so code that uses it remains valid when compiled

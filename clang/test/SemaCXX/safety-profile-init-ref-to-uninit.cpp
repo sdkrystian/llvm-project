@@ -960,6 +960,12 @@ template <typename T> void deduced_marked_local() {
 }
 template void deduced_marked_local<int>(); // expected-note {{in instantiation of function template specialization 'deduced_marked_local<int>' requested here}}
 
+// A marker on a deduced return type is honored by the return binding
+auto deduced_ret_alloc [[ref_to_uninit]] () { return (int *)malloc(4); } // OK
+decltype(auto) deduced_ret_alloc2 [[ref_to_uninit]] () { return (int *)malloc(4); } // OK
+auto trailing_ret_alloc [[ref_to_uninit]] () -> int * { return (int *)malloc(4); } // OK
+auto deduced_ret_init [[ref_to_uninit]] () { return &g_init; } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+
 int *mixed_arms_unmarked(bool c) {
   return c ? new int : &g_init; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 }
@@ -1009,6 +1015,15 @@ void test_lambda_return_marked() {
     return q; // OK: marked operator returning uninitialized memory
   };
   auto marked_bad = [] [[ref_to_uninit]] () -> int * {
+    return &g_init; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  };
+  (void)marked; (void)marked_bad;
+}
+
+// A marked lambda with a deduced return type is enforced in both directions
+void test_lambda_deduced_return_marked() {
+  auto marked = [] [[ref_to_uninit]] () { return (int *)malloc(4); }; // OK
+  auto marked_bad = [] [[ref_to_uninit]] () {
     return &g_init; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   };
   (void)marked; (void)marked_bad;

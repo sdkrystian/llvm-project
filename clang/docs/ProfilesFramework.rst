@@ -402,10 +402,11 @@ or the declarator-id position (``int u [[uninit]];``,
 the paper's examples use -- after a ``*`` or ``&``, after an array bound,
 or after a parameter list -- are rejected: neither
 ``int arr[10] [[uninit]];`` nor ``void destroy_at(T* p) [[now_uninit]];``
-compiles.  A marker on a variable whose type is deduced
-(``auto p [[ref_to_uninit]] = ...;``) is validated against the deduced
-type.  The markers' exact placement and spelling track an open committee
-question (P4222R2 §4.7).
+compiles.  A marker on a declaration whose type is deduced
+(``auto p [[ref_to_uninit]] = ...;``, ``auto f [[ref_to_uninit]] () { ... }``)
+is validated against the deduced type: a variable's at its initializer, a
+function's or lambda's return type at the end of its body.  The markers'
+exact placement and spelling track an open committee question (P4222R2 §4.7).
 
 Each rule has a name, so it can be suppressed individually with
 ``[[profiles::suppress(std::init, rule: "name")]]`` (see `Suppressing
@@ -718,7 +719,8 @@ and aggregate initialization, assignment, call arguments (including defaulted
 and variadic ones), ``return`` and ``throw`` statements (including returns
 inside lambdas and blocks -- a lambda's marker is written on its call
 operator, in the C++23 attribute position after the lambda-introducer:
-``[] [[ref_to_uninit]] () -> int* { ... }``), lambda captures (by reference
+``[] [[ref_to_uninit]] () { ... }``, with a deduced or trailing return type),
+lambda captures (by reference
 and by copy -- a closure field cannot carry the marker, so a by-copy capture
 of a marked pointer is rejected like any unmarked pointer copy; capture by
 reference, or store through the marker first, if the flow is intended), and

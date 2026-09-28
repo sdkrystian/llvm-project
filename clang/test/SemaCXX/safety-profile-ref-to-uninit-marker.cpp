@@ -118,3 +118,36 @@ constexpr auto deduced_pick(int) -> decltype(deduced_var_tmpl<T>, 1) { return 1;
 template <typename T> constexpr int deduced_pick(...) { return 2; }
 static_assert(deduced_pick<int>(0) == 1);
 static_assert(deduced_pick<int *>(0) == 1);
+
+// A deduced pointer or reference return type carries the marker
+auto deduced_ret [[ref_to_uninit]] () { return &g; }
+decltype(auto) deduced_ref_ret [[ref_to_uninit]] () { return (g); }
+auto deduced_lambda = [] [[ref_to_uninit]] () { return &g; };
+
+// A deduced non-pointer return type is rejected at the end of the body
+auto deduced_int_ret [[ref_to_uninit]] () { return 1; } // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
+                                                        // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+auto deduced_void_ret [[ref_to_uninit]] () {} // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
+                                              // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+auto deduced_int_lambda = [] [[ref_to_uninit]] () { return 1; }; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
+                                                                 // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+
+// A marker on a forward declaration is validated at the definition
+auto deduced_fwd [[ref_to_uninit]] ();
+auto deduced_fwd () { return &g; }
+auto deduced_fwd_bad [[ref_to_uninit]] (); // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
+                                           // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+auto deduced_fwd_bad () { return 1; }
+
+// A generic lambda's deduced return type is validated per instantiation
+void call_deduced_generic_lambda() {
+  auto l = [] [[ref_to_uninit]] (auto *v) { return v; };
+  (void)l(&g);
+}
+
+// A function template's deduced return type is validated per instantiation
+template <typename T> auto deduced_tmpl_ret [[ref_to_uninit]] () { return T{}; } // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
+                                                                                // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+int *deduced_tmpl_ptr = deduced_tmpl_ret<int *>();
+int deduced_tmpl_int = deduced_tmpl_ret<int>(); // expected-note {{in instantiation of function template specialization 'deduced_tmpl_ret<int>' requested here}} \
+                                                // no-profiles-note {{in instantiation of function template specialization 'deduced_tmpl_ret<int>' requested here}}

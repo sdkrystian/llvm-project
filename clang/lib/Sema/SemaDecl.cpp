@@ -16901,6 +16901,12 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body, bool IsInstantiation,
         }
       }
 
+      // A marker on a deduced return type is validated once deduced; see
+      // SemaProfiles::checkDeducedMarkers.
+      if (!FD->isInvalidDecl() && !FD->isDependentContext() &&
+          !FD->getReturnType()->isUndeducedType())
+        Profiles().checkDeducedMarkers(FD);
+
       // If the function implicitly returns zero (like 'main') or is naked,
       // don't complain about missing return statements.
       // Clang implicitly returns 0 in C89 mode, but that's considered an
