@@ -616,7 +616,7 @@ public:
   void checkInitProfileIncDec(Expr *Operand, SourceLocation OpLoc);
 
   /// What a direct callee does to the storage bound to its parameters,
-  /// derived from the callee's lifetime attributes and the allocator-callee
+  /// derived from the callee's lifetime attributes and the known-callee
   /// table. Each consumer reads only the bits its direction may rely on:
   /// binding *acceptance* (which never diagnoses) reads the union of the
   /// destroy and release bits, the CFG pass's Kill (a diagnostic's firing
@@ -640,7 +640,7 @@ public:
     bool ReleasesStorageByName = false;
   };
   /// Derive what \p FD does to the storage bound to its parameters: the
-  /// lifetime attributes plus the allocator-callee table's storage-release
+  /// lifetime attributes plus the known-callee table's storage-release
   /// rows (free, realloc's pointer parameter, replaceable global operator
   /// delete / operator delete[]), split by trust. Shared by the parse-time
   /// funnel and the CFG pass's lifecycle arm.

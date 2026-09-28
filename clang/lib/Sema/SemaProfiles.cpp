@@ -1399,10 +1399,10 @@ classifyUninitPassThrough(const Expr *E, UninitStorage EmptyListState,
   return std::nullopt;
 }
 
-// The role a known allocator callee's return value plays as an uninit
-// source (paper §4.3: functions like malloc "must be known to an analyzer
-// enforcing the initialization profile").
-enum class AllocatorCalleeRole {
+/// What a known callee's return value is as an uninit source (P4222R2 §4.3:
+/// functions like malloc "must be known to an analyzer enforcing the
+/// initialization profile").
+enum class KnownCalleeReturn {
   /// Returns freshly allocated, uninitialized storage -- classified like a
   /// [[ref_to_uninit]] return, including the trusted-marker degradation.
   ReturnsUninitialized,
@@ -1436,105 +1436,106 @@ static bool isReplaceableGlobalOperatorDelete(const FunctionDecl *FD) {
          FD->isReplaceableGlobalAllocationFunction();
 }
 
-// The known allocator and deallocator callees. A row is keyed by builtin ID
-// (the C allocation family) or, for the operator new/delete families, which
-// never carry a builtin ID, by a form predicate. The source side (Role) says
-// what the return value is -- the malloc/alloca/operator-new families return
-// uninitialized memory, calloc returns zero-initialized memory, realloc a
-// preserved prefix plus an indeterminate tail -- and the sink side
-// (ReleasesStorage) says whether the callee releases the storage its pointer
-// argument denotes, making it [[now_uninit]]-equivalent at the binding site
-// (free, realloc's pointer parameter, operator delete). A builtin ID is
-// absent under -fno-builtin / -ffreestanding (or on a non-matching
-// declaration), where an allocator falls back to the trusted default and a
-// release callee goes unrecognized -- a missed diagnostic or a missed
-// relaxation, never a false positive or a false acceptance elsewhere.
-// Future known callees go here. (getBuiltinFunctionEffects in
-// SemaFunctionEffects.cpp groups almost exactly this set for the
-// `allocating` effect.)
-struct AllocatorCalleeEntry {
+/// A row of the known-callee table (KnownCallees): the allocator and
+/// deallocator callees. A row is keyed by builtin ID (the C allocation
+/// family) or, for the operator new/delete families, which never carry a
+/// builtin ID, by a form predicate. The source side (Return) says what the
+/// return value is -- the malloc/alloca/operator-new families return
+/// uninitialized memory, calloc returns zero-initialized memory, realloc a
+/// preserved prefix plus an indeterminate tail -- and the sink side
+/// (ReleasesStorage) says whether the callee releases the storage its
+/// pointer argument denotes, making it [[now_uninit]]-equivalent at the
+/// binding site (free, realloc's pointer parameter, operator delete). A
+/// builtin ID is absent under -fno-builtin / -ffreestanding (or on a
+/// non-matching declaration), where an allocator falls back to the trusted
+/// default and a release callee goes unrecognized -- a missed diagnostic or
+/// a missed relaxation, never a false positive or a false acceptance
+/// elsewhere. (getBuiltinFunctionEffects in SemaFunctionEffects.cpp groups
+/// almost exactly the allocator set for the \c allocating effect.)
+struct KnownCalleeEntry {
   /// The Clang builtin ID this row matches; 0 for a form-keyed row.
   unsigned BuiltinID = 0;
-  AllocatorCalleeRole Role;
+  KnownCalleeReturn Return;
   bool ReleasesStorage = false;
   /// The form predicate for callees with no builtin ID; null for
   /// builtin-keyed rows.
   bool (*Form)(const FunctionDecl *) = nullptr;
   /// The library name of a plain-spelled builtin row, compared by the
-  /// untrusted name-only fallback (matchAllocatorCallee) when the builtin
+  /// untrusted name-only fallback (matchKnownCallee) when the builtin
   /// ID is absent; empty for the __builtin_* spellings (which always keep
   /// their IDs) and the form-keyed rows. A per-row literal rather than
   /// Builtin::Context::getName, which returns std::string by value.
   StringRef Name;
 };
 
-static constexpr AllocatorCalleeEntry AllocatorCallees[] = {
-    {Builtin::BImalloc, AllocatorCalleeRole::ReturnsUninitialized,
+/// The known-callee table; see KnownCalleeEntry.
+static constexpr KnownCalleeEntry KnownCallees[] = {
+    {Builtin::BImalloc, KnownCalleeReturn::ReturnsUninitialized,
      /*ReleasesStorage=*/false, /*Form=*/nullptr, "malloc"},
-    {Builtin::BI__builtin_malloc, AllocatorCalleeRole::ReturnsUninitialized},
-    {Builtin::BIaligned_alloc, AllocatorCalleeRole::ReturnsUninitialized,
+    {Builtin::BI__builtin_malloc, KnownCalleeReturn::ReturnsUninitialized},
+    {Builtin::BIaligned_alloc, KnownCalleeReturn::ReturnsUninitialized,
      /*ReleasesStorage=*/false, /*Form=*/nullptr, "aligned_alloc"},
-    {Builtin::BIalloca, AllocatorCalleeRole::ReturnsUninitialized,
+    {Builtin::BIalloca, KnownCalleeReturn::ReturnsUninitialized,
      /*ReleasesStorage=*/false, /*Form=*/nullptr, "alloca"},
-    {Builtin::BI__builtin_alloca, AllocatorCalleeRole::ReturnsUninitialized},
+    {Builtin::BI__builtin_alloca, KnownCalleeReturn::ReturnsUninitialized},
     {Builtin::BI__builtin_alloca_uninitialized,
-     AllocatorCalleeRole::ReturnsUninitialized},
+     KnownCalleeReturn::ReturnsUninitialized},
     {Builtin::BI__builtin_alloca_with_align,
-     AllocatorCalleeRole::ReturnsUninitialized},
+     KnownCalleeReturn::ReturnsUninitialized},
     {Builtin::BI__builtin_alloca_with_align_uninitialized,
-     AllocatorCalleeRole::ReturnsUninitialized},
+     KnownCalleeReturn::ReturnsUninitialized},
     {Builtin::BI__builtin_operator_new,
-     AllocatorCalleeRole::ReturnsUninitialized},
-    {Builtin::BIcalloc, AllocatorCalleeRole::ReturnsInitialized,
+     KnownCalleeReturn::ReturnsUninitialized},
+    {Builtin::BIcalloc, KnownCalleeReturn::ReturnsInitialized,
      /*ReleasesStorage=*/false, /*Form=*/nullptr, "calloc"},
-    {Builtin::BI__builtin_calloc, AllocatorCalleeRole::ReturnsInitialized},
-    {Builtin::BIrealloc, AllocatorCalleeRole::ReturnsUnknown,
+    {Builtin::BI__builtin_calloc, KnownCalleeReturn::ReturnsInitialized},
+    {Builtin::BIrealloc, KnownCalleeReturn::ReturnsUnknown,
      /*ReleasesStorage=*/true, /*Form=*/nullptr, "realloc"},
-    {Builtin::BI__builtin_realloc, AllocatorCalleeRole::ReturnsUnknown,
+    {Builtin::BI__builtin_realloc, KnownCalleeReturn::ReturnsUnknown,
      /*ReleasesStorage=*/true},
-    {Builtin::BIfree, AllocatorCalleeRole::ReturnsNothing,
+    {Builtin::BIfree, KnownCalleeReturn::ReturnsNothing,
      /*ReleasesStorage=*/true, /*Form=*/nullptr, "free"},
-    {Builtin::BI__builtin_free, AllocatorCalleeRole::ReturnsNothing,
+    {Builtin::BI__builtin_free, KnownCalleeReturn::ReturnsNothing,
      /*ReleasesStorage=*/true},
-    {/*BuiltinID=*/0, AllocatorCalleeRole::ReturnsUninitialized,
+    {/*BuiltinID=*/0, KnownCalleeReturn::ReturnsUninitialized,
      /*ReleasesStorage=*/false, isReplaceableGlobalOperatorNew},
-    {/*BuiltinID=*/0, AllocatorCalleeRole::ReturnsNothing,
+    {/*BuiltinID=*/0, KnownCalleeReturn::ReturnsNothing,
      /*ReleasesStorage=*/true, isReplaceableGlobalOperatorDelete},
 };
 
-// The table row for \p FD, if any -- the *trusted* match: the builtin ID
-// (or the operator form) guarantees the row's semantics. Builtin rows are
-// consulted first; no collision is possible -- plain operator new/delete
-// never carry the table's builtin IDs, and __builtin_operator_new is not an
-// operator name -- so the order is cosmetic.
-static const AllocatorCalleeEntry *findAllocatorCallee(const FunctionDecl *FD) {
+/// The table row for \p FD, if any -- the *trusted* match: the builtin ID
+/// (or the operator form) guarantees the row's semantics. Builtin rows are
+/// consulted first; no collision is possible -- plain operator new/delete
+/// never carry the table's builtin IDs, and __builtin_operator_new is not an
+/// operator name -- so the order is cosmetic.
+static const KnownCalleeEntry *findKnownCallee(const FunctionDecl *FD) {
   if (unsigned ID = FD->getBuiltinID())
-    for (const AllocatorCalleeEntry &Entry : AllocatorCallees)
+    for (const KnownCalleeEntry &Entry : KnownCallees)
       if (Entry.BuiltinID == ID)
         return &Entry;
-  for (const AllocatorCalleeEntry &Entry : AllocatorCallees)
+  for (const KnownCalleeEntry &Entry : KnownCallees)
     if (Entry.Form && Entry.Form(FD))
       return &Entry;
   return nullptr;
 }
 
-// The table row for \p FD plus whether the match is trusted. A trusted
-// match is findAllocatorCallee's. The fallback recognizes a plain-named
-// declaration whose builtin ID is absent -- -fno-builtin / -ffreestanding,
-// or a non-matching signature -- as an *untrusted* match: the name says
-// what the function is meant to be, but its semantics cannot be assumed.
-// The gate mirrors clang's builtin-attachment condition (a file-scope
-// declaration with C language linkage; deliberately not isGlobal(), which
-// a static member and ns::malloc both pass), and a callee that still
-// carries any builtin ID is never re-matched by name (the __builtin_*
-// spellings keep their IDs everywhere).
-struct AllocatorCalleeMatch {
-  const AllocatorCalleeEntry *Entry = nullptr;
+/// The table row for \p FD plus whether the match is trusted. A trusted
+/// match is findKnownCallee's. The fallback recognizes a plain-named
+/// declaration whose builtin ID is absent -- -fno-builtin / -ffreestanding,
+/// or a non-matching signature -- as an *untrusted* match: the name says
+/// what the function is meant to be, but its semantics cannot be assumed.
+/// The gate mirrors clang's builtin-attachment condition (a file-scope
+/// declaration with C language linkage, which a static member and ns::malloc
+/// fail although isGlobal() holds for them), and a callee that still
+/// carries any builtin ID is never re-matched by name (the __builtin_*
+/// spellings keep their IDs everywhere).
+struct KnownCalleeMatch {
+  const KnownCalleeEntry *Entry = nullptr;
   bool Trusted = false;
 };
 
-static AllocatorCalleeMatch matchAllocatorCallee(const FunctionDecl *FD) {
-  if (const AllocatorCalleeEntry *Entry = findAllocatorCallee(FD))
+static KnownCalleeMatch matchKnownCallee(const FunctionDecl *FD) {
+  if (const KnownCalleeEntry *Entry = findKnownCallee(FD))
     return {Entry, /*Trusted=*/true};
   if (FD->getBuiltinID() != 0)
     return {};
@@ -1543,14 +1544,14 @@ static AllocatorCalleeMatch matchAllocatorCallee(const FunctionDecl *FD) {
       FD->getLanguageLinkage() != CLanguageLinkage)
     return {};
   StringRef Name = II->getName();
-  for (const AllocatorCalleeEntry &Entry : AllocatorCallees)
+  for (const KnownCalleeEntry &Entry : KnownCallees)
     if (!Entry.Name.empty() && Entry.Name == Name)
       return {&Entry, /*Trusted=*/false};
   return {};
 }
 
 // Derive, once per binding, what \p FD does to the storage bound to its
-// parameters: the lifetime attributes plus the allocator-callee table's
+// parameters: the lifetime attributes plus the known-callee table's
 // ReleasesStorage rows (free, realloc's pointer parameter, replaceable
 // global operator delete / operator delete[]), split by trust. Releasing
 // storage leaves it as uninitialized as ending the object's lifetime does,
@@ -1569,7 +1570,7 @@ SemaProfiles::getCalleeLifecycleRoles(const FunctionDecl *FD) {
   SemaProfiles::CalleeLifecycleRoles Roles;
   Roles.InitializesRefToUninitParams = FD->hasAttr<NowInitAttr>();
   Roles.DestroysPointerParams = FD->hasAttr<NowUninitAttr>();
-  AllocatorCalleeMatch M = matchAllocatorCallee(FD);
+  KnownCalleeMatch M = matchKnownCallee(FD);
   if (M.Entry && M.Entry->ReleasesStorage) {
     if (M.Trusted)
       Roles.ReleasesStorageTrusted = true;
@@ -1592,7 +1593,7 @@ static UninitStorage classifyRefToUninitCallee(const CallExpr *CE,
   if (!FD)
     return UninitStorage::Unknown;
   bool RefersToUninit = FD->hasAttr<RefToUninitAttr>();
-  if (AllocatorCalleeMatch M = matchAllocatorCallee(FD); M.Entry) {
+  if (KnownCalleeMatch M = matchKnownCallee(FD); M.Entry) {
     if (!M.Trusted) {
       // Recognized by name but not the builtin (-fno-builtin,
       // -ffreestanding, a non-matching declaration): the trusted default
@@ -1604,15 +1605,15 @@ static UninitStorage classifyRefToUninitCallee(const CallExpr *CE,
       if (!RefersToUninit)
         return UninitStorage::Unknown;
     } else {
-      switch (M.Entry->Role) {
-      case AllocatorCalleeRole::ReturnsUninitialized:
+      switch (M.Entry->Return) {
+      case KnownCalleeReturn::ReturnsUninitialized:
         RefersToUninit = true;
         break;
-      case AllocatorCalleeRole::ReturnsInitialized:
+      case KnownCalleeReturn::ReturnsInitialized:
         return UninitStorage::Initialized;
-      case AllocatorCalleeRole::ReturnsUnknown:
+      case KnownCalleeReturn::ReturnsUnknown:
         return UninitStorage::Unknown;
-      case AllocatorCalleeRole::ReturnsNothing:
+      case KnownCalleeReturn::ReturnsNothing:
         // A void return never reaches these recognizers; keep the trusted
         // default if it somehow did.
         break;
