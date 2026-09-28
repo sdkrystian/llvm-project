@@ -919,6 +919,23 @@ is a diagnostic's firing basis and needs the trusted recognition, so a
 post-release read or destroy stays accepted there (a missed diagnostic,
 never a false positive).
 
+The standard byte-writing callees ``memset``, ``memcpy``, and ``memmove``
+are recognized without annotation as initializing their destination: the
+destination accepts storage in any state and is initialized whole by the
+call, whatever the byte count -- ``memset(arr, 0, sizeof arr)`` initializes
+a local ``[[uninit]]`` array, ``memset(p, 0, n)`` the storage a marked
+pointer refers to (not its further elements: ``p[1]`` stays a read through
+the marker) -- and a second call on the same storage is no double
+initialization.  The returned destination is initialized memory.  The
+source of ``memcpy`` and ``memmove`` is an ordinary unmarked parameter, so
+an uninitialized source is rejected.  Recognition keys on Clang's builtin
+IDs, and the fortified ``__builtin___memset_chk``, ``__builtin___memcpy_chk``,
+and ``__builtin___memmove_chk`` that ``_FORTIFY_SOURCE`` headers expand to
+are recognized the same way; by name (``-fno-builtin``, ``-ffreestanding``)
+only the acceptance survives, so a later read of the destination is
+diagnosed there, while the ``__builtin_`` spellings keep their IDs
+everywhere.
+
 
 Constructors
 ------------

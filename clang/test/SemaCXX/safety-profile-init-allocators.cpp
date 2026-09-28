@@ -27,6 +27,9 @@ extern "C" void *calloc(size_t, size_t);
 extern "C" void *realloc(void *, size_t);
 extern "C" void *aligned_alloc(size_t, size_t);
 extern "C" void free(void *);
+extern "C" void *memset(void *, int, size_t);
+extern "C" void *memcpy(void *, const void *, size_t);
+extern "C" void *memmove(void *, const void *, size_t);
 
 void take_uninit_ptr(int *p [[ref_to_uninit]]);
 void take_ptr(int *p);
@@ -311,4 +314,84 @@ void test_unevaluated_builtin_arguments() {
   (void)__builtin_dynamic_object_size(arr, 0); // OK
   int *p [[ref_to_uninit]] = (int *)malloc(4);
   (void)__builtin_object_size(p, 0); // OK
+}
+
+// memset initializes its destination whole
+void test_memset_array() {
+  int arr [[uninit]] [4];
+  memset(arr, 0, sizeof arr);
+  int x = arr[0]; // nobuiltin-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  (void)x;
+}
+
+// The referent of a marked pointer is initialized; elements are not
+void test_memset_marked_pointer() {
+  int *p [[ref_to_uninit]] = (int *)malloc(16);
+  memset(p, 0, 16);
+  int y = *p; // nobuiltin-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  int z = p[1]; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}} \
+                // nobuiltin-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  (void)y; (void)z;
+}
+
+// An initialized destination is accepted; a repeated memset is not a double initialization
+void test_memset_initialized() {
+  int buf[4] = {};
+  memset(buf, 0, 4);
+  memset(buf, 1, 4); // OK
+}
+
+// memcpy and memmove read their source: an uninitialized source is rejected
+void test_memcpy_source() {
+  int dst[4] = {};
+  int arr [[uninit]] [4];
+  memcpy(dst, arr, 16); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}} \
+                        // nobuiltin-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  int *p [[ref_to_uninit]] = (int *)malloc(16);
+  memcpy(dst, p, 16); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}} \
+                      // nobuiltin-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+void test_memmove_destination() {
+  int src[4] = {};
+  int arr [[uninit]] [4];
+  memmove(arr, src, 16);
+  int w = arr[0]; // nobuiltin-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  (void)w;
+}
+
+// The __builtin_ spellings keep their credit everywhere
+void test_builtin_memset() {
+  int arr [[uninit]] [4];
+  __builtin_memset(arr, 0, 16);
+  int v = arr[0]; // OK
+  (void)v;
+}
+
+// The fortified spellings initialize their destination too
+void test_fortified_memset() {
+  int arr [[uninit]] [4];
+  __builtin___memset_chk(arr, 0, sizeof arr, __builtin_object_size(arr, 0));
+  int src[4] = {};
+  int dst [[uninit]] [4];
+  __builtin___memcpy_chk(dst, src, sizeof dst, __builtin_object_size(dst, 0));
+  int v = arr[0] + dst[0]; // OK
+  (void)v;
+}
+
+// A destroyed referent is reinitialized by a byte write
+[[now_uninit]] void destroy_int(int *);
+void test_memset_after_destroy() {
+  int *p [[ref_to_uninit]] = (int *)malloc(4);
+  *p = 1;
+  destroy_int(p);
+  memset(p, 0, 4);
+  int t = *p; // nobuiltin-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  (void)t;
+}
+
+// The returned destination is initialized memory
+void test_memset_return() {
+  int *p [[ref_to_uninit]] = (int *)malloc(16);
+  int *q = (int *)memset(p, 0, 16); // OK
+  (void)q;
 }

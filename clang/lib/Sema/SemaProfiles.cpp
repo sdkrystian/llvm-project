@@ -1436,20 +1436,22 @@ static bool isReplaceableGlobalOperatorDelete(const FunctionDecl *FD) {
          FD->isReplaceableGlobalAllocationFunction();
 }
 
-/// A row of the known-callee table (KnownCallees): the allocator and
-/// deallocator callees. A row is keyed by builtin ID (the C allocation
-/// family) or, for the operator new/delete families, which never carry a
-/// builtin ID, by a form predicate. The source side (Return) says what the
-/// return value is -- the malloc/alloca/operator-new families return
-/// uninitialized memory, calloc returns zero-initialized memory, realloc a
-/// preserved prefix plus an indeterminate tail -- and the sink side
-/// (ReleasesStorage) says whether the callee releases the storage its
-/// pointer argument denotes, making it [[now_uninit]]-equivalent at the
-/// binding site (free, realloc's pointer parameter, operator delete). A
-/// builtin ID is absent under -fno-builtin / -ffreestanding (or on a
-/// non-matching declaration), where an allocator falls back to the trusted
-/// default and a release callee goes unrecognized -- a missed diagnostic or
-/// a missed relaxation, never a false positive or a false acceptance
+/// A row of the known-callee table (KnownCallees): the allocator,
+/// deallocator, and byte-writing callees. A row is keyed by builtin ID (the
+/// C allocation and memory families) or, for the operator new/delete
+/// families, which never carry a builtin ID, by a form predicate. The source
+/// side (Return) says what the return value is -- the malloc/alloca/
+/// operator-new families return uninitialized memory, calloc returns
+/// zero-initialized memory, realloc a preserved prefix plus an indeterminate
+/// tail, memset/memcpy/memmove their initialized destination -- and the sink
+/// side says whether the callee releases the storage its pointer argument
+/// denotes (ReleasesStorage), making it [[now_uninit]]-equivalent at the
+/// binding site (free, realloc's pointer parameter, operator delete), or
+/// initializes the storage of one parameter (InitializesParam). A builtin ID
+/// is absent under -fno-builtin / -ffreestanding (or on a non-matching
+/// declaration), where an allocator falls back to the trusted default and a
+/// release or initialization goes unrecognized -- a missed diagnostic or a
+/// missed relaxation, never a false positive or a false acceptance
 /// elsewhere. (getBuiltinFunctionEffects in SemaFunctionEffects.cpp groups
 /// almost exactly the allocator set for the \c allocating effect.)
 struct KnownCalleeEntry {
@@ -1466,6 +1468,9 @@ struct KnownCalleeEntry {
   /// their IDs) and the form-keyed rows. A per-row literal rather than
   /// Builtin::Context::getName, which returns std::string by value.
   StringRef Name;
+  /// The initializing parameter's index: the callee writes the whole
+  /// storage its argument denotes, whatever the storage's prior state.
+  std::optional<unsigned> InitializesParam;
 };
 
 /// The known-callee table; see KnownCalleeEntry.
@@ -1501,6 +1506,33 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
      /*ReleasesStorage=*/false, isReplaceableGlobalOperatorNew},
     {/*BuiltinID=*/0, KnownCalleeReturn::ReturnsNothing,
      /*ReleasesStorage=*/true, isReplaceableGlobalOperatorDelete},
+    {Builtin::BImemset, KnownCalleeReturn::ReturnsInitialized,
+     /*ReleasesStorage=*/false, /*Form=*/nullptr, "memset",
+     /*InitializesParam=*/0},
+    {Builtin::BI__builtin_memset, KnownCalleeReturn::ReturnsInitialized,
+     /*ReleasesStorage=*/false, /*Form=*/nullptr, /*Name=*/"",
+     /*InitializesParam=*/0},
+    {Builtin::BImemcpy, KnownCalleeReturn::ReturnsInitialized,
+     /*ReleasesStorage=*/false, /*Form=*/nullptr, "memcpy",
+     /*InitializesParam=*/0},
+    {Builtin::BI__builtin_memcpy, KnownCalleeReturn::ReturnsInitialized,
+     /*ReleasesStorage=*/false, /*Form=*/nullptr, /*Name=*/"",
+     /*InitializesParam=*/0},
+    {Builtin::BImemmove, KnownCalleeReturn::ReturnsInitialized,
+     /*ReleasesStorage=*/false, /*Form=*/nullptr, "memmove",
+     /*InitializesParam=*/0},
+    {Builtin::BI__builtin_memmove, KnownCalleeReturn::ReturnsInitialized,
+     /*ReleasesStorage=*/false, /*Form=*/nullptr, /*Name=*/"",
+     /*InitializesParam=*/0},
+    {Builtin::BI__builtin___memset_chk, KnownCalleeReturn::ReturnsInitialized,
+     /*ReleasesStorage=*/false, /*Form=*/nullptr, /*Name=*/"",
+     /*InitializesParam=*/0},
+    {Builtin::BI__builtin___memcpy_chk, KnownCalleeReturn::ReturnsInitialized,
+     /*ReleasesStorage=*/false, /*Form=*/nullptr, /*Name=*/"",
+     /*InitializesParam=*/0},
+    {Builtin::BI__builtin___memmove_chk, KnownCalleeReturn::ReturnsInitialized,
+     /*ReleasesStorage=*/false, /*Form=*/nullptr, /*Name=*/"",
+     /*InitializesParam=*/0},
 };
 
 /// The table row for \p FD, if any -- the *trusted* match: the builtin ID
@@ -1553,7 +1585,8 @@ static KnownCalleeMatch matchKnownCallee(const FunctionDecl *FD) {
 // Derive, once per binding, what \p FD does to the storage bound to its
 // parameters: the lifetime attributes plus the known-callee table's
 // ReleasesStorage rows (free, realloc's pointer parameter, replaceable
-// global operator delete / operator delete[]), split by trust. Releasing
+// global operator delete / operator delete[]) and InitializesParam rows
+// (memset, memcpy, memmove), split by trust. Releasing
 // storage leaves it as uninitialized as ending the object's lifetime does,
 // so the binding sites treat a release callee's pointer parameter like a
 // [[now_uninit]] one -- except for the double-destroy check:
@@ -1576,6 +1609,12 @@ SemaProfiles::getCalleeLifecycleRoles(const FunctionDecl *FD) {
       Roles.ReleasesStorageTrusted = true;
     else
       Roles.ReleasesStorageByName = true;
+  }
+  if (M.Entry && M.Entry->InitializesParam) {
+    if (M.Trusted)
+      Roles.InitializesParamTrusted = M.Entry->InitializesParam;
+    else
+      Roles.InitializesParamByName = M.Entry->InitializesParam;
   }
   return Roles;
 }
@@ -2553,6 +2592,9 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
   // The callee's lifecycle roles (see CalleeLifecycleRoles).
   CalleeLifecycleRoles Roles =
       Callee ? getCalleeLifecycleRoles(Callee) : CalleeLifecycleRoles();
+  // An initializing parameter accepts storage in any live state.
+  if (Parm && Roles.isInitializingParam(Parm->getFunctionScopeIndex()))
+    return;
   if (Roles.DestroysPointerParams || Roles.ReleasesStorageTrusted ||
       Roles.ReleasesStorageByName) {
     // A [[now_uninit]] callee's pointer/reference parameter -- and a known

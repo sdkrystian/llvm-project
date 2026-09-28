@@ -867,6 +867,22 @@ Iterator-shaped relatives (``destroy_n``, the ``uninitialized_*`` family) and
 ``ranges::`` CPOs sit outside the form key; the user-facing scope note lives
 in :doc:`ProfilesFramework`.
 
+Library callees whose semantics the profile needs without an attribute are
+rows of the known-callee table (``KnownCallees`` in SemaProfiles.cpp), keyed
+by builtin ID or, for the ``operator new`` / ``operator delete`` families, by
+form, with a name-only *untrusted* fallback where the ID is absent; the
+roles reach the funnels and the CFG pass through ``getCalleeLifecycleRoles``.
+A row's *initializing parameter* is a parameter whose storage the callee
+initializes whatever its prior state (the destination of ``memset``,
+``memcpy``, and ``memmove``, and of their fortified ``_chk`` builtins).  The binding to it is accepted in any live
+state, and the flow pass writes the argument's storage whole on a trusted
+match only: by name the acceptance survives but the credit does not,
+mirroring the release rows' ``Kill``, because a credit suppresses later
+diagnostics.  Unlike ``[[ref_to_uninit]]`` with ``[[now_init]]``, the role
+is one-directional: it asserts nothing about the prior state, so an
+initialized destination is legal and a repeated call is no double
+initialization.
+
 
 Flow-Tracked Storage (std::init)
 ================================

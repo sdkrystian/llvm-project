@@ -619,10 +619,10 @@ public:
   /// derived from the callee's lifetime attributes and the known-callee
   /// table. Each consumer reads only the bits its direction may rely on:
   /// binding *acceptance* (which never diagnoses) reads the union of the
-  /// destroy and release bits, the CFG pass's Kill (a diagnostic's firing
-  /// basis) reads the trusted release bit only, and double_destroy keys on
-  /// the destroy bit only (a storage release leaves no object to destroy
-  /// again).
+  /// destroy, release, and initializing-parameter bits, the CFG pass's Kill
+  /// and initializing Write (a diagnostic's firing basis) read the trusted
+  /// bits only, and double_destroy keys on the destroy bit only (a storage
+  /// release leaves no object to destroy again).
   struct CalleeLifecycleRoles {
     /// [[now_init]]: the callee initializes the storage bound to its
     /// [[ref_to_uninit]] parameters (P4222R2 §6.2).
@@ -638,11 +638,26 @@ public:
     /// meant to be, but its semantics cannot be assumed, so this bit feeds
     /// acceptance only.
     bool ReleasesStorageByName = false;
+    /// A trusted initializing parameter -- memset's, memcpy's, or memmove's
+    /// destination: the callee writes the whole storage its argument
+    /// denotes, so the binding accepts storage in any live state and the
+    /// CFG pass credits the storage (see ProfilesFrameworkInternals.rst).
+    std::optional<unsigned> InitializesParamTrusted;
+    /// A name-only initializing parameter match, for acceptance only.
+    std::optional<unsigned> InitializesParamByName;
+
+    /// True if parameter \p Index is an initializing parameter, trusted or
+    /// by name.
+    bool isInitializingParam(unsigned Index) const {
+      return InitializesParamTrusted == Index ||
+             InitializesParamByName == Index;
+    }
   };
   /// Derive what \p FD does to the storage bound to its parameters: the
   /// lifetime attributes plus the known-callee table's storage-release
   /// rows (free, realloc's pointer parameter, replaceable global operator
-  /// delete / operator delete[]), split by trust. Shared by the parse-time
+  /// delete / operator delete[]) and initializing-parameter rows (memset,
+  /// memcpy, memmove), split by trust. Shared by the parse-time
   /// funnel and the CFG pass's lifecycle arm.
   static CalleeLifecycleRoles getCalleeLifecycleRoles(const FunctionDecl *FD);
 

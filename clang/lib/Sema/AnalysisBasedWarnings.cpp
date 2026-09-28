@@ -2908,7 +2908,8 @@ static void forEachArgumentBinding(
 /// passed as `p`, a decayed [[uninit]] array, an [[uninit]] local passed as
 /// `&u` / `u`, or every tracked member of an object passed as a whole
 /// (`this`, `*this`, `&x`, `x`); an argument whose arms name several
-/// storages may-writes each.
+/// storages may-writes each. A trusted initializing parameter (memset's
+/// destination) is written the same way.
 /// A [[now_uninit]] callee destroys the storage bound to each pointer or
 /// reference parameter (no marker key: the attribute's contract covers every
 /// such argument) -- a DestroySite judged by the destroy rules, then
@@ -3038,9 +3039,11 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
       else
         AppendFor(Arg, PT, DefAssignEventKind::Kill);
     });
-  if (Roles.InitializesRefToUninitParams)
+  if (Roles.InitializesRefToUninitParams || Roles.InitializesParamTrusted)
     ForEachParam([&](const ParmVarDecl *P, const Expr *Arg) {
-      if (P->hasAttr<RefToUninitAttr>())
+      if ((Roles.InitializesRefToUninitParams &&
+           P->hasAttr<RefToUninitAttr>()) ||
+          Roles.InitializesParamTrusted == P->getFunctionScopeIndex())
         AppendFor(Arg, P->getType(), DefAssignEventKind::Write);
     });
 }
@@ -3495,27 +3498,34 @@ static void extractStdInitEvents(
                              0, At, (unsigned)(ASites.size() - 1)});
     };
     // The argument bindings of the call-like \p CallLike
-    // (forEachArgumentBinding): a Parameter binding per declared parameter
-    // unless \p ParamsDestroyed (a [[now_uninit]] or storage-release callee's
-    // parameters run the destroy rules instead), a VariadicArgument binding
-    // per variadic argument, and the mutable aliases either hands out.
-    auto AppendArgumentBindings = [&](const Expr *CallLike,
-                                      bool ParamsDestroyed) {
-      forEachArgumentBinding(
-          Ctx, CallLike,
-          [&](const ParmVarDecl *Parm, QualType T, const Expr *Arg,
-              bool Variadic) {
-            SourceLocation Loc = Arg->IgnoreImplicit()->getExprLoc();
-            if (Variadic)
-              AddBinding(K::VariadicArgument, Loc, /*TargetMarked=*/false, T,
-                         Arg, nullptr, CallLike);
-            else if (!ParamsDestroyed)
-              AddBinding(K::Parameter, Loc,
-                         Parm && Parm->hasAttr<RefToUninitAttr>(), T, Arg,
-                         nullptr, CallLike);
-            AppendAliasEscapes(Arg, T, CallLike);
-          });
-    };
+    // (forEachArgumentBinding) of a callee with \p Roles: a VariadicArgument
+    // binding per variadic argument, a Parameter binding per declared
+    // parameter other than an initializing one -- none for a [[now_uninit]]
+    // or storage-release callee, whose parameters run the destroy rules
+    // instead -- and the mutable aliases each argument hands out.
+    auto AppendArgumentBindings =
+        [&](const Expr *CallLike,
+            const SemaProfiles::CalleeLifecycleRoles &Roles) {
+          bool ParamsDestroyed = Roles.DestroysPointerParams ||
+                                 Roles.ReleasesStorageTrusted ||
+                                 Roles.ReleasesStorageByName;
+          forEachArgumentBinding(
+              Ctx, CallLike,
+              [&](const ParmVarDecl *Parm, QualType T, const Expr *Arg,
+                  bool Variadic) {
+                SourceLocation Loc = Arg->IgnoreImplicit()->getExprLoc();
+                if (Variadic)
+                  AddBinding(K::VariadicArgument, Loc, /*TargetMarked=*/false,
+                             T, Arg, nullptr, CallLike);
+                else if (!ParamsDestroyed &&
+                         !(Parm && Roles.isInitializingParam(
+                                       Parm->getFunctionScopeIndex())))
+                  AddBinding(K::Parameter, Loc,
+                             Parm && Parm->hasAttr<RefToUninitAttr>(), T, Arg,
+                             nullptr, CallLike);
+                AppendAliasEscapes(Arg, T, CallLike);
+              });
+        };
     // A call of \p Callee (null when there is no declared callee) through
     // the call-like \p CallLike: its argument bindings and its lifecycle
     // effects.
@@ -3524,9 +3534,7 @@ static void extractStdInitEvents(
       SemaProfiles::CalleeLifecycleRoles Roles =
           Callee ? SemaProfiles::getCalleeLifecycleRoles(Callee)
                  : SemaProfiles::CalleeLifecycleRoles();
-      AppendArgumentBindings(CallLike, Roles.DestroysPointerParams ||
-                                           Roles.ReleasesStorageTrusted ||
-                                           Roles.ReleasesStorageByName);
+      AppendArgumentBindings(CallLike, Roles);
       appendLifecycleCallEvents(S, D, CallLike, Roles, Storage, BlockEvents,
                                 DSites, JudgedLeaves);
     };
@@ -3716,11 +3724,11 @@ static void extractStdInitEvents(
       } else if (const auto *CCE = dyn_cast<CXXConstructExpr>(St)) {
         // A constructor call's parameter bindings, the copy of a class object
         // out of tracked storage included.
-        AppendArgumentBindings(CCE, /*ParamsDestroyed=*/false);
+        AppendArgumentBindings(CCE, SemaProfiles::CalleeLifecycleRoles());
       } else if (const auto *ME = dyn_cast<ObjCMessageExpr>(St)) {
         // A message's parameter bindings; a method carries no lifecycle
         // attribute.
-        AppendArgumentBindings(ME, /*ParamsDestroyed=*/false);
+        AppendArgumentBindings(ME, SemaProfiles::CalleeLifecycleRoles());
       } else if (const auto *LE = dyn_cast<LambdaExpr>(St)) {
         if (Ctor)
           appendThisCaptureLambdaReadEvents(LE, Storage, StarThisCopyTrusted,
