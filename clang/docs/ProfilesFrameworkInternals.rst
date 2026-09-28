@@ -798,7 +798,10 @@ follows:
        a source with a flow-tracked leaf (``isFlowTrackedLeaf``) is left to
        the binding arms of ``extractStdInitEvents``, which derive the same
        kinds from the CFG's elements and judge each site against the flow
-       state (``judgeBindingSite``); ``classifyPointerGlvalue`` judges a
+       state (``judgeBindingSite``); the call and construction arms zip
+       arguments with parameters through one walk,
+       ``forEachArgumentBinding``, which the lifecycle arm
+       (``appendLifecycleCallEvents``) shares; ``classifyPointerGlvalue`` judges a
        reference-to-pointer binding by the pointer's value (a read-only
        alias) or not at all (a mutable alias); a defaulted argument is a
        Parameter binding at its declaration

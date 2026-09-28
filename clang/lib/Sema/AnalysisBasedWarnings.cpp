@@ -2808,9 +2808,82 @@ static LeafState formState(SemaProfiles::InitSourceState S) {
   llvm_unreachable("unknown InitSourceState");
 }
 
-/// The lifecycle effects of the call \p CE on the storage bound to its
-/// parameters (\p Roles, derived by the caller; \p ArgOffset skips a member
-/// operator's object argument). A [[now_init]] callee writes the storage
+/// Zip the arguments of the call-like expression \p CallLike with its callee's
+/// parameters and hand each pair to \p F: the parameter (null when no
+/// declaration carries it), the type the argument is bound as, the argument,
+/// and whether the argument is variadic (bound as its own type). A CallExpr
+/// skips a member operator's object argument (an explicit-object member
+/// declares it as parameter 0) and takes the parameter types from the
+/// prototype of a call with no declared callee; a CXXConstructExpr zips with
+/// its constructor. A defaulted argument, judged at its declaration, is
+/// skipped. A builtin with custom type checking binds nothing except
+/// __builtin_operator_new / __builtin_operator_delete, whose arguments bind
+/// type-only parameters. The one parameter walk behind every argument arm of
+/// extractStdInitEvents and appendLifecycleCallEvents.
+static void forEachArgumentBinding(
+    const ASTContext &Ctx, const Expr *CallLike,
+    llvm::function_ref<void(const ParmVarDecl *Parm, QualType ParamTy,
+                            const Expr *Arg, bool Variadic)>
+        F) {
+  // Zip \p Args with \p Params from parameter \p First on; an argument past
+  // the last parameter is variadic.
+  auto Zip = [&](ArrayRef<ParmVarDecl *> Params, unsigned First, auto &&Args) {
+    unsigned PI = First;
+    for (const Expr *Arg : Args) {
+      unsigned I = PI++;
+      if (isa<CXXDefaultArgExpr>(Arg))
+        continue;
+      if (I < Params.size())
+        F(Params[I], Params[I]->getType(), Arg, /*Variadic=*/false);
+      else
+        F(nullptr, Arg->getType(), Arg, /*Variadic=*/true);
+    }
+  };
+  if (const auto *CE = dyn_cast<CallExpr>(CallLike)) {
+    const FunctionDecl *Callee = CE->getDirectCallee();
+    if (unsigned ID = Callee ? Callee->getBuiltinID() : 0;
+        ID && Ctx.BuiltinInfo.hasCustomTypechecking(ID)) {
+      if (ID == Builtin::BI__builtin_operator_new ||
+          ID == Builtin::BI__builtin_operator_delete)
+        for (const Expr *Arg : CE->arguments())
+          F(nullptr, Arg->getType(), Arg, /*Variadic=*/false);
+      return;
+    }
+    unsigned ArgOffset = 0;
+    if (const auto *MD = dyn_cast_or_null<CXXMethodDecl>(Callee);
+        MD && isa<CXXOperatorCallExpr>(CE) &&
+        !MD->isExplicitObjectMemberFunction())
+      ArgOffset = 1;
+    auto Args = llvm::drop_begin(CE->arguments(), ArgOffset);
+    if (Callee) {
+      Zip(Callee->parameters(), 0, Args);
+      return;
+    }
+    QualType CalleeTy = CE->getCallee()->getType();
+    if (CalleeTy->isAnyPointerType() || CalleeTy->isBlockPointerType() ||
+        CalleeTy->isReferenceType())
+      CalleeTy = CalleeTy->getPointeeType();
+    const auto *Proto = CalleeTy->getAs<FunctionProtoType>();
+    if (!Proto)
+      return;
+    unsigned PI = 0;
+    for (const Expr *Arg : Args) {
+      unsigned I = PI++;
+      if (isa<CXXDefaultArgExpr>(Arg))
+        continue;
+      if (I < Proto->getNumParams())
+        F(nullptr, Proto->getParamType(I), Arg, /*Variadic=*/false);
+      else
+        F(nullptr, Arg->getType(), Arg, /*Variadic=*/true);
+    }
+  } else if (const auto *CCE = dyn_cast<CXXConstructExpr>(CallLike)) {
+    Zip(CCE->getConstructor()->parameters(), 0, CCE->arguments());
+  }
+}
+
+/// The lifecycle effects of the call-like \p CallLike on the storage bound to
+/// its parameters (\p Roles, derived by the caller; the pairs come from
+/// forEachArgumentBinding). A [[now_init]] callee writes the storage
 /// bound to each of its [[ref_to_uninit]] parameters (P4222R2 §6.2): a
 /// member passed as `&m` / `m`, the storage a marked pointer refers to
 /// passed as `p`, a decayed [[uninit]] array, an [[uninit]] local passed as
@@ -2831,11 +2904,12 @@ static LeafState formState(SemaProfiles::InitSourceState S) {
 /// is replay order -- so a dual-attributed reinitializer nets to assigned. A
 /// plain callee earns nothing. The bindings judged at this call precede
 /// these effects in the block, so they see the pre-call state.
-static void appendLifecycleCallEvents(
-    Sema &S, const Decl *D, const CallExpr *CE, const FunctionDecl *Callee,
-    const SemaProfiles::CalleeLifecycleRoles &Roles, unsigned ArgOffset,
-    const TrackedStorage &Storage, SmallVectorImpl<DefAssignEvent> &BlockEvents,
-    SmallVectorImpl<DestroySite> &DSites) {
+static void
+appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
+                          const SemaProfiles::CalleeLifecycleRoles &Roles,
+                          const TrackedStorage &Storage,
+                          SmallVectorImpl<DefAssignEvent> &BlockEvents,
+                          SmallVectorImpl<DestroySite> &DSites) {
   const auto *DC = cast<DeclContext>(D);
   // Resolve the leaves of \p Arg, bound to a parameter of type \p ParamTy
   // (SemaProfiles::bindingSourceOperand decides whether they are pointer
@@ -2883,11 +2957,11 @@ static void appendLifecycleCallEvents(
     for (const ArgLeaf &L : Leaves) {
       if (L.R.Entity) {
         if (!L.R.Subobject)
-          BlockEvents.push_back({Kind, *L.R.Entity, CE});
+          BlockEvents.push_back({Kind, *L.R.Entity, CallLike});
         continue;
       }
       for (unsigned Idx = L.Whole.first; Idx != L.Whole.second; ++Idx)
-        BlockEvents.push_back({Kind, Idx, CE});
+        BlockEvents.push_back({Kind, Idx, CallLike});
     }
   };
   // A [[now_uninit]] parameter's argument: one destroy site.
@@ -2917,16 +2991,17 @@ static void appendLifecycleCallEvents(
     if (!Site.Judged && Site.Affected.empty())
       return;
     DSites.push_back(std::move(Site));
-    BlockEvents.push_back(
-        {DefAssignEventKind::Destroy, 0, CE, (unsigned)(DSites.size() - 1)});
+    BlockEvents.push_back({DefAssignEventKind::Destroy, 0, CallLike,
+                           (unsigned)(DSites.size() - 1)});
   };
   auto ForEachParam =
       [&](llvm::function_ref<void(const ParmVarDecl *, const Expr *)> F) {
-        for (unsigned PI = 0, NP = Callee->getNumParams(); PI != NP; ++PI) {
-          if (PI + ArgOffset >= CE->getNumArgs())
-            break;
-          F(Callee->getParamDecl(PI), CE->getArg(PI + ArgOffset));
-        }
+        forEachArgumentBinding(S.Context, CallLike,
+                               [&](const ParmVarDecl *P, QualType,
+                                   const Expr *Arg, bool Variadic) {
+                                 if (P && !Variadic)
+                                   F(P, Arg);
+                               });
       };
   if (Roles.DestroysPointerParams || Roles.ReleasesStorageTrusted)
     ForEachParam([&](const ParmVarDecl *P, const Expr *Arg) {
@@ -3389,6 +3464,28 @@ static void extractStdInitEvents(
                                      : DefAssignEventKind::ReadThrough,
                              0, At, (unsigned)(ASites.size() - 1)});
     };
+    // The argument bindings of the call-like \p CallLike
+    // (forEachArgumentBinding): a Parameter binding per declared parameter
+    // unless \p ParamsDestroyed (a [[now_uninit]] or storage-release callee's
+    // parameters run the destroy rules instead), a VariadicArgument binding
+    // per variadic argument, and the mutable aliases either hands out.
+    auto AppendArgumentBindings = [&](const Expr *CallLike,
+                                      bool ParamsDestroyed) {
+      forEachArgumentBinding(
+          Ctx, CallLike,
+          [&](const ParmVarDecl *Parm, QualType T, const Expr *Arg,
+              bool Variadic) {
+            SourceLocation Loc = Arg->IgnoreImplicit()->getExprLoc();
+            if (Variadic)
+              AddBinding(K::VariadicArgument, Loc, /*TargetMarked=*/false, T,
+                         Arg, nullptr, CallLike);
+            else if (!ParamsDestroyed)
+              AddBinding(K::Parameter, Loc,
+                         Parm && Parm->hasAttr<RefToUninitAttr>(), T, Arg,
+                         nullptr, CallLike);
+            AppendAliasEscapes(Arg, T, CallLike);
+          });
+    };
     // The element bindings of an aggregate initializer of type \p T: each
     // pointer or reference field of a record (the bases consume the leading
     // initializers, unnamed bit-fields none) is a member binding, each
@@ -3530,23 +3627,17 @@ static void extractStdInitEvents(
                     /*ReseatSource=*/nullptr);
       } else if (const auto *CE = dyn_cast<CallExpr>(St)) {
         const FunctionDecl *Callee = CE->getDirectCallee();
-        // Zip declared parameters with arguments. A member operator called
-        // through CXXOperatorCallExpr receives the object as argument 0
-        // ahead of its declared parameters -- for a C++23 static operator
-        // too, whose object argument is still evaluated -- so skip it. An
-        // explicit-object member function instead declares its object as
-        // parameter 0, so its mapping is already direct.
-        unsigned ArgOffset = 0;
+        // A member operator called through CXXOperatorCallExpr receives the
+        // object as argument 0 -- for a C++23 static operator too, whose
+        // object argument is evaluated but binds no parameter.
         const CXXMethodDecl *ObjectMethod = nullptr;
         const Expr *Object = nullptr;
         if (isa<CXXOperatorCallExpr>(CE)) {
           if (const auto *MD = dyn_cast_or_null<CXXMethodDecl>(Callee);
-              MD && !MD->isExplicitObjectMemberFunction()) {
-            ArgOffset = 1;
-            if (!MD->isStatic() && CE->getNumArgs() > 0) {
-              ObjectMethod = MD;
-              Object = CE->getArg(0);
-            }
+              MD && !MD->isExplicitObjectMemberFunction() && !MD->isStatic() &&
+              CE->getNumArgs() > 0) {
+            ObjectMethod = MD;
+            Object = CE->getArg(0);
           }
         } else if (const auto *MCE = dyn_cast<CXXMemberCallExpr>(CE)) {
           if (const CXXMethodDecl *MD = MCE->getMethodDecl();
@@ -3567,88 +3658,18 @@ static void extractStdInitEvents(
           AddBinding(K::ObjectArgument, Object->IgnoreImplicit()->getExprLoc(),
                      /*TargetMarked=*/false, T, Object, ObjectMethod, CE);
         }
-        QualType CalleeTy = CE->getCallee()->getType();
-        if (CalleeTy->isAnyPointerType() || CalleeTy->isBlockPointerType() ||
-            CalleeTy->isReferenceType())
-          CalleeTy = CalleeTy->getPointeeType();
-        const auto *Proto = CalleeTy->getAs<FunctionProtoType>();
-        // A builtin with custom type checking has no parameter list to zip:
-        // __builtin_operator_new / __builtin_operator_delete resolve to a
-        // usual allocation or deallocation function and copy-initialize
-        // their arguments into its parameters (type-only entities, so
-        // nothing carries the marker), every other one converts its
-        // arguments itself and binds nothing. A defaulted argument was
-        // judged when its CXXDefaultArgExpr was built; a call with no
-        // declared callee (through a function pointer) has parameter types
-        // but no declaration to carry the marker.
-        unsigned BuiltinID = Callee ? Callee->getBuiltinID() : 0;
-        bool CustomBuiltin =
-            BuiltinID && Ctx.BuiltinInfo.hasCustomTypechecking(BuiltinID);
         SemaProfiles::CalleeLifecycleRoles Roles =
             Callee ? SemaProfiles::getCalleeLifecycleRoles(Callee)
                    : SemaProfiles::CalleeLifecycleRoles();
-        // A [[now_uninit]] or storage-release callee's parameter runs the
-        // destroy rules instead of the binding check.
-        bool DestroyOrRelease = Roles.DestroysPointerParams ||
-                                Roles.ReleasesStorageTrusted ||
-                                Roles.ReleasesStorageByName;
-        if (CustomBuiltin) {
-          if (BuiltinID == Builtin::BI__builtin_operator_new ||
-              BuiltinID == Builtin::BI__builtin_operator_delete)
-            for (const Expr *Arg : CE->arguments()) {
-              AddBinding(K::Parameter, Arg->IgnoreImplicit()->getExprLoc(),
-                         /*TargetMarked=*/false, Arg->getType(), Arg, nullptr,
-                         CE);
-              AppendAliasEscapes(Arg, Arg->getType(), CE);
-            }
-        } else if (Callee || Proto) {
-          unsigned NP = Callee ? Callee->getNumParams() : Proto->getNumParams();
-          for (unsigned I = ArgOffset, N = CE->getNumArgs(); I != N; ++I) {
-            const Expr *Arg = CE->getArg(I);
-            if (isa<CXXDefaultArgExpr>(Arg))
-              continue;
-            unsigned PI = I - ArgOffset;
-            if (PI < NP) {
-              const ParmVarDecl *Parm =
-                  Callee ? Callee->getParamDecl(PI) : nullptr;
-              QualType T = Parm ? Parm->getType() : Proto->getParamType(PI);
-              if (!DestroyOrRelease)
-                AddBinding(K::Parameter, Arg->IgnoreImplicit()->getExprLoc(),
-                           Parm && Parm->hasAttr<RefToUninitAttr>(), T, Arg,
-                           nullptr, CE);
-              AppendAliasEscapes(Arg, T, CE);
-            } else {
-              AddBinding(
-                  K::VariadicArgument, Arg->IgnoreImplicit()->getExprLoc(),
-                  /*TargetMarked=*/false, Arg->getType(), Arg, nullptr, CE);
-              AppendAliasEscapes(Arg, Arg->getType(), CE);
-            }
-          }
-        }
-        if (Callee)
-          appendLifecycleCallEvents(S, D, CE, Callee, Roles, ArgOffset, Storage,
-                                    BlockEvents, DSites);
+        AppendArgumentBindings(CE, Roles.DestroysPointerParams ||
+                                       Roles.ReleasesStorageTrusted ||
+                                       Roles.ReleasesStorageByName);
+        appendLifecycleCallEvents(S, D, CE, Roles, Storage, BlockEvents,
+                                  DSites);
       } else if (const auto *CCE = dyn_cast<CXXConstructExpr>(St)) {
         // A constructor call's parameter bindings, the copy of a class object
         // out of tracked storage included.
-        const CXXConstructorDecl *CD = CCE->getConstructor();
-        for (unsigned I = 0, N = CCE->getNumArgs(); I != N; ++I) {
-          const Expr *Arg = CCE->getArg(I);
-          if (isa<CXXDefaultArgExpr>(Arg))
-            continue;
-          if (I < CD->getNumParams()) {
-            const ParmVarDecl *Parm = CD->getParamDecl(I);
-            AddBinding(K::Parameter, Arg->IgnoreImplicit()->getExprLoc(),
-                       Parm->hasAttr<RefToUninitAttr>(), Parm->getType(), Arg,
-                       nullptr, CCE);
-            AppendAliasEscapes(Arg, Parm->getType(), CCE);
-          } else {
-            AddBinding(K::VariadicArgument, Arg->IgnoreImplicit()->getExprLoc(),
-                       /*TargetMarked=*/false, Arg->getType(), Arg, nullptr,
-                       CCE);
-            AppendAliasEscapes(Arg, Arg->getType(), CCE);
-          }
-        }
+        AppendArgumentBindings(CCE, /*ParamsDestroyed=*/false);
       } else if (const auto *LE = dyn_cast<LambdaExpr>(St)) {
         if (Ctor)
           appendThisCaptureLambdaReadEvents(LE, Storage, StarThisCopyTrusted,
