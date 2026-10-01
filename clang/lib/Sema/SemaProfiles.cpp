@@ -2546,6 +2546,10 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
   const auto *Parm = dyn_cast_or_null<ParmVarDecl>(Target);
   const auto *Callee =
       Parm ? dyn_cast<FunctionDecl>(Parm->getDeclContext()) : nullptr;
+  // A builtin that never evaluates its arguments binds nothing.
+  if (unsigned ID = Callee ? Callee->getBuiltinID() : 0;
+      ID && getASTContext().BuiltinInfo.isUnevaluated(ID))
+    return;
   // The callee's lifecycle roles (see CalleeLifecycleRoles).
   CalleeLifecycleRoles Roles =
       Callee ? getCalleeLifecycleRoles(Callee) : CalleeLifecycleRoles();

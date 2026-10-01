@@ -303,3 +303,12 @@ void test_builtin_operator_delete_gap(int *p [[ref_to_uninit]]) {
   __builtin_operator_delete(p); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}} \
                                 // nobuiltin-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 }
+
+// A builtin that never evaluates its arguments binds none
+void test_unevaluated_builtin_arguments() {
+  int arr [[uninit]] [4];
+  (void)__builtin_object_size(arr, 0);         // OK
+  (void)__builtin_dynamic_object_size(arr, 0); // OK
+  int *p [[ref_to_uninit]] = (int *)malloc(4);
+  (void)__builtin_object_size(p, 0); // OK
+}

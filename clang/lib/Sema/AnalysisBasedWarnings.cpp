@@ -2823,7 +2823,8 @@ static LeafState formState(SemaProfiles::InitSourceState S) {
 /// copy-initialized). A defaulted argument, judged at its declaration, is
 /// skipped. A builtin with custom type checking binds nothing except
 /// __builtin_operator_new / __builtin_operator_delete, whose arguments bind
-/// type-only parameters. The one parameter walk behind every argument arm of
+/// type-only parameters, and a builtin that never evaluates its arguments
+/// binds nothing. The one parameter walk behind every argument arm of
 /// extractStdInitEvents and appendLifecycleCallEvents.
 static void forEachArgumentBinding(
     const ASTContext &Ctx, const Expr *CallLike,
@@ -2854,6 +2855,8 @@ static void forEachArgumentBinding(
           F(nullptr, Arg->getType(), Arg, /*Variadic=*/false);
       return;
     }
+    if (CE->isUnevaluatedBuiltinCall(Ctx))
+      return;
     unsigned ArgOffset = 0;
     if (const auto *MD = dyn_cast_or_null<CXXMethodDecl>(Callee);
         MD && isa<CXXOperatorCallExpr>(CE) &&
