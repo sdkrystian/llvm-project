@@ -391,7 +391,9 @@ Following the paper:
 recognized regardless of ``-fprofiles`` (see the :doc:`AttributeReference`
 entries for their placement rules); the rules below carry weight only while
 ``std::init`` is enforced.  Reads and writes of ``std::byte`` objects are
-exempt from all of them (§4.5).
+exempt from all of them (§4.5), and a read of a ``std::nullptr_t`` object,
+which accesses no storage ([conv.lval]p3), is never a read of uninitialized
+memory.
 
 **Marker placement.**  The marker family -- ``[[uninit]]``,
 ``[[ref_to_uninit]]``, ``[[now_init]]``, and ``[[now_uninit]]`` --

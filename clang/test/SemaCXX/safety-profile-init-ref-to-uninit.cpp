@@ -4145,3 +4145,14 @@ void test_function_value_not_uninit() {
   int *r = fnval_alloc(); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   (void)fp1; (void)fp2; (void)v; (void)r;
 }
+
+// A read of a std::nullptr_t object accesses no storage
+// no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+[[profiles::suppress(std::init, rule: "static_marker")]] decltype(nullptr) *g_nullptr_marked [[ref_to_uninit]];
+void test_nullptr_read(decltype(nullptr) *np [[ref_to_uninit]]) {
+  decltype(nullptr) n [[uninit]];
+  int *a = n;                 // OK
+  int *b = *np;               // OK
+  int *c = *g_nullptr_marked; // OK
+  (void)a; (void)b; (void)c;
+}

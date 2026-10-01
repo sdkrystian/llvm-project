@@ -2649,8 +2649,10 @@ void SemaProfiles::checkInitProfileReadThrough(SourceLocation Loc,
   // "Check Sites").
   if (Glvalue->isInstantiationDependent())
     return;
-  // P4222R2 §4.6: reading an uninitialized std::byte is permitted.
-  if (getASTContext().getBaseElementType(ValueType)->isStdByteType())
+  // P4222R2 §4.6: reading an uninitialized std::byte is permitted. Reading a
+  // std::nullptr_t accesses no storage ([conv.lval]p3).
+  if (getASTContext().getBaseElementType(ValueType)->isStdByteType() ||
+      ValueType->isNullPtrType())
     return;
   // A read with a flow-tracked leaf is the CFG pass's (its ReadThrough
   // sites), judged against the flow state at its program point.
