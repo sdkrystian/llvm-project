@@ -731,7 +731,8 @@ element it decomposes, marker included, so after ``auto [a, b] = s;`` a use
 of ``b`` is judged by the marking of the field it names.  For the copy, the escape is the paper's
 own (§7.2): declare the copy constructor's parameter ``[[ref_to_uninit]]``.
 Positions that cannot carry the marker -- a variadic argument, a parameter of
-a function called through a function pointer, the implicit object parameter,
+a function called through a function pointer or a pointer to member
+function, the implicit object parameter,
 a pointer element of an array in aggregate initialization
 -- are checked as unmarked targets; suppress at the call site if the flow is
 intended.  A reference to a *const* pointer, or an rvalue reference to a

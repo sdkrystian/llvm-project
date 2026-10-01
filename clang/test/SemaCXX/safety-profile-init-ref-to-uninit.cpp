@@ -4041,6 +4041,15 @@ void test_now_init_credit_after_redecl() {
   ni_sink(&u);              // OK: the [[now_init]] callee initialized u
 }
 
+// A call through a pointer to member function binds its unmarked parameters
+struct PmfTarget { void take(int *); };
+void test_pointer_to_member_call(PmfTarget s, void (PmfTarget::*pm)(int *)) {
+  int u [[uninit]];
+  (s.*pm)(&u); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  u = 1;
+  (s.*pm)(&u); // OK
+}
+
 // A marked function's [[ref_to_uninit]] describes its *return value*: the
 // function's own decayed pointer value is not uninitialized memory, so
 // binding it to an (unmarkable) function pointer -- or casting it to void*

@@ -2814,7 +2814,8 @@ static LeafState formState(SemaProfiles::InitSourceState S) {
 /// and whether the argument is variadic (bound as its own type). A CallExpr
 /// skips a member operator's object argument (an explicit-object member
 /// declares it as parameter 0) and takes the parameter types from the
-/// prototype of a call with no declared callee; a CXXConstructExpr zips with
+/// prototype of a call with no declared callee (through a function pointer or
+/// a pointer to member function); a CXXConstructExpr zips with
 /// its constructor. A defaulted argument, judged at its declaration, is
 /// skipped. A builtin with custom type checking binds nothing except
 /// __builtin_operator_new / __builtin_operator_delete, whose arguments bind
@@ -2860,10 +2861,13 @@ static void forEachArgumentBinding(
       return;
     }
     QualType CalleeTy = CE->getCallee()->getType();
-    if (CalleeTy->isAnyPointerType() || CalleeTy->isBlockPointerType() ||
-        CalleeTy->isReferenceType())
+    if (CalleeTy->isSpecificPlaceholderType(BuiltinType::BoundMember))
+      CalleeTy = Expr::findBoundMemberType(CE->getCallee());
+    else if (CalleeTy->isAnyPointerType() || CalleeTy->isBlockPointerType() ||
+             CalleeTy->isReferenceType())
       CalleeTy = CalleeTy->getPointeeType();
-    const auto *Proto = CalleeTy->getAs<FunctionProtoType>();
+    const auto *Proto =
+        CalleeTy.isNull() ? nullptr : CalleeTy->getAs<FunctionProtoType>();
     if (!Proto)
       return;
     unsigned PI = 0;
