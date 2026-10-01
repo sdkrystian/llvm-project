@@ -601,6 +601,12 @@ private:
   /// not be initialized yet.
   bool thisIsUnderConstruction() const;
 
+  /// True while a default argument or default member initializer is rebuilt
+  /// for one of its uses -- in an aggregate initialization, or for an
+  /// immediate invocation or source-location builtin inside it: the std::init
+  /// checks judged it where it was written.
+  bool rebuildingDefaultArgOrInit() const;
+
   /// std::init / ref_to_uninit (P4222R2 §4.2-§4.3): judge binding \p Src as
   /// \p T to \p Target -- null for a construct with no declaration to carry
   /// the marker -- against the target's marking: a marked target must refer

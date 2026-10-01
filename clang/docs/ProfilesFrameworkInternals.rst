@@ -757,7 +757,8 @@ follows:
        doubling the engine state and touching the enqueue-skip invariant);
        ``checkInitProfileReadThrough`` at the lvalue-to-rvalue chokepoint,
        plus compound-assignment and increment/decrement hooks, for a
-       glvalue with no flow-tracked leaf; the ReadThrough sites of
+       glvalue with no flow-tracked leaf (a rebuilt default argument or
+       initializer is skipped, as for ``ref_to_uninit``); the ReadThrough sites of
        ``extractStdInitEvents`` (``judgeAccessSite``, suppressed by
        ``May``) otherwise
    * - ``uninit_decl``

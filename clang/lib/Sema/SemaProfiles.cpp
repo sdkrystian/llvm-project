@@ -1973,6 +1973,12 @@ static void diagnoseBindingVerdict(SemaProfiles &SP,
   }
 }
 
+bool SemaProfiles::rebuildingDefaultArgOrInit() const {
+  return SemaRef.needsRebuildOfDefaultArgOrInit() ||
+         SemaRef.currentEvaluationContext()
+             .DelayedDefaultInitializationContext.has_value();
+}
+
 bool SemaProfiles::thisIsUnderConstruction() const {
   // The enclosing non-lambda context: a constructor (body or
   // mem-initializer), or the class itself while a default member initializer
@@ -2000,7 +2006,7 @@ void SemaProfiles::checkInitProfileBinding(const InitializedEntity &Entity,
     return;
   // A SFINAE trap is not a use, and a default argument or initializer
   // rebuilt for a nested use was judged where it was written.
-  if (SemaRef.isSFINAEContext() || SemaRef.needsRebuildOfDefaultArgOrInit())
+  if (SemaRef.isSFINAEContext() || rebuildingDefaultArgOrInit())
     return;
   if (Entity.isImplicitMemberInitializer())
     return;
@@ -2109,8 +2115,10 @@ void SemaProfiles::judgeInitProfileBinding(InitBindingKind Kind,
                                            const NamedDecl *Subject) {
   bool IsReference = T->isReferenceType();
   // A RecoveryExpr is a placeholder for an initialization that already failed,
-  // not a source the user wrote, so it must not drive this rule.
-  if (!Src || isa<RecoveryExpr>(Src->IgnoreParens()))
+  // not a source the user wrote, so it must not drive this rule. A rebuilt
+  // default argument or initializer was judged where it was written.
+  if (!Src || isa<RecoveryExpr>(Src->IgnoreParens()) ||
+      rebuildingDefaultArgOrInit())
     return;
   // A source with a flow-tracked leaf is the CFG pass's: judged at its
   // program point, on each instantiation's own CFG (see
@@ -2452,7 +2460,8 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
                                            const ValueDecl *Target, QualType T,
                                            const Expr *Src, const Decl *D) {
   if (!isProfileLive("std::init") || T.isNull() || T->isDependentType() ||
-      (!T->isPointerType() && !T->isReferenceType()))
+      (!T->isPointerType() && !T->isReferenceType()) ||
+      rebuildingDefaultArgOrInit())
     return;
   bool TargetMarked = Target && Target->hasAttr<RefToUninitAttr>() &&
                       bindingTargetCanCarryMarker(Kind);
@@ -2631,8 +2640,10 @@ void SemaProfiles::checkInitProfileReadThrough(SourceLocation Loc,
   if (!isProfileLive("std::init"))
     return;
   // A RecoveryExpr is a placeholder for an expression that already failed, not
-  // a read the user wrote, so it must not drive this rule.
-  if (!Glvalue || isa<RecoveryExpr>(Glvalue->IgnoreParens()))
+  // a read the user wrote, so it must not drive this rule. A rebuilt default
+  // argument or initializer was judged where it was written.
+  if (!Glvalue || isa<RecoveryExpr>(Glvalue->IgnoreParens()) ||
+      rebuildingDefaultArgOrInit())
     return;
   // The expression-check template policy (ProfilesFrameworkInternals.rst,
   // "Check Sites").
@@ -2662,8 +2673,10 @@ void SemaProfiles::checkInitProfileSubobjectWrite(SourceLocation Loc,
   if (!isProfileLive("std::init"))
     return;
   // A RecoveryExpr is a placeholder for an expression that already failed, not
-  // a store the user wrote, so it must not drive this rule.
-  if (!LHS || isa<RecoveryExpr>(LHS->IgnoreParens()))
+  // a store the user wrote, so it must not drive this rule. A rebuilt default
+  // argument or initializer was judged where it was written.
+  if (!LHS || isa<RecoveryExpr>(LHS->IgnoreParens()) ||
+      rebuildingDefaultArgOrInit())
     return;
   // The expression-check template policy (ProfilesFrameworkInternals.rst,
   // "Check Sites").

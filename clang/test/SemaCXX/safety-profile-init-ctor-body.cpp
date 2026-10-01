@@ -1099,3 +1099,22 @@ struct TryCtorOk {
     }
   }
 };
+
+// A default member initializer rebuilt at its use is not judged again there
+consteval int rebuild_ce() { return 1; }
+struct RebuiltInit {
+  int m [[uninit]];
+  int y = m + __builtin_LINE();
+  int z = (m = 1) + rebuild_ce();
+  RebuiltInit() : m(1) {}
+};
+struct RebuiltAggregate {
+  int m [[uninit]];
+  int y = m + __builtin_LINE();
+  void g();
+};
+void RebuiltAggregate::g() {
+  m = 1;
+  RebuiltAggregate a{};
+  (void)a;
+}
