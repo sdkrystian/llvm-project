@@ -904,7 +904,35 @@ program points through the shared violation gate.  The parse-time checks and
 the pass split the work by one predicate, ``SemaProfiles::isFlowTrackedLeaf``:
 a binding, destroy, read, or store with a tracked leaf is the pass's,
 everything else -- and everything outside a function body -- is judged at
-parse time without flow state.  The pass's resolver
+parse time without flow state.  Each deferral is recorded
+(``SemaProfiles::DeferredInitSite``) under the check's *analysis owner*: the
+function, method, or block whose flow pass judges it -- the innermost one
+enclosing the check, looking through OpenMP captured regions, whose
+statements are elements of the enclosing function's CFG
+(``SemaProfiles::flowAnalysisOwner``).  After the pass, every recorded site
+must have produced a Binding, Destroy, ReadThrough, or SubobjectWrite site
+on one of its tracked leaves (``verifyDeferredInitSites``).  A leftover none
+of whose leaves is an element of the engine's CFG lies in code the CFG does
+not contain -- an argument of a builtin that does not evaluate it or of a
+side-effecting ``__builtin_assume``, a ``[[assume]]`` assumption, an
+unselected ``_Generic`` association or ``__builtin_choose_expr`` arm, an
+OpenMP clause, a coroutine's parameter copies and promise construction, or a
+body whose CFG cannot be built -- and is dropped.  So is a leftover below a
+construct the CFG contains but the engine does not enumerate
+(``collectUnenumeratedExprs``): an argument of a builtin with custom type
+checking, an atomic builtin's operand, and an Objective-C boxed expression's
+operand.  Neither side judges such a check, which is a known gap.  Any other
+leftover is an enumeration bug: an assertion failure in an asserting build,
+judged by form otherwise.  The record is verification only, never the
+source of the pass's sites: TreeTransform reuses non-dependent nodes, which
+never re-enter the funnels, so the CFG derivation stays authoritative and
+the invariant checked is that recorded sites are a subset of judged ones.  A
+site is recorded only where the pass can see it -- a potentially-evaluated,
+non-discarded, non-immediate, non-dependent context inside a body other than
+a defaulted function's -- and the record of a body whose pass does not run
+is dropped (``Sema::PopFunctionScopeInfo``), as is that of a body with an
+error that is not a profile violation, whose recovery can discard the
+recorded expressions.  The pass's resolver
 (``TrackedStorage::resolve``) and the predicate share one lvalue-shape walk,
 ``SemaProfiles::flowLeafShape``, so no binding falls between the two.  A
 templated body is never analyzed; each instantiation is analyzed on its own

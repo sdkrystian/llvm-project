@@ -2595,7 +2595,13 @@ Sema::PopFunctionScopeInfo(const AnalysisBasedWarnings::Policy *WP, Decl *D,
   // Issue any analysis-based warnings.
   if (WP && D) {
     inferNoReturnAttr(*this, D);
+    // Error recovery can discard the expressions a std::init check deferred to
+    // the flow pass was recorded on.
+    if (Scope->hasUnrecoverableErrorOccurred())
+      Profiles().discardDeferredInitSites(D);
     AnalysisWarnings.IssueWarnings(*WP, Scope.get(), D, BlockType);
+    // The std::init checks deferred to a flow pass that did not run.
+    Profiles().discardDeferredInitSites(D);
   } else
     for (const auto &PUD : Scope->PossiblyUnreachableDiags)
       Diag(PUD.Loc, PUD.PD);

@@ -2919,13 +2919,15 @@ static void forEachArgumentBinding(
 /// destroyed). Destroys and kills are appended before writes -- append order
 /// is replay order -- so a dual-attributed reinitializer nets to assigned. A
 /// plain callee earns nothing. The bindings judged at this call precede
-/// these effects in the block, so they see the pre-call state.
+/// these effects in the block, so they see the pre-call state. A judged
+/// destroy site's flow-tracked leaves are added to \p JudgedLeaves.
 static void
 appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
                           const SemaProfiles::CalleeLifecycleRoles &Roles,
                           const TrackedStorage &Storage,
                           SmallVectorImpl<DefAssignEvent> &BlockEvents,
-                          SmallVectorImpl<DestroySite> &DSites) {
+                          SmallVectorImpl<DestroySite> &DSites,
+                          llvm::SmallPtrSetImpl<const Expr *> &JudgedLeaves) {
   const auto *DC = cast<DeclContext>(D);
   // Resolve the leaves of \p Arg, bound to a parameter of type \p ParamTy
   // (SemaProfiles::bindingSourceOperand decides whether they are pointer
@@ -2936,6 +2938,7 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
     const Expr *E;
     TrackedStorage::Resolution R;
     std::pair<unsigned, unsigned> Whole{0, 0};
+    bool Tracked = false;
   };
   auto ResolveArg = [&](const Expr *Arg, QualType ParamTy,
                         SmallVectorImpl<ArgLeaf> &Leaves) {
@@ -2948,8 +2951,9 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
     SemaProfiles::forEachTargetLeaf(
         Operand, [&](const Expr *Leaf) {
           ArgLeaf L{Leaf, Storage.resolveFlowLeaf(Leaf, AsPointerValue)};
-          AnyTracked |= SemaProfiles::isFlowTrackedLeaf(S.Context, Leaf,
-                                                        AsPointerValue, DC);
+          L.Tracked = SemaProfiles::isFlowTrackedLeaf(S.Context, Leaf,
+                                                      AsPointerValue, DC);
+          AnyTracked |= L.Tracked;
           if (!L.R.Entity) {
             const Expr *G = SemaProfiles::ignoreTransparentCasts(Leaf);
             if (const auto *AddrOf = dyn_cast<UnaryOperator>(G);
@@ -2991,6 +2995,8 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
     Site.Judged = ResolveArg(Arg, PT, Leaves);
     Site.Conditional = Leaves.size() > 1;
     for (const ArgLeaf &L : Leaves) {
+      if (L.Tracked)
+        JudgedLeaves.insert(L.E);
       BindingLeaf Leaf;
       if (L.R.Entity) {
         Leaf.Entity = L.R.Entity;
@@ -3175,13 +3181,15 @@ static void collectCtorBodyStmts(const CXXConstructorDecl *Ctor,
 /// Current-object events of a constructor (\p Ctor non-null) come from the
 /// constructor body and its written initializers only. \p cfg is the engine's
 /// own, fully linearized CFG (runStdInitMemberReadChecks), so every statement
-/// class has an element.
+/// class has an element. The flow-tracked leaves of every Binding, Destroy,
+/// ReadThrough, and SubobjectWrite site go to \p JudgedLeaves.
 static void extractStdInitEvents(
     Sema &S, const Decl *D, const CFG &cfg, const TrackedStorage &Storage,
     const CXXConstructorDecl *Ctor, bool StarThisCopyTrusted,
     std::vector<SmallVector<DefAssignEvent, 4>> &Events,
     SmallVectorImpl<BindingSite> &Sites, SmallVectorImpl<DestroySite> &DSites,
-    SmallVectorImpl<AccessSite> &ASites) {
+    SmallVectorImpl<AccessSite> &ASites,
+    llvm::SmallPtrSetImpl<const Expr *> &JudgedLeaves) {
   using K = SemaProfiles::InitBindingKind;
   ASTContext &Ctx = S.Context;
   const auto *DC = cast<DeclContext>(D);
@@ -3410,6 +3418,7 @@ static void extractStdInitEvents(
         BindingLeaf L;
         if (SemaProfiles::isFlowTrackedLeaf(Ctx, Leaf, AsPointerValue, DC)) {
           AnyTracked = true;
+          JudgedLeaves.insert(Leaf);
           TrackedStorage::Resolution R =
               Storage.resolveFlowLeaf(Leaf, AsPointerValue);
           L.Entity = R.Entity;
@@ -3443,6 +3452,7 @@ static void extractStdInitEvents(
             if (SemaProfiles::isFlowTrackedLeaf(Ctx, Leaf,
                                                 /*AsPointerValue=*/false, DC)) {
               AnyTracked = true;
+              JudgedLeaves.insert(Leaf);
               TrackedStorage::Resolution R =
                   Storage.resolveFlowLeaf(Leaf, /*AsPointerValue=*/false);
               if (R.Entity) {
@@ -3515,7 +3525,7 @@ static void extractStdInitEvents(
                                            Roles.ReleasesStorageTrusted ||
                                            Roles.ReleasesStorageByName);
       appendLifecycleCallEvents(S, D, CallLike, Roles, Storage, BlockEvents,
-                                DSites);
+                                DSites, JudgedLeaves);
     };
     // The element bindings of an aggregate initializer of type \p T: each
     // pointer or reference field of a record (the bases consume the leading
@@ -4062,6 +4072,93 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
   }
 }
 
+/// Add to \p Out every expression below a construct of \p D's body that the
+/// CFG contains and the parse-time funnels check but the std::init flow engine
+/// does not enumerate: an argument of a builtin with custom type checking
+/// (other than __builtin_operator_new and __builtin_operator_delete, which
+/// forEachArgumentBinding zips), an atomic builtin's operand, and an
+/// Objective-C boxed expression's operand. A deferred check below one is a
+/// known gap (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage
+/// (std::init)").
+static void collectUnenumeratedExprs(const ASTContext &Ctx, const Decl *D,
+                                     llvm::SmallPtrSetImpl<const Expr *> &Out) {
+  auto AddSubtree = [&](const Stmt *Root) {
+    SmallVector<const Stmt *, 16> Stack(1, Root);
+    while (!Stack.empty()) {
+      const Stmt *Cur = Stack.pop_back_val();
+      if (!Cur)
+        continue;
+      if (const auto *E = dyn_cast<Expr>(Cur))
+        Out.insert(E);
+      llvm::append_range(Stack, Cur->children());
+    }
+  };
+  SmallVector<const Stmt *, 32> Stack(1, D->getBody());
+  if (const auto *Ctor = dyn_cast<CXXConstructorDecl>(D))
+    for (const CXXCtorInitializer *Init : Ctor->inits())
+      if (Init->isWritten())
+        Stack.push_back(Init->getInit());
+  while (!Stack.empty()) {
+    const Stmt *Cur = Stack.pop_back_val();
+    if (!Cur)
+      continue;
+    if (const auto *CE = dyn_cast<CallExpr>(Cur)) {
+      unsigned ID = CE->getBuiltinCallee();
+      if (ID && Ctx.BuiltinInfo.hasCustomTypechecking(ID) &&
+          ID != Builtin::BI__builtin_operator_new &&
+          ID != Builtin::BI__builtin_operator_delete)
+        for (const Expr *Arg : CE->arguments())
+          AddSubtree(Arg);
+    } else if (isa<AtomicExpr, ObjCBoxedExpr>(Cur)) {
+      for (const Stmt *Child : Cur->children())
+        AddSubtree(Child);
+    }
+    llvm::append_range(Stack, Cur->children());
+  }
+}
+
+/// Account for the checks the parse-time funnels deferred to the flow pass
+/// over \p D (SemaProfiles::DeferredInitSite): a site none of whose tracked
+/// leaves is in \p Judged is a leftover. A leftover none of whose leaves is
+/// an element of \p cfg -- null when the CFG could not be built -- lies in
+/// code the CFG does not contain (an unevaluated builtin argument, a
+/// coroutine's parameter copies, an unselected _Generic association) and is
+/// dropped, as is one below a construct the engine does not enumerate
+/// (collectUnenumeratedExprs). Any other leftover is an enumeration bug: an
+/// assertion failure, and judged by form in a release build.
+static void verifyDeferredInitSites(
+    Sema &S, const Decl *D, ArrayRef<SemaProfiles::DeferredInitSite> Deferred,
+    const CFG *cfg, const llvm::SmallPtrSetImpl<const Expr *> &Judged) {
+  if (!cfg)
+    return;
+  SmallVector<const SemaProfiles::DeferredInitSite *, 4> Leftover;
+  for (const SemaProfiles::DeferredInitSite &Site : Deferred)
+    if (llvm::none_of(Site.TrackedLeaves,
+                      [&](const Expr *Leaf) { return Judged.contains(Leaf); }))
+      Leftover.push_back(&Site);
+  if (Leftover.empty())
+    return;
+  llvm::SmallPtrSet<const Stmt *, 32> Elements;
+  for (const CFGBlock *B : *cfg)
+    for (const CFGElement &Elem : *B)
+      if (auto CS = Elem.getAs<CFGStmt>())
+        Elements.insert(CS->getStmt());
+  llvm::SmallPtrSet<const Expr *, 32> Unenumerated;
+  collectUnenumeratedExprs(S.Context, D, Unenumerated);
+  llvm::erase_if(Leftover, [&](const SemaProfiles::DeferredInitSite *Site) {
+    return llvm::none_of(
+               Site->TrackedLeaves,
+               [&](const Expr *Leaf) { return Elements.contains(Leaf); }) ||
+           llvm::any_of(Site->TrackedLeaves, [&](const Expr *Leaf) {
+             return Unenumerated.contains(Leaf);
+           });
+  });
+  assert(Leftover.empty() &&
+         "std::init check deferred to the flow engine was never judged");
+  for (const SemaProfiles::DeferredInitSite *Site : Leftover)
+    S.Profiles().judgeDeferredInitSiteByForm(*Site, D);
+}
+
 /// The std::init flow engine over one body: the member read-before-init rule
 /// (P4222R2 §4.2, §5.1-§5.4) and the binding, destroy, read-through, and
 /// subobject-write judgments of flow-tracked storage
@@ -4100,15 +4197,17 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
           });
   }
   harvestTrackedLocals(S, D, Storage);
-  if (Storage.Entities.empty())
+  SmallVector<SemaProfiles::DeferredInitSite, 4> Deferred =
+      S.Profiles().takeDeferredInitSites(D);
+  if (Storage.Entities.empty() && Deferred.empty())
     return;
-  // The engine's own CFG, built only for a body with tracked storage:
-  // exception edges, so a call inside a try block reaches its handler before
-  // the assignment that follows it (P4222R2 §1.3: every path is considered),
-  // every expression as an element, so the extraction arms match any
-  // statement class, and a new-expression's allocation call as an element of
-  // its own. The shared CFG the other analyses see is untouched (see
-  // ProfilesFrameworkInternals.rst, "CFG Riders").
+  // The engine's own CFG, built only for a body with tracked storage or
+  // deferred checks: exception edges, so a call inside a try block reaches its
+  // handler before the assignment that follows it (P4222R2 §1.3: every path
+  // is considered), every expression as an element, so the extraction arms
+  // match any statement class, and a new-expression's allocation call as an
+  // element of its own. The shared CFG the other analyses see is untouched
+  // (see ProfilesFrameworkInternals.rst, "CFG Riders").
   AnalysisDeclContext InitAC(/*Mgr=*/nullptr, D);
   CFG::BuildOptions &Options = InitAC.getCFGBuildOptions();
   Options.PruneTriviallyFalseEdges = true;
@@ -4120,14 +4219,20 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
   Options.AddCXXNewAllocator = true;
   Options.setAllAlwaysAdd();
   CFG *cfg = InitAC.getCFG();
-  if (!cfg)
+  // A flow-tracked leaf names a harvested entity, so with none every deferred
+  // check is a leftover.
+  llvm::SmallPtrSet<const Expr *, 16> JudgedLeaves;
+  if (!cfg || Storage.Entities.empty()) {
+    verifyDeferredInitSites(S, D, Deferred, cfg, JudgedLeaves);
     return;
+  }
   std::vector<SmallVector<DefAssignEvent, 4>> Events(cfg->getNumBlockIDs());
   SmallVector<BindingSite, 8> Sites;
   SmallVector<DestroySite, 4> DSites;
   SmallVector<AccessSite, 8> ASites;
   extractStdInitEvents(S, D, *cfg, Storage, Ctor, StarThisCopyTrusted, Events,
-                       Sites, DSites, ASites);
+                       Sites, DSites, ASites, JudgedLeaves);
+  verifyDeferredInitSites(S, D, Deferred, cfg, JudgedLeaves);
   // Nothing is assigned at function entry: written initializers write at
   // their CFGInitializer elements, a tracked local cannot be referenced
   // before its DeclStmt, a by-value parameter starts unassigned by design,

@@ -1163,6 +1163,15 @@ those entries never cause a rejection.
   ``[[ref_to_uninit]]``, is the workaround -- the parameter marker keeps
   ``destroy_uninit`` from rejecting the release of a buffer that was
   never written (a release function's contract, unlike a destroy's).
+- An argument of a builtin that Clang type-checks itself
+  (``__builtin_launder(&u)``, ``__builtin_align_up(&u, 16)``, an atomic
+  builtin's value operand), an Objective-C boxed expression's operand, and a
+  coroutine parameter passed to its promise's constructor are not checked
+  when they name flow-tracked storage.
+- A function body whose control flow the analysis cannot model -- one with an
+  Objective-C ``@finally`` or an SEH ``__finally`` -- gets none of the
+  flow-based checks: its bindings, reads, and stores of flow-tracked storage
+  are not diagnosed.
 - The read analysis of a plain ``[[uninit]]`` local considers no exception
   paths: after ``try { x = f(); } catch (...) {}`` a read of ``x`` is
   accepted although the handler path skips the assignment.  The member

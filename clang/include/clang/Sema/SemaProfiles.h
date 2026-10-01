@@ -358,12 +358,17 @@ public:
                                 bool AsPointerValue,
                                 const DeclContext *CurContext);
   /// True if any leaf of \p Src, bound as \p T, is flow-tracked in the
-  /// current context (isFlowTrackedLeaf).
-  bool hasFlowTrackedLeaf(const Expr *Src, QualType T) const;
+  /// current context (isFlowTrackedLeaf); the tracked leaves are appended to
+  /// \p Leaves when given.
+  bool
+  hasFlowTrackedLeaf(const Expr *Src, QualType T,
+                     SmallVectorImpl<const Expr *> *Leaves = nullptr) const;
   /// True if any leaf of the glvalue \p G is flow-tracked in the current
   /// context: the read-through and subobject-write checks leave such an
-  /// access to the CFG pass.
-  bool hasFlowTrackedGlvalueLeaf(const Expr *G) const;
+  /// access to the CFG pass. The tracked leaves are appended to \p Leaves
+  /// when given.
+  bool hasFlowTrackedGlvalueLeaf(
+      const Expr *G, SmallVectorImpl<const Expr *> *Leaves = nullptr) const;
   /// The operand a binding of \p Src as \p T classifies, and whether it is
   /// used as a pointer value (\p AsPointerValue): a pointer binding or a
   /// read-only alias of a pointer reads the source's value; a reference
@@ -512,8 +517,11 @@ public:
   /// (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage"). A std::byte
   /// read is exempt (P4222R2 §4.6). Template deferral follows the
   /// expression-check policy (ProfilesFrameworkInternals.rst, "Check Sites").
+  /// A non-null \p AfterFlowPass judges, by form, a read the flow pass over
+  /// that body left unjudged (judgeDeferredInitSiteByForm).
   void checkInitProfileReadThrough(SourceLocation Loc, const Expr *Glvalue,
-                                   QualType ValueType);
+                                   QualType ValueType,
+                                   const Decl *AfterFlowPass = nullptr);
 
   /// std::init / uninit_write (paper §5.4-§5.6): diagnose a scalar store to a
   /// proper subobject of a named [[uninit]] entity -- delayed piecemeal
@@ -527,8 +535,53 @@ public:
   /// leaf is the CFG pass's (ProfilesFrameworkInternals.rst, "Flow-Tracked
   /// Storage"). A std::byte store is exempt (P4222R2 §4.6). Template
   /// deferral follows the expression-check policy
-  /// (ProfilesFrameworkInternals.rst, "Check Sites").
-  void checkInitProfileSubobjectWrite(SourceLocation Loc, const Expr *LHS);
+  /// (ProfilesFrameworkInternals.rst, "Check Sites"). \p AfterFlowPass is
+  /// checkInitProfileReadThrough's.
+  void checkInitProfileSubobjectWrite(SourceLocation Loc, const Expr *LHS,
+                                      const Decl *AfterFlowPass = nullptr);
+
+  /// A std::init check the parse-time funnels left to the flow engine: what
+  /// the form judgment needs, and the flow-tracked leaves that caused the
+  /// deferral. Verification only -- the engine derives its sites from the
+  /// CFG, and every recorded site must have been judged there
+  /// (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage (std::init)").
+  struct DeferredInitSite {
+    enum class Kind { Binding, Destroy, ReadThrough, SubobjectWrite };
+    Kind K;
+    /// Binding: the construct's kind.
+    InitBindingKind BindingKind;
+    SourceLocation Loc;
+    /// Binding: the target's marking. Destroy: whether destroy_uninit
+    /// applies (the callee is no reinitializer and the parameter is
+    /// unmarked).
+    bool Flag;
+    /// Binding and Destroy: the bound type. ReadThrough: the value type.
+    QualType T;
+    /// The binding source, the read glvalue, or the store target.
+    const Expr *Src;
+    /// Binding: the entity a kind-specific wording names.
+    const NamedDecl *Subject;
+    SmallVector<const Expr *, 2> TrackedLeaves;
+  };
+
+  /// The body whose flow pass judges a check deferred in \p DC: the
+  /// function, method, or block \p DC is, looking through OpenMP captured
+  /// regions (the enclosing function's CFG contains them) -- the check's
+  /// analysis owner -- or null when \p DC is no body (a local class).
+  static const Decl *flowAnalysisOwner(const DeclContext *DC);
+
+  /// Hand the sites recorded for the analysis owner \p Body to its flow
+  /// pass, erasing them.
+  SmallVector<DeferredInitSite, 4> takeDeferredInitSites(const Decl *Body);
+
+  /// Drop the sites recorded for \p Body; called once its analysis ran or
+  /// was skipped, and before it for a body with an unrecoverable error.
+  void discardDeferredInitSites(const Decl *Body);
+
+  /// Judge \p Site, which the flow pass over \p Body left unjudged, by form
+  /// alone, as the parse-time funnel would have without the deferral.
+  void judgeDeferredInitSiteByForm(const DeferredInitSite &Site,
+                                   const Decl *Body);
 
   /// The ObjectArgument derive step of checkInitProfileBinding: a member call
   /// binds its implicit object parameter, which cannot carry the marker, to
@@ -598,8 +651,24 @@ private:
   /// construction -- the enclosing non-lambda function is a constructor, or
   /// the context is a class (a default member initializer) -- so the
   /// recognizers classify it Unknown rather than Initialized: its members may
-  /// not be initialized yet.
-  bool thisIsUnderConstruction() const;
+  /// not be initialized yet. For a site judged after the flow pass over \p
+  /// AfterFlowPass, whether that body's enclosing instance method is a
+  /// constructor.
+  bool thisIsUnderConstruction(const Decl *AfterFlowPass = nullptr) const;
+
+  /// Record \p Site, deferred to the flow engine in the current context,
+  /// under its analysis owner -- unless the engine never sees the site: a
+  /// dependent context (the instantiation records what it rebuilds), an
+  /// evaluation context other than a potentially-evaluated one, a discarded
+  /// statement, an immediate function context, or a defaulted function's
+  /// synthesized body.
+  void recordDeferredInitSite(DeferredInitSite Site);
+
+  /// The form half of the destroy arm of checkInitProfileBinding: diagnose
+  /// destroy_uninit when \p Src, bound as \p T, classifies uninitialized.
+  /// \p D and \p AfterFlowPass are judgeInitProfileBinding's.
+  void judgeDestroyUninitByForm(SourceLocation Loc, QualType T, const Expr *Src,
+                                const Decl *D, const Decl *AfterFlowPass);
 
   /// True while a default argument or default member initializer is rebuilt
   /// for one of its uses -- in an aggregate initialization, or for an
@@ -643,11 +712,14 @@ private:
   /// gate, classify \p Src once as bound to \p T -- a reference to a pointer
   /// aliases the source glvalue (classifyPointerGlvalue) -- and diagnose the
   /// verdict in \p Kind's wording. \p Subject is the entity a kind-specific
-  /// wording names (the called method).
+  /// wording names (the called method). A non-null \p AfterFlowPass judges,
+  /// by form, a binding the flow pass over that body left unjudged
+  /// (judgeDeferredInitSiteByForm).
   void judgeInitProfileBinding(InitBindingKind Kind, SourceLocation Loc,
                                bool TargetMarked, QualType T, const Expr *Src,
                                const Decl *D,
-                               const NamedDecl *Subject = nullptr);
+                               const NamedDecl *Subject = nullptr,
+                               const Decl *AfterFlowPass = nullptr);
 
 public:
   /// Enumerate the lvalue leaves the store target, binding source, or
@@ -736,6 +808,11 @@ private:
   /// Per profile, whether a rule diagnostic of it is enabled by a
   /// command-line option; see isProfileLive.
   llvm::StringMap<bool> RulesEnabledByOption;
+
+  /// Per analysis owner, the std::init checks deferred to its flow pass
+  /// (recordDeferredInitSite).
+  llvm::DenseMap<const Decl *, SmallVector<DeferredInitSite, 4>>
+      DeferredInitSites;
 };
 
 } // namespace clang

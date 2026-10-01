@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -std=c++23 %s
+// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fobjc-exceptions -std=c++23 %s
 
 [[profiles::enforce(std::init)]];
 
@@ -47,6 +47,28 @@ void test_variadic(A *a) {
 void test_property_assignment(A *a) {
   int u [[uninit]];
   a.prop = &u; // OK
+}
+
+__attribute__((objc_root_class))
+@interface NSString
++ (id)stringWithUTF8String:(const char *)s;
+@end
+
+// A boxed expression's operand is not judged
+void test_boxed() {
+  char buf [[uninit]] [4];
+  id s = @(buf); // OK
+  (void)s;
+}
+
+// A body whose CFG cannot be built is not judged by flow
+void test_finally(A *a) {
+  int u [[uninit]];
+  u = 1;
+  [a take:&u]; // OK
+  @try {
+  } @finally {
+  }
 }
 
 // A message inside a method body is judged by the method's own flow

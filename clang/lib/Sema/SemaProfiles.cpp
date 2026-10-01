@@ -1979,12 +1979,73 @@ bool SemaProfiles::rebuildingDefaultArgOrInit() const {
              .DelayedDefaultInitializationContext.has_value();
 }
 
-bool SemaProfiles::thisIsUnderConstruction() const {
+bool SemaProfiles::thisIsUnderConstruction(const Decl *AfterFlowPass) const {
+  if (AfterFlowPass)
+    return isa_and_nonnull<CXXConstructorDecl>(
+        enclosingInstanceMethod(dyn_cast<DeclContext>(AfterFlowPass)));
   // The enclosing non-lambda context: a constructor (body or
   // mem-initializer), or the class itself while a default member initializer
   // is parsed or instantiated.
   return isa<CXXConstructorDecl, CXXRecordDecl>(
       SemaRef.getFunctionLevelDeclContext());
+}
+
+const Decl *SemaProfiles::flowAnalysisOwner(const DeclContext *DC) {
+  while (isa_and_nonnull<CapturedDecl>(DC))
+    DC = DC->getParent();
+  return DC && DC->isFunctionOrMethod() ? cast<Decl>(DC) : nullptr;
+}
+
+void SemaProfiles::recordDeferredInitSite(DeferredInitSite Site) {
+  const Sema::ExpressionEvaluationContextRecord &EC =
+      SemaRef.currentEvaluationContext();
+  if ((EC.Context != Sema::ExpressionEvaluationContext::PotentiallyEvaluated &&
+       EC.Context !=
+           Sema::ExpressionEvaluationContext::PotentiallyEvaluatedIfUsed) ||
+      EC.isDiscardedStatementContext() || EC.isImmediateFunctionContext() ||
+      SemaRef.isSFINAEContext() || SemaRef.CurContext->isDependentContext())
+    return;
+  const Decl *Owner = flowAnalysisOwner(SemaRef.CurContext);
+  // A defaulted function's synthesized body is never analyzed.
+  if (!Owner ||
+      (isa<FunctionDecl>(Owner) && cast<FunctionDecl>(Owner)->isDefaulted()))
+    return;
+  DeferredInitSites[Owner].push_back(std::move(Site));
+}
+
+SmallVector<SemaProfiles::DeferredInitSite, 4>
+SemaProfiles::takeDeferredInitSites(const Decl *Body) {
+  auto It = DeferredInitSites.find(Body);
+  if (It == DeferredInitSites.end())
+    return {};
+  SmallVector<DeferredInitSite, 4> Sites = std::move(It->second);
+  DeferredInitSites.erase(It);
+  return Sites;
+}
+
+void SemaProfiles::discardDeferredInitSites(const Decl *Body) {
+  DeferredInitSites.erase(Body);
+}
+
+void SemaProfiles::judgeDeferredInitSiteByForm(const DeferredInitSite &Site,
+                                               const Decl *Body) {
+  switch (Site.K) {
+  case DeferredInitSite::Kind::Binding:
+    judgeInitProfileBinding(Site.BindingKind, Site.Loc, Site.Flag, Site.T,
+                            Site.Src, /*D=*/nullptr, Site.Subject, Body);
+    return;
+  case DeferredInitSite::Kind::Destroy:
+    if (Site.Flag)
+      judgeDestroyUninitByForm(Site.Loc, Site.T, Site.Src, /*D=*/nullptr, Body);
+    return;
+  case DeferredInitSite::Kind::ReadThrough:
+    checkInitProfileReadThrough(Site.Loc, Site.Src, Site.T, Body);
+    return;
+  case DeferredInitSite::Kind::SubobjectWrite:
+    checkInitProfileSubobjectWrite(Site.Loc, Site.Src, Body);
+    return;
+  }
+  llvm_unreachable("unknown DeferredInitSite kind");
 }
 
 void SemaProfiles::checkInitProfileVariadicArgument(const Expr *Arg) {
@@ -2112,30 +2173,36 @@ void SemaProfiles::judgeInitProfileBinding(InitBindingKind Kind,
                                            SourceLocation Loc,
                                            bool TargetMarked, QualType T,
                                            const Expr *Src, const Decl *D,
-                                           const NamedDecl *Subject) {
+                                           const NamedDecl *Subject,
+                                           const Decl *AfterFlowPass) {
   bool IsReference = T->isReferenceType();
   // A RecoveryExpr is a placeholder for an initialization that already failed,
   // not a source the user wrote, so it must not drive this rule. A rebuilt
   // default argument or initializer was judged where it was written.
   if (!Src || isa<RecoveryExpr>(Src->IgnoreParens()) ||
-      rebuildingDefaultArgOrInit())
+      (!AfterFlowPass && rebuildingDefaultArgOrInit()))
     return;
   // A source with a flow-tracked leaf is the CFG pass's: judged at its
   // program point, on each instantiation's own CFG (see
   // ProfilesFrameworkInternals.rst, "Flow-Tracked Storage").
-  if (hasFlowTrackedLeaf(Src, T))
+  if (SmallVector<const Expr *, 2> Leaves;
+      !AfterFlowPass && hasFlowTrackedLeaf(Src, T, &Leaves)) {
+    recordDeferredInitSite({DeferredInitSite::Kind::Binding, Kind, Loc,
+                            TargetMarked, T, Src, Subject, std::move(Leaves)});
     return;
+  }
   // The expression-check template policy (ProfilesFrameworkInternals.rst,
   // "Check Sites"): without a Decl an instantiation-dependent source defers to
   // the rebuild; with one, the gate's templated rung defers instead.
   if (!D && Src->isInstantiationDependent())
     return;
-  if (!shouldEmitProfileViolation(
-          "std::init", diag::err_init_uninit_requires_ref_to_uninit, Loc, D))
+  if (!shouldEmitProfileViolation("std::init",
+                                  diag::err_init_uninit_requires_ref_to_uninit,
+                                  Loc, D, /*PostParse=*/AfterFlowPass))
     return;
   UninitAccessOpts Opts =
       UninitBindAccess.withAlias(pointerAliasOf(T))
-          .withThisUnderConstruction(thisIsUnderConstruction());
+          .withThisUnderConstruction(thisIsUnderConstruction(AfterFlowPass));
   diagnoseBindingVerdict(
       *this, Kind, Loc, TargetMarked, IsReference,
       classifyUninitSource(getASTContext(), Src, IsReference, Opts), Subject);
@@ -2429,18 +2496,24 @@ const Expr *SemaProfiles::bindingSourceOperand(const Expr *Src, QualType T,
   return MTE->getSubExpr();
 }
 
-bool SemaProfiles::hasFlowTrackedGlvalueLeaf(const Expr *G) const {
+bool SemaProfiles::hasFlowTrackedGlvalueLeaf(
+    const Expr *G, SmallVectorImpl<const Expr *> *Leaves) const {
   if (!G)
     return false;
   bool Any = false;
   forEachTargetLeaf(G, [&](const Expr *Leaf) {
-    Any |= isFlowTrackedLeaf(getASTContext(), Leaf, /*AsPointerValue=*/false,
-                             SemaRef.CurContext);
+    if (!isFlowTrackedLeaf(getASTContext(), Leaf, /*AsPointerValue=*/false,
+                           SemaRef.CurContext))
+      return;
+    Any = true;
+    if (Leaves)
+      Leaves->push_back(Leaf);
   });
   return Any;
 }
 
-bool SemaProfiles::hasFlowTrackedLeaf(const Expr *Src, QualType T) const {
+bool SemaProfiles::hasFlowTrackedLeaf(
+    const Expr *Src, QualType T, SmallVectorImpl<const Expr *> *Leaves) const {
   if (!Src || T.isNull())
     return false;
   bool AsPointerValue;
@@ -2449,8 +2522,12 @@ bool SemaProfiles::hasFlowTrackedLeaf(const Expr *Src, QualType T) const {
     return false;
   bool Any = false;
   forEachTargetLeaf(Src, [&](const Expr *Leaf) {
-    Any |= isFlowTrackedLeaf(getASTContext(), Leaf, AsPointerValue,
-                             SemaRef.CurContext);
+    if (!isFlowTrackedLeaf(getASTContext(), Leaf, AsPointerValue,
+                           SemaRef.CurContext))
+      return;
+    Any = true;
+    if (Leaves)
+      Leaves->push_back(Leaf);
   });
   return Any;
 }
@@ -2504,21 +2581,39 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
     // storage exists only as flow state); the rest is judged here by form.
     // An instantiation-dependent source defers exactly like
     // judgeInitProfileBinding's.
-    bool Checkable = Src && !isa<RecoveryExpr>(Src->IgnoreParens()) &&
-                     (D || !Src->isInstantiationDependent()) &&
-                     !hasFlowTrackedLeaf(Src, T);
-    if (Roles.DestroysPointerParams && !Roles.InitializesRefToUninitParams &&
-        !TargetMarked && Checkable &&
-        shouldEmitProfileViolation("std::init", diag::err_init_destroy_uninit,
-                                   Loc, D) &&
-        isUninitializedOrMixed(
-            classifyUninitSource(getASTContext(), Src, T->isReferenceType(),
-                                 UninitBindAccess.withThisUnderConstruction(
-                                     thisIsUnderConstruction()))))
-      Diag(Loc, diag::err_init_destroy_uninit) << "std::init";
+    if (!Src || isa<RecoveryExpr>(Src->IgnoreParens()) ||
+        (!D && Src->isInstantiationDependent()))
+      return;
+    bool DestroyUninitApplies = Roles.DestroysPointerParams &&
+                                !Roles.InitializesRefToUninitParams &&
+                                !TargetMarked;
+    if (SmallVector<const Expr *, 2> Leaves;
+        hasFlowTrackedLeaf(Src, T, &Leaves)) {
+      // A release callee's argument is a Kill or nothing in the CFG pass,
+      // never a judgment.
+      if (Roles.DestroysPointerParams)
+        recordDeferredInitSite({DeferredInitSite::Kind::Destroy, Kind, Loc,
+                                DestroyUninitApplies, T, Src,
+                                /*Subject=*/nullptr, std::move(Leaves)});
+      return;
+    }
+    if (DestroyUninitApplies)
+      judgeDestroyUninitByForm(Loc, T, Src, D, /*AfterFlowPass=*/nullptr);
   } else {
     judgeInitProfileBinding(Kind, Loc, TargetMarked, T, Src, D);
   }
+}
+
+void SemaProfiles::judgeDestroyUninitByForm(SourceLocation Loc, QualType T,
+                                            const Expr *Src, const Decl *D,
+                                            const Decl *AfterFlowPass) {
+  if (shouldEmitProfileViolation("std::init", diag::err_init_destroy_uninit,
+                                 Loc, D, /*PostParse=*/AfterFlowPass) &&
+      isUninitializedOrMixed(
+          classifyUninitSource(getASTContext(), Src, T->isReferenceType(),
+                               UninitBindAccess.withThisUnderConstruction(
+                                   thisIsUnderConstruction(AfterFlowPass)))))
+    Diag(Loc, diag::err_init_destroy_uninit) << "std::init";
 }
 
 void SemaProfiles::checkInitProfileObjectArgument(const Expr *Object,
@@ -2634,7 +2729,8 @@ static bool uninitWriteChainSeesMarker(const Expr *E) {
 
 void SemaProfiles::checkInitProfileReadThrough(SourceLocation Loc,
                                                const Expr *Glvalue,
-                                               QualType ValueType) {
+                                               QualType ValueType,
+                                               const Decl *AfterFlowPass) {
   // Hoisted first rung of the gate: the call site is ungated and the work
   // below is not free.
   if (!isProfileLive("std::init"))
@@ -2643,7 +2739,7 @@ void SemaProfiles::checkInitProfileReadThrough(SourceLocation Loc,
   // a read the user wrote, so it must not drive this rule. A rebuilt default
   // argument or initializer was judged where it was written.
   if (!Glvalue || isa<RecoveryExpr>(Glvalue->IgnoreParens()) ||
-      rebuildingDefaultArgOrInit())
+      (!AfterFlowPass && rebuildingDefaultArgOrInit()))
     return;
   // The expression-check template policy (ProfilesFrameworkInternals.rst,
   // "Check Sites").
@@ -2656,29 +2752,37 @@ void SemaProfiles::checkInitProfileReadThrough(SourceLocation Loc,
     return;
   // A read with a flow-tracked leaf is the CFG pass's (its ReadThrough
   // sites), judged against the flow state at its program point.
-  if (hasFlowTrackedGlvalueLeaf(Glvalue))
+  if (SmallVector<const Expr *, 2> Leaves;
+      !AfterFlowPass && hasFlowTrackedGlvalueLeaf(Glvalue, &Leaves)) {
+    recordDeferredInitSite({DeferredInitSite::Kind::ReadThrough,
+                            InitBindingKind::Variable, Loc, /*Flag=*/false,
+                            ValueType, Glvalue, /*Subject=*/nullptr,
+                            std::move(Leaves)});
     return;
+  }
   if (!shouldEmitProfileViolation("std::init",
-                                  diag::err_init_uninit_read_through, Loc))
+                                  diag::err_init_uninit_read_through, Loc,
+                                  /*D=*/nullptr, /*PostParse=*/AfterFlowPass))
     return;
   if (!isUninitializedOrMixed(glvalueDenotesUninitStorage(
           getASTContext(), Glvalue,
           UninitReadAccess.withThisUnderConstruction(
-              thisIsUnderConstruction()))))
+              thisIsUnderConstruction(AfterFlowPass)))))
     return;
   Diag(Loc, diag::err_init_uninit_read_through)
       << "std::init" << (isMemberChainOfUninitObject(Glvalue) ? 1 : 0);
 }
 
 void SemaProfiles::checkInitProfileSubobjectWrite(SourceLocation Loc,
-                                                  const Expr *LHS) {
+                                                  const Expr *LHS,
+                                                  const Decl *AfterFlowPass) {
   if (!isProfileLive("std::init"))
     return;
   // A RecoveryExpr is a placeholder for an expression that already failed, not
   // a store the user wrote, so it must not drive this rule. A rebuilt default
   // argument or initializer was judged where it was written.
   if (!LHS || isa<RecoveryExpr>(LHS->IgnoreParens()) ||
-      rebuildingDefaultArgOrInit())
+      (!AfterFlowPass && rebuildingDefaultArgOrInit()))
     return;
   // The expression-check template policy (ProfilesFrameworkInternals.rst,
   // "Check Sites").
@@ -2689,15 +2793,22 @@ void SemaProfiles::checkInitProfileSubobjectWrite(SourceLocation Loc,
     return;
   // A store with a flow-tracked leaf is the CFG pass's (its SubobjectWrite
   // sites), judged against the flow state at its program point.
-  if (hasFlowTrackedGlvalueLeaf(LHS))
+  if (SmallVector<const Expr *, 2> Leaves;
+      !AfterFlowPass && hasFlowTrackedGlvalueLeaf(LHS, &Leaves)) {
+    recordDeferredInitSite({DeferredInitSite::Kind::SubobjectWrite,
+                            InitBindingKind::Variable, Loc, /*Flag=*/false,
+                            LHS->getType(), LHS, /*Subject=*/nullptr,
+                            std::move(Leaves)});
     return;
+  }
   if (!shouldEmitProfileViolation("std::init",
-                                  diag::err_init_uninit_subobject_write, Loc))
+                                  diag::err_init_uninit_subobject_write, Loc,
+                                  /*D=*/nullptr, /*PostParse=*/AfterFlowPass))
     return;
   if (!isUninitializedOrMixed(glvalueDenotesUninitStorage(
           getASTContext(), LHS,
           UninitWriteAccess.withThisUnderConstruction(
-              thisIsUnderConstruction()))))
+              thisIsUnderConstruction(AfterFlowPass)))))
     return;
   // The provenance phrase: a member chain of a named [[uninit]] object
   // renders exactly as before the marked/allocator arms existed (arm 0);
