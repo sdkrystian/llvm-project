@@ -3570,13 +3570,13 @@ static void extractStdInitEvents(
 
     for (const CFGElement &Elem : *B) {
       if (auto OptInit = Elem.getAs<CFGInitializer>()) {
-        // A written member initializer binds and then assigns its member at
-        // this point in execution order, after its init expression's events
-        // above it; a written base initializer (e.g. `: Base{1}`) gives the
-        // tracked members of that constructor-less base subtree their
-        // values.
+        // A written member initializer binds its member at this point in
+        // execution order, after its init expression's events above it, and
+        // in a constructor whose members are tracked (\p Ctor) then assigns
+        // it; a written base initializer (e.g. `: Base{1}`) gives the tracked
+        // members of that constructor-less base subtree their values.
         const CXXCtorInitializer *CI = OptInit->getInitializer();
-        if (!Ctor || !CI->isWritten())
+        if (!CI->isWritten())
           continue;
         if (CI->isAnyMemberInitializer()) {
           const FieldDecl *F = CI->getAnyMember();
@@ -3586,10 +3586,12 @@ static void extractStdInitEvents(
                      F->hasAttr<RefToUninitAttr>(), F->getType(), CI->getInit(),
                      nullptr, CI->getInit());
           AppendAliasEscapes(CI->getInit(), F->getType(), CI->getInit());
+          if (!Ctor)
+            continue;
           if (std::optional<unsigned> Idx = Storage.find(nullptr, {}, F))
             BlockEvents.push_back(
                 {DefAssignEventKind::Write, *Idx, CI->getInit()});
-        } else if (CI->isBaseInitializer()) {
+        } else if (Ctor && CI->isBaseInitializer()) {
           // Every entity below that base: its path starts with the base.
           const auto *BRD = CI->getBaseClass()->getAsCXXRecordDecl();
           if (!BRD)

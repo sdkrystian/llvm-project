@@ -167,3 +167,12 @@ void template_union_never_instantiated() {
   T x [[uninit]];
   (void)x;
 }
+
+// A union constructor's member initializer binds its member by flow
+union PtrUnion {
+  int *p;
+  int *mp [[ref_to_uninit]];
+  PtrUnion(int *q [[ref_to_uninit]]) : p(q) {} // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  PtrUnion(int *q [[ref_to_uninit]], int) : mp(q) {} // OK
+  PtrUnion(int *q [[ref_to_uninit]], long) : p((*q = 1, q)) {} // OK: stored first
+};
