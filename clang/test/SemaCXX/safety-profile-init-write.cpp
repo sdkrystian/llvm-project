@@ -193,6 +193,31 @@ void test_fill_then_member_write(Pair *ptr [[ref_to_uninit]]) {
   ptr->x = 5; // OK: the callee initialized the whole pointee
 }
 
+// A member write through a marker after a fill on one path only is rejected
+void test_one_path_fill_then_member_write(Pair *ptr [[ref_to_uninit]]) {
+  if (cond())
+    fill_pair(ptr);
+  ptr->x = 5; // expected-error {{writing a member of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
+}
+
+// A member write to an [[uninit]] object filled on one path only is rejected
+void test_one_path_fill_then_local_member_write() {
+  Pair s [[uninit]];
+  if (cond())
+    fill_pair(&s);
+  s.x = 5; // expected-error {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
+}
+
+// A member write to an [[uninit]] object filled on every path is accepted
+void test_every_path_fill_then_local_member_write() {
+  Pair s [[uninit]];
+  if (cond())
+    fill_pair(&s);
+  else
+    fill_pair(&s);
+  s.x = 5; // OK
+}
+
 // Two suppress-only corners: a marked pointer MEMBER's pointee and an
 // element access are not flow-tracked, so even a prior fill legalizes
 // neither -- suppression is the remedy.

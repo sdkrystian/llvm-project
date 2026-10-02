@@ -2501,16 +2501,16 @@ static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
 
 /// Judge an access site against \p St: uninit_read (\p IsWrite false) or
 /// uninit_write fires when a leaf is uninitialized -- a tracked leaf on some
-/// path for a read (P4222R2 §1.3: every path must initialize it) and on every
-/// path for a store, a form-classified leaf affirmatively or as a Mixed
-/// combination (P4222R2 §4.9) -- exactly as the recognizers' combination of
-/// conditional arms fires on any uninitialized arm.
+/// path (P4222R2 §1.3: every path must initialize it), a form-classified leaf
+/// affirmatively or as a Mixed combination (P4222R2 §4.9) -- exactly as the
+/// recognizers' combination of conditional arms fires on any uninitialized
+/// arm.
 static void judgeAccessSite(const AccessSite &Site, bool IsWrite,
                             const FlowState &St, const TrackedStorage &Storage,
                             SmallVectorImpl<PendingViolation> &Out) {
   bool Fires = false;
   for (const BindingLeaf &L : Site.Leaves) {
-    LeafState S = leafState(L, St, Storage, /*EveryPath=*/!IsWrite);
+    LeafState S = leafState(L, St, Storage, /*EveryPath=*/true);
     Fires |= S == LeafState::Uninitialized || S == LeafState::Mixed;
   }
   if (!Fires)

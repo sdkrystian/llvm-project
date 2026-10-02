@@ -828,11 +828,12 @@ follows:
    * - ``uninit_write``
      - CFG rider for flow-tracked targets, expression site otherwise
      - the SubobjectWrite sites of ``extractStdInitEvents`` for a target
-       with a flow-tracked leaf (``judgeAccessSite``, suppressed by
-       ``May``); otherwise ``checkInitProfileSubobjectWrite`` (its store
-       preset trusts ``[[ref_to_uninit]]`` at the top level only: the
-       member arm of the glvalue recognizer clears the trust, so subobject
-       writes below the marker classify uninitialized)
+       with a flow-tracked leaf (``judgeAccessSite``, which requires
+       initialization on every path); otherwise
+       ``checkInitProfileSubobjectWrite`` (its store preset trusts
+       ``[[ref_to_uninit]]`` at the top level only: the member arm of the
+       glvalue recognizer clears the trust, so subobject writes below the marker
+       classify uninitialized)
 
 Two helpers are shared across the rules.  ``classifyUninitSource`` -- the
 pointer and glvalue recognizers -- classifies an expression as referring to
@@ -996,20 +997,20 @@ and untracked arms P4222R2 §4.9 rejects.  A templated body is never analyzed;
 each instantiation is analyzed on its own CFG, in which statements TreeTransform
 reused from the pattern are ordinary elements.  Consumers read the lattices as
 follows: a marked-target binding fires on ``Must`` and ``double_destroy`` on
-``Destroyed``; an unmarked-target binding, ``destroy_uninit``, and a subobject
-write are suppressed by ``May``; a read through a marker or of a subobject of an
-``[[uninit]]`` object fires on ``MayUnassigned`` without ``Must``: every path
-must initialize the storage (P4222R2 §1.3, §9.2), and a path that does not
-know its state does not count against the read, just as an unidentified referent
-fires in neither direction.  A destroy or release whose arms name different
-storage leaves each possibly assigned, possibly unassigned, and not destroyed;
-arms that all name one storage destroy or release it.  A mutable alias of a
-marked pointer handed out gives the pointer an anonymous referent of unknown
-state (``May`` set, ``Must`` and ``MayUnassigned`` clear).  A variable of an
-enclosing function reached by capture, whose state the enclosing body decides,
-enters in that unknown state, so no binding, destroy, or read fires on it until
-the body itself stores to it or reseats it.  The remaining blind spots are
-listed in `Known Gaps (std::init)`_ and in :doc:`ProfilesFramework`,
+``Destroyed``; an unmarked-target binding and ``destroy_uninit`` are suppressed
+by ``May``; a read through a marker or of a subobject of an ``[[uninit]]``
+object, and a subobject write, fire on ``MayUnassigned`` without ``Must``: every
+path must initialize the storage (P4222R2 §1.3, §9.2), and a path that does
+not know its state does not count against the read, just as an unidentified
+referent fires in neither direction.  A destroy or release whose arms name
+different storage leaves each possibly assigned, possibly unassigned, and not
+destroyed; arms that all name one storage destroy or release it.  A mutable
+alias of a marked pointer handed out gives the pointer an anonymous referent of
+unknown state (``May`` set, ``Must`` and ``MayUnassigned`` clear).  A variable
+of an enclosing function reached by capture, whose state the enclosing body
+decides, enters in that unknown state, so no binding, destroy, or read fires on
+it until the body itself stores to it or reseats it.  The remaining blind spots
+are listed in `Known Gaps (std::init)`_ and in :doc:`ProfilesFramework`,
 "Limitations".
 
 
@@ -1026,16 +1027,18 @@ cause a rejection.
 Deliberate Strictnesses
 -----------------------
 
-- The flow-based read checks -- of a plain local, a member, a subobject of
-  an ``[[uninit]]`` object, and through a ``[[ref_to_uninit]]`` pointer or
-  reference -- promote every use a path *may* reach uninitialized to the
-  profile error, path-insensitively: with two correlated conditions
+- The flow-based read checks -- of a plain local, a member, a subobject of an
+  ``[[uninit]]`` object, and through a ``[[ref_to_uninit]]`` pointer or
+  reference -- promote every use a path *may* reach uninitialized to the profile
+  error, path-insensitively: with two correlated conditions
   (``if (c) x = 1; ... if (c) use(x);``) the read is rejected although no
-  executable path reads uninitialized memory -- the shape
-  ``-Wuninitialized`` reports as only "may be uninitialized" is a hard error
-  under the profile.  Destroys over-flag the same way: with correlated
-  conditions (``if (c) destroy_at(&m); ... if (!c) use(m);``) the member read
-  is rejected although no executable path reads destroyed memory.
+  executable path reads uninitialized memory -- the shape ``-Wuninitialized``
+  reports as only "may be uninitialized" is a hard error under the profile.
+  Destroys over-flag the same way: with correlated conditions
+  (``if (c) destroy_at(&m); ... if (!c) use(m);``) the member read is rejected
+  although no executable path reads destroyed memory.  The subobject-write check
+  over-flags the same way
+  (``if (c) std::construct_at(&s, v); ... if (c) s.x = 1;``).
 
 Missed Diagnostics
 ------------------

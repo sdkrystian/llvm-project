@@ -634,9 +634,10 @@ Writes to Subobjects of Uninitialized Objects
 Piecemeal delayed initialization of an ``[[uninit]]`` object through its
 members or elements cannot be validated statically (§5.4, §5.5), so a store
 to a *proper subobject* of an ``[[uninit]]`` entity is rejected (rule
-``uninit_write``); writing the whole entity is that entity's initialization,
-stays legal, and initializes the entity for every path after it (see
-`Binding Pointers and References`_):
+``uninit_write``) unless the entity is initialized on every path reaching the
+store (§1.3) -- by ``std::construct_at`` or a ``[[now_init]]`` call; writing
+the whole entity is that entity's initialization, stays legal, and initializes
+the entity for every path after it (see `Binding Pointers and References`_):
 
 .. code-block:: c++
 
@@ -665,7 +666,9 @@ is reached through a marked pointer, reference, member, or callee return,
 through a recognized allocator's raw result, or through a raw ``new``
 expression.  A class pointee's initialization is ``construct_at`` (its
 ``[[ref_to_uninit]]`` parameter accepts the pointer) or, for a scalar
-pointee, the whole ``*p`` store.
+pointee, the whole ``*p`` store.  For a marked local pointer or reference the
+store is accepted once its referent is initialized on every path reaching it
+(``construct_at(p, ...)`` or a ``[[now_init]]`` call first).
 
 A compound assignment or increment/decrement of such a subobject also reads
 its old value, so the read diagnostic fires alongside this one.  Assigning a
@@ -898,11 +901,11 @@ destroyed on every path reaching the call and not stored since: a double
 destruction (rule ``double_destroy``).  A destroy on one path only leaves
 the storage neither definitely initialized nor definitely destroyed: a
 marked binding is not forced, an unmarked binding stays accepted, a
-second destroy is not a double destroy, and a read through a marker or of a
-subobject of an ``[[uninit]]`` object is rejected.  Clang declares
-``std::destroy_at`` this way itself -- a ``std::destroy_at`` whose first
-parameter is of pointer type receives ``[[now_uninit]]`` implicitly, and so
-do ``std::destroy`` and ``std::destroy_n`` (P4222R2 §6) where their iterator
+second destroy is not a double destroy, and a read through a marker, a read of a
+subobject of an ``[[uninit]]`` object, or a subobject write is rejected.  Clang
+declares ``std::destroy_at`` this way itself -- a ``std::destroy_at`` whose
+first parameter is of pointer type receives ``[[now_uninit]]`` implicitly, and
+so do ``std::destroy`` and ``std::destroy_n`` (P4222R2 §6) where their iterator
 is a pointer -- so
 the construct/destroy/construct cycle is legal, a second destruction is
 rejected, a destroy of never-constructed storage is rejected too, and
