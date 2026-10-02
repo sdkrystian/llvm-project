@@ -672,11 +672,12 @@ private:
   bool thisIsUnderConstruction(const Decl *AfterFlowPass = nullptr) const;
 
   /// Record \p Site, deferred to the flow engine in the current context,
-  /// under its analysis owner -- unless the engine never sees the site: a
+  /// under its analysis owner -- unless no flow pass judges it there: a
   /// dependent context (the instantiation records what it rebuilds), an
   /// evaluation context other than a potentially-evaluated one, a discarded
   /// statement, an immediate function context, or a defaulted function's
-  /// synthesized body.
+  /// synthesized body. A recorded site the CFG does not contain is dropped by
+  /// verifyDeferredInitSites.
   void recordDeferredInitSite(DeferredInitSite Site);
 
   /// The form half of the destroy arm of checkInitProfileBinding: diagnose

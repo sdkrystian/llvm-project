@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fenable-matrix -fblocks -std=c++23 %s
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -fenable-matrix -fblocks -std=c++23 %s
 // RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -fenable-matrix -fblocks -std=c++23 %s
 
 // no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}

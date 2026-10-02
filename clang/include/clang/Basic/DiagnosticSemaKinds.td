@@ -14535,4 +14535,7 @@ def err_init_destroy_uninit : ProfileRule<
   "uninitialized storage is destroyed by a '[[now_uninit]]' function under "
   "profile '%0'",
   ProfileStdInitDestroyUninit>;
+def err_init_deferred_check_unjudged : Error<
+  "std::init %select{binding|destroy|read|store}0 check deferred to the flow "
+  "analysis was never judged">;
 } // end of sema component.

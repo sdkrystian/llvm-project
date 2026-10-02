@@ -1,7 +1,7 @@
-// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -std=c++23 %s
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %s
 // RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 %s
-// RUN: %clang_cc1 -fsyntax-only -verify=nobuiltin -fprofiles -fno-builtin -std=c++23 %s
-// RUN: %clang_cc1 -fsyntax-only -verify=nobuiltin -fprofiles -ffreestanding -std=c++23 %s
+// RUN: %clang_cc1 -fsyntax-only -verify=nobuiltin -fprofiles -fprofiles-verify-deferred-checks -fno-builtin -std=c++23 %s
+// RUN: %clang_cc1 -fsyntax-only -verify=nobuiltin -fprofiles -fprofiles-verify-deferred-checks -ffreestanding -std=c++23 %s
 
 // std::init: known allocator callees are classified without annotation
 // (paper §4.3: malloc returns a pointer to uninitialized memory, calloc to

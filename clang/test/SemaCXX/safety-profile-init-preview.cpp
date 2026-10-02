@@ -1,13 +1,13 @@
 // std::init's rules preview as warnings under -Wprofile-std-init without an
 // enforcement, at every host: a declaration site, the
 // constructor-finalization funnel, the CFG rider, and an expression site.
-// RUN: %clang_cc1 -fsyntax-only -verify=preview -fprofiles -std=c++23 -Wno-uninitialized -Wprofile-std-init %s
+// RUN: %clang_cc1 -fsyntax-only -verify=preview -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -Wno-uninitialized -Wprofile-std-init %s
 // A rule's own option makes the profile live but maps only that rule.
-// RUN: %clang_cc1 -fsyntax-only -verify=decl -fprofiles -std=c++23 -Wno-uninitialized -Wprofile-std-init-uninit-decl %s
+// RUN: %clang_cc1 -fsyntax-only -verify=decl -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -Wno-uninitialized -Wprofile-std-init-uninit-decl %s
 // Without an option or an enforcement nothing fires.
-// RUN: %clang_cc1 -fsyntax-only -verify=none -fprofiles -std=c++23 -Wno-uninitialized %s
+// RUN: %clang_cc1 -fsyntax-only -verify=none -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -Wno-uninitialized %s
 // -w silences the preview; there is no enforcement for it to survive.
-// RUN: %clang_cc1 -fsyntax-only -verify=none -fprofiles -std=c++23 -w -Wprofile-std-init %s
+// RUN: %clang_cc1 -fsyntax-only -verify=none -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -w -Wprofile-std-init %s
 // none-no-diagnostics
 
 // An uninitialized automatic variable: the uninit_decl declaration site.

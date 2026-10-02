@@ -1,10 +1,10 @@
 // RUN: rm -rf %t && mkdir -p %t
 // RUN: split-file %s %t
-// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -std=c++23 %t/local.cpp
-// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -std=c++23 %t/referent.cpp
-// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -isystem %t/sys -std=c++23 %t/system.cpp
-// RUN: %clang_cc1 -fsyntax-only -verify=expected,strict -fprofiles -fno-profiles-exempt-system-headers -isystem %t/sys -std=c++23 %t/system.cpp
-// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -std=c++23 %t/now_init_body.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %t/local.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %t/referent.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -isystem %t/sys -std=c++23 %t/system.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected,strict -fprofiles -fprofiles-verify-deferred-checks -fno-profiles-exempt-system-headers -isystem %t/sys -std=c++23 %t/system.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %t/now_init_body.cpp
 //
 // The lifecycle attributes are injected only under -fprofiles (enforcement
 // not required), and appear on both the pattern and its instantiations.

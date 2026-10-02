@@ -1,15 +1,15 @@
-// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -std=c++23 -Wno-uninitialized -fexceptions -fcxx-exceptions %s
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -Wno-uninitialized -fexceptions -fcxx-exceptions %s
 // RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -Wno-uninitialized -fexceptions -fcxx-exceptions %s
 // The LEADING_ERROR runs add a leading unrelated error so every later function
 // is analyzed through the post-error path; the same local-aggregate member
 // diagnostics must still fire there.
-// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -std=c++23 -Wno-uninitialized -DLEADING_ERROR -fexceptions -fcxx-exceptions %s
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -Wno-uninitialized -DLEADING_ERROR -fexceptions -fcxx-exceptions %s
 // RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -Wno-uninitialized -DLEADING_ERROR -fexceptions -fcxx-exceptions %s
 // -Wunreachable-code makes the main path build a fully linearized CFG
 // (setAllAlwaysAdd); the pass must recover the same events from it (the
 // linearized-CFG invariant at addNonLinearizedAlwaysAddClasses). The
 // post-error rerun is always non-linearized, so this axis is clean-only.
-// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -std=c++23 -Wno-uninitialized -Wunreachable-code -fexceptions -fcxx-exceptions %s
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -Wno-uninitialized -Wunreachable-code -fexceptions -fcxx-exceptions %s
 
 // std::init: an [[uninit]] scalar member of a constructor-less aggregate
 // local (the paper §5.3 "class exposing uninitialized members" pattern) is

@@ -948,17 +948,20 @@ construct the CFG contains but the engine does not enumerate
 (``collectUnenumeratedExprs``): an argument of a builtin with custom type
 checking, an atomic builtin's operand, and an Objective-C boxed expression's
 operand.  Neither side judges such a check, which is a known gap.  Any other
-leftover is an enumeration bug: an assertion failure in an asserting build,
-judged by form otherwise.  The record is verification only, never the
-source of the pass's sites: TreeTransform reuses non-dependent nodes, which
-never re-enter the funnels, so the CFG derivation stays authoritative and
-the invariant checked is that recorded sites are a subset of judged ones.  A
-site is recorded only where the pass can see it -- a potentially-evaluated,
-non-discarded, non-immediate, non-dependent context inside a body other than
-a defaulted function's -- and the record of a body whose pass does not run
-is dropped (``Sema::PopFunctionScopeInfo``), as is that of a body with an
-error that is not a profile violation, whose recovery can discard the
-recorded expressions.  The pass's resolver
+leftover is an enumeration bug: ``-fprofiles-verify-deferred-checks``
+(``-cc1`` only; the ``std::init`` tests pass it) reports each one as an
+error, and in every build it is then judged by form.  The record is
+verification only, never the source of the pass's sites: TreeTransform
+reuses non-dependent nodes, which never re-enter the funnels, so the CFG
+derivation stays authoritative and the invariant checked is that recorded
+sites are a subset of judged ones.  No site is recorded where no flow pass
+judges it -- an evaluation context other than a potentially-evaluated one, a
+discarded statement, an immediate function context, a dependent context
+(each instantiation records its own), a defaulted function's synthesized
+body -- and the record of a body whose pass does not run is dropped
+(``Sema::PopFunctionScopeInfo``), as is that of a body with an error that
+is not a profile violation, whose recovery can discard the recorded
+expressions.  The pass's resolver
 (``TrackedStorage::resolve``) and the predicate share one lvalue-shape walk,
 ``SemaProfiles::flowLeafShape``, so no binding falls between the two.  A
 templated body is never analyzed; each instantiation is analyzed on its own

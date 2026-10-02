@@ -1,5 +1,5 @@
-// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -std=c++20 -DCORO %s
-// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -std=c++20 -fopenmp -DOMP %s
+// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -std=c++20 -DCORO %s
+// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -std=c++20 -fopenmp -DOMP %s
 
 // std::init / uninit_decl skips synthesized (implicit) variables: the user
 // can neither initialize them nor mark them [[uninit]]. A coroutine's

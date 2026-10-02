@@ -4136,7 +4136,8 @@ static void collectUnenumeratedExprs(const ASTContext &Ctx, const Decl *D,
 /// coroutine's parameter copies, an unselected _Generic association) and is
 /// dropped, as is one below a construct the engine does not enumerate
 /// (collectUnenumeratedExprs). Any other leftover is an enumeration bug: an
-/// assertion failure, and judged by form in a release build.
+/// error under -fprofiles-verify-deferred-checks, and judged by form in every
+/// build.
 static void verifyDeferredInitSites(
     Sema &S, const Decl *D, ArrayRef<SemaProfiles::DeferredInitSite> Deferred,
     const CFG *cfg, const llvm::SmallPtrSetImpl<const Expr *> &Judged) {
@@ -4164,10 +4165,13 @@ static void verifyDeferredInitSites(
              return Unenumerated.contains(Leaf);
            });
   });
-  assert(Leftover.empty() &&
-         "std::init check deferred to the flow engine was never judged");
-  for (const SemaProfiles::DeferredInitSite *Site : Leftover)
+  for (const SemaProfiles::DeferredInitSite *Site : Leftover) {
+    // The diagnostic's %select follows DeferredInitSite::Kind.
+    if (S.getLangOpts().ProfilesVerifyDeferredChecks)
+      S.Diag(Site->Loc, diag::err_init_deferred_check_unjudged)
+          << static_cast<unsigned>(Site->K);
     S.Profiles().judgeDeferredInitSiteByForm(*Site, D);
+  }
 }
 
 /// The std::init flow engine over one body: the member read-before-init rule

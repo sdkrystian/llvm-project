@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -std=c++23 %s
+// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %s
 // RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 %s
 
 // std::init / uninit_write (paper §5.4-§5.6): a scalar store to a proper

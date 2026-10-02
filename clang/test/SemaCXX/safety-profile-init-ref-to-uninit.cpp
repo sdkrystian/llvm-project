@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fblocks -fcxx-exceptions -std=c++23 %s
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -fblocks -fcxx-exceptions -std=c++23 %s
 // RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -fblocks -fcxx-exceptions -std=c++23 %s
 
 // std::init / ref_to_uninit (paper §5): a [[ref_to_uninit]] pointer or

@@ -1799,6 +1799,12 @@ def fprofiles_test_profiles : Flag<["-"], "fprofiles-test-profiles">,
   Group<f_Group>, Visibility<[CC1Option]>,
   HelpText<"Enable the built-in test:: profiles (test suite only)">,
   MarshallingInfoFlag<LangOpts<"ProfilesTestProfiles">>;
+def fprofiles_verify_deferred_checks
+  : Flag<["-"], "fprofiles-verify-deferred-checks">,
+  Group<f_Group>, Visibility<[CC1Option]>,
+  HelpText<"Diagnose a std::init check deferred to the flow analysis that it "
+           "never judged (test suite only)">,
+  MarshallingInfoFlag<LangOpts<"ProfilesVerifyDeferredChecks">>;
 defm profiles_exempt_system_headers
   : BoolFOption<"profiles-exempt-system-headers",
   LangOpts<"ProfilesExemptSystemHeaders">, DefaultTrue,

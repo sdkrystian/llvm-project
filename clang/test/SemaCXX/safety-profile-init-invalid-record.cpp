@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -fsyntax-only -verify=expected,common -fprofiles -std=c++23 %s
+// RUN: %clang_cc1 -fsyntax-only -verify=expected,common -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %s
 // RUN: %clang_cc1 -fsyntax-only -verify=no-profiles,common -std=c++23 %s
 
 // A local of an invalid self-containing recovery record reaches the

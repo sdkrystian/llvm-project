@@ -1,13 +1,13 @@
 // The DEMOTE run additionally enforces test::uninit_read to exercise profile
 // table ordering, which would otherwise change the std::init-only diagnostics.
-// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -std=c++23 -Wno-uninitialized %s
-// RUN: %clang_cc1 -fsyntax-only -verify=demote -fprofiles -fprofiles-test-profiles -std=c++23 -Wno-uninitialized -DDEMOTE %s
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -Wno-uninitialized %s
+// RUN: %clang_cc1 -fsyntax-only -verify=demote -fprofiles -fprofiles-verify-deferred-checks -fprofiles-test-profiles -std=c++23 -Wno-uninitialized -DDEMOTE %s
 // RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -Wno-uninitialized %s
 // The LEADING_ERROR runs add a leading unrelated error so every later function
 // is analyzed through the post-error path; the same profile diagnostics must
 // still fire there.
-// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -std=c++23 -Wno-uninitialized -DLEADING_ERROR %s
-// RUN: %clang_cc1 -fsyntax-only -verify=demote -fprofiles -fprofiles-test-profiles -std=c++23 -Wno-uninitialized -DDEMOTE -DLEADING_ERROR %s
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -Wno-uninitialized -DLEADING_ERROR %s
+// RUN: %clang_cc1 -fsyntax-only -verify=demote -fprofiles -fprofiles-verify-deferred-checks -fprofiles-test-profiles -std=c++23 -Wno-uninitialized -DDEMOTE -DLEADING_ERROR %s
 // RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -Wno-uninitialized -DLEADING_ERROR %s
 
 // no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}

@@ -4,10 +4,10 @@
 // -Wuninitialized warnings either (the self-init and sometimes-uninitialized
 // shapes below would produce them; -verify rejects any unexpected
 // diagnostic).
-// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -std=c++23 -w %s
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -w %s
 // The post-error path must behave the same under -w: a leading unrelated TU
 // error routes every later function through the post-error rerun.
-// RUN: %clang_cc1 -fsyntax-only -verify=expected,err -fprofiles -std=c++23 -w -DLEADING_ERROR %s
+// RUN: %clang_cc1 -fsyntax-only -verify=expected,err -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -w -DLEADING_ERROR %s
 // Without -fprofiles, -w silences everything: the profile-only pass must not
 // run when no profile is enforced.
 // RUN: %clang_cc1 -fsyntax-only -verify=quiet -std=c++23 -w %s

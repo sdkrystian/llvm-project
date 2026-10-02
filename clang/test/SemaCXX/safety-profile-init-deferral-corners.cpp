@@ -1,12 +1,13 @@
 // RUN: rm -rf %t && split-file %s %t
-// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -std=c++23 -isystem %t/sys %t/corners.cpp
-// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fopenmp -std=c++23 -isystem %t/sys %t/corners.cpp
-// RUN: %clang_cc1 -fsyntax-only -verify=expected,blocks -fprofiles -fblocks -std=c++23 -isystem %t/sys %t/corners.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -isystem %t/sys %t/corners.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -fopenmp -std=c++23 -isystem %t/sys %t/corners.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected,blocks -fprofiles -fprofiles-verify-deferred-checks -fblocks -std=c++23 -isystem %t/sys %t/corners.cpp
 
 // The shapes the verification of std::init's deferred checks depends on
-// (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage (std::init)"): in an
-// asserting build a deferred check the flow pass leaves unjudged aborts, so
-// each case pins its verdict and the record's keying or visibility.
+// (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage (std::init)"): under
+// -fprofiles-verify-deferred-checks a deferred check the flow pass leaves
+// unjudged is an error, so each case pins its verdict and the record's keying
+// or visibility.
 
 //--- sys/sys_body.h
 #pragma clang system_header

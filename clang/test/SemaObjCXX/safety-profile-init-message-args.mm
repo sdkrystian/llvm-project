@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fobjc-exceptions -std=c++23 %s
+// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -fobjc-exceptions -std=c++23 %s
 
 [[profiles::enforce(std::init)]];
 

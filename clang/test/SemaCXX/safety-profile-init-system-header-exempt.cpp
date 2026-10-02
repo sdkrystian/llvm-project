@@ -8,10 +8,10 @@
 // RUN: split-file %s %t
 //
 // Default: exemption on -- only the -I header's violation fires.
-// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -std=c++23 -I %t %t/main.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -I %t %t/main.cpp
 //
 // Exemption off: both the system-header and the -I header violations fire.
-// RUN: %clang_cc1 -fsyntax-only -verify=expected,strict -fno-profiles-exempt-system-headers -fprofiles -std=c++23 -I %t %t/main.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected,strict -fno-profiles-exempt-system-headers -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -I %t %t/main.cpp
 
 //--- user.h
 // A normal header reached via -I is not a system header, so it is enforced in
