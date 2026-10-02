@@ -329,7 +329,9 @@ LLDB) do not know the new immediate and label the trap "Undefined Behavior
 Sanitizer" when trap reasons are off or basic; the detailed trap-reason
 string compensates.  At ``-O0`` every check site gets its own trap instruction,
 keeping locations and reasons exact; optimized builds coalesce the traps of
-one handler kind and merge their locations, like UBSan's trap mode.
+one handler kind and merge their locations, like UBSan's trap mode.  No
+sanitizer facility consults the check: a profile's runtime check is a
+language guarantee, not opt-in instrumentation.
 
 
 Enforcement and Suppression State
@@ -357,7 +359,9 @@ profile.
 The engine's own rungs then apply: the rule diagnostics are latent, so
 ``-w`` keeps an enforced rule, ``-Weverything`` in either form leaves the
 rules alone, and ``-Wprofile-...`` and the diagnostic pragmas move a rule's
-severity like any other diagnostic's.  Nothing is mapped until an
+severity like any other diagnostic's.  An enforcement's mapping is
+installed after the command-line options, so ``-Wno-profiles`` and
+``-Wno-error=profile-...`` cannot undo it.  Nothing is mapped until an
 enforcement or option asks for it, so a translation unit that enforces no
 profile carries no profile state, in its diagnostic pragma record included.
 Enforcement therefore

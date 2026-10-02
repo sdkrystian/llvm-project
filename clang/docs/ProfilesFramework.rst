@@ -224,10 +224,10 @@ controls apply to profile rules as well:
   checks (see `Runtime-Checked Rules`_).
 
 ``-Wno-profiles`` (or a narrower ``-Wno-profile-...``) does not disable an
-enforcement, whose mapping is installed after the command-line options; a
-violation stays an error under ``-w`` as well, and ``-Wno-error=profile-...``
-has no effect on an enforced rule.  A ``#pragma clang diagnostic push``
-before an enforcement and ``pop`` after it leave the enforcement in place.
+enforcement; a violation stays an error under ``-w`` as well, and
+``-Wno-error=profile-...`` has no effect on an enforced rule.  A
+``#pragma clang diagnostic push`` before an enforcement and ``pop`` after it
+leave the enforcement in place.
 
 
 System Headers
@@ -347,8 +347,7 @@ Behavior of a runtime check:
   sanitizer configuration: a sanitizer guarding the same operation
   instruments it twice (redundant, never wrong), and no sanitizer facility
   (ignorelists, ``__attribute__((no_sanitize))``, hot cutoffs) can disable a
-  profile's check, which is a language guarantee rather than opt-in
-  instrumentation.
+  profile's check.
 - **Per-unit enforcement.**  A check is emitted exactly when the
   translation unit *whose tokens the code is* enforces the profile there.
   An inline function defined in a textual header is therefore compiled with
