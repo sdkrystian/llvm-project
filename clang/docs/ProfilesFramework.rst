@@ -368,10 +368,6 @@ integer division or remainder by a runtime zero) also exists to exercise the
 machinery and is inert outside the test suite (see `Test Profiles`_).  Trap
 emission is described in :doc:`ProfilesFrameworkInternals`.
 
-The zero-divisor checks (``std::core_ub``'s and the pilot's) deliberately
-mirror UBSan's blind spots: GCC vector-extension integer division and
-``_Complex int`` division are not checked.
-
 
 The ``std::core_ub`` Profile
 ============================

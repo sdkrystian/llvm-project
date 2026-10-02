@@ -670,8 +670,8 @@ Modules
 Runtime Checks
 --------------
 
-- The ``test::arith`` zero-divisor check does not cover GCC
-  vector-extension integer division or ``_Complex int`` division, the
+- The ``std::core_ub`` and ``test::arith`` zero-divisor checks do not cover
+  GCC vector-extension integer division or ``_Complex int`` division, the
   operations UBSan's integer-divide-by-zero check leaves unchecked as well.
 
 
