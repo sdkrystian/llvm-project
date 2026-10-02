@@ -3050,8 +3050,7 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
     SmallVector<ArgLeaf, 2> Leaves;
     DestroySite Site;
     Site.Loc = Arg->IgnoreImplicit()->getExprLoc();
-    Site.Exempt =
-        Roles.InitializesRefToUninitParams || P->hasAttr<RefToUninitAttr>();
+    Site.Exempt = Roles.InitializesRefToUninitParams || Roles.isMarkedParam(P);
     Site.Judged = ResolveArg(Arg, PT, Leaves);
     Site.Conditional = !NameOneStorage(Leaves);
     for (const ArgLeaf &L : Leaves) {
@@ -3085,21 +3084,19 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
                                    F(P, Arg);
                                });
       };
-  if (Roles.DestroysPointerParams || Roles.ReleasesStorageTrusted)
+  if (Roles.DestroysPointerParams || Roles.KnownParam)
     ForEachParam([&](const ParmVarDecl *P, const Expr *Arg) {
       QualType PT = P->getType();
       if (!PT->isPointerType() && !PT->isReferenceType())
         return;
-      if (Roles.DestroysPointerParams)
+      if (Roles.destroysParam(P))
         AppendDestroy(P, Arg);
-      else
+      else if (Roles.releasesParam(P, /*TrustedOnly=*/true))
         AppendFor(Arg, PT, DefAssignEventKind::Kill);
     });
-  if (Roles.InitializesRefToUninitParams || Roles.InitializesParamTrusted)
+  if (Roles.InitializesRefToUninitParams || Roles.KnownParam)
     ForEachParam([&](const ParmVarDecl *P, const Expr *Arg) {
-      if ((Roles.InitializesRefToUninitParams &&
-           P->hasAttr<RefToUninitAttr>()) ||
-          Roles.InitializesParamTrusted == P->getFunctionScopeIndex())
+      if (Roles.initializesParam(P))
         AppendFor(Arg, P->getType(), DefAssignEventKind::Write);
     });
 }
@@ -3625,9 +3622,6 @@ static void extractStdInitEvents(
     auto AppendArgumentBindings =
         [&](const Expr *CallLike,
             const SemaProfiles::CalleeLifecycleRoles &Roles) {
-          bool ParamsDestroyed = Roles.DestroysPointerParams ||
-                                 Roles.ReleasesStorageTrusted ||
-                                 Roles.ReleasesStorageByName;
           forEachArgumentBinding(
               Ctx, CallLike,
               [&](const ParmVarDecl *Parm, QualType T, const Expr *Arg,
@@ -3636,12 +3630,13 @@ static void extractStdInitEvents(
                 if (Variadic)
                   AddBinding(K::VariadicArgument, Loc, /*TargetMarked=*/false,
                              T, Arg, nullptr, CallLike);
-                else if (!ParamsDestroyed &&
-                         !(Parm && Roles.isInitializingParam(
-                                       Parm->getFunctionScopeIndex())))
+                else if (!Parm ||
+                         !(Roles.destroysParam(Parm) ||
+                           Roles.releasesParam(Parm, /*TrustedOnly=*/false) ||
+                           Roles.isInitializingParam(Parm)))
                   AddBinding(K::Parameter, Loc,
-                             Parm && Parm->hasAttr<RefToUninitAttr>(), T, Arg,
-                             nullptr, CallLike);
+                             Parm && Roles.isMarkedParam(Parm), T, Arg, nullptr,
+                             CallLike);
                 AppendAliasEscapes(Arg, T, CallLike);
               });
         };

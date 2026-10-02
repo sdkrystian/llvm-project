@@ -1588,10 +1588,9 @@ enum class KnownCalleeReturn {
   /// Returns storage affirmatively neither -- realloc's preserved prefix
   /// plus indeterminate tail.
   ReturnsUnknown,
-  /// Returns no storage at all (a pure release callee, present for its
-  /// ReleasesStorage column): never consulted as a source -- a void return
-  /// cannot reach the recognizers -- and inert (trusted) if it ever were.
-  ReturnsNothing,
+  /// Returns what an unmarked direct callee returns: trusted as initialized
+  /// (a release callee's void return).
+  ReturnsTrusted,
 };
 
 // True for a direct declaration of replaceable global operator new /
@@ -1613,103 +1612,125 @@ static bool isReplaceableGlobalOperatorDelete(const FunctionDecl *FD) {
          FD->isReplaceableGlobalAllocationFunction();
 }
 
-/// A row of the known-callee table (KnownCallees): the allocator,
-/// deallocator, and byte-writing callees. A row is keyed by builtin ID (the
-/// C allocation and memory families) or, for the operator new/delete
-/// families, which never carry a builtin ID, by a form predicate. The source
-/// side (Return) says what the return value is -- the malloc/alloca/
-/// operator-new families return uninitialized memory, calloc returns
-/// zero-initialized memory, realloc a preserved prefix plus an indeterminate
-/// tail, memset/memcpy/memmove their initialized destination -- and the sink
-/// side says whether the callee releases the storage its pointer argument
-/// denotes (ReleasesStorage), making it [[now_uninit]]-equivalent at the
-/// binding site (free, realloc's pointer parameter, operator delete), or
-/// initializes the storage of one parameter (InitializesParam). A builtin ID
-/// is absent under -fno-builtin / -ffreestanding (or on a non-matching
-/// declaration), where an allocator falls back to the trusted default and a
-/// release or initialization goes unrecognized -- a missed diagnostic or a
-/// missed relaxation, never a false positive or a false acceptance
-/// elsewhere. (getBuiltinFunctionEffects in SemaFunctionEffects.cpp groups
-/// almost exactly the allocator set for the \c allocating effect.)
+namespace {
+using KnownParamRole = SemaProfiles::KnownParamRole;
+
+/// A row of the known-callee table (KnownCallees): what a library callee
+/// returns and what it does to the storage bound to one role parameter. A
+/// row is keyed by builtin ID (the C allocation and memory families) or, for
+/// the operator new/delete families, which never carry a builtin ID, by a
+/// form predicate. A builtin ID is absent under -fno-builtin /
+/// -ffreestanding (or on a non-matching declaration), where an allocator
+/// falls back to the trusted default and a release or initialization goes
+/// unrecognized -- a missed diagnostic or a missed relaxation, never a false
+/// positive or a false acceptance elsewhere. (getBuiltinFunctionEffects in
+/// SemaFunctionEffects.cpp groups almost exactly the allocator set for the
+/// \c allocating effect.)
 struct KnownCalleeEntry {
-  /// The Clang builtin ID this row matches; 0 for a form-keyed row.
+  /// The Clang builtin ID this row matches; 0 for a form row.
   unsigned BuiltinID = 0;
-  KnownCalleeReturn Return;
-  bool ReleasesStorage = false;
-  /// The form predicate for callees with no builtin ID; null for
-  /// builtin-keyed rows.
+  /// The form predicate of a form row; null otherwise.
   bool (*Form)(const FunctionDecl *) = nullptr;
-  /// The library name of a plain-spelled builtin row, compared by the
-  /// untrusted name-only fallback (matchKnownCallee) when the builtin
-  /// ID is absent; empty for the __builtin_* spellings (which always keep
-  /// their IDs) and the form-keyed rows. A per-row literal rather than
-  /// Builtin::Context::getName, which returns std::string by value.
+  /// A builtin row's library name, compared by the untrusted name-only
+  /// fallback (matchKnownCallee) when the builtin ID is absent; empty for
+  /// the __builtin_* spellings, which always keep their IDs. A per-row
+  /// literal rather than Builtin::Context::getName, which returns
+  /// std::string by value.
   StringRef Name;
-  /// The initializing parameter's index: the callee writes the whole
-  /// storage its argument denotes, whatever the storage's prior state.
-  std::optional<unsigned> InitializesParam;
+  KnownCalleeReturn Return = KnownCalleeReturn::ReturnsTrusted;
+  /// The role parameter's index.
+  unsigned Param = 0;
+  /// What the callee does to the storage bound to Param.
+  KnownParamRole Role = KnownParamRole::None;
 };
+} // namespace
+
+/// A row keyed by builtin ID, with \p FallbackName for the name-only
+/// fallback.
+static constexpr KnownCalleeEntry
+builtinRow(unsigned ID, KnownCalleeReturn Return, StringRef FallbackName = "",
+           KnownParamRole Role = KnownParamRole::None, unsigned Param = 0) {
+  KnownCalleeEntry E;
+  E.BuiltinID = ID;
+  E.Name = FallbackName;
+  E.Return = Return;
+  E.Role = Role;
+  E.Param = Param;
+  return E;
+}
+
+/// A row keyed by a form predicate.
+static constexpr KnownCalleeEntry
+formRow(bool (*Form)(const FunctionDecl *), KnownCalleeReturn Return,
+        KnownParamRole Role = KnownParamRole::None, unsigned Param = 0) {
+  KnownCalleeEntry E;
+  E.Form = Form;
+  E.Return = Return;
+  E.Role = Role;
+  E.Param = Param;
+  return E;
+}
 
 /// The known-callee table; see KnownCalleeEntry.
 static constexpr KnownCalleeEntry KnownCallees[] = {
-    {Builtin::BImalloc, KnownCalleeReturn::ReturnsUninitialized,
-     /*ReleasesStorage=*/false, /*Form=*/nullptr, "malloc"},
-    {Builtin::BI__builtin_malloc, KnownCalleeReturn::ReturnsUninitialized},
-    {Builtin::BIaligned_alloc, KnownCalleeReturn::ReturnsUninitialized,
-     /*ReleasesStorage=*/false, /*Form=*/nullptr, "aligned_alloc"},
-    {Builtin::BIalloca, KnownCalleeReturn::ReturnsUninitialized,
-     /*ReleasesStorage=*/false, /*Form=*/nullptr, "alloca"},
-    {Builtin::BI__builtin_alloca, KnownCalleeReturn::ReturnsUninitialized},
-    {Builtin::BI__builtin_alloca_uninitialized,
-     KnownCalleeReturn::ReturnsUninitialized},
-    {Builtin::BI__builtin_alloca_with_align,
-     KnownCalleeReturn::ReturnsUninitialized},
-    {Builtin::BI__builtin_alloca_with_align_uninitialized,
-     KnownCalleeReturn::ReturnsUninitialized},
-    {Builtin::BI__builtin_operator_new,
-     KnownCalleeReturn::ReturnsUninitialized},
-    {Builtin::BIcalloc, KnownCalleeReturn::ReturnsInitialized,
-     /*ReleasesStorage=*/false, /*Form=*/nullptr, "calloc"},
-    {Builtin::BI__builtin_calloc, KnownCalleeReturn::ReturnsInitialized},
-    {Builtin::BIrealloc, KnownCalleeReturn::ReturnsUnknown,
-     /*ReleasesStorage=*/true, /*Form=*/nullptr, "realloc"},
-    {Builtin::BI__builtin_realloc, KnownCalleeReturn::ReturnsUnknown,
-     /*ReleasesStorage=*/true},
-    {Builtin::BIfree, KnownCalleeReturn::ReturnsNothing,
-     /*ReleasesStorage=*/true, /*Form=*/nullptr, "free"},
-    {Builtin::BI__builtin_free, KnownCalleeReturn::ReturnsNothing,
-     /*ReleasesStorage=*/true},
-    {/*BuiltinID=*/0, KnownCalleeReturn::ReturnsUninitialized,
-     /*ReleasesStorage=*/false, isReplaceableGlobalOperatorNew},
-    {/*BuiltinID=*/0, KnownCalleeReturn::ReturnsNothing,
-     /*ReleasesStorage=*/true, isReplaceableGlobalOperatorDelete},
-    {Builtin::BImemset, KnownCalleeReturn::ReturnsInitialized,
-     /*ReleasesStorage=*/false, /*Form=*/nullptr, "memset",
-     /*InitializesParam=*/0},
-    {Builtin::BI__builtin_memset, KnownCalleeReturn::ReturnsInitialized,
-     /*ReleasesStorage=*/false, /*Form=*/nullptr, /*Name=*/"",
-     /*InitializesParam=*/0},
-    {Builtin::BImemcpy, KnownCalleeReturn::ReturnsInitialized,
-     /*ReleasesStorage=*/false, /*Form=*/nullptr, "memcpy",
-     /*InitializesParam=*/0},
-    {Builtin::BI__builtin_memcpy, KnownCalleeReturn::ReturnsInitialized,
-     /*ReleasesStorage=*/false, /*Form=*/nullptr, /*Name=*/"",
-     /*InitializesParam=*/0},
-    {Builtin::BImemmove, KnownCalleeReturn::ReturnsInitialized,
-     /*ReleasesStorage=*/false, /*Form=*/nullptr, "memmove",
-     /*InitializesParam=*/0},
-    {Builtin::BI__builtin_memmove, KnownCalleeReturn::ReturnsInitialized,
-     /*ReleasesStorage=*/false, /*Form=*/nullptr, /*Name=*/"",
-     /*InitializesParam=*/0},
-    {Builtin::BI__builtin___memset_chk, KnownCalleeReturn::ReturnsInitialized,
-     /*ReleasesStorage=*/false, /*Form=*/nullptr, /*Name=*/"",
-     /*InitializesParam=*/0},
-    {Builtin::BI__builtin___memcpy_chk, KnownCalleeReturn::ReturnsInitialized,
-     /*ReleasesStorage=*/false, /*Form=*/nullptr, /*Name=*/"",
-     /*InitializesParam=*/0},
-    {Builtin::BI__builtin___memmove_chk, KnownCalleeReturn::ReturnsInitialized,
-     /*ReleasesStorage=*/false, /*Form=*/nullptr, /*Name=*/"",
-     /*InitializesParam=*/0},
+    builtinRow(Builtin::BImalloc, KnownCalleeReturn::ReturnsUninitialized,
+               "malloc"),
+    builtinRow(Builtin::BI__builtin_malloc,
+               KnownCalleeReturn::ReturnsUninitialized),
+    builtinRow(Builtin::BIaligned_alloc,
+               KnownCalleeReturn::ReturnsUninitialized, "aligned_alloc"),
+    builtinRow(Builtin::BIalloca, KnownCalleeReturn::ReturnsUninitialized,
+               "alloca"),
+    builtinRow(Builtin::BI__builtin_alloca,
+               KnownCalleeReturn::ReturnsUninitialized),
+    builtinRow(Builtin::BI__builtin_alloca_uninitialized,
+               KnownCalleeReturn::ReturnsUninitialized),
+    builtinRow(Builtin::BI__builtin_alloca_with_align,
+               KnownCalleeReturn::ReturnsUninitialized),
+    builtinRow(Builtin::BI__builtin_alloca_with_align_uninitialized,
+               KnownCalleeReturn::ReturnsUninitialized),
+    builtinRow(Builtin::BI__builtin_operator_new,
+               KnownCalleeReturn::ReturnsUninitialized),
+    builtinRow(Builtin::BIcalloc, KnownCalleeReturn::ReturnsInitialized,
+               "calloc"),
+    builtinRow(Builtin::BI__builtin_calloc,
+               KnownCalleeReturn::ReturnsInitialized),
+    builtinRow(Builtin::BIrealloc, KnownCalleeReturn::ReturnsUnknown, "realloc",
+               KnownParamRole::Release),
+    builtinRow(Builtin::BI__builtin_realloc, KnownCalleeReturn::ReturnsUnknown,
+               "", KnownParamRole::Release),
+    builtinRow(Builtin::BIfree, KnownCalleeReturn::ReturnsTrusted, "free",
+               KnownParamRole::Release),
+    builtinRow(Builtin::BI__builtin_free, KnownCalleeReturn::ReturnsTrusted, "",
+               KnownParamRole::Release),
+    formRow(isReplaceableGlobalOperatorNew,
+            KnownCalleeReturn::ReturnsUninitialized),
+    formRow(isReplaceableGlobalOperatorDelete,
+            KnownCalleeReturn::ReturnsTrusted, KnownParamRole::Release),
+    builtinRow(Builtin::BImemset, KnownCalleeReturn::ReturnsInitialized,
+               "memset", KnownParamRole::InitializeAnyState),
+    builtinRow(Builtin::BI__builtin_memset,
+               KnownCalleeReturn::ReturnsInitialized, "",
+               KnownParamRole::InitializeAnyState),
+    builtinRow(Builtin::BImemcpy, KnownCalleeReturn::ReturnsInitialized,
+               "memcpy", KnownParamRole::InitializeAnyState),
+    builtinRow(Builtin::BI__builtin_memcpy,
+               KnownCalleeReturn::ReturnsInitialized, "",
+               KnownParamRole::InitializeAnyState),
+    builtinRow(Builtin::BImemmove, KnownCalleeReturn::ReturnsInitialized,
+               "memmove", KnownParamRole::InitializeAnyState),
+    builtinRow(Builtin::BI__builtin_memmove,
+               KnownCalleeReturn::ReturnsInitialized, "",
+               KnownParamRole::InitializeAnyState),
+    builtinRow(Builtin::BI__builtin___memset_chk,
+               KnownCalleeReturn::ReturnsInitialized, "",
+               KnownParamRole::InitializeAnyState),
+    builtinRow(Builtin::BI__builtin___memcpy_chk,
+               KnownCalleeReturn::ReturnsInitialized, "",
+               KnownParamRole::InitializeAnyState),
+    builtinRow(Builtin::BI__builtin___memmove_chk,
+               KnownCalleeReturn::ReturnsInitialized, "",
+               KnownParamRole::InitializeAnyState),
 };
 
 /// The table row for \p FD, if any -- the *trusted* match: the builtin ID
@@ -1759,41 +1780,70 @@ static KnownCalleeMatch matchKnownCallee(const FunctionDecl *FD) {
   return {};
 }
 
-// Derive, once per binding, what \p FD does to the storage bound to its
-// parameters: the lifetime attributes plus the known-callee table's
-// ReleasesStorage rows (free, realloc's pointer parameter, replaceable
-// global operator delete / operator delete[]) and InitializesParam rows
-// (memset, memcpy, memmove), split by trust. Releasing
-// storage leaves it as uninitialized as ending the object's lifetime does,
-// so the binding sites treat a release callee's pointer parameter like a
-// [[now_uninit]] one -- except for the double-destroy check:
-// destroy_at(p); free(p); is correct, because ending an object's lifetime
-// and releasing its storage are different operations. The trusted/by-name
-// split preserves the lenient/strict query pair: acceptance may read the
-// union (a declared free(p) should not reject its argument just because
-// -fno-builtin stripped the ID), while the CFG pass's Kill must key on the
-// trusted bit only -- killing on an untrusted name-only free could
-// manufacture read-through false positives, while a missed kill is the
-// documented missed-diagnostic direction.
+// Releasing storage leaves it as uninitialized as ending the object's
+// lifetime does, so the binding sites treat a release role like a destroy --
+// except for the double-destroy check: destroy_at(p); free(p); is correct,
+// because ending an object's lifetime and releasing its storage are
+// different operations. The trusted/by-name split preserves the
+// lenient/strict query pair: acceptance may read a name-only row (a declared
+// free(p) should not reject its argument just because -fno-builtin stripped
+// the ID), while the CFG pass's Kill and Write key on a trusted row only --
+// killing on an untrusted name-only free could manufacture read-through
+// false positives, while a missed kill is the documented missed-diagnostic
+// direction.
 SemaProfiles::CalleeLifecycleRoles
 SemaProfiles::getCalleeLifecycleRoles(const FunctionDecl *FD) {
   SemaProfiles::CalleeLifecycleRoles Roles;
   Roles.InitializesRefToUninitParams = FD->hasAttr<NowInitAttr>();
   Roles.DestroysPointerParams = FD->hasAttr<NowUninitAttr>();
   KnownCalleeMatch M = matchKnownCallee(FD);
-  if (M.Entry && M.Entry->ReleasesStorage) {
-    if (M.Trusted)
-      Roles.ReleasesStorageTrusted = true;
-    else
-      Roles.ReleasesStorageByName = true;
-  }
-  if (M.Entry && M.Entry->InitializesParam) {
-    if (M.Trusted)
-      Roles.InitializesParamTrusted = M.Entry->InitializesParam;
-    else
-      Roles.InitializesParamByName = M.Entry->InitializesParam;
-  }
+  if (!M.Entry || M.Entry->Role == KnownParamRole::None ||
+      M.Entry->Param >= FD->getNumParams())
+    return Roles;
+  Roles.KnownParam = M.Entry->Param;
+  Roles.KnownRole = M.Entry->Role;
+  Roles.KnownTrusted = M.Trusted;
   return Roles;
+}
+
+SemaProfiles::KnownParamRole
+SemaProfiles::CalleeLifecycleRoles::roleOf(const ParmVarDecl *P) const {
+  return KnownParam == P->getFunctionScopeIndex() ? KnownRole
+                                                  : KnownParamRole::None;
+}
+
+bool SemaProfiles::CalleeLifecycleRoles::isMarkedParam(
+    const ParmVarDecl *P) const {
+  KnownParamRole R = roleOf(P);
+  return P->hasAttr<RefToUninitAttr>() || R == KnownParamRole::AssertUninit ||
+         R == KnownParamRole::Construct;
+}
+
+bool SemaProfiles::CalleeLifecycleRoles::isInitializingParam(
+    const ParmVarDecl *P) const {
+  return roleOf(P) == KnownParamRole::InitializeAnyState;
+}
+
+bool SemaProfiles::CalleeLifecycleRoles::destroysParam(
+    const ParmVarDecl *P) const {
+  if (roleOf(P) == KnownParamRole::Destroy)
+    return true;
+  QualType T = P->getType();
+  return DestroysPointerParams && (T->isPointerType() || T->isReferenceType());
+}
+
+bool SemaProfiles::CalleeLifecycleRoles::releasesParam(const ParmVarDecl *P,
+                                                       bool TrustedOnly) const {
+  return roleOf(P) == KnownParamRole::Release && (KnownTrusted || !TrustedOnly);
+}
+
+bool SemaProfiles::CalleeLifecycleRoles::initializesParam(
+    const ParmVarDecl *P) const {
+  if (InitializesRefToUninitParams && isMarkedParam(P))
+    return true;
+  KnownParamRole R = roleOf(P);
+  return KnownTrusted && (R == KnownParamRole::Construct ||
+                          R == KnownParamRole::InitializeAnyState);
 }
 
 // A call to a [[ref_to_uninit]]-returning function yields uninitialized
@@ -1829,9 +1879,7 @@ static UninitStorage classifyRefToUninitCallee(const CallExpr *CE,
         return UninitStorage::Initialized;
       case KnownCalleeReturn::ReturnsUnknown:
         return UninitStorage::Unknown;
-      case KnownCalleeReturn::ReturnsNothing:
-        // A void return never reaches these recognizers; keep the trusted
-        // default if it somehow did.
+      case KnownCalleeReturn::ReturnsTrusted:
         break;
       }
     }
@@ -2778,8 +2826,6 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
       (!T->isPointerType() && !T->isReferenceType()) ||
       rebuildingDefaultArgOrInit())
     return;
-  bool TargetMarked = Target && Target->hasAttr<RefToUninitAttr>() &&
-                      bindingTargetCanCarryMarker(Kind);
   const auto *Parm = dyn_cast_or_null<ParmVarDecl>(Target);
   const auto *Callee =
       Parm ? dyn_cast<FunctionDecl>(Parm->getDeclContext()) : nullptr;
@@ -2792,11 +2838,14 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
   // The callee's lifecycle roles (see CalleeLifecycleRoles).
   CalleeLifecycleRoles Roles =
       Callee ? getCalleeLifecycleRoles(Callee) : CalleeLifecycleRoles();
+  bool TargetMarked =
+      Target && bindingTargetCanCarryMarker(Kind) &&
+      (Parm ? Roles.isMarkedParam(Parm) : Target->hasAttr<RefToUninitAttr>());
   // An initializing parameter accepts storage in any live state.
-  if (Parm && Roles.isInitializingParam(Parm->getFunctionScopeIndex()))
+  if (Parm && Roles.isInitializingParam(Parm))
     return;
-  if (Roles.DestroysPointerParams || Roles.ReleasesStorageTrusted ||
-      Roles.ReleasesStorageByName) {
+  bool Destroys = Parm && Roles.destroysParam(Parm);
+  if (Destroys || (Parm && Roles.releasesParam(Parm, /*TrustedOnly=*/false))) {
     // A [[now_uninit]] callee's pointer/reference parameter -- and a known
     // storage-release callee's (free, realloc's pointer, replaceable
     // global operator delete), which is [[now_uninit]]-equivalent here --
@@ -2831,14 +2880,13 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
     if (!Src || isa<RecoveryExpr>(Src->IgnoreParens()) ||
         (!D && Src->isInstantiationDependent()))
       return;
-    bool DestroyUninitApplies = Roles.DestroysPointerParams &&
-                                !Roles.InitializesRefToUninitParams &&
-                                !TargetMarked;
+    bool DestroyUninitApplies =
+        Destroys && !Roles.InitializesRefToUninitParams && !TargetMarked;
     if (SmallVector<const Expr *, 2> Leaves;
         hasFlowTrackedLeaf(Src, T, &Leaves)) {
       // A release callee's argument is a Kill or nothing in the CFG pass,
       // never a judgment.
-      if (Roles.DestroysPointerParams)
+      if (Destroys)
         recordDeferredInitSite({DeferredInitSite::Kind::Destroy, Kind, Loc,
                                 DestroyUninitApplies, T, Src,
                                 /*Subject=*/nullptr, std::move(Leaves)});

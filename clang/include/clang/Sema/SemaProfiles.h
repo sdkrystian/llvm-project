@@ -657,14 +657,38 @@ public:
   /// Sema::CreateBuiltinUnaryOp's increment/decrement arm.
   void checkInitProfileIncDec(Expr *Operand, SourceLocation OpLoc);
 
-  /// What a direct callee does to the storage bound to its parameters,
-  /// derived from the callee's lifetime attributes and the known-callee
-  /// table. Each consumer reads only the bits its direction may rely on:
-  /// binding *acceptance* (which never diagnoses) reads the union of the
-  /// destroy, release, and initializing-parameter bits, the CFG pass's Kill
-  /// and initializing Write (a diagnostic's firing basis) read the trusted
-  /// bits only, and double_destroy keys on the destroy bit only (a storage
-  /// release leaves no object to destroy again).
+  /// What a known callee does to the storage bound to its role parameter
+  /// (KnownCallees in SemaProfiles.cpp; see ProfilesFrameworkInternals.rst,
+  /// "The std::init Implementation Map").
+  enum class KnownParamRole : uint8_t {
+    /// No role parameter.
+    None,
+    /// The storage must be uninitialized and keeps its state, as for a
+    /// [[ref_to_uninit]] parameter (std::now_init, P4222R2 §4.4).
+    AssertUninit,
+    /// The storage must be uninitialized and is initialized by the call, as
+    /// for a [[ref_to_uninit]] parameter of a [[now_init]] function
+    /// (std::construct_at, the std::uninitialized_* output range).
+    Construct,
+    /// The storage is initialized by the call whatever its prior state: an
+    /// initializing parameter (memset's destination, va_start's va_list).
+    InitializeAnyState,
+    /// The call ends the lifetime of the storage, as a [[now_uninit]]
+    /// function does (std::destroy_at, std::destroy's first iterator).
+    Destroy,
+    /// The call releases the storage, which may never have been constructed
+    /// (free, realloc's pointer, replaceable global operator delete).
+    Release,
+  };
+
+  /// What a direct callee does to the storage bound to its parameters: its
+  /// lifetime attributes plus its known-callee row's role parameter. Each
+  /// consumer reads only the bits its direction may rely on: binding
+  /// *acceptance* (which never diagnoses) reads a name-only row like a
+  /// trusted one, the CFG pass's Kill and initializing Write (a diagnostic's
+  /// firing basis) read a trusted row only, and double_destroy keys on the
+  /// destroy role only (a storage release leaves no object to destroy
+  /// again).
   struct CalleeLifecycleRoles {
     /// [[now_init]]: the callee initializes the storage bound to its
     /// [[ref_to_uninit]] parameters (P4222R2 §6.2).
@@ -672,35 +696,37 @@ public:
     /// [[now_uninit]]: the callee ends the lifetime of the storage bound
     /// to its pointer/reference parameters (§4.4).
     bool DestroysPointerParams = false;
-    /// A trusted storage-release callee (builtin ID or operator form):
-    /// free, realloc's pointer, replaceable global operator delete.
-    bool ReleasesStorageTrusted = false;
-    /// A name-only (untrusted) release match -- -fno-builtin /
-    /// -ffreestanding strips the ID: the name says what the function is
-    /// meant to be, but its semantics cannot be assumed, so this bit feeds
-    /// acceptance only.
-    bool ReleasesStorageByName = false;
-    /// A trusted initializing parameter -- memset's, memcpy's, or memmove's
-    /// destination: the callee writes the whole storage its argument
-    /// denotes, so the binding accepts storage in any live state and the
-    /// CFG pass credits the storage (see ProfilesFrameworkInternals.rst).
-    std::optional<unsigned> InitializesParamTrusted;
-    /// A name-only initializing parameter match, for acceptance only.
-    std::optional<unsigned> InitializesParamByName;
+    /// The known-callee row's role parameter, if the row has one.
+    std::optional<unsigned> KnownParam;
+    /// What the row does to the storage bound to KnownParam.
+    KnownParamRole KnownRole = KnownParamRole::None;
+    /// Whether the row matched by builtin ID, form, or namespace-std name
+    /// rather than by the name-only fallback, which -fno-builtin /
+    /// -ffreestanding leaves: the name says what the function is meant to
+    /// be, but its semantics cannot be assumed.
+    bool KnownTrusted = false;
 
-    /// True if parameter \p Index is an initializing parameter, trusted or
-    /// by name.
-    bool isInitializingParam(unsigned Index) const {
-      return InitializesParamTrusted == Index ||
-             InitializesParamByName == Index;
-    }
+    /// The row role of \p P, a parameter of the callee.
+    KnownParamRole roleOf(const ParmVarDecl *P) const;
+    /// True if the binding to \p P is judged against a [[ref_to_uninit]]
+    /// target: \p P carries the marker, or its row role implies one.
+    bool isMarkedParam(const ParmVarDecl *P) const;
+    /// True if \p P is an initializing parameter, trusted or by name: its
+    /// binding accepts storage in any live state.
+    bool isInitializingParam(const ParmVarDecl *P) const;
+    /// True if the call ends the lifetime of the storage bound to \p P.
+    bool destroysParam(const ParmVarDecl *P) const;
+    /// True if the call releases the storage bound to \p P; a name-only
+    /// match counts unless \p TrustedOnly.
+    bool releasesParam(const ParmVarDecl *P, bool TrustedOnly) const;
+    /// True if the call initializes the storage bound to \p P on a trusted
+    /// basis: a marked parameter of a [[now_init]] callee, or a trusted
+    /// row's Construct or InitializeAnyState role.
+    bool initializesParam(const ParmVarDecl *P) const;
   };
   /// Derive what \p FD does to the storage bound to its parameters: the
-  /// lifetime attributes plus the known-callee table's storage-release
-  /// rows (free, realloc's pointer parameter, replaceable global operator
-  /// delete / operator delete[]) and initializing-parameter rows (memset,
-  /// memcpy, memmove), split by trust. Shared by the parse-time
-  /// funnel and the CFG pass's lifecycle arm.
+  /// lifetime attributes plus the known-callee row. Shared by the parse-time
+  /// funnel and the CFG pass's argument and lifecycle arms.
   static CalleeLifecycleRoles getCalleeLifecycleRoles(const FunctionDecl *FD);
 
 private:
