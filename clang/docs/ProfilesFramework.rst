@@ -294,10 +294,9 @@ units:
 
 - A non-partition implementation unit (``module M;``) inherits the
   interface's enforcements automatically.
-- A partition implementation unit (``module M:P;``) inherits them only on a
-  best-effort basis, because the interface's BMI is usually not built yet
-  when the partition is compiled.  Repeat the ``[[profiles::enforce]]`` there
-  for guaranteed enforcement.
+- A partition implementation unit (``module M:P;``) is not guaranteed to
+  inherit them (see :ref:`profiles-known-gaps`): repeat the
+  ``[[profiles::enforce]]`` there.
 
 ``-fprofiles-enforce=`` is local to the translation unit it is given to: a
 module interface or header unit built with it advertises nothing for
@@ -341,7 +340,7 @@ Behavior of a runtime check:
   initializer or default argument emitted there -- those belong to the
   member's or parameter's construct, so suppress on the member or parameter
   instead.  The corners where a suppression's recorded dominion departs from
-  its construct's tokens are listed in :doc:`ProfilesFrameworkInternals`.
+  its construct's tokens are listed in :ref:`profiles-known-gaps`.
 - **System-header exemption.**  As for compile-time rules, code originating
   in a system header gets no checks by default (see `System Headers`_).
 - **Sanitizer independence.**  The checks are emitted regardless of

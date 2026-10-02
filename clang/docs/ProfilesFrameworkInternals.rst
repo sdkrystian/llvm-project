@@ -163,9 +163,7 @@ names a parameter or a sibling that changed -- is reported again at that
 instantiation, with the ``in instantiation of ...`` note; an operand the
 instantiation reuses is not.  The pattern-time half is the one place the
 framework departs from P3589R2 §1.1's "as-if after phase 7" model, in
-exchange for reuse-proof diagnostics.  Under ``-fdelayed-template-parsing``
-the body of a never-instantiated template is never parsed, so pattern-time
-diagnosis does not occur in that mode.  ``test::type_cast`` follows the
+exchange for reuse-proof diagnostics.  ``test::type_cast`` follows the
 expression policy exactly: a ``reinterpret_cast`` of a non-dependent operand
 fires at the definition, of a dependent operand once per instantiation.
 
@@ -333,10 +331,6 @@ string compensates.  At ``-O0`` every check site gets its own trap instruction,
 keeping locations and reasons exact; optimized builds coalesce the traps of
 one handler kind and merge their locations, like UBSan's trap mode.
 
-The pilot's zero-divisor check deliberately mirrors UBSan's blind spots: GCC
-vector-extension integer division and ``_Complex int`` division are not
-checked.
-
 
 Enforcement and Suppression State
 =================================
@@ -358,9 +352,7 @@ an unenforced state.  ``-fprofiles-enforce=`` maps the group in the initial
 state instead (the ``ASTContext`` constructor, a command-line mapping).  A
 profile the implementation does not know has no entry in the registry, so
 nothing is mapped for it, which is the specified behavior of an unknown
-profile.  A check site with an invalid location sees the latest recorded
-state: command-line enforcement plus whatever enforcement or suppression
-was most recently recorded anywhere in the unit.
+profile.
 
 The engine's own rungs then apply: the rule diagnostics are latent, so
 ``-w`` keeps an enforced rule, ``-Weverything`` in either form leaves the
@@ -469,16 +461,8 @@ member's or parameter's, never the use site's.
 (``mergeDeclAttribute`` skips it), so a suppression written on a previous
 declaration does not appear on the definition in the AST either.
 
-Where the recorded dominion departs from the construct's token range:
-
-- Positions are expansion sites, so a dominion that begins or ends inside a
-  macro expansion covers the whole expansion: a suppression spelled inside a
-  macro, or whose construct ends inside one, also suppresses the other
-  tokens of that expansion (the one under-check corner).
-- A check site with an invalid location sees the latest recorded state:
-  command-line enforcement plus whatever enforcement or suppression was most
-  recently recorded anywhere in the unit -- an over- or under-check
-  depending on what was last recorded.
+The corners where the recorded state departs from the dominions' token
+ranges are listed in `Known Gaps`_.
 
 
 Modules and Serialization
@@ -491,11 +475,9 @@ enforced designators: they are recorded on
 advertises the same way from the empty-declaration form P3589R2 prescribes
 for headers.  A non-partition implementation unit inherits the
 interface's enforcements through its implicit import of the primary
-interface.  A partition implementation unit does not implicitly import the
-interface, whose BMI is normally built later, so inheritance there is
-best-effort: enforcements are inherited only when the interface's BMI is
-already resident, and it is never force-loaded nor its absence diagnosed --
-a missed diagnostic, never a wrong one.
+interface.  A partition implementation unit inherits them only from an
+interface module already loaded when its module-declaration is processed
+(see `Known Gaps`_).
 ``[[profiles::enforce]]`` on a *non-interface* module-declaration is recorded
 only translation-unit-locally and is invisible to importers.  A designator
 written on an implementation unit's module-declaration is checked against the
@@ -553,27 +535,23 @@ standard ``std::``-prefixed profiles.
 The previous declaration's dominion is its translation unit's recorded
 enforcement set -- every profile enforced there by attribute, by
 ``-fprofiles-enforce=``, or by inheritance -- carried on the module as
-``Module::DominionProfiles`` (``SUBMODULE_DOMINION_PROFILES``).  It is
-distinct from the advertised set that ``[[profiles::require]]`` reads.
-Two cases are skipped rather than guessed at (a missed diagnostic, never a
-wrong one): a declaration in an explicit global module fragment (an
-enforcement written on the module-declaration does not cover it while one
-written before the fragment's declarations does, and the recorded set cannot
-tell the two apart), and a previous declaration from the same module family
-(this unit inherits the interface's enforcements, and an implementation
-unit's additional TU-local enforcements do not obligate the interface).  A
-previous declaration owned by a module-map module (a Clang header module,
-``-fmodules``) is not checked at all: that is textual inclusion wearing an
-AST file, not a separate TU in the standard's model, so it has no dominion of
-its own -- header units, which are real TUs with recorded designators, stay
-checked.  A textual or PCH previous declaration shares the current TU's
-dominion and is not checked; implicit template instantiations are exempt.
-A previous declaration covered by the system-header exemption stopgap is
-skipped as well -- a header unit built from a system header has no recorded
-designators, and redeclaring or specializing its entities must not draw the
-error while every other check exempts that code
-(``-fno-profiles-exempt-system-headers`` restores spec-exact checking).
-Profiles gated off in this compilation (``test::`` names without
+``Module::DominionProfiles`` (``SUBMODULE_DOMINION_PROFILES``).  It is distinct
+from the advertised set that ``[[profiles::require]]`` reads.  A previous
+declaration from the same module family is skipped: this unit inherits the
+interface's enforcements, and an implementation unit's additional TU-local
+enforcements do not obligate the interface.  A declaration in an explicit
+global module fragment is skipped too (see `Known Gaps`_).  A previous
+declaration owned by a module-map module (a Clang header module, ``-fmodules``)
+is not checked at all: that is textual inclusion wearing an AST file, not a
+separate TU in the standard's model, so it has no dominion of its own -- header
+units, which are real TUs with recorded designators, stay checked.  A textual
+or PCH previous declaration shares the current TU's dominion and is not
+checked; implicit template instantiations are exempt.  A previous declaration
+covered by the system-header exemption stopgap is skipped as well -- a header
+unit built from a system header has no recorded designators, and redeclaring or
+specializing its entities must not draw the error while every other check
+exempts that code (``-fno-profiles-exempt-system-headers`` restores spec-exact
+checking).  Profiles gated off in this compilation (``test::`` names without
 ``-fprofiles-test-profiles``) are inert on either side of the comparison.
 
 
@@ -584,6 +562,27 @@ Known Gaps
 
 Each entry is a place where the framework misses a check that P3589R2 or
 :doc:`ProfilesFramework` calls for, or applies one that they exempt.
+
+Templates
+---------
+
+- Under ``-fdelayed-template-parsing`` the body of a never-instantiated
+  template is never parsed, so the pattern-time half of the expression
+  policy (`Check Sites`_) does not occur in that mode.
+
+Suppression Dominions
+---------------------
+
+Where the recorded dominion departs from the construct's token range:
+
+- Positions are expansion sites, so a dominion that begins or ends inside a
+  macro expansion covers the whole expansion: a suppression spelled inside a
+  macro, or whose construct ends inside one, also suppresses the other
+  tokens of that expansion (the one under-check corner).
+- A check site with an invalid location sees the latest recorded state:
+  command-line enforcement plus whatever enforcement or suppression was most
+  recently recorded anywhere in the unit -- an over- or under-check
+  depending on what was last recorded.
 
 Analysis-Based Rules
 --------------------
@@ -597,6 +596,33 @@ Analysis-Based Rules
   ``constexpr`` variable whose initializer failed.  The error rejects the
   translation unit, so no violation is accepted; the body's rider
   diagnostics appear once the error is fixed.
+
+Modules
+-------
+
+- A partition implementation unit (``module M:P;``) inherits the
+  interface's enforcements only from an interface module already loaded
+  when its module-declaration is processed: ``ModuleMap::findModule`` does
+  not load one, and its absence is not diagnosed.  With the lazy
+  ``-fmodule-file=M=<path>`` and ``-fprebuilt-module-path=`` forms the
+  interface is never loaded there, so the partition is not enforced; the
+  eager ``-fmodule-file=<path>`` form inherits.  An ``import M;`` in the
+  partition comes after the module-declaration and does not help, and an
+  internal partition that the primary interface imports is compiled before
+  the interface's BMI exists.  Each is a missed diagnostic, never a wrong
+  one.
+- A declaration in an explicit global module fragment is not checked for
+  redeclaration compatibility (`Redeclaration Compatibility`_): an
+  enforcement written on the module-declaration does not cover it while one
+  written before the fragment's declarations does, and the recorded
+  enforcement set cannot tell the two apart.
+
+Runtime Checks
+--------------
+
+- The ``test::arith`` zero-divisor check does not cover GCC
+  vector-extension integer division or ``_Complex int`` division, the
+  operations UBSan's integer-divide-by-zero check leaves unchecked as well.
 
 
 Test Profiles

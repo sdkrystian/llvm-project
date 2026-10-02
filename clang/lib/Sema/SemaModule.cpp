@@ -471,8 +471,8 @@ Sema::DeclGroupPtrTy Sema::ActOnModuleDecl(
     } else if (MDK == ModuleDeclKind::PartitionImplementation) {
       // A partition implementation unit does not implicitly import the primary
       // interface, so inheriting the interface's enforcements is best-effort,
-      // only when its BMI is already resident. See "Modules and Serialization"
-      // in ProfilesFrameworkInternals.rst.
+      // only when its BMI is already resident. See
+      // ProfilesFrameworkInternals.rst, "Known Gaps".
       if (Module *Primary = PP.getHeaderSearchInfo().getModuleMap().findModule(
               Mod->getPrimaryModuleInterfaceName()))
         for (const auto &EP : Primary->AdvertisedProfiles)
