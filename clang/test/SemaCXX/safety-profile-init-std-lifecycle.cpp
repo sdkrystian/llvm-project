@@ -7,6 +7,7 @@
 // RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %t/now_init_body.cpp
 // RUN: %clang_cc1 -triple x86_64-linux-gnu -fsyntax-only -verify=expected,array -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %t/va.cpp
 // RUN: %clang_cc1 -triple aarch64-linux-gnu -fsyntax-only -verify=expected,record -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %t/va.cpp
+// RUN: %clang_cc1 -triple i386-linux-gnu -fsyntax-only -verify=expected,pointer -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %t/va.cpp
 
 // Clang knows the std::init roles of std::construct_at (its pointer first
 // parameter must refer to uninitialized memory and is initialized by the
@@ -649,7 +650,9 @@ void user() {
 
 //--- va.cpp
 // va_start and va_copy initialize their va_list whatever its state; va_arg
-// binds a class-type va_list (AArch64, ARM) to a reference.
+// binds a class-type va_list (AArch64, ARM) to a reference. The [[uninit]]
+// marker is accepted on a va_list of any representation, a pointer (i386)
+// included.
 [[profiles::enforce(std::init)]];
 
 // The canonical variadic idiom
@@ -665,7 +668,8 @@ int sum(int n, ...) {
 int copy(int n, ...) {
   __builtin_va_list ap [[uninit]], aq [[uninit]];
   __builtin_va_copy(aq, ap); // array-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}} \
-                             // record-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+                             // record-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}} \
+                             // pointer-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   __builtin_va_start(ap, n);
   __builtin_va_copy(aq, ap);
   int r = __builtin_va_arg(aq, int);
@@ -679,7 +683,8 @@ int before_start(int n, ...) {
   __builtin_va_list ap [[uninit]];
   int r = __builtin_va_arg(ap, int); // record-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   __builtin_va_end(ap); // array-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}} \
-                        // record-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+                        // record-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}} \
+                        // pointer-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   return r;
 }
 
@@ -690,6 +695,12 @@ int value_initialized(int n, ...) {
   int r = __builtin_va_arg(ap, int);
   __builtin_va_end(ap);
   return r;
+}
+
+// A pointer is still rejected
+int *pointer_marker() {
+  char *p [[uninit]]; // expected-error {{'[[uninit]]' cannot be applied to a pointer under profile 'std::init'; initialize the pointer (for example to 'nullptr')}}
+  return nullptr;
 }
 
 // An unmarked va_list without an initializer is diagnosed

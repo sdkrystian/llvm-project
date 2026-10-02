@@ -26,6 +26,7 @@
 #include "clang/Basic/Module.h"
 #include "clang/Basic/SimpleTypoCorrection.h"
 #include "clang/Basic/SourceManager.h"
+#include "clang/Basic/TargetInfo.h"
 #include "clang/Sema/Initialization.h"
 #include "clang/Sema/ParsedAttr.h"
 #include "clang/Sema/Sema.h"
@@ -787,6 +788,21 @@ static bool isPointerMarkerBannedType(QualType T) {
          T->isBlockPointerType();
 }
 
+/// True if \p T names the target's va_list type, or the Microsoft-ABI one,
+/// through its typedef: an opaque handle that va_start initializes, whatever
+/// its representation.
+static bool isBuiltinVaListSugar(const ASTContext &Ctx, QualType T) {
+  while (const auto *TT = T->getAs<TypedefType>()) {
+    const TypedefNameDecl *TD = TT->getDecl();
+    if (TD == Ctx.getBuiltinVaListDecl() ||
+        (Ctx.getTargetInfo().hasBuiltinMSVaList() &&
+         TD == Ctx.getBuiltinMSVaListDecl()))
+      return true;
+    T = TD->getUnderlyingType();
+  }
+  return false;
+}
+
 namespace {
 /// Which std::init marker rule owns the [[uninit]] on an entity, in the
 /// fixed precedence the exactly-one-diagnostic invariants encode: the
@@ -824,7 +840,8 @@ static UninitMarkerVerdict classifyUninitMarkerSubject(ASTContext &Ctx,
       isa<FieldDecl>(D) && cast<FieldDecl>(D)->getParent()->isUnion();
   if (BaseTy->isUnionType() || UnionMember)
     return UninitMarkerVerdict::Union;
-  if (isPointerMarkerBannedType(BaseTy))
+  if (isPointerMarkerBannedType(BaseTy) &&
+      !isBuiltinVaListSugar(Ctx, D->getType()))
     return UninitMarkerVerdict::Pointer;
   return UninitMarkerVerdict::Consistent;
 }

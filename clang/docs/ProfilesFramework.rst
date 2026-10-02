@@ -503,19 +503,21 @@ guarantee -- are rejected:
    }
 
 Each of these keys on the array element type, so an array of pointers or of
-unions is rejected exactly like a single one.  The rules apply in a fixed
-precedence, so a marked entity draws exactly one of them: the subject's type
-first (a marked pointer or union is rejected by ``pointer_marker`` /
-``union_marker`` whatever its storage duration or initializer), then static
-or thread storage duration, then a contradicting initializer.  A no-op
-initialization -- the
-trivial default-initialization of a scalar or aggregate that leaves a scalar
-subobject indeterminate -- is consistent with the marker; any other
-synthesized initialization contradicts it and is rejected (§5.3): a member or
-base with a user-provided default constructor, a default member initializer,
-a virtual table pointer, or a value-initialization (``= P()``), all of which
-initialize something.  ``uninit_with_initializer`` reports the two cases
-differently: a *written* initializer contradicts the marker outright, while a
+unions is rejected exactly like a single one.  A ``va_list`` is exempt from
+``pointer_marker``: it is an opaque handle ``va_start`` initializes, so
+``va_list ap [[uninit]];`` is accepted where ``va_list`` is a pointer (i386,
+Windows) as elsewhere.  The rules apply in a fixed precedence, so a marked
+entity draws exactly one of them: the subject's type first (a marked pointer or
+union is rejected by ``pointer_marker`` / ``union_marker`` whatever its storage
+duration or initializer), then static or thread storage duration, then a
+contradicting initializer.  A no-op initialization -- the trivial
+default-initialization of a scalar or aggregate that leaves a scalar subobject
+indeterminate -- is consistent with the marker; any other synthesized
+initialization contradicts it and is rejected (§5.3): a member or base with a
+user-provided default constructor, a default member initializer, a virtual table
+pointer, or a value-initialization (``= P()``), all of which initialize
+something.  ``uninit_with_initializer`` reports the two cases differently: a
+*written* initializer contradicts the marker outright, while a
 *default*-initialization that is not a no-op is reported against the type,
 with a note giving the reason (a constructor runs, a default member
 initializer runs, nothing is left indeterminate, or the type has no usable

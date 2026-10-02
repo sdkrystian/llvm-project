@@ -781,7 +781,8 @@ follows:
        ``InstantiateVariableInitializer``
    * - ``union_marker``, ``pointer_marker``
      - attribute handler
-     - ``checkInitProfileMarkerPlacement``
+     - ``checkInitProfileMarkerPlacement`` (a ``va_list`` is exempt from
+       ``pointer_marker``: ``isBuiltinVaListSugar``)
    * - ``ctor_uninit_member``
      - constructor finalization; class completion for inherited
        constructors
