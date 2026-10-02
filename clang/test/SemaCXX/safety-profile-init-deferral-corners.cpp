@@ -252,6 +252,7 @@ struct suspend_never {
 } // namespace std
 struct CoTask {
   struct promise_type {
+    promise_type();
     promise_type(int *, int *);
     CoTask get_return_object();
     std::suspend_never initial_suspend();
@@ -263,6 +264,22 @@ struct CoTask {
 CoTask coroutine_marked_params(int *q [[ref_to_uninit]], int *r) {
   sink(q); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   co_return;
+}
+
+// An awaited object is the object argument of each awaiter call
+struct CoAwaiter {
+  int v;
+  bool await_ready();
+  void await_suspend(std::coroutine_handle<>);
+  int await_resume();
+};
+CoTask coroutine_await_uninit() {
+  CoAwaiter a [[uninit]];
+  co_await a; // expected-error {{calling member function 'await_ready' binds its implicit object parameter to uninitialized memory under profile 'std::init'}} \
+              // expected-error {{calling member function 'await_suspend' binds its implicit object parameter to uninitialized memory under profile 'std::init'}} \
+              // expected-error {{calling member function 'await_resume' binds its implicit object parameter to uninitialized memory under profile 'std::init'}}
+  CoAwaiter c{1};
+  co_await c; // OK
 }
 
 // A system-header body is not analyzed

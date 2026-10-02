@@ -547,10 +547,12 @@ An uninitialized object must not be read (rule ``uninit_read``).  Local flow
 analysis verifies reads of uninitialized locals, of ``[[uninit]]`` members
 within the defining constructor's body, and of ``[[uninit]]`` members of
 constructor-less aggregate locals; reads through ``[[ref_to_uninit]]``
-pointers and references and reads of subobjects of ``[[uninit]]`` objects are
-rejected unless the storage is initialized on some path reaching the read --
-by a whole-entity store, a ``[[now_init]]`` call, or ``std::construct_at``
-(see `Binding Pointers and References`_):
+pointers and references and reads of subobjects of ``[[uninit]]`` objects
+(copying an ``[[uninit]]`` array -- a by-copy capture ``[arr]``,
+``auto [a, b] = arr;`` -- reads each element) are rejected unless the storage is
+initialized on some path reaching the read -- by a whole-entity store, a
+``[[now_init]]`` call, or ``std::construct_at`` (see
+`Binding Pointers and References`_):
 
 .. code-block:: c++
 
@@ -719,36 +721,36 @@ to a function pointer is accepted while a call to it stays a marked source:
 The check applies wherever a pointer or reference is bound: variable, member,
 and aggregate initialization, assignment, call arguments (including defaulted
 and variadic ones; a builtin that never evaluates its arguments, such as
-``__builtin_object_size``, binds none), Objective-C message arguments (except a variadic
-method's extra arguments and the value a property assignment ``a.p = &u``
-passes to its setter), ``return`` and ``throw`` statements (including returns
-inside lambdas and blocks -- a lambda's marker is written on its call
-operator, in the C++23 attribute position after the lambda-introducer:
-``[] [[ref_to_uninit]] () { ... }``, with a deduced or trailing return type),
-lambda captures (by reference
-and by copy -- a closure field cannot carry the marker, so a by-copy capture
-of a marked pointer is rejected like any unmarked pointer copy; capture by
-reference, or store through the marker first, if the flow is intended), and
-the implicit object argument of a member call -- so calling a member function
-on an object recognized as uninitialized storage is rejected, and so is
-copying a class object out of one.  A structured binding names the member or
-element it decomposes, marker included, so after ``auto [a, b] = s;`` a use
-of ``b`` is judged by the marking of the field it names.  For the copy, the escape is the paper's
-own (§7.2): declare the copy constructor's parameter ``[[ref_to_uninit]]``.
-Positions that cannot carry the marker -- a variadic argument, a parameter of
-a function called through a function pointer or a pointer to member
-function, the implicit object parameter,
-a pointer element of an array in aggregate initialization
--- are checked as unmarked targets; suppress at the call site if the flow is
-intended.  A reference to a *const* pointer, or an rvalue reference to a
-pointer, is bound by the pointer's value: ``int *const &r = &u`` needs the
-marker exactly as ``int *r = &u`` does.  A reference to a *non-const*
-pointer aliases the pointer object itself and is neither checked nor
-tracked.  An assignment whose target is a conditional, comma, or GNU ``?:``
-expression stores to whichever pointer the chosen arm names: arms that agree
-on their marking are checked under it, and arms of mixed marking accept
-either source (any one answer would reject a legal combination); a target
-that does not directly name a pointer declaration -- a reference to a
+``__builtin_object_size``, binds none), Objective-C message arguments, a
+property assignment's value included (``a.p = &u`` binds the setter's parameter;
+a variadic method's extra arguments bind nothing), ``return`` and ``throw``
+statements (including returns inside lambdas and blocks -- a lambda's marker is
+written on its call operator, in the C++23 attribute position after the
+lambda-introducer: ``[] [[ref_to_uninit]] () { ... }``, with a deduced or
+trailing return type), lambda captures (by reference and by copy -- a closure
+field cannot carry the marker, so a by-copy capture of a marked pointer is
+rejected like any unmarked pointer copy; capture by reference, or store through
+the marker first, if the flow is intended), and the implicit object argument of
+a member call (including a ``__declspec(property)`` access's accessor call and
+``co_await``'s awaiter calls) -- so calling a member function on an object
+recognized as uninitialized storage is rejected, and so is copying a class
+object out of one.  A structured binding names the member or element it
+decomposes, marker included, so after ``auto [a, b] = s;`` a use of ``b`` is
+judged by the marking of the field it names.  For the copy, the escape is the
+paper's own (§7.2): declare the copy constructor's parameter
+``[[ref_to_uninit]]``.  Positions that cannot carry the marker -- a variadic
+argument, a parameter of a function called through a function pointer or a
+pointer to member function, the implicit object parameter, a pointer element of
+an array in aggregate initialization -- are checked as unmarked targets;
+suppress at the call site if the flow is intended.  A reference to a *const*
+pointer, or an rvalue reference to a pointer, is bound by the pointer's value:
+``int *const &r = &u`` needs the marker exactly as ``int *r = &u`` does.  A
+reference to a *non-const* pointer aliases the pointer object itself and is
+neither checked nor tracked.  An assignment whose target is a conditional,
+comma, or GNU ``?:`` expression stores to whichever pointer the chosen arm
+names: arms that agree on their marking are checked under it, and arms of mixed
+marking accept either source (any one answer would reject a legal combination);
+a target that does not directly name a pointer declaration -- a reference to a
 pointer, ``*pp``, an array element -- has unknown marking and accepts either
 source as well.  A conditional *source* whose arms disagree -- one
 initialized, one uninitialized -- is rejected for either target (P4222R2

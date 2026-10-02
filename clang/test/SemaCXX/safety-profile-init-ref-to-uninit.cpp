@@ -1,5 +1,5 @@
-// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -fblocks -fcxx-exceptions -std=c++23 %s
-// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -fblocks -fcxx-exceptions -std=c++23 %s
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -fblocks -fcxx-exceptions -fdeclspec -std=c++23 %s
+// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -fblocks -fcxx-exceptions -fdeclspec -std=c++23 %s
 
 // std::init / ref_to_uninit (paper §5): a [[ref_to_uninit]] pointer or
 // reference must be bound to uninitialized memory, and an unmarked pointer or
@@ -3579,6 +3579,47 @@ void test_stmt_expr_and_compound_literal() {
   u = 1;
   int *c = ({ &u; });                         // OK
   (void)a; (void)b; (void)m; (void)n; (void)c;
+}
+
+// An array copy reads each element of its source
+void test_array_copy_reads() {
+  int arr [[uninit]] [2];
+  auto l = [arr] { return arr[0]; }; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  auto [e0, e1] = arr;               // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  int ok [[uninit]] [2];
+  now_init_fill(ok);
+  auto m = [ok] { return ok[0]; };   // OK
+  (void)l; (void)e0; (void)e1; (void)m;
+}
+
+// A lambda body's array copy names the enclosing array
+void test_lambda_array_copy() {
+  int arr [[uninit]] [2];
+  now_init_fill(arr);
+  auto l = [&] { auto [x, y] = arr; return x + y; }; // OK
+  (void)l;
+}
+
+struct PropHolder {
+  int v;
+  int get() const;
+  void put(int x);
+  __declspec(property(get = get, put = put)) int prop;
+};
+struct PtrPropHolder {
+  void put(int *x);
+  __declspec(property(put = put)) int *pq;
+};
+
+// A property access calls its accessor on the object
+void test_declspec_property(PropHolder *p [[ref_to_uninit]],
+                            PtrPropHolder &t) {
+  p->prop = 1;       // expected-error {{calling member function 'put' binds its implicit object parameter to uninitialized memory under profile 'std::init'}}
+  PropHolder s [[uninit]];
+  int x = s.prop;    // expected-error {{calling member function 'get' binds its implicit object parameter to uninitialized memory under profile 'std::init'}}
+  int u [[uninit]];
+  t.pq = &u;         // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)x;
 }
 // A flow-tracked binding inside a function template is judged on each
 // instantiation's own CFG, with the instantiation note; a never-instantiated

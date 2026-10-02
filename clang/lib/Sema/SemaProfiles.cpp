@@ -1501,8 +1501,9 @@ static const Expr *chosenArm(const Expr *E, ArrayRef<const Expr *> Arms) {
 /// The operand a pass-through form \p E yields its lvalue or value from, or
 /// null: a comma's right operand, a single-element braced list's element, a
 /// GNU statement expression's result, a pointer compound literal's
-/// initializer, an identity call's argument (SemaProfiles::isIdentityCall),
-/// and the arm of a conditional listed in \p Arms.
+/// initializer, an opaque value's source, an identity call's argument
+/// (SemaProfiles::isIdentityCall), and the arm of a conditional listed in
+/// \p Arms.
 static const Expr *passThroughOperand(const Expr *E,
                                       ArrayRef<const Expr *> Arms) {
   if (const auto *BO = dyn_cast<BinaryOperator>(E); BO && BO->isCommaOp())
@@ -1518,6 +1519,8 @@ static const Expr *passThroughOperand(const Expr *E,
   if (const auto *CLE = dyn_cast<CompoundLiteralExpr>(E);
       CLE && CLE->getType()->isPointerType())
     return CLE->getInitializer();
+  if (const auto *OVE = dyn_cast<OpaqueValueExpr>(E))
+    return OVE->getSourceExpr();
   if (const auto *CE = dyn_cast<CallExpr>(E);
       CE && SemaProfiles::isIdentityCall(CE))
     return CE->getArg(0);

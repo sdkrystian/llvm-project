@@ -10,6 +10,9 @@ __attribute__((objc_root_class))
 - (void)fill:(int *) [[ref_to_uninit]] p;
 - (void)vararg:(int *)p, ...;
 @property int *prop;
+@property(nonatomic) int *mprop;
+- (void)setMprop:(int *) [[ref_to_uninit]] p;
+@property int val;
 @end
 
 // A message argument binds the method's unmarked parameter
@@ -43,10 +46,29 @@ void test_variadic(A *a) {
   [a vararg:nullptr, &u]; // OK
 }
 
-// A property assignment's value is not judged
+// A property assignment binds its value to the setter's parameter
 void test_property_assignment(A *a) {
   int u [[uninit]];
-  a.prop = &u; // OK
+  a.prop = &u; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  a.mprop = &u; // OK
+  u = 1;
+  a.prop = &u;  // OK
+  a.mprop = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A property assignment in a lambda body names the enclosing variable
+void test_property_assignment_in_lambda(A *a) {
+  int u [[uninit]];
+  u = 1;
+  auto l = [&] { a.prop = &u; }; // OK
+  (void)l;
+}
+
+// A property assignment reads its value
+void test_property_value_read(A *a, int *p [[ref_to_uninit]]) {
+  a.val = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  *p = 1;
+  a.val = *p; // OK
 }
 
 __attribute__((objc_root_class))
@@ -76,6 +98,7 @@ void test_finally(A *a) {
 - (void)take:(int *)p {}
 - (void)fill:(int *)p {}
 - (void)vararg:(int *)p, ... {}
+- (void)setMprop:(int *)p {}
 - (void)selfSend {
   int u [[uninit]];
   [self take:&u]; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}

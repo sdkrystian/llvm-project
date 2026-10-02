@@ -3077,11 +3077,16 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
 /// with the enclosing body: a lambda's capture initializers (its body too
 /// with \p EnterLambdaBodies), an OpenMP directive's clause expressions and
 /// region statement (as CFGBuilder::VisitOMPExecutableDirective visits them),
-/// and every child of any other statement -- of a non-OpenMP captured
-/// statement, its capture initializers only.
+/// an opaque value's source (the CFG evaluates it where the opaque value's
+/// owner puts it), and every child of any other statement -- of a non-OpenMP
+/// captured statement, its capture initializers only.
 static void appendAnalyzedChildren(const Stmt *S,
                                    SmallVectorImpl<const Stmt *> &Out,
                                    bool EnterLambdaBodies = false) {
+  if (const auto *OVE = dyn_cast<OpaqueValueExpr>(S)) {
+    Out.push_back(OVE->getSourceExpr());
+    return;
+  }
   if (const auto *LE = dyn_cast<LambdaExpr>(S)) {
     llvm::append_range(Out, LE->capture_inits());
     if (EnterLambdaBodies)

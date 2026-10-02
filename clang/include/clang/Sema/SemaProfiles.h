@@ -451,10 +451,10 @@ public:
   /// `(int)m` are not stripped -- they produce a new value, not the same
   /// storage; a comma's right operand, a single-element braced list's
   /// element, a GNU statement expression's result, a pointer compound
-  /// literal's initializer, and an identity call's argument (isIdentityCall),
-  /// which yield that operand's lvalue or value; and the arm of a conditional
-  /// listed in \p Arms. Shared with the CFG pass in
-  /// AnalysisBasedWarnings.cpp, so recognition and flow tracking see through
+  /// literal's initializer, an opaque value's source, and an identity call's
+  /// argument (isIdentityCall), which yield that operand's lvalue or value;
+  /// and the arm of a conditional listed in \p Arms. Shared with the CFG pass
+  /// in AnalysisBasedWarnings.cpp, so recognition and flow tracking see through
   /// exactly the same forms.
   static const Expr *ignoreTransparentCasts(const Expr *E,
                                             ArrayRef<const Expr *> Arms = {});

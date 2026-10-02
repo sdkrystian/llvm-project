@@ -980,22 +980,26 @@ marker-only form judgment.  The standard identity functions (``std::move``,
 (``SemaProfiles::isShapeTransparentBuiltin``), and a call to one binds nothing:
 judging its argument's binding to the parameter too would hand ``std::move``'s
 ``T &&`` a mutable alias of a marked pointer, which makes the pointer's referent
-unknown, so ``*std::move(p)`` would read nothing.  Disagreeing arms are kept
-apart rather than collapsed to an unidentified referent, which would lose the
-mix of tracked and untracked arms P4222R2 §4.9 rejects.  A templated body is
-never analyzed; each instantiation is analyzed on its own CFG, in which
-statements TreeTransform reused from the pattern are ordinary elements.
-Consumers read the lattices as follows: a marked-target binding fires on
-``Must`` and ``double_destroy`` on ``Destroyed``; an unmarked-target binding,
-``destroy_uninit``, a read through a marker, and a subobject write are
-suppressed by ``May``.  A destroy or release whose arms name different storage
-leaves each possibly assigned, not definitely, and not destroyed, and a mutable
-alias of a marked pointer handed out gives the pointer an anonymous referent in
-that state; arms that all name one storage destroy or release it.  A variable of
-an enclosing function reached by capture, whose state the enclosing body
-decides, enters with ``May`` set and ``Must`` clear, so neither direction fires
-on it until the body itself stores.  The remaining blind spots are listed in
-`Known Gaps (std::init)`_ and in :doc:`ProfilesFramework`, "Limitations".
+unknown, so ``*std::move(p)`` would read nothing.  An opaque value is its
+source: the CFG evaluates the source once, where the pseudo-object, array-copy,
+``?:``, or ``co_await`` expression puts it; each use -- an element copy, an
+accessor call, an awaiter call -- is a site of its own on that storage, and the
+walk descends the source the same way.  Disagreeing arms are kept apart rather
+than collapsed to an unidentified referent, which would lose the mix of tracked
+and untracked arms P4222R2 §4.9 rejects.  A templated body is never analyzed;
+each instantiation is analyzed on its own CFG, in which statements TreeTransform
+reused from the pattern are ordinary elements.  Consumers read the lattices as
+follows: a marked-target binding fires on ``Must`` and ``double_destroy`` on
+``Destroyed``; an unmarked-target binding, ``destroy_uninit``, a read through a
+marker, and a subobject write are suppressed by ``May``.  A destroy or release
+whose arms name different storage leaves each possibly assigned, not definitely,
+and not destroyed, and a mutable alias of a marked pointer handed out gives the
+pointer an anonymous referent in that state; arms that all name one storage
+destroy or release it.  A variable of an enclosing function reached by capture,
+whose state the enclosing body decides, enters with ``May`` set and ``Must``
+clear, so neither direction fires on it until the body itself stores.  The
+remaining blind spots are listed in `Known Gaps (std::init)`_ and in
+:doc:`ProfilesFramework`, "Limitations".
 
 
 .. _profiles-init-known-gaps:
