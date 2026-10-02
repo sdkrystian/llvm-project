@@ -132,3 +132,48 @@ void macro_spelled_suppression() {
   CAST_STMT; // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
 }
 SUPPRESSED_DECL
+
+// A diagnostic pragma between the attribute and its statement is in the dominion
+void pragma_after_attribute() {
+  [[profiles::suppress(test::type_cast)]]
+#pragma clang diagnostic warning "-Wunused-variable"
+  (void)reinterpret_cast<long *>(0);
+  (void)reinterpret_cast<long *>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+}
+
+// A diagnostic pragma right after a suppressed construct is outside the dominion
+void pragma_after_construct() {
+  [[profiles::suppress(test::type_cast)]] (void)0;
+#pragma clang diagnostic warning "-Wunused-variable"
+  (void)reinterpret_cast<long *>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+}
+[[profiles::suppress(test::type_cast)]] long before_pragma = 0;
+#pragma clang diagnostic warning "-Wunused-variable"
+long after_pragma = (long)reinterpret_cast<long *>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+
+// A pragma inside a suppressed construct that maps the rule stays in effect after it
+void pragma_maps_rule_inside() {
+#pragma clang diagnostic push
+  [[profiles::suppress(test::type_cast)]] {
+#pragma clang diagnostic warning "-Wprofile-test-type-cast"
+  }
+  (void)reinterpret_cast<long *>(0); // expected-warning {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+#pragma clang diagnostic pop
+  [[profiles::suppress(test::type_cast)]] {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wprofile-test-type-cast"
+  }
+  (void)reinterpret_cast<long *>(0);
+#pragma clang diagnostic pop
+  (void)reinterpret_cast<long *>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+}
+
+// A pop inside a suppressed construct, of a push before it, keeps the suppression
+void pop_inside() {
+#pragma clang diagnostic push
+  [[profiles::suppress(test::type_cast)]] {
+#pragma clang diagnostic pop
+    (void)reinterpret_cast<long *>(0);
+  }
+  (void)reinterpret_cast<long *>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+}

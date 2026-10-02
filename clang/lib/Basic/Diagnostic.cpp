@@ -105,16 +105,16 @@ void DiagnosticsEngine::setClient(DiagnosticConsumer *client,
 }
 
 void DiagnosticsEngine::pushMappings(SourceLocation Loc) {
-  DiagStateOnPushStack.push_back({GetCurDiagState(), Loc});
+  DiagStateOnPushStack.push_back(GetCurDiagState());
 }
 
 bool DiagnosticsEngine::popMappings(SourceLocation Loc) {
   if (DiagStateOnPushStack.empty())
     return false;
 
-  if (DiagStateOnPushStack.back().State != GetCurDiagState()) {
+  if (DiagStateOnPushStack.back() != GetCurDiagState()) {
     // State changed at some point between push/pop.
-    PushDiagStatePoint(DiagStateOnPushStack.back().State, Loc);
+    PushDiagStatePoint(DiagStateOnPushStack.back(), Loc);
   }
   DiagStateOnPushStack.pop_back();
   return true;
@@ -235,6 +235,40 @@ void DiagnosticsEngine::DiagStateMap::refreshEntryStates(
                            : ~0u,
                        Old, State);
   }
+}
+
+void DiagnosticsEngine::DiagStateMap::replaceStatesAfter(
+    SourceManager &SrcMgr, SourceLocation Loc,
+    llvm::function_ref<DiagState *(DiagState *)> Replace) {
+  FileIDAndOffset Decomp = SrcMgr.getDecomposedLoc(Loc);
+  unsigned Offset = Decomp.second;
+  File *From = nullptr;
+  for (File *F = getFile(SrcMgr, Decomp.first); F;
+       From = F, Offset = F->ParentOffset, F = F->Parent) {
+    // In an enclosing file, the transition at From's offset is the state
+    // after From, and a file included at that offset is not ordered after
+    // From.
+    auto Point = llvm::partition_point(
+        F->StateTransitions, [&](const DiagStatePoint &P) {
+          return From ? P.Offset < Offset : P.Offset <= Offset;
+        });
+    for (; Point != F->StateTransitions.end(); ++Point)
+      Point->State = Replace(Point->State);
+    auto Child = llvm::partition_point(F->Children, [&](const File *C) {
+      return From ? C->ParentOffset <= Offset : C->ParentOffset < Offset;
+    });
+    for (; Child != F->Children.end(); ++Child)
+      replaceFileStates(**Child, Replace);
+  }
+  CurDiagState = Replace(CurDiagState);
+}
+
+void DiagnosticsEngine::DiagStateMap::replaceFileStates(
+    File &F, llvm::function_ref<DiagState *(DiagState *)> Replace) const {
+  for (DiagStatePoint &Point : F.StateTransitions)
+    Point.State = Replace(Point.State);
+  for (File *Child : F.Children)
+    replaceFileStates(*Child, Replace);
 }
 
 DiagnosticsEngine::DiagState *
@@ -466,25 +500,45 @@ DiagnosticsEngine::DiagState *DiagnosticsEngine::copyDiagStateWith(
   return State;
 }
 
-void DiagnosticsEngine::setDiagnosticMappingsAt(
-    ArrayRef<std::pair<diag::kind, DiagnosticMapping>> Mappings,
-    SourceLocation Loc, SourceRange PushedIn) {
+void DiagnosticsEngine::replaceDiagnosticMappingsAt(
+    ArrayRef<DiagnosticMappingChange> Changes, SourceLocation Loc) {
   assert(Loc.isValid() && SourceMgr && "positional mapping needs a location");
-  DiagState *State =
-      copyDiagStateWith(*DiagStatesByLoc.lookup(*SourceMgr, Loc), Mappings);
-  SourceLocation CurLoc = DiagStatesByLoc.getCurDiagStateLoc();
-  if (CurLoc.isInvalid() || !SourceMgr->isBeforeInTranslationUnit(Loc, CurLoc))
-    DiagStatesByLoc.append(*SourceMgr, Loc, State);
-  else
-    DiagStatesByLoc.insert(*SourceMgr, Loc, State);
-  if (PushedIn.isInvalid())
-    return;
-  for (PushedDiagState &Pushed : DiagStateOnPushStack)
-    if (Pushed.Loc.isValid() &&
-        !SourceMgr->isBeforeInTranslationUnit(Pushed.Loc,
-                                              PushedIn.getBegin()) &&
-        SourceMgr->isBeforeInTranslationUnit(Pushed.Loc, PushedIn.getEnd()))
-      Pushed.State = copyDiagStateWith(*Pushed.State, Mappings);
+  // Each state with the changes that apply to it, so a state shared by
+  // several points stays shared.
+  llvm::DenseMap<DiagState *, DiagState *> Replaced;
+  auto Replace = [&](DiagState *S) {
+    auto [It, Inserted] = Replaced.try_emplace(S, S);
+    if (!Inserted)
+      return It->second;
+    DiagState *New = nullptr;
+    for (const DiagnosticMappingChange &C : Changes) {
+      if (!(S->getOrAddMapping(C.Diag) == C.From))
+        continue;
+      if (!New) {
+        DiagStates.push_back(*S);
+        New = &DiagStates.back();
+      }
+      New->setMapping(C.Diag, C.To);
+    }
+    if (New)
+      It->second = New;
+    return It->second;
+  };
+  DiagState *Old = DiagStatesByLoc.lookup(*SourceMgr, Loc);
+  DiagState *State = Replace(Old);
+  if (State != Old) {
+    SourceLocation CurLoc = DiagStatesByLoc.getCurDiagStateLoc();
+    if (CurLoc.isInvalid() ||
+        !SourceMgr->isBeforeInTranslationUnit(Loc, CurLoc))
+      DiagStatesByLoc.append(*SourceMgr, Loc, State);
+    else
+      DiagStatesByLoc.insert(*SourceMgr, Loc, State);
+    // The new state already has the changes.
+    Replaced.try_emplace(State, State);
+  }
+  DiagStatesByLoc.replaceStatesAfter(*SourceMgr, Loc, Replace);
+  for (DiagState *&Pushed : DiagStateOnPushStack)
+    Pushed = Replace(Pushed);
 }
 
 void DiagnosticsEngine::setDiagnosticMappingsFrom(
@@ -498,8 +552,8 @@ void DiagnosticsEngine::setDiagnosticMappingsFrom(
     Loc = CurLoc;
   DiagStatesByLoc.append(*SourceMgr, Loc,
                          copyDiagStateWith(*GetCurDiagState(), Mappings));
-  for (PushedDiagState &Pushed : DiagStateOnPushStack)
-    Pushed.State = copyDiagStateWith(*Pushed.State, Mappings);
+  for (DiagState *&Pushed : DiagStateOnPushStack)
+    Pushed = copyDiagStateWith(*Pushed, Mappings);
 }
 
 bool DiagnosticsEngine::setSeverityForGroup(diag::Flavor Flavor,

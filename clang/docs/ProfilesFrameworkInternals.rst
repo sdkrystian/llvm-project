@@ -415,18 +415,23 @@ A suppression's dominion ([decl.attr.suppress]p3: the attribute's tokens
 through the last token of the declaration or statement it appertains to) is
 recorded the same way, by ``Parser::ProfileSuppressionDominion`` guards.
 ``SemaProfiles::beginSuppression`` maps every diagnostic of the attribute's
-rule group (the profile's group for a rule-less attribute) to ignored from
-the attribute's expansion location on, remembering the mappings it
-replaced, and ``endSuppression`` restores them from the end of the last
-consumed token on -- in the states a ``#pragma clang diagnostic push``
-inside the dominion saved as well, so a later ``pop`` does not revive the
-suppression.  A guard whose attributes suppress nothing new (an enclosing
+rule group (the profile's group for a rule-less attribute) from its mapping
+at the attribute's expansion location to ignored, from there on, and
+``endSuppression`` maps it back from the end of the last consumed token on.
+Both go through ``DiagnosticsEngine::replaceDiagnosticMappingsAt``, which
+replaces a mapping only where it is still the one replaced: in the state at
+the location, in the states a ``#pragma clang diagnostic`` lexed ahead of
+the parser recorded after it, and in the states a ``push`` saved, which a
+``pop`` can bring back.  A pragma's mapping always carries the
+no-``-Werror`` and no-``-Wfatal-errors`` flags and the framework's never does,
+so a pragma inside the dominion that maps a suppressed rule keeps its effect
+after the dominion.  A guard whose attributes suppress nothing new (an enclosing
 construct already suppresses the rule) records nothing, so the doubled
 guards of a block-scope declaration cost nothing.  Because the state is
 keyed on positions, a token-cached body, default argument, or member
 initializer parsed after its class, and a template instantiated at any
 later point, find the dominion their tokens lie in without re-establishing
-anything: ``setDiagnosticMappingsAt`` inserts a transition when the lexer
+anything: ``replaceDiagnosticMappingsAt`` inserts a transition when the lexer
 has already passed the location.  The engine creates the state of a macro
 expansion or included file when a diagnostic is first queried in it, and a
 query can run ahead of a guard -- the misleading-indentation check reads the
@@ -466,22 +471,10 @@ Where the recorded dominion departs from the construct's token range:
   macro expansion covers the whole expansion: a suppression spelled inside a
   macro, or whose construct ends inside one, also suppresses the other
   tokens of that expansion (the one under-check corner).
-- A ``#pragma clang diagnostic`` inside a token-cached construct (an inline
-  member function body, a class-scope default argument or member
-  initializer, a ``-fdelayed-template-parsing`` body) is recorded before the
-  construct's guard runs, and the state it establishes does not carry the
-  suppression: the tokens between the pragma and the construct's end are
-  checked.
-- A ``#pragma clang diagnostic pop`` inside a suppressed construct, of a
-  push before it, restores the unsuppressed state for the rest of the
-  construct.
 - A check site with an invalid location sees the latest recorded state:
   command-line enforcement plus whatever enforcement or suppression was most
   recently recorded anywhere in the unit -- an over- or under-check
   depending on what was last recorded.
-
-The second and third are over-checks (a check that suppression fails to
-remove), never missing checks.
 
 
 Modules and Serialization

@@ -7424,7 +7424,7 @@ void ASTReader::ReadPragmaDiagnosticMappings(DiagnosticsEngine &Diag) {
     for (unsigned I = 0; I != NumPushes; ++I) {
       auto *State = ReadDiagState(*FirstState, false);
       if (!F.isModule())
-        Diag.DiagStateOnPushStack.push_back({State, SourceLocation()});
+        Diag.DiagStateOnPushStack.push_back(State);
     }
 
     // Don't try to read these mappings again.

@@ -95,12 +95,13 @@ public:
                                   bool PostParse = false);
 
   /// A [[profiles::suppress]] dominion being recorded as diagnostic state:
-  /// where it begins and, per diagnostic of the suppressed rules, the mapping
-  /// the begin replaced, which the end restores. Empty when the attributes
-  /// suppressed nothing that was not already ignored.
+  /// where it begins and, per diagnostic of the suppressed rules, the change
+  /// the begin made (the mapping in effect there to ignored), which the end
+  /// reverses. Empty when the attributes suppressed nothing that was not
+  /// already ignored.
   struct SuppressionRecord {
     SourceLocation Begin;
-    SmallVector<std::pair<diag::kind, DiagnosticMapping>, 8> Restore;
+    SmallVector<DiagnosticsEngine::DiagnosticMappingChange, 8> Changes;
   };
 
   /// Record into \p Record that the dominion of the [[profiles::suppress]]
@@ -115,10 +116,10 @@ public:
   /// attributes themselves.
   void beginSuppression(const Decl *D, SourceLocation Begin,
                         SuppressionRecord &Record);
-  /// Record that \p Record's dominion ends at \p End: the mappings its
-  /// begin replaced are restored from there on, and in the states a
-  /// diagnostic push inside the dominion saved. An \p End not after the
-  /// begin (nothing was consumed) ends the dominion where it began.
+  /// Record that \p Record's dominion ends at \p End: each mapping its begin
+  /// replaced is restored from there on, except where a pragma inside the
+  /// dominion remapped the diagnostic. An \p End not after the begin
+  /// (nothing was consumed) ends the dominion where it began.
   void endSuppression(SuppressionRecord &Record, SourceLocation End);
 
   /// P3589R2 [decl.attr.enforce]p5: a declaration and its redeclarations must

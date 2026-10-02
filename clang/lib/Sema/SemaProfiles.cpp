@@ -281,8 +281,8 @@ SemaProfiles::makeProfilesSuppressAttr(const ParsedAttr &AL) {
 }
 
 /// Map every diagnostic of the rule groups named by \p Suppressions (profile,
-/// rule) to ignored from \p Begin on, recording the replaced mappings into
-/// \p Record; a diagnostic already ignored at \p Begin needs nothing.
+/// rule) to ignored from \p Begin on, recording the changes into \p Record;
+/// a diagnostic already ignored at \p Begin needs nothing.
 static void beginSuppressionOf(
     Sema &S, ArrayRef<std::pair<StringRef, StringRef>> Suppressions,
     SourceLocation Begin, SemaProfiles::SuppressionRecord &Record) {
@@ -290,7 +290,6 @@ static void beginSuppressionOf(
     return;
   DiagnosticsEngine &Diags = S.getDiagnostics();
   Begin = S.getSourceManager().getExpansionLoc(Begin);
-  SmallVector<std::pair<diag::kind, DiagnosticMapping>, 8> Ignore;
   for (const auto &[Profile, Rule] : Suppressions) {
     SmallVector<diag::kind, 16> Kinds;
     if (Diags.getDiagnosticIDs()->getDiagnosticsInGroup(
@@ -300,18 +299,21 @@ static void beginSuppressionOf(
     for (diag::kind Kind : Kinds) {
       DiagnosticMapping Current = Diags.getDiagnosticMappingAt(Kind, Begin);
       if (Current.getSeverity() == diag::Severity::Ignored ||
-          llvm::any_of(Ignore, [&](const auto &M) { return M.first == Kind; }))
+          llvm::any_of(Record.Changes,
+                       [&](const auto &C) { return C.Diag == Kind; }))
         continue;
-      Record.Restore.push_back({Kind, Current});
-      Ignore.push_back({Kind, DiagnosticMapping::Make(diag::Severity::Ignored,
-                                                      /*IsUser=*/true,
-                                                      /*IsPragma=*/true)});
+      // Unlike a pragma's mapping, this one has neither the no-Werror nor
+      // the no-fatal flag, so the end tells a pragma's remapping from it.
+      Record.Changes.push_back(
+          {Kind, Current,
+           DiagnosticMapping::Make(diag::Severity::Ignored, /*IsUser=*/true,
+                                   /*IsPragma=*/true)});
     }
   }
-  if (Ignore.empty())
+  if (Record.Changes.empty())
     return;
   Record.Begin = Begin;
-  Diags.setDiagnosticMappingsAt(Ignore, Begin);
+  Diags.replaceDiagnosticMappingsAt(Record.Changes, Begin);
 }
 
 void SemaProfiles::beginSuppression(const ParsedAttributesView &Attrs,
@@ -348,14 +350,15 @@ void SemaProfiles::beginSuppression(const Decl *D, SourceLocation Begin,
 
 void SemaProfiles::endSuppression(SuppressionRecord &Record,
                                   SourceLocation End) {
-  if (Record.Restore.empty())
+  if (Record.Changes.empty())
     return;
   const SourceManager &SM = getASTContext().getSourceManager();
   if (End.isInvalid() || !SM.isBeforeInTranslationUnit(Record.Begin, End))
     End = Record.Begin;
-  getDiagnostics().setDiagnosticMappingsAt(Record.Restore, End,
-                                           SourceRange(Record.Begin, End));
-  Record.Restore.clear();
+  for (DiagnosticsEngine::DiagnosticMappingChange &C : Record.Changes)
+    std::swap(C.From, C.To);
+  getDiagnostics().replaceDiagnosticMappingsAt(Record.Changes, End);
+  Record.Changes.clear();
 }
 
 bool SemaProfiles::shouldEmitProfileViolation(StringRef Profile,

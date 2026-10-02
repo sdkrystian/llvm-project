@@ -437,6 +437,14 @@ private:
     /// within the region the new state covers take it as their entry state.
     void insert(SourceManager &SrcMgr, SourceLocation Loc, DiagState *State);
 
+    /// Replace each state \p S recorded after \p Loc by \p Replace(S): the
+    /// later transitions of \p Loc's file and of the files enclosing it,
+    /// those of the files included or expanded at or after \p Loc, and the
+    /// current state.
+    void
+    replaceStatesAfter(SourceManager &SrcMgr, SourceLocation Loc,
+                       llvm::function_ref<DiagState *(DiagState *)> Replace);
+
     /// Look up the diagnostic state at a given source location.
     DiagState *lookup(SourceManager &SrcMgr, SourceLocation Loc) const;
 
@@ -525,20 +533,18 @@ private:
     /// include before their own first transition, recursively.
     void refreshEntryStates(File *F, unsigned Offset, unsigned End,
                             DiagState *Old, DiagState *State) const;
+
+    /// Replace every state of \p F and of the files included or expanded
+    /// into it.
+    void replaceFileStates(
+        File &F, llvm::function_ref<DiagState *(DiagState *)> Replace) const;
   };
 
   DiagStateMap DiagStatesByLoc;
 
-  /// A diagnostic state saved by a diagnostic 'push', with the location of
-  /// the push (invalid when restored from an AST file).
-  struct PushedDiagState {
-    DiagState *State;
-    SourceLocation Loc;
-  };
-
   /// Keeps the DiagState that was active during each diagnostic 'push'
   /// so we can get back at it when we 'pop'.
-  std::vector<PushedDiagState> DiagStateOnPushStack;
+  std::vector<DiagState *> DiagStateOnPushStack;
 
   DiagState *GetCurDiagState() const {
     return DiagStatesByLoc.getCurDiagState();
@@ -890,16 +896,23 @@ public:
   DiagnosticMapping getDiagnosticMappingAt(diag::kind Diag,
                                            SourceLocation Loc) const;
 
-  /// Install \p Mappings from \p Loc on, as a new state based on the state
-  /// in effect at \p Loc. The new state becomes the current state when
-  /// \p Loc is not before the current state's location; otherwise it is a
-  /// transition of \p Loc's file, and the states after it are left as they
-  /// are. No existing state is modified. States saved by a diagnostic 'push'
-  /// located within \p PushedIn get the mappings too, as copies, so a later
-  /// 'pop' does not restore the mappings this call replaced there.
-  void setDiagnosticMappingsAt(
-      ArrayRef<std::pair<diag::kind, DiagnosticMapping>> Mappings,
-      SourceLocation Loc, SourceRange PushedIn = SourceRange());
+  /// A change of one diagnostic's mapping: \p From is replaced by \p To.
+  struct DiagnosticMappingChange {
+    diag::kind Diag;
+    DiagnosticMapping From;
+    DiagnosticMapping To;
+  };
+
+  /// Apply \p Changes from \p Loc on, in every state that maps a changed
+  /// diagnostic as the change's From: the state in effect at \p Loc, as a
+  /// new state established there (the current state when \p Loc is not
+  /// before the current state's location, otherwise a transition of
+  /// \p Loc's file); the states recorded after \p Loc, by a diagnostic
+  /// pragma lexed ahead of the caller; and the states saved by a diagnostic
+  /// 'push', which a 'pop' brings back after \p Loc. A mapping a pragma set
+  /// differently is kept. No existing state is modified.
+  void replaceDiagnosticMappingsAt(ArrayRef<DiagnosticMappingChange> Changes,
+                                   SourceLocation Loc);
 
   /// Install \p Mappings from \p Loc to the end of the translation unit: in
   /// a new current state based on the current one -- established at \p Loc,

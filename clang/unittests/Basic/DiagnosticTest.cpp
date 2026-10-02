@@ -482,6 +482,23 @@ protected:
                                                       diag::Severity S) {
     return {D, DiagnosticMapping::Make(S, /*IsUser=*/true, /*IsPragma=*/true)};
   }
+  static DiagnosticMapping mapping(diag::Severity S) {
+    return DiagnosticMapping::Make(S, /*IsUser=*/true, /*IsPragma=*/true);
+  }
+  /// Map \p D from the mapping in effect at \p Loc to \p S from \p Loc on,
+  /// as a suppression's begin does; returns the change, whose reverse ends
+  /// the region.
+  DiagnosticsEngine::DiagnosticMappingChange
+  begin(diag::kind D, diag::Severity S, SourceLocation Loc) {
+    DiagnosticsEngine::DiagnosticMappingChange C{
+        D, Diags.getDiagnosticMappingAt(D, Loc), mapping(S)};
+    Diags.replaceDiagnosticMappingsAt({C}, Loc);
+    return C;
+  }
+  void end(DiagnosticsEngine::DiagnosticMappingChange C, SourceLocation Loc) {
+    std::swap(C.From, C.To);
+    Diags.replaceDiagnosticMappingsAt({C}, Loc);
+  }
   /// A macro expansion at \p Offset of the main file.
   SourceLocation expansionAt(unsigned Offset) {
     return SM.createExpansionLoc(at(0), at(Offset), at(Offset), /*Length=*/4);
@@ -490,9 +507,8 @@ protected:
 
 TEST_F(PositionalMappingTest, InsertsBeforeTheCurrentState) {
   Diags.setSeverity(W1, diag::Severity::Error, at(30));
-  Diags.setDiagnosticMappingsAt({map(W1, diag::Severity::Ignored)}, at(10));
-  Diags.setDiagnosticMappingsAt({{W1, Diags.getDiagnosticMappingAt(W1, at(0))}},
-                                at(20));
+  auto C = begin(W1, diag::Severity::Ignored, at(10));
+  end(C, at(20));
   EXPECT_EQ(levelAt(W1, 5), DiagnosticsEngine::Warning);
   EXPECT_EQ(levelAt(W1, 10), DiagnosticsEngine::Ignored);
   EXPECT_EQ(levelAt(W1, 15), DiagnosticsEngine::Ignored);
@@ -507,15 +523,15 @@ TEST_F(PositionalMappingTest, InsertsBeforeTheCurrentState) {
 
 TEST_F(PositionalMappingTest, ReplacesTheStateAtTheSameOffset) {
   Diags.setSeverity(W1, diag::Severity::Error, at(30));
-  Diags.setDiagnosticMappingsAt({map(W1, diag::Severity::Ignored)}, at(10));
-  Diags.setDiagnosticMappingsAt({map(W1, diag::Severity::Warning)}, at(10));
+  auto C = begin(W1, diag::Severity::Ignored, at(10));
+  end(C, at(10));
   EXPECT_EQ(levelAt(W1, 10), DiagnosticsEngine::Warning);
   EXPECT_EQ(levelAt(W1, 15), DiagnosticsEngine::Warning);
   EXPECT_EQ(levelAt(W1, 30), DiagnosticsEngine::Error);
 }
 
 TEST_F(PositionalMappingTest, AppendsInOrder) {
-  Diags.setDiagnosticMappingsAt({map(W1, diag::Severity::Ignored)}, at(10));
+  begin(W1, diag::Severity::Ignored, at(10));
   Diags.setSeverity(W2, diag::Severity::Error, at(20));
   EXPECT_EQ(levelAt(W1, 25), DiagnosticsEngine::Ignored);
   EXPECT_EQ(levelAt(W2, 25), DiagnosticsEngine::Error);
@@ -529,7 +545,7 @@ TEST_F(PositionalMappingTest, InsertRefreshesIncludedFiles) {
   SourceLocation InIncluded =
       SM.getLocForStartOfFile(Included).getLocWithOffset(4);
   EXPECT_EQ(levelAt(W1, InIncluded), DiagnosticsEngine::Warning);
-  Diags.setDiagnosticMappingsAt({map(W1, diag::Severity::Ignored)}, at(10));
+  begin(W1, diag::Severity::Ignored, at(10));
   EXPECT_EQ(levelAt(W1, InIncluded), DiagnosticsEngine::Ignored);
 }
 
@@ -563,23 +579,70 @@ TEST_F(PositionalMappingTest, AppendInAnIncludedFileRefreshesTheIncluder) {
   EXPECT_EQ(levelAt(W1, InIncluded), DiagnosticsEngine::Ignored);
 }
 
-TEST_F(PositionalMappingTest, RestoresPushedStatesInRange) {
-  Diags.setDiagnosticMappingsAt({map(W1, diag::Severity::Ignored)}, at(10));
+TEST_F(PositionalMappingTest, ReplacesInStatesRecordedAhead) {
+  Diags.setSeverity(W2, diag::Severity::Error, at(30));
+  auto C = begin(W1, diag::Severity::Ignored, at(10));
+  EXPECT_EQ(levelAt(W1, 35), DiagnosticsEngine::Ignored);
+  EXPECT_EQ(levelAt(W2, 35), DiagnosticsEngine::Error);
+  end(C, at(40));
+  EXPECT_EQ(levelAt(W1, 45), DiagnosticsEngine::Warning);
+  EXPECT_EQ(levelAt(W2, 45), DiagnosticsEngine::Error);
+}
+
+TEST_F(PositionalMappingTest, RestoresInStatesRecordedAhead) {
+  auto C = begin(W1, diag::Severity::Ignored, at(10));
+  Diags.setSeverity(W2, diag::Severity::Error, at(30));
+  end(C, at(20));
+  EXPECT_EQ(levelAt(W1, 15), DiagnosticsEngine::Ignored);
+  EXPECT_EQ(levelAt(W1, 25), DiagnosticsEngine::Warning);
+  EXPECT_EQ(levelAt(W1, 35), DiagnosticsEngine::Warning);
+  // The current state carries the restored mapping too.
+  Diags.setSeverity(W2, diag::Severity::Warning, at(40));
+  EXPECT_EQ(levelAt(W1, 45), DiagnosticsEngine::Warning);
+}
+
+TEST_F(PositionalMappingTest, KeepsAPragmaMappingAtTheEnd) {
+  auto C = begin(W1, diag::Severity::Ignored, at(10));
+  Diags.setSeverity(W1, diag::Severity::Error, at(20));
+  end(C, at(30));
+  EXPECT_EQ(levelAt(W1, 35), DiagnosticsEngine::Error);
+}
+
+TEST_F(PositionalMappingTest, KeepsAPragmaIgnoredMappingAtTheEnd) {
+  Diags.setSeverity(W1, diag::Severity::Error, at(5));
+  auto C = begin(W1, diag::Severity::Ignored, at(10));
+  Diags.setSeverity(W1, diag::Severity::Ignored, at(20));
+  end(C, at(30));
+  EXPECT_EQ(levelAt(W1, 35), DiagnosticsEngine::Ignored);
+}
+
+TEST_F(PositionalMappingTest, RestoresPushedStates) {
+  auto C = begin(W1, diag::Severity::Ignored, at(10));
   Diags.pushMappings(at(20));
-  Diags.setDiagnosticMappingsAt({map(W1, diag::Severity::Warning)}, at(30),
-                                SourceRange(at(10), at(30)));
+  end(C, at(30));
   Diags.popMappings(at(40));
   EXPECT_EQ(levelAt(W1, 25), DiagnosticsEngine::Ignored);
   EXPECT_EQ(levelAt(W1, 35), DiagnosticsEngine::Warning);
   EXPECT_EQ(levelAt(W1, 45), DiagnosticsEngine::Warning);
 }
 
-TEST_F(PositionalMappingTest, LeavesPushedStatesOutsideRange) {
+TEST_F(PositionalMappingTest, ReplacesInStatesPushedBefore) {
   Diags.pushMappings(at(5));
-  Diags.setDiagnosticMappingsAt({map(W1, diag::Severity::Ignored)}, at(10));
+  auto C = begin(W1, diag::Severity::Ignored, at(10));
   Diags.popMappings(at(20));
   EXPECT_EQ(levelAt(W1, 15), DiagnosticsEngine::Ignored);
-  EXPECT_EQ(levelAt(W1, 25), DiagnosticsEngine::Warning);
+  EXPECT_EQ(levelAt(W1, 25), DiagnosticsEngine::Ignored);
+  end(C, at(30));
+  EXPECT_EQ(levelAt(W1, 35), DiagnosticsEngine::Warning);
+}
+
+TEST_F(PositionalMappingTest, PushedBeforeAndPoppedAfterIsUnchanged) {
+  Diags.pushMappings(at(5));
+  auto C = begin(W1, diag::Severity::Ignored, at(10));
+  end(C, at(20));
+  Diags.popMappings(at(30));
+  EXPECT_EQ(levelAt(W1, 15), DiagnosticsEngine::Ignored);
+  EXPECT_EQ(levelAt(W1, 35), DiagnosticsEngine::Warning);
 }
 
 TEST_F(PositionalMappingTest, FromTakesEffectAtALaterCurrentState) {
