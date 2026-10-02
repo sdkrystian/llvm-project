@@ -186,6 +186,8 @@ To exempt an object from a profile's checks everywhere it is used, a profile
 must provide its own per-object, decl-scoped marker attribute.
 
 
+.. _profiles-diagnostic-groups:
+
 Diagnostic Groups
 =================
 

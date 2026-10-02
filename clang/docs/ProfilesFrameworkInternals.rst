@@ -336,7 +336,7 @@ Enforcement and Suppression State
 An enforcement's dominion (P3589R2 [decl.attr.enforce]p4: the tokens from
 the attribute to the end of the translation unit) is represented as
 diagnostic state: ``SemaProfiles::addProfileEnforcement`` maps every
-diagnostic of the profile's group (`Diagnostic Groups`_ in
+diagnostic of the profile's group (:ref:`profiles-diagnostic-groups` in
 :doc:`ProfilesFramework`; ``profiles::getProfileDiagGroupName``) to an
 error from the attribute's expansion location on, and
 ``ASTContext::isProfileRuleActiveAt`` reads the mapping back at each check
