@@ -550,9 +550,10 @@ constructor-less aggregate locals; reads through ``[[ref_to_uninit]]``
 pointers and references and reads of subobjects of ``[[uninit]]`` objects
 (copying an ``[[uninit]]`` array -- a by-copy capture ``[arr]``,
 ``auto [a, b] = arr;`` -- reads each element) are rejected unless the storage is
-initialized on some path reaching the read -- by a whole-entity store, a
-``[[now_init]]`` call, or ``std::construct_at`` (see
-`Binding Pointers and References`_):
+initialized on every path reaching the read (§1.3) -- by a whole-entity store,
+a ``[[now_init]]`` call, or ``std::construct_at``; a path past a mutable alias
+of the pointer, which leaves the referent's state unknown, does not count
+against the read (see `Binding Pointers and References`_):
 
 .. code-block:: c++
 
@@ -896,8 +897,9 @@ spelling for an unrecognized release function.  Never accepted is storage
 destroyed on every path reaching the call and not stored since: a double
 destruction (rule ``double_destroy``).  A destroy on one path only leaves
 the storage neither definitely initialized nor definitely destroyed: a
-marked binding is not forced, an unmarked binding stays accepted, and a
-second destroy is not a double destroy.  Clang declares
+marked binding is not forced, an unmarked binding stays accepted, a
+second destroy is not a double destroy, and a read through a marker or of a
+subobject of an ``[[uninit]]`` object is rejected.  Clang declares
 ``std::destroy_at`` this way itself -- a ``std::destroy_at`` whose first
 parameter is of pointer type receives ``[[now_uninit]]`` implicitly, and so
 do ``std::destroy`` and ``std::destroy_n`` (P4222R2 §6) where their iterator
@@ -1129,15 +1131,6 @@ listed in :ref:`profiles-init-known-gaps`.
   before every tracked member is assigned -- unless the class has a
   *user-provided* copy constructor, which is opaque and trusted (§5.1) --
   and its body accesses go to the copy, not the original.
-- The flow-based read passes promote every use a path *may* reach
-  uninitialized to the profile error, path-insensitively: with two
-  correlated conditions (``if (c) x = 1; ... if (c) use(x);``) the read is
-  rejected although no executable path reads uninitialized memory --
-  the shape ``-Wuninitialized`` reports as only "may be uninitialized"
-  is a hard error under the profile.  Destroys over-flag the same way:
-  with correlated conditions (``if (c) destroy_at(&m); ... if (!c)
-  use(m);``) the member read is rejected although no executable path
-  reads destroyed memory.
 - Destroying through a ``[[ref_to_uninit]]`` pointer that was never stored
   through is rejected by ``destroy_uninit``: the marker asserts an
   uninitialized referent at entry or at its latest marked binding.  If a

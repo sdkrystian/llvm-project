@@ -1865,6 +1865,34 @@ void test_pointee_read_before_store(int *p [[ref_to_uninit]]) {
   (void)x;
 }
 
+// A read through a marker after a store on one path only is rejected
+void test_pointee_store_one_path(int *p [[ref_to_uninit]], bool c) {
+  if (c)
+    *p = 5;
+  int x = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  (void)x;
+}
+
+// A read through a marker after a store on every path is accepted
+void test_pointee_store_every_path(int *p [[ref_to_uninit]], bool c) {
+  if (c)
+    *p = 5;
+  else
+    *p = 6;
+  int x = *p; // OK
+  (void)x;
+}
+
+// A loop body's read through a marker precedes the first iteration's store
+int test_pointee_store_after_read_in_loop(int *p [[ref_to_uninit]], bool c) {
+  int s = 0;
+  while (c) {
+    s += *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+    *p = 1;
+  }
+  return s;
+}
+
 // The RHS load precedes the store in the CFG, so a self-assignment's RHS
 // read is judged before its own store initializes the pointee.
 void test_pointee_no_self_credit(int *p [[ref_to_uninit]]) {
@@ -2551,6 +2579,35 @@ void test_assert_not_by_parameter_binding(int *p [[ref_to_uninit]]) {
   take_uninit_ptr(p);
   int *u2 = p; // OK: the referent may still be initialized
   (void)u2;
+}
+
+// A read through a marker accepts a path past a mutable alias of the pointer
+void test_read_after_alias_escape_one_path(int *p [[ref_to_uninit]], bool c) {
+  *p = 5;
+  if (c)
+    alias_by_ptr(&p);
+  int x = *p; // OK: initialized or of unknown state on every path
+  (void)x;
+}
+
+// A read through a captured marker accepts the lambda body's entry state
+void test_read_through_capture_one_path_store(int *q [[ref_to_uninit]], bool c) {
+  auto l = [&q, c] {
+    if (c)
+      *q = 2;
+    return *q; // OK: of unknown state on the other path
+  };
+  (void)l;
+}
+
+// A captured marker reseated to fresh storage on one path rejects the read
+void test_read_through_capture_one_path_reseat(int *q [[ref_to_uninit]], bool c) {
+  auto l = [&q, c] {
+    if (c)
+      q = &g_uninit;
+    return *q; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  };
+  (void)l;
 }
 
 // The callee's initialization survives statement reuse in instantiated

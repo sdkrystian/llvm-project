@@ -1861,8 +1861,9 @@ struct TrackedEntity {
   /// default-initialized constructor-less local's members).
   bool TrackReads = true;
   /// The entity belongs to an enclosing function (a variable a lambda body
-  /// reaches by capture): its entry state is unknown -- assigned on some
-  /// path, on no path definitely -- rather than unassigned.
+  /// reaches by capture): its entry state is unknown -- possibly assigned,
+  /// on no path definitely, and on no path known unassigned -- rather than
+  /// unassigned.
   bool UnknownEntry = false;
 };
 
@@ -2170,19 +2171,19 @@ TrackedStorage::markedPointerObject(const SemaProfiles::ShapeLeaf &Leaf) const {
 /// escaped. Reseat: the marked pointer or reference Idx refers, from here,
 /// to the storage DefAssignEvent::RT describes and, when a marked binding
 /// names an identified referent (Entity, ViaPointer), asserts it unassigned:
-/// Must and May cleared, Destroyed and Esc kept. Escape: Idx may have been
-/// destroyed or released on one of several arms, so it is possibly
-/// assigned, not definitely, and not destroyed. Reset: Idx belongs to a local
-/// whose declaration runs here, which begins a new object each time (a loop's
-/// next iteration, a backward goto): unassigned, not escaped, and not
-/// destroyed. AggregateEscape: the tracked aggregate local owning member Idx
-/// escapes as a whole (a non-benign DeclRefExpr), so reads of the member are
-/// trusted from here (the local read leniency) while its assignment state is
-/// unchanged. Binding: a pointer or reference binding whose source has a
-/// tracked leaf (BindingSites[Aux]), judged by the binding rule. ReadThrough /
-/// SubobjectWrite: a read through, or a store below, tracked storage
-/// (AccessSites[Aux]), judged by uninit_read / uninit_write. An event on a
-/// Pointee entity acts on the storage the pointer refers to at its program
+/// Must and May cleared, MayUnassigned set, Destroyed and Esc kept. Escape: Idx
+/// may have been destroyed or released on one of several arms, so it is
+/// possibly assigned, possibly unassigned, and not destroyed. Reset: Idx
+/// belongs to a local whose declaration runs here, which begins a new object
+/// each time (a loop's next iteration, a backward goto): unassigned, not
+/// escaped, and not destroyed. AggregateEscape: the tracked aggregate local
+/// owning member Idx escapes as a whole (a non-benign DeclRefExpr), so reads of
+/// the member are trusted from here (the local read leniency) while its
+/// assignment state is unchanged. Binding: a pointer or reference binding whose
+/// source has a tracked leaf (BindingSites[Aux]), judged by the binding rule.
+/// ReadThrough / SubobjectWrite: a read through, or a store below, tracked
+/// storage (AccessSites[Aux]), judged by uninit_read / uninit_write. An event
+/// on a Pointee entity acts on the storage the pointer refers to at its program
 /// point (referent). Every event but a Reset carries the anchor expression
 /// the diagnostic and the suppression walk use.
 enum class DefAssignEventKind {
@@ -2335,28 +2336,31 @@ static constexpr unsigned TopTarget = ~0u;
 static constexpr unsigned UnknownTarget = ~1u;
 
 /// The dataflow state of every tracked entity at a program point: assigned
-/// on every path (Must), on some path (May), escaped as a local aggregate on
-/// every path (Esc: the read leniency for locals, ProfilesFramework.rst,
-/// "Limitations"), destroyed on every path and not stored since
-/// (Destroyed), and, for a Pointee entity, the entity the marked pointer or
-/// reference refers to (Target). The join of predecessors intersects Must,
-/// Esc, and Destroyed, unites May, and keeps a Target the predecessors
-/// agree on.
+/// on every path (Must), on some path (May), unassigned on some path that knows
+/// its state (MayUnassigned: a path entering from an enclosing function, or
+/// past a mutable alias of a marked pointer, does not), escaped as a local
+/// aggregate on every path (Esc: the read leniency for locals,
+/// ProfilesFramework.rst, "Limitations"), destroyed on every path and not
+/// stored since (Destroyed), and, for a Pointee entity, the entity the marked
+/// pointer or reference refers to (Target). The join of predecessors intersects
+/// Must, Esc, and Destroyed, unites May and MayUnassigned, and keeps a Target
+/// the predecessors agree on.
 struct FlowState {
-  llvm::BitVector Must, May, Esc, Destroyed;
+  llvm::BitVector Must, May, MayUnassigned, Esc, Destroyed;
   /// Per entity, meaningful for a Pointee: the entity's own index when the
   /// pointer refers to an anonymous referent whose state is the entity's
   /// bits, another entity's index when it refers to that entity's storage
   /// (an [[uninit]] local, a tracked member, or another pointer's anonymous
   /// referent), UnknownTarget, or TopTarget.
   SmallVector<unsigned, 8> Target;
-  /// \p Top is the identity of the join: all-assigned, may-assigned on no
-  /// path, escaped, destroyed, referring to nothing yet -- the state of an
-  /// unreached predecessor. Otherwise every marked pointer or reference
-  /// refers to its own anonymous referent.
+  /// \p Top is the identity of the join: all-assigned, may-assigned and
+  /// unassigned on no path, escaped, destroyed, referring to nothing yet --
+  /// the state of an unreached predecessor. Otherwise every entity is
+  /// unassigned and every marked pointer or reference refers to its own
+  /// anonymous referent.
   FlowState(unsigned N, bool Top)
-      : Must(N, Top), May(N, false), Esc(N, Top), Destroyed(N, Top),
-        Target(N, TopTarget) {
+      : Must(N, Top), May(N, false), MayUnassigned(N, !Top), Esc(N, Top),
+        Destroyed(N, Top), Target(N, TopTarget) {
     if (!Top)
       for (unsigned I = 0; I != N; ++I)
         Target[I] = I;
@@ -2364,6 +2368,7 @@ struct FlowState {
   void meet(const FlowState &O) {
     Must &= O.Must;
     May |= O.May;
+    MayUnassigned |= O.MayUnassigned;
     Esc &= O.Esc;
     Destroyed &= O.Destroyed;
     for (unsigned I = 0, N = Target.size(); I != N; ++I) {
@@ -2374,8 +2379,8 @@ struct FlowState {
     }
   }
   bool operator==(const FlowState &O) const {
-    return Must == O.Must && May == O.May && Esc == O.Esc &&
-           Destroyed == O.Destroyed && Target == O.Target;
+    return Must == O.Must && May == O.May && MayUnassigned == O.MayUnassigned &&
+           Esc == O.Esc && Destroyed == O.Destroyed && Target == O.Target;
   }
   bool operator!=(const FlowState &O) const { return !(*this == O); }
 };
@@ -2409,9 +2414,12 @@ static std::optional<unsigned> referent(unsigned Idx, const FlowState &St,
 }
 
 /// The state of one binding leaf under \p St: its entity's referent's bits,
-/// Unknown when the referent is not identified.
+/// Unknown when the referent is not identified. Storage assigned on some
+/// path but not every one is Uninitialized for a consumer that requires
+/// initialization on \p EveryPath (P4222R2 §1.3) when a path that knows its
+/// state leaves it unassigned, and Unknown otherwise.
 static LeafState leafState(const BindingLeaf &L, const FlowState &St,
-                           const TrackedStorage &Storage) {
+                           const TrackedStorage &Storage, bool EveryPath) {
   if (!L.Entity)
     return L.State;
   std::optional<unsigned> R = referent(*L.Entity, St, Storage);
@@ -2419,7 +2427,7 @@ static LeafState leafState(const BindingLeaf &L, const FlowState &St,
     return LeafState::Unknown;
   if (St.Must.test(*R))
     return LeafState::Initialized;
-  if (!St.May.test(*R))
+  if (EveryPath ? St.MayUnassigned.test(*R) : !St.May.test(*R))
     return LeafState::Uninitialized;
   return LeafState::Unknown;
 }
@@ -2434,9 +2442,11 @@ static void judgeBindingSite(const BindingSite &Site, const FlowState &St,
   using K = SemaProfiles::InitBindingKind;
   if (Site.Leaves.empty())
     return;
-  LeafState Acc = leafState(Site.Leaves.front(), St, Storage);
+  LeafState Acc =
+      leafState(Site.Leaves.front(), St, Storage, /*EveryPath=*/false);
   for (const BindingLeaf &L : llvm::drop_begin(Site.Leaves))
-    Acc = combineLeafStates(Acc, leafState(L, St, Storage));
+    Acc =
+        combineLeafStates(Acc, leafState(L, St, Storage, /*EveryPath=*/false));
   if (Site.TargetMarked) {
     if (Acc == LeafState::Initialized || Acc == LeafState::Mixed)
       Out.push_back({diag::err_init_ref_to_uninit_requires_uninit, Site.Loc,
@@ -2477,7 +2487,7 @@ static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
     std::optional<unsigned> R =
         L.Entity ? referent(*L.Entity, St, Storage) : std::nullopt;
     AllDestroyed &= R && St.Destroyed.test(*R);
-    LeafState S = leafState(L, St, Storage);
+    LeafState S = leafState(L, St, Storage, /*EveryPath=*/false);
     Acc = Acc ? combineLeafStates(*Acc, S) : S;
   }
   if (AllDestroyed) {
@@ -2490,16 +2500,17 @@ static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
 }
 
 /// Judge an access site against \p St: uninit_read (\p IsWrite false) or
-/// uninit_write fires when a leaf is uninitialized -- a tracked leaf on every
-/// path, a form-classified leaf affirmatively or as a Mixed combination
-/// (P4222R2 §4.9) -- exactly as the recognizers' combination of conditional
-/// arms fires on any uninitialized arm.
+/// uninit_write fires when a leaf is uninitialized -- a tracked leaf on some
+/// path for a read (P4222R2 §1.3: every path must initialize it) and on every
+/// path for a store, a form-classified leaf affirmatively or as a Mixed
+/// combination (P4222R2 §4.9) -- exactly as the recognizers' combination of
+/// conditional arms fires on any uninitialized arm.
 static void judgeAccessSite(const AccessSite &Site, bool IsWrite,
                             const FlowState &St, const TrackedStorage &Storage,
                             SmallVectorImpl<PendingViolation> &Out) {
   bool Fires = false;
   for (const BindingLeaf &L : Site.Leaves) {
-    LeafState S = leafState(L, St, Storage);
+    LeafState S = leafState(L, St, Storage, /*EveryPath=*/!IsWrite);
     Fires |= S == LeafState::Uninitialized || S == LeafState::Mixed;
   }
   if (!Fires)
@@ -2530,6 +2541,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
   auto Write = [&](unsigned I) {
     St.Must.set(I);
     St.May.set(I);
+    St.MayUnassigned.reset(I);
     St.Destroyed.reset(I);
   };
   for (const DefAssignEvent &Ev : BlockEvents) {
@@ -2554,6 +2566,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
     case DefAssignEventKind::Copy:
       St.Must[Ev.Idx] = St.Must.test(Ev.Aux);
       St.May[Ev.Idx] = St.May.test(Ev.Aux);
+      St.MayUnassigned[Ev.Idx] = St.MayUnassigned.test(Ev.Aux);
       St.Esc[Ev.Idx] = St.Esc.test(Ev.Aux);
       St.Destroyed[Ev.Idx] = St.Destroyed.test(Ev.Aux);
       break;
@@ -2561,6 +2574,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       if (std::optional<unsigned> R = referent(Ev.Idx, St, Storage)) {
         St.Must.reset(*R);
         St.May.reset(*R);
+        St.MayUnassigned.set(*R);
         St.Esc.reset(*R);
       }
       break;
@@ -2573,6 +2587,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
         if (!R)
           continue;
         St.Must.reset(*R);
+        St.MayUnassigned.set(*R);
         if (Site.Conditional) {
           St.May.set(*R);
           St.Destroyed.reset(*R);
@@ -2597,6 +2612,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
             St.Target[K] = UnknownTarget;
         St.Must.reset(Ev.Idx);
         St.May[Ev.Idx] = Ev.RT == ReseatTarget::Escaped;
+        St.MayUnassigned[Ev.Idx] = Ev.RT != ReseatTarget::Escaped;
         St.Destroyed.reset(Ev.Idx);
         break;
       case ReseatTarget::Entity:
@@ -2616,6 +2632,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
           NewTarget != UnknownTarget && NewTarget != TopTarget) {
         St.Must.reset(NewTarget);
         St.May.reset(NewTarget);
+        St.MayUnassigned.set(NewTarget);
       }
       St.Target[Ev.Idx] = NewTarget;
       break;
@@ -2624,12 +2641,14 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       if (std::optional<unsigned> R = referent(Ev.Idx, St, Storage)) {
         St.Must.reset(*R);
         St.May.set(*R);
+        St.MayUnassigned.set(*R);
         St.Destroyed.reset(*R);
       }
       break;
     case DefAssignEventKind::Reset:
       St.Must.reset(Ev.Idx);
       St.May.reset(Ev.Idx);
+      St.MayUnassigned.set(Ev.Idx);
       St.Esc.reset(Ev.Idx);
       St.Destroyed.reset(Ev.Idx);
       break;
@@ -2652,26 +2671,27 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
 }
 
 /// The forward dataflow of the std::init engine: nothing is assigned at
-/// function entry (an entity of an enclosing function is may-assigned), a
-/// block's entry is the join of its predecessors' exits (an entity is
-/// definitely assigned at a point only if assigned on every incoming path,
-/// the paper's all-branches rule, P4222R2 §1.3), and a block's transfer is
-/// the event replay above -- the same replay the reporting pass uses. Every
-/// transfer is monotone in each lattice (Read, Write, ReadWrite, MayWrite,
-/// and AggregateEscape only set bits, Copy projects the source's bits, Kill,
-/// Destroy, Reseat, Escape, and Reset are constant functions of their bits -- a
-/// Reseat's assertion clears its referent's Must and May like Kill), so a
-/// block's exit only ever descends from the join identity in a finite
-/// lattice and the iteration terminates. A pointer's Target lattice is flat
-/// -- TopTarget below every value, UnknownTarget above -- and meet only
-/// moves toward UnknownTarget; a Reseat is a constant function of its
-/// ReseatTarget, ViaPointer a projection of another pointer's Target, and
-/// the invalidation of a replaced anonymous referent's aliases maps one
-/// value to UnknownTarget, so the same argument covers Target. Unprocessed
-/// (unreachable) predecessors keep the join identity, so unreachable code is
-/// never flagged. Returns, per read-tracked entity, the reads at program
-/// points where the entity is not definitely assigned nor escaped, and
-/// appends every other rule's violations to \p Violations.
+/// function entry (an entity of an enclosing function is may-assigned and in no
+/// known state), a block's entry is the join of its predecessors' exits (an
+/// entity is definitely assigned at a point only if assigned on every incoming
+/// path, the paper's all-branches rule, P4222R2 §1.3), and a block's transfer
+/// is the event replay above -- the same replay the reporting pass uses. Every
+/// transfer is monotone in each lattice (Read, MayWrite, and AggregateEscape
+/// only set bits, Write and ReadWrite set Must and May and clear MayUnassigned
+/// and Destroyed, Copy projects the source's bits, Kill, Destroy, Reseat,
+/// Escape, and Reset are constant functions of their bits -- a Reseat's
+/// assertion clears its referent's Must and May like Kill), so a block's exit
+/// only ever descends from the join identity in a finite lattice and the
+/// iteration terminates. A pointer's Target lattice is flat -- TopTarget below
+/// every value, UnknownTarget above -- and meet only moves toward
+/// UnknownTarget; a Reseat is a constant function of its ReseatTarget,
+/// ViaPointer a projection of another pointer's Target, and the invalidation of
+/// a replaced anonymous referent's aliases maps one value to UnknownTarget, so
+/// the same argument covers Target. Unprocessed (unreachable) predecessors keep
+/// the join identity, so unreachable code is never flagged. Returns, per
+/// read-tracked entity, the reads at program points where the entity is not
+/// definitely assigned nor escaped, and appends every other rule's violations
+/// to \p Violations.
 static std::vector<SmallVector<const Expr *, 2>>
 runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
                       const TrackedStorage &Storage,
@@ -2685,8 +2705,10 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
   std::vector<FlowState> ExitState(NumBlocks, FlowState(NumTracked, true));
   FlowState FunctionEntry(NumTracked, false);
   for (unsigned I = 0; I != NumTracked; ++I)
-    if (Storage.Entities[I].UnknownEntry)
+    if (Storage.Entities[I].UnknownEntry) {
       FunctionEntry.May.set(I);
+      FunctionEntry.MayUnassigned.reset(I);
+    }
   const CFGBlock &CFGEntry = cfg.getEntry();
   ForwardDataflowWorklist Worklist(cfg, AC);
   Worklist.enqueueBlock(&CFGEntry);

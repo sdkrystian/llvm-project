@@ -571,6 +571,39 @@ void construct_conditional_then_bind(bool c) {
   (void)z; (void)z2;
 }
 
+// A subobject read after a construct_at on one path only is rejected
+int construct_one_path_subobject_read(bool c) {
+  Payload x [[uninit]];
+  if (c)
+    std::construct_at(&x, 1);
+  return x.y; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A subobject read after a construct_at on every path is accepted
+int construct_every_path_subobject_read(bool c) {
+  Payload x [[uninit]];
+  if (c)
+    std::construct_at(&x, 1);
+  else
+    std::construct_at(&x, 2);
+  return x.y; // OK
+}
+
+// A read through a marker after a construct_at on one path only is rejected
+int construct_one_path_read_through(int *p [[ref_to_uninit]], bool c) {
+  if (c)
+    std::construct_at(p, 1);
+  return *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A read through a marker after a destroy_at on one path only is rejected
+int destroy_one_path_read_through(int *p [[ref_to_uninit]], bool c) {
+  std::construct_at(p, 1);
+  if (c)
+    std::destroy_at(p);
+  return *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
 //--- sys/init_mem.h
 namespace std {
 template <class T, class... A> T *construct_at(T *p, A &&...args);

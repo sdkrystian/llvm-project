@@ -759,8 +759,8 @@ follows:
        plus compound-assignment and increment/decrement hooks, for a
        glvalue with no flow-tracked leaf (a rebuilt default argument or
        initializer is skipped, as for ``ref_to_uninit``); the ReadThrough sites of
-       ``extractStdInitEvents`` (``judgeAccessSite``, suppressed by
-       ``May``) otherwise
+       ``extractStdInitEvents`` (``judgeAccessSite``, which requires
+       initialization on every path) otherwise
    * - ``uninit_decl``
      - declaration site
      - ``checkInitProfileUninitDecl``
@@ -904,9 +904,10 @@ of the ``std::init`` ``CFGProfiles`` row harvests the body's flow-tracked
 entities (``TrackedEntity``: ``[[uninit]]`` locals, the referents of marked
 local pointers and references, and marked scalar members of locals and of
 the current object), extracts one event stream from a CFG of its own
-(exception edges, fully linearized), runs a forward dataflow over four bit
+(exception edges, fully linearized), runs a forward dataflow over five bit
 vectors per entity -- ``Must`` (assigned on every path), ``May`` (assigned
-on some path), ``Esc`` (escaped; read leniency for local aggregates), and
+on some path), ``MayUnassigned`` (unassigned on some path that knows the
+entity's state), ``Esc`` (escaped; read leniency for local aggregates), and
 ``Destroyed`` (destroyed on every path and not stored since) -- plus, per
 marked pointer or reference, ``Target``, the entity it refers to at that
 point: an ``[[uninit]]`` local, a tracked member, another pointer's
@@ -918,14 +919,15 @@ entity a single-leaf source names, what another marked pointer refers to,
 a fresh anonymous referent for an untracked source, the target every arm of the
 source agrees on, or unidentified when the arms disagree and one is tracked.  An
 identified referent named by a marked binding is asserted unassigned (``Must``
-and ``May`` cleared, ``Destroyed`` and ``Esc`` kept); the ``Reseat`` follows the
-binding's ``Binding`` event in block order, so the judgment sees the
-pre-assertion state.  A binding to a marked parameter is a ``Binding`` event
-only and asserts nothing.  A tracked local's DeclStmt emits a ``Reset`` of its
-``[[uninit]]`` entity and of its member entities ahead of the declaration's own
-binding and copy events, clearing every bit: each execution of the declaration
-starts a new, unassigned object.  A marked pointer or reference is reseated by
-its initializer instead.  The pass reports the ``ref_to_uninit`` judgments of
+and ``May`` cleared, ``MayUnassigned`` set, ``Destroyed`` and ``Esc`` kept); the
+``Reseat`` follows the binding's ``Binding`` event in block order, so the
+judgment sees the pre-assertion state.  A binding to a marked parameter is a
+``Binding`` event only and asserts nothing.  A tracked local's DeclStmt emits a
+``Reset`` of its ``[[uninit]]`` entity and of its member entities ahead of the
+declaration's own binding and copy events, clearing every bit but
+``MayUnassigned``, which it sets: each execution of the declaration starts a
+new, unassigned object.  A marked pointer or reference is reseated by its
+initializer instead.  The pass reports the ``ref_to_uninit`` judgments of
 the body's bindings, the ``double_destroy`` / ``destroy_uninit`` judgments of
 its ``[[now_uninit]]`` calls, and the ``uninit_read`` / ``uninit_write``
 judgments of its reads through and stores below tracked storage at their
@@ -994,16 +996,21 @@ and untracked arms P4222R2 §4.9 rejects.  A templated body is never analyzed;
 each instantiation is analyzed on its own CFG, in which statements TreeTransform
 reused from the pattern are ordinary elements.  Consumers read the lattices as
 follows: a marked-target binding fires on ``Must`` and ``double_destroy`` on
-``Destroyed``; an unmarked-target binding, ``destroy_uninit``, a read through a
-marker, and a subobject write are suppressed by ``May``.  A destroy or release
-whose arms name different storage leaves each possibly assigned, not definitely,
-and not destroyed, and a mutable alias of a marked pointer handed out gives the
-pointer an anonymous referent in that state; arms that all name one storage
-destroy or release it.  A variable of an enclosing function reached by capture,
-whose state the enclosing body decides, enters with ``May`` set and ``Must``
-clear, so neither direction fires on it until the body itself stores.  The
-remaining blind spots are listed in `Known Gaps (std::init)`_ and in
-:doc:`ProfilesFramework`, "Limitations".
+``Destroyed``; an unmarked-target binding, ``destroy_uninit``, and a subobject
+write are suppressed by ``May``; a read through a marker or of a subobject of an
+``[[uninit]]`` object fires on ``MayUnassigned`` without ``Must``: every path
+must initialize the storage (P4222R2 §1.3, §9.2), and a path that does not
+know its state does not count against the read, just as an unidentified referent
+fires in neither direction.  A destroy or release whose arms name different
+storage leaves each possibly assigned, possibly unassigned, and not destroyed;
+arms that all name one storage destroy or release it.  A mutable alias of a
+marked pointer handed out gives the pointer an anonymous referent of unknown
+state (``May`` set, ``Must`` and ``MayUnassigned`` clear).  A variable of an
+enclosing function reached by capture, whose state the enclosing body decides,
+enters in that unknown state, so no binding, destroy, or read fires on it until
+the body itself stores to it or reseats it.  The remaining blind spots are
+listed in `Known Gaps (std::init)`_ and in :doc:`ProfilesFramework`,
+"Limitations".
 
 
 .. _profiles-init-known-gaps:
@@ -1015,6 +1022,20 @@ The ``std::init`` slice is conservative in both directions: it rejects some
 correct code that it cannot prove safe, where ``[[profiles::suppress]]`` is
 the escape hatch, and it accepts some flows it does not check, which never
 cause a rejection.
+
+Deliberate Strictnesses
+-----------------------
+
+- The flow-based read checks -- of a plain local, a member, a subobject of
+  an ``[[uninit]]`` object, and through a ``[[ref_to_uninit]]`` pointer or
+  reference -- promote every use a path *may* reach uninitialized to the
+  profile error, path-insensitively: with two correlated conditions
+  (``if (c) x = 1; ... if (c) use(x);``) the read is rejected although no
+  executable path reads uninitialized memory -- the shape
+  ``-Wuninitialized`` reports as only "may be uninitialized" is a hard error
+  under the profile.  Destroys over-flag the same way: with correlated
+  conditions (``if (c) destroy_at(&m); ... if (!c) use(m);``) the member read
+  is rejected although no executable path reads destroyed memory.
 
 Missed Diagnostics
 ------------------
@@ -1050,3 +1071,12 @@ Missed Diagnostics
   left:
   ``while (n--) { if (c) goto m; { int u [[uninit]]; m: sink(&u); u = 1; } }``
   is accepted.
+- An unmarked binding of storage initialized on some paths only is accepted,
+  and reads through the unmarked name are trusted: after ``if (c) *p = 1;``
+  through a marked ``p``, ``int *q = p; return *q;`` is accepted while
+  ``return *p;`` is rejected; so is ``C c = *p;`` (the copy constructor's
+  reference parameter).
+- A read through a marked pointer or reference that a lambda or block
+  captures is not diagnosed unless the body itself leaves the referent
+  uninitialized on some path: the captured storage enters the body in an
+  unknown state (``[&p] { return *p; }`` is accepted).
