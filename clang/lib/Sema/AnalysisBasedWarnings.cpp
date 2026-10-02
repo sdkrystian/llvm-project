@@ -3050,15 +3050,18 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
 }
 
 /// Append to \p Out the children of \p S that the engine's CFG evaluates
-/// with the enclosing body: a lambda's capture initializers, an OpenMP
-/// directive's clause expressions and region statement (as
-/// CFGBuilder::VisitOMPExecutableDirective visits them), and every child of
-/// any other statement -- of a non-OpenMP captured statement, its capture
-/// initializers only.
+/// with the enclosing body: a lambda's capture initializers (its body too
+/// with \p EnterLambdaBodies), an OpenMP directive's clause expressions and
+/// region statement (as CFGBuilder::VisitOMPExecutableDirective visits them),
+/// and every child of any other statement -- of a non-OpenMP captured
+/// statement, its capture initializers only.
 static void appendAnalyzedChildren(const Stmt *S,
-                                   SmallVectorImpl<const Stmt *> &Out) {
+                                   SmallVectorImpl<const Stmt *> &Out,
+                                   bool EnterLambdaBodies = false) {
   if (const auto *LE = dyn_cast<LambdaExpr>(S)) {
     llvm::append_range(Out, LE->capture_inits());
+    if (EnterLambdaBodies)
+      Out.push_back(LE->getBody());
     return;
   }
   if (const auto *D = dyn_cast<OMPExecutableDirective>(S)) {
@@ -3111,15 +3114,15 @@ static void forEachAnalyzedStmt(const Decl *D,
 // body-scan -- body accesses go to the *copy*, so attributing them to the
 // original would be wrong either way. A plain `this` capture instead reads
 // nothing at creation: treat every member read in its body -- and in nested
-// lambda bodies, reached through children() -- as a Read at the LambdaExpr's
-// program point, except that a nested lambda capturing `*this` gets the
-// whole-object reads at its own LambdaExpr (its creation runs when the outer
-// body does, which may be immediately) and is not descended into. Writes in
-// a body earn no assignment credit (the lambda may never run), consistent
-// with the intersection semantics; a lambda stored now and called only after
-// the member is assigned is still flagged (accepted imprecision). Capture
-// initializers are ordinary CFG elements, already handled by the caller's
-// other arms.
+// lambda bodies and OpenMP regions, reached through appendAnalyzedChildren --
+// as a Read at the LambdaExpr's program point, except that a nested lambda
+// capturing `*this` gets the whole-object reads at its own LambdaExpr (its
+// creation runs when the outer body does, which may be immediately) and is not
+// descended into. Writes in a body earn no assignment credit (the lambda may
+// never run), consistent with the intersection semantics; a lambda stored now
+// and called only after the member is assigned is still flagged (accepted
+// imprecision). Capture initializers are ordinary CFG elements, already handled
+// by the caller's other arms.
 static void appendThisCaptureLambdaReadEvents(
     const LambdaExpr *LE, const TrackedStorage &Storage,
     bool StarThisCopyTrusted, SmallVectorImpl<DefAssignEvent> &BlockEvents) {
@@ -3175,8 +3178,7 @@ static void appendThisCaptureLambdaReadEvents(
           Storage.Entities[*Idx].TrackReads)
         BlockEvents.push_back(
             {DefAssignEventKind::Read, *Idx, cast<Expr>(Cur)});
-    for (const Stmt *Child : Cur->children())
-      Stack.push_back(Child);
+    appendAnalyzedChildren(Cur, Stack, /*EnterLambdaBodies=*/true);
   }
 }
 

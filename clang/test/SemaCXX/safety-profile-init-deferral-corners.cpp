@@ -80,6 +80,21 @@ struct OmpCtorClause {
   }
 };
 
+// A this-capturing lambda's OpenMP region reads members at the lambda
+struct OmpLambda {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  OmpLambda() {
+    auto l = [this] {
+#pragma omp parallel
+      {
+        use(m); // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+      }
+    };
+    m = 1;
+    l();
+  }
+};
+
 // A local of a statement expression in a mem-initializer is tracked
 struct StmtExprInit {
   int k;
