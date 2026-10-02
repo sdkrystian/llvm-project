@@ -933,16 +933,22 @@ everything else -- and everything outside a function body -- is judged at
 parse time without flow state.  Each deferral is recorded
 (``SemaProfiles::DeferredInitSite``) under the check's *analysis owner*: the
 function, method, or block whose flow pass judges it -- the innermost one
-enclosing the check, looking through OpenMP captured regions, whose
-statements are elements of the enclosing function's CFG
-(``SemaProfiles::flowAnalysisOwner``).  After the pass, every recorded site
+enclosing the check, looking through captured regions
+(``SemaProfiles::flowAnalysisOwner``).  One walk, ``forEachAnalyzedStmt``,
+defines the statements of an owner's body for the harvest, the exemption
+walk, and the constructor-body set: those the engine's CFG visits -- a
+coroutine's user-written body, a constructor's written initializers, an
+OpenMP directive's clause expressions and region, a lambda's capture
+initializers but not its body -- so a local declared inside an OpenMP region
+is tracked like any other.  After the pass, every recorded site
 must have produced a Binding, Destroy, ReadThrough, or SubobjectWrite site
 on one of its tracked leaves (``verifyDeferredInitSites``).  A leftover none
 of whose leaves is an element of the engine's CFG lies in code the CFG does
 not contain -- an argument of a builtin that does not evaluate it or of a
 side-effecting ``__builtin_assume``, a ``[[assume]]`` assumption, an
 unselected ``_Generic`` association or ``__builtin_choose_expr`` arm, an
-OpenMP clause, a coroutine's parameter copies and promise construction, or a
+OpenMP clause expression the directive evaluates through a helper, a
+coroutine's parameter copies and promise construction, or a
 body whose CFG cannot be built -- and is dropped.  So is a leftover below a
 construct the CFG contains but the engine does not enumerate
 (``collectUnenumeratedExprs``): an argument of a builtin with custom type
@@ -976,5 +982,23 @@ pointer handed out gives the pointer an anonymous referent in that state.  A
 variable of an enclosing function reached by capture,
 whose state the enclosing body decides, enters with ``May`` set and ``Must``
 clear, so neither direction fires on it until the body itself stores.  The
-remaining blind spots are listed in :doc:`ProfilesFramework`,
-"Limitations".
+remaining blind spots are listed in `Known Gaps (std::init)`_ and in
+:doc:`ProfilesFramework`, "Limitations".
+
+
+.. _profiles-init-known-gaps:
+
+Known Gaps (std::init)
+======================
+
+The ``std::init`` slice is conservative in both directions: it rejects some
+correct code that it cannot prove safe, where ``[[profiles::suppress]]`` is
+the escape hatch, and it accepts some flows it does not check, which never
+cause a rejection.
+
+Missed Diagnostics
+------------------
+
+- A read of an ``[[uninit]]`` local declared inside an OpenMP region is not
+  checked: the plain-local read analysis tracks only the variables the
+  function declares directly, and a region's belong to its ``CapturedDecl``.

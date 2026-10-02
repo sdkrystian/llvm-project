@@ -1067,7 +1067,8 @@ below lists *deliberate strictnesses*: places where the analysis rejects
 what it cannot prove safe, even though the code may be correct --
 ``[[profiles::suppress]]`` is the escape hatch there.  The second group
 lists *missed diagnostics*: accepted flows the analysis does not see;
-those entries never cause a rejection.
+those entries never cause a rejection.  More entries of both groups are
+listed in :ref:`profiles-init-known-gaps`.
 
 **Deliberate strictnesses (may reject correct code):**
 

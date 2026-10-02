@@ -27,6 +27,7 @@
 #include "clang/AST/ParentMap.h"
 #include "clang/AST/StmtCXX.h"
 #include "clang/AST/StmtObjC.h"
+#include "clang/AST/StmtOpenMP.h"
 #include "clang/AST/StmtVisitor.h"
 #include "clang/AST/Type.h"
 #include "clang/Analysis/Analyses/CFGReachabilityAnalysis.h"
@@ -3048,6 +3049,57 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
     });
 }
 
+/// Append to \p Out the children of \p S that the engine's CFG evaluates
+/// with the enclosing body: a lambda's capture initializers, an OpenMP
+/// directive's clause expressions and region statement (as
+/// CFGBuilder::VisitOMPExecutableDirective visits them), and every child of
+/// any other statement -- of a non-OpenMP captured statement, its capture
+/// initializers only.
+static void appendAnalyzedChildren(const Stmt *S,
+                                   SmallVectorImpl<const Stmt *> &Out) {
+  if (const auto *LE = dyn_cast<LambdaExpr>(S)) {
+    llvm::append_range(Out, LE->capture_inits());
+    return;
+  }
+  if (const auto *D = dyn_cast<OMPExecutableDirective>(S)) {
+    llvm::append_range(
+        Out, OMPExecutableDirective::used_clauses_children(D->clauses()));
+    if (!D->isStandaloneDirective())
+      Out.push_back(D->getRawStmt());
+    return;
+  }
+  llvm::append_range(Out, S->children());
+}
+
+/// Call \p F on each statement of the body the engine analyzes over \p D,
+/// parents first: a constructor's written initializers, then the body -- a
+/// coroutine's user-written body, from which AnalysisDeclContext builds the
+/// CFG -- descending through appendAnalyzedChildren. The harvest, the
+/// exemption walk, and the constructor-body set take the body's statements
+/// from here (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage
+/// (std::init)").
+static void forEachAnalyzedStmt(const Decl *D,
+                                llvm::function_ref<void(const Stmt *)> F) {
+  const Stmt *Body = D->getBody();
+  if (const auto *Coro = dyn_cast_or_null<CoroutineBodyStmt>(Body))
+    Body = Coro->getBody();
+  SmallVector<const Stmt *, 32> Stack(1, Body);
+  if (const auto *Ctor = dyn_cast<CXXConstructorDecl>(D))
+    for (const CXXCtorInitializer *Init : llvm::reverse(Ctor->inits()))
+      if (Init->isWritten())
+        Stack.push_back(Init->getInit());
+  SmallVector<const Stmt *, 8> Children;
+  while (!Stack.empty()) {
+    const Stmt *Cur = Stack.pop_back_val();
+    if (!Cur)
+      continue;
+    F(Cur);
+    Children.clear();
+    appendAnalyzedChildren(Cur, Children);
+    Stack.append(Children.rbegin(), Children.rend());
+  }
+}
+
 // The lambda body is a separate function and never appears in the enclosing
 // constructor's CFG, but a this-capturing lambda can read members the moment
 // it is created (it may be invoked immediately). A `*this` capture
@@ -3131,30 +3183,18 @@ static void appendThisCaptureLambdaReadEvents(
 static const DeclRefExpr *getLocalCopySourceRef(const VarDecl *V,
                                                 BasePath &CastPath);
 
-/// The statements of a constructor body the engine takes current-object
-/// events from: the body plus each *written* member/base initializer
-/// expression (the CFG is built with AddInitializers=true, so those run as
-/// CFG elements in execution order, and a written initializer's own member is
-/// assigned at its CFGInitializer element, so declaration order decides what
-/// an initializer may read). An NSDMI's subexpressions are excluded although
-/// AddCXXDefaultInitExprInCtors puts them in the CFG, so a read of a tracked
-/// member inside another member's default initializer stays undetected (see
-/// ProfilesFramework.rst, "Limitations").
+/// The statements of a constructor body the engine takes current-object events
+/// from (forEachAnalyzedStmt): the body plus each *written* member/base
+/// initializer expression (the CFG is built with AddInitializers=true, so those
+/// run as CFG elements in execution order, and a written initializer's own
+/// member is assigned at its CFGInitializer element, so declaration order
+/// decides what an initializer may read). An NSDMI's subexpressions are
+/// excluded although AddCXXDefaultInitExprInCtors puts them in the CFG, so a
+/// read of a tracked member inside another member's default initializer stays
+/// undetected (see ProfilesFramework.rst, "Limitations").
 static void collectCtorBodyStmts(const CXXConstructorDecl *Ctor,
                                  llvm::SmallPtrSetImpl<const Stmt *> &Body) {
-  SmallVector<const Stmt *, 32> Stack;
-  if (const Stmt *B = Ctor->getBody())
-    Stack.push_back(B);
-  for (const CXXCtorInitializer *Init : Ctor->inits())
-    if (Init->isWritten())
-      Stack.push_back(Init->getInit());
-  while (!Stack.empty()) {
-    const Stmt *Cur = Stack.pop_back_val();
-    if (!Cur || !Body.insert(Cur).second)
-      continue;
-    for (const Stmt *Child : Cur->children())
-      Stack.push_back(Child);
-  }
+  forEachAnalyzedStmt(Ctor, [&](const Stmt *S) { Body.insert(S); });
 }
 
 /// Recover the per-block std::init events of \p cfg over \p Storage: the one
@@ -3938,21 +3978,20 @@ static const DeclRefExpr *getLocalCopySourceRef(const VarDecl *V,
 /// Harvest the tracked storage of the analyzed body \p D into \p Storage.
 /// Read-tracked (TrackedEntity::TrackReads) are the members of by-value
 /// parameters of a trackable class without a default argument, of
-/// default-initialized constructor-less aggregate locals (the body's
-/// DeclStmts in source order, a lambda's or block's body excluded as a
-/// separate function), and of locals copy- or move-constructed from a
-/// read-tracked local (recorded in TrackedStorage::CopySource; iterated to a
-/// fixpoint so a copy of a copy resolves). Tracked for bindings only are the
-/// members of every other local, handler variable, or parameter whose class
-/// has marked scalar members (SemaProfiles::flowTrackedAggregateClass),
-/// every [[uninit]] local or parameter as a whole, and the referent of every
-/// [[ref_to_uninit]] local pointer or reference; a variable of an enclosing
-/// function the body reaches by capture is tracked from an unknown entry
-/// state. The read-tracking premises -- a copy does not inherit
-/// initialization (P4222R2 §5.2), a by-value parameter is a copy of the
-/// caller's argument, a defaulted parameter is not -- are argued in
-/// ProfilesFramework.rst, "Reads of Uninitialized Objects" and
-/// "Limitations".
+/// default-initialized constructor-less aggregate locals (the DeclStmts of
+/// forEachAnalyzedStmt, in source order), and of locals copy- or
+/// move-constructed from a read-tracked local (recorded in
+/// TrackedStorage::CopySource; iterated to a fixpoint so a copy of a copy
+/// resolves). Tracked for bindings only are the members of every other local,
+/// handler variable, or parameter whose class has marked scalar members
+/// (SemaProfiles::flowTrackedAggregateClass), every [[uninit]] local or
+/// parameter as a whole, and the referent of every [[ref_to_uninit]] local
+/// pointer or reference; a variable of an enclosing function the body reaches
+/// by capture is tracked from an unknown entry state. The read-tracking
+/// premises -- a copy does not inherit initialization (P4222R2 §5.2), a
+/// by-value parameter is a copy of the caller's argument, a defaulted parameter
+/// is not -- are argued in ProfilesFramework.rst,
+/// "Reads of Uninitialized Objects" and "Limitations".
 static void harvestTrackedLocals(Sema &S, const Decl *D,
                                  TrackedStorage &Storage) {
   // A marked local or parameter is tracked as a whole ([[uninit]]) or by
@@ -3994,41 +4033,22 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
   SmallVector<const VarDecl *, 8> Locals;
   SmallVector<const DeclStmt *, 8> DeclStmts;
   SmallVector<const VarDecl *, 4> Referenced;
-  {
-    SmallVector<const Stmt *, 32> Stack;
-    if (const Stmt *Body = D->getBody())
-      Stack.push_back(Body);
-    while (!Stack.empty()) {
-      const Stmt *Cur = Stack.pop_back_val();
-      if (!Cur)
-        continue;
-      if (const auto *DS = dyn_cast<DeclStmt>(Cur)) {
-        DeclStmts.push_back(DS);
-        for (const Decl *Dcl : DS->decls())
-          if (const auto *V = dyn_cast<VarDecl>(Dcl);
-              V && Owned.insert(V).second)
-            Locals.push_back(V);
-      } else if (const auto *CS = dyn_cast<CXXCatchStmt>(Cur)) {
-        if (const VarDecl *V = CS->getExceptionDecl();
-            V && Owned.insert(V).second)
+  forEachAnalyzedStmt(D, [&](const Stmt *Cur) {
+    if (const auto *DS = dyn_cast<DeclStmt>(Cur)) {
+      DeclStmts.push_back(DS);
+      for (const Decl *Dcl : DS->decls())
+        if (const auto *V = dyn_cast<VarDecl>(Dcl); V && Owned.insert(V).second)
           Locals.push_back(V);
-      } else if (const auto *DRE = dyn_cast<DeclRefExpr>(Cur)) {
-        if (const auto *V = dyn_cast<VarDecl>(DRE->getDecl());
-            V && V->hasLocalStorage())
-          Referenced.push_back(V);
-      }
-      if (const auto *LE = dyn_cast<LambdaExpr>(Cur)) {
-        for (const Expr *Init : llvm::reverse(LE->capture_inits()))
-          Stack.push_back(Init);
-        continue;
-      }
-      if (isa<BlockExpr>(Cur))
-        continue;
-      SmallVector<const Stmt *, 8> Children(Cur->children());
-      for (const Stmt *Child : llvm::reverse(Children))
-        Stack.push_back(Child);
+    } else if (const auto *CS = dyn_cast<CXXCatchStmt>(Cur)) {
+      if (const VarDecl *V = CS->getExceptionDecl();
+          V && Owned.insert(V).second)
+        Locals.push_back(V);
+    } else if (const auto *DRE = dyn_cast<DeclRefExpr>(Cur)) {
+      if (const auto *V = dyn_cast<VarDecl>(DRE->getDecl());
+          V && V->hasLocalStorage())
+        Referenced.push_back(V);
     }
-  }
+  });
   for (const VarDecl *V : Locals) {
     HarvestMarked(V, /*UnknownEntry=*/false);
     if (const CXXRecordDecl *RD = getTrackedLocalAggregate(V))
@@ -4101,18 +4121,10 @@ static void collectUnenumeratedExprs(const ASTContext &Ctx, const Decl *D,
         continue;
       if (const auto *E = dyn_cast<Expr>(Cur))
         Out.insert(E);
-      llvm::append_range(Stack, Cur->children());
+      appendAnalyzedChildren(Cur, Stack);
     }
   };
-  SmallVector<const Stmt *, 32> Stack(1, D->getBody());
-  if (const auto *Ctor = dyn_cast<CXXConstructorDecl>(D))
-    for (const CXXCtorInitializer *Init : Ctor->inits())
-      if (Init->isWritten())
-        Stack.push_back(Init->getInit());
-  while (!Stack.empty()) {
-    const Stmt *Cur = Stack.pop_back_val();
-    if (!Cur)
-      continue;
+  forEachAnalyzedStmt(D, [&](const Stmt *Cur) {
     if (const auto *CE = dyn_cast<CallExpr>(Cur)) {
       unsigned ID = CE->getBuiltinCallee();
       if (ID && Ctx.BuiltinInfo.hasCustomTypechecking(ID) &&
@@ -4124,8 +4136,7 @@ static void collectUnenumeratedExprs(const ASTContext &Ctx, const Decl *D,
       for (const Stmt *Child : Cur->children())
         AddSubtree(Child);
     }
-    llvm::append_range(Stack, Cur->children());
-  }
+  });
 }
 
 /// Account for the checks the parse-time funnels deferred to the flow pass

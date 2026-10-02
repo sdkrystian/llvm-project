@@ -1,6 +1,6 @@
 // RUN: rm -rf %t && split-file %s %t
 // RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -isystem %t/sys %t/corners.cpp
-// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -fopenmp -std=c++23 -isystem %t/sys %t/corners.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected,omp -fprofiles -fprofiles-verify-deferred-checks -fopenmp -std=c++23 -isystem %t/sys %t/corners.cpp
 // RUN: %clang_cc1 -fsyntax-only -verify=expected,blocks -fprofiles -fprofiles-verify-deferred-checks -fblocks -std=c++23 -isystem %t/sys %t/corners.cpp
 
 // The shapes the verification of std::init's deferred checks depends on
@@ -23,6 +23,7 @@ inline void sys_body() {
 
 void sink(int *);
 bool check(int *);
+int use(int);
 int *gp;
 
 // An OpenMP region's bindings are judged by the enclosing function's flow
@@ -41,6 +42,49 @@ void omp_region() {
     (void)q;
   }
 }
+
+// An OpenMP region's own tracked locals are tracked like any local
+void omp_region_local() {
+#pragma omp parallel
+  {
+    int w [[uninit]];
+    sink(&w); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+    int v [[uninit]];
+    v = 1;
+    sink(&v); // OK
+  }
+}
+
+// A constructor's OpenMP region is part of its body
+struct OmpCtor {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  OmpCtor() {
+    int u [[uninit]];
+#pragma omp parallel
+    {
+      sink(&u); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+      use(m); // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    }
+    m = 1;
+  }
+};
+
+// A constructor's OpenMP clause is part of its body
+struct OmpCtorClause {
+  int m [[uninit]]; // omp-note {{member 'm' declared here}}
+  OmpCtorClause() {
+#pragma omp parallel if(m) // omp-error {{member 'm' is read before initialization under profile 'std::init'}}
+    {
+    }
+    m = 1;
+  }
+};
+
+// A local of a statement expression in a mem-initializer is tracked
+struct StmtExprInit {
+  int k;
+  StmtExprInit() : k(({ int t [[uninit]]; t = 1; sink(&t); 1; })) {} // OK
+};
 
 // An init-capture is judged by the enclosing function's flow
 void init_capture() {
@@ -128,6 +172,16 @@ void unenumerated_builtins() {
   (void)__builtin_align_up(&u, 16);
   int *pu [[ref_to_uninit]] = &u;
   __atomic_store_n(&gp, pu, 0);
+  u = 1;
+}
+
+// A builtin the flow engine does not enumerate leaves its arguments unjudged in an OpenMP region
+void unenumerated_builtins_omp() {
+  int u [[uninit]];
+#pragma omp parallel
+  {
+    (void)__builtin_launder(&u);
+  }
   u = 1;
 }
 
