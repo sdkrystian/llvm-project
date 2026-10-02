@@ -3837,7 +3837,10 @@ CFGBlock *CFGBuilder::VisitForStmt(ForStmt *F) {
               Init);
           appendStmt(Block, DS);
           EntryConditionBlock = addStmt(Init);
-          assert(Block == EntryConditionBlock);
+          // A loop or label in a statement-expression initializer leaves no
+          // current block.
+          assert(Block == EntryConditionBlock ||
+                 (!Block && EntryConditionBlock == Succ));
           maybeAddScopeBeginForVarDecl(EntryConditionBlock, VD, C);
         }
       }
@@ -4163,7 +4166,10 @@ CFGBlock *CFGBuilder::VisitWhileStmt(WhileStmt *W) {
             Init);
         appendStmt(Block, DS);
         EntryConditionBlock = addStmt(Init);
-        assert(Block == EntryConditionBlock);
+        // A loop or label in a statement-expression initializer leaves no
+        // current block.
+        assert(Block == EntryConditionBlock ||
+               (!Block && EntryConditionBlock == Succ));
         maybeAddScopeBeginForVarDecl(EntryConditionBlock, VD, C);
       }
     }

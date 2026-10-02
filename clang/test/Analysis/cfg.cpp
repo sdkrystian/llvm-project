@@ -491,6 +491,80 @@ int foo() {
 }
 } // namespace statement_expression_in_return
 
+namespace condition_variable_statement_expression {
+// CHECK-LABEL: void for_loop(bool b)
+// CHECK:       [B5 (ENTRY)]
+// CHECK-NEXT:    Succs (1): B4
+// CHECK:       [B1]
+// CHECK-NEXT:    Preds (1): B2
+// CHECK-NEXT:    Succs (1): B4
+// CHECK:       [B2]
+// CHECK-NEXT:    1: 0
+// CHECK-NEXT:    2: ({ ... ; [B2.1] })
+// CHECK-NEXT:    3: int n = ({
+// CHECK:         4: n
+// CHECK-NEXT:    5: [B2.4] (ImplicitCastExpr, LValueToRValue, int)
+// CHECK-NEXT:    6: [B2.5] (ImplicitCastExpr, IntegralToBoolean, _Bool)
+// CHECK-NEXT:    T: for (; [B2.6]; )
+// CHECK-NEXT:    Preds (1): B4
+// CHECK-NEXT:    Succs (2): B1 B0
+// CHECK:       [B3]
+// CHECK-NEXT:    Preds (1): B4
+// CHECK-NEXT:    Succs (1): B4
+// CHECK:       [B4]
+// CHECK-NEXT:    1: b
+// CHECK-NEXT:    2: [B4.1] (ImplicitCastExpr, LValueToRValue, _Bool)
+// CHECK-NEXT:    T: while [B4.2]
+// CHECK-NEXT:    Preds (3): B3 B1 B5
+// CHECK-NEXT:    Succs (2): B3 B2
+// CHECK:       [B0 (EXIT)]
+// CHECK-NEXT:    Preds (1): B2
+void for_loop(bool b) {
+  for (; int n = ({
+           while (b)
+             ;
+           0;
+         });)
+    ;
+}
+
+// CHECK-LABEL: void while_loop(bool b)
+// CHECK:       [B5 (ENTRY)]
+// CHECK-NEXT:    Succs (1): B4
+// CHECK:       [B1]
+// CHECK-NEXT:    Preds (1): B2
+// CHECK-NEXT:    Succs (1): B4
+// CHECK:       [B2]
+// CHECK-NEXT:    1: 0
+// CHECK-NEXT:    2: ({ ... ; [B2.1] })
+// CHECK-NEXT:    3: int n = ({
+// CHECK:         4: n
+// CHECK-NEXT:    5: [B2.4] (ImplicitCastExpr, LValueToRValue, int)
+// CHECK-NEXT:    6: [B2.5] (ImplicitCastExpr, IntegralToBoolean, _Bool)
+// CHECK-NEXT:    T: while [B2.6]
+// CHECK-NEXT:    Preds (1): B4
+// CHECK-NEXT:    Succs (2): B1 B0
+// CHECK:       [B3]
+// CHECK-NEXT:    Preds (1): B4
+// CHECK-NEXT:    Succs (1): B4
+// CHECK:       [B4]
+// CHECK-NEXT:    1: b
+// CHECK-NEXT:    2: [B4.1] (ImplicitCastExpr, LValueToRValue, _Bool)
+// CHECK-NEXT:    T: while [B4.2]
+// CHECK-NEXT:    Preds (3): B3 B1 B5
+// CHECK-NEXT:    Succs (2): B3 B2
+// CHECK:       [B0 (EXIT)]
+// CHECK-NEXT:    Preds (1): B2
+void while_loop(bool b) {
+  while (int n = ({
+           while (b)
+             ;
+           0;
+         }))
+    ;
+}
+} // namespace condition_variable_statement_expression
+
 // CHECK-LABEL: void vla_simple(int x)
 // CHECK: [B1]
 // CHECK-NEXT:   1: x

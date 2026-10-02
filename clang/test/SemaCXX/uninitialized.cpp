@@ -625,6 +625,22 @@ int pr12325(int params) {
   return x;
 }
 
+// A loop in the statement-expression initializer of a condition variable
+// ends no block early.
+int for_condvar_stmt_expr_loop(bool b) {
+  int x; // expected-note {{initialize the variable 'x' to silence this warning}}
+  for (; int n = ({ while (b) {} x; });) // expected-warning {{variable 'x' is uninitialized when used here}}
+    return n;
+  return 0;
+}
+
+int while_condvar_stmt_expr_loop(bool b) {
+  int x; // expected-note {{initialize the variable 'x' to silence this warning}}
+  while (int n = ({ while (b) {} x; })) // expected-warning {{variable 'x' is uninitialized when used here}}
+    return n;
+  return 0;
+}
+
 // Test lambda expressions with -Wuninitialized
 int test_lambda() {
   auto f1 = [] (int x, int y) { int z; return x + y + z; }; // expected-warning{{variable 'z' is uninitialized when used here}} expected-note {{initialize the variable 'z' to silence this warning}}

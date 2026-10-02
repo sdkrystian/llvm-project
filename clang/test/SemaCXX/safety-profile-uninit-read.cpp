@@ -204,3 +204,16 @@ void test_const_ref_use_not_diagnosed() {
   take_const_ref(x);
   take_const_ptr(&x);
 }
+
+// A loop in a condition variable's statement-expression initializer.
+void test_condvar_stmt_expr_loop(bool b) {
+  int x; // expected-note {{variable 'x' is declared here}}
+  for (; int n = ({ while (b) {} x; });) // expected-error {{variable 'x' is read before initialization under profile 'test::uninit_read'}}
+    (void)n;
+}
+
+void test_while_condvar_stmt_expr_loop(bool b) {
+  int x; // expected-note {{variable 'x' is declared here}}
+  while (int n = ({ while (b) {} x; })) // expected-error {{variable 'x' is read before initialization under profile 'test::uninit_read'}}
+    (void)n;
+}
