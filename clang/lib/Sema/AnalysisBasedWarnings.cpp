@@ -1964,13 +1964,14 @@ struct TrackedStorage {
   /// member's type. The one resolver behind every event arm, so a leaf
   /// affects flow state exactly as SemaProfiles::isFlowTrackedLeaf says it
   /// is tracked.
-  Resolution resolve(const Expr *E) const;
+  Resolution resolve(const SemaProfiles::ShapeLeaf &Leaf) const;
 
   /// Resolve a binding or argument leaf: the glvalue \p E (resolve), or --
   /// with \p AsPointerValue, a leaf used as a pointer value -- the storage
   /// `&x` names, a marked local pointer's referent (its value), or a decayed
   /// [[uninit]] array as a whole.
-  Resolution resolveFlowLeaf(const Expr *E, bool AsPointerValue) const;
+  Resolution resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
+                             bool AsPointerValue) const;
 
   /// The Pointee entity of the marked local pointer \p V (a reference's
   /// referent cannot be reseated and is not one), if tracked.
@@ -1978,7 +1979,8 @@ struct TrackedStorage {
   /// The same for the pointer object the glvalue \p E directly names through
   /// transparent casts: the object a store reseats or an alias binding
   /// escapes.
-  std::optional<unsigned> markedPointerObject(const Expr *E) const;
+  std::optional<unsigned>
+  markedPointerObject(const SemaProfiles::ShapeLeaf &Leaf) const;
 
   /// The range of the object \p E names as a whole -- `this` / `*this`, or
   /// a tracked local's DeclRefExpr -- empty otherwise.
@@ -2050,9 +2052,10 @@ std::pair<unsigned, unsigned> TrackedStorage::wholeObject(const Expr *E) const {
   return {0, 0};
 }
 
-TrackedStorage::Resolution TrackedStorage::resolve(const Expr *E) const {
+TrackedStorage::Resolution
+TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf) const {
   std::optional<SemaProfiles::FlowLeafShape> Shape =
-      SemaProfiles::flowLeafShape(E);
+      SemaProfiles::flowLeafShape(Leaf.E, Leaf.Arms);
   if (!Shape)
     return {};
   Resolution R;
@@ -2114,13 +2117,13 @@ TrackedStorage::Resolution TrackedStorage::resolve(const Expr *E) const {
 }
 
 TrackedStorage::Resolution
-TrackedStorage::resolveFlowLeaf(const Expr *E, bool AsPointerValue) const {
+TrackedStorage::resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
+                                bool AsPointerValue) const {
   if (!AsPointerValue)
-    return resolve(E);
-  E = SemaProfiles::ignoreTransparentCasts(E);
-  if (const auto *UO = dyn_cast<UnaryOperator>(E);
-      UO && UO->getOpcode() == UO_AddrOf)
-    return resolve(UO->getSubExpr());
+    return resolve(Leaf);
+  const Expr *E = SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms);
+  if (const Expr *Op = SemaProfiles::addressOfOperand(E))
+    return resolve({Op, Leaf.Arms});
   Resolution R;
   if (std::optional<unsigned> Idx = markedPointerObject(E)) {
     R.Entity = Idx;
@@ -2148,9 +2151,9 @@ TrackedStorage::markedPointerObject(const VarDecl *V) const {
 }
 
 std::optional<unsigned>
-TrackedStorage::markedPointerObject(const Expr *E) const {
+TrackedStorage::markedPointerObject(const SemaProfiles::ShapeLeaf &Leaf) const {
   const auto *V = dyn_cast_or_null<VarDecl>(SemaProfiles::getDirectlyNamedDecl(
-      SemaProfiles::ignoreTransparentCasts(E)));
+      SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms)));
   return V ? markedPointerObject(V) : std::nullopt;
 }
 
@@ -2944,6 +2947,8 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
     TrackedStorage::Resolution R;
     std::pair<unsigned, unsigned> Whole{0, 0};
     bool Tracked = false;
+    /// The form state of a leaf no entity tracks.
+    LeafState Form = LeafState::Unknown;
   };
   auto ResolveArg = [&](const Expr *Arg, QualType ParamTy,
                         SmallVectorImpl<ArgLeaf> &Leaves) {
@@ -2954,17 +2959,20 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
       return false;
     bool AnyTracked = false;
     SemaProfiles::forEachTargetLeaf(
-        Operand, [&](const Expr *Leaf) {
-          ArgLeaf L{Leaf, Storage.resolveFlowLeaf(Leaf, AsPointerValue)};
+        Operand, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+          ArgLeaf L{Leaf.E, Storage.resolveFlowLeaf(Leaf, AsPointerValue)};
           L.Tracked = SemaProfiles::isFlowTrackedLeaf(S.Context, Leaf,
                                                       AsPointerValue, DC);
           AnyTracked |= L.Tracked;
           if (!L.R.Entity) {
-            const Expr *G = SemaProfiles::ignoreTransparentCasts(Leaf);
-            if (const auto *AddrOf = dyn_cast<UnaryOperator>(G);
-                AsPointerValue && AddrOf && AddrOf->getOpcode() == UO_AddrOf)
-              G = AddrOf->getSubExpr();
+            const Expr *G =
+                SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms);
+            if (const Expr *Op = SemaProfiles::addressOfOperand(G);
+                AsPointerValue && Op)
+              G = SemaProfiles::ignoreTransparentCasts(Op, Leaf.Arms);
             L.Whole = Storage.wholeObject(G);
+            L.Form = formState(
+                S.Profiles().classifyInitBindingLeaf(Leaf, ParamTy, D));
           }
           Leaves.push_back(L);
         });
@@ -3008,8 +3016,7 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
         if (!L.R.Subobject)
           Site.Affected.push_back(*L.R.Entity);
       } else {
-        Leaf.State =
-            formState(S.Profiles().classifyInitBindingLeaf(L.E, PT, D));
+        Leaf.State = L.Form;
         for (unsigned Idx = L.Whole.first; Idx != L.Whole.second; ++Idx)
           Site.Affected.push_back(Idx);
       }
@@ -3248,7 +3255,9 @@ static void extractStdInitEvents(
       [&](const Expr *E,
           llvm::function_ref<void(const TrackedStorage::Resolution &)> F) {
         SemaProfiles::forEachTargetLeaf(
-            E, [&](const Expr *Leaf) { F(Storage.resolve(Leaf)); });
+            E, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+              F(Storage.resolve(Leaf));
+            });
       };
 
   // Pass one: the base DeclRefExprs a recognized member read or write
@@ -3340,26 +3349,32 @@ static void extractStdInitEvents(
           SemaProfiles::bindingSourceOperand(Src, T, AsPointerValue);
       if (!Operand)
         return Fresh;
-      SmallVector<const Expr *, 2> SrcLeaves;
+      // Per leaf: the one tracked entity it names, what a marked pointer or
+      // reference leaf refers to, or an anonymous referent.
+      SmallVector<std::pair<ReseatTarget, unsigned>, 2> Targets;
+      bool AnyTracked = false;
       SemaProfiles::forEachTargetLeaf(
-          Operand, [&](const Expr *Leaf) { SrcLeaves.push_back(Leaf); });
-      if (SrcLeaves.size() != 1) {
-        for (const Expr *Leaf : SrcLeaves)
-          if (SemaProfiles::isFlowTrackedLeaf(Ctx, Leaf, AsPointerValue, DC))
-            return {ReseatTarget::Unknown, 0};
-        return Fresh;
-      }
-      const Expr *Leaf = SrcLeaves.front();
-      if (AsPointerValue &&
-          SemaProfiles::ignoreTransparentCasts(Leaf)->getType()->isArrayType())
-        return Fresh;
-      TrackedStorage::Resolution R =
-          Storage.resolveFlowLeaf(Leaf, AsPointerValue);
-      if (!R.Entity || R.Subobject)
-        return Fresh;
-      if (Storage.Entities[*R.Entity].K == TrackedEntity::Kind::Pointee)
-        return {ReseatTarget::ViaPointer, *R.Entity};
-      return {ReseatTarget::Entity, *R.Entity};
+          Operand, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+            AnyTracked |=
+                SemaProfiles::isFlowTrackedLeaf(Ctx, Leaf, AsPointerValue, DC);
+            std::pair<ReseatTarget, unsigned> RT = Fresh;
+            TrackedStorage::Resolution R =
+                Storage.resolveFlowLeaf(Leaf, AsPointerValue);
+            if ((!AsPointerValue ||
+                 !SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms)
+                      ->getType()
+                      ->isArrayType()) &&
+                R.Entity && !R.Subobject)
+              RT = {Storage.Entities[*R.Entity].K ==
+                            TrackedEntity::Kind::Pointee
+                        ? ReseatTarget::ViaPointer
+                        : ReseatTarget::Entity,
+                    *R.Entity};
+            Targets.push_back(RT);
+          });
+      if (Targets.size() != 1)
+        return AnyTracked ? std::pair{ReseatTarget::Unknown, 0u} : Fresh;
+      return Targets.front();
     };
     // A store to \p G: one Write (or ReadWrite) when every leaf names the
     // same whole entity; otherwise the chosen arm is unknown, so each named
@@ -3401,13 +3416,14 @@ static void extractStdInitEvents(
       }
       SmallVector<unsigned, 2> Reseated;
       bool AllMarked = true;
-      SemaProfiles::forEachTargetLeaf(G, [&](const Expr *Leaf) {
-        std::optional<unsigned> Idx = Storage.markedPointerObject(Leaf);
-        if (!Idx)
-          AllMarked = false;
-        else if (!llvm::is_contained(Reseated, *Idx))
-          Reseated.push_back(*Idx);
-      });
+      SemaProfiles::forEachTargetLeaf(
+          G, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+            std::optional<unsigned> Idx = Storage.markedPointerObject(Leaf);
+            if (!Idx)
+              AllMarked = false;
+            else if (!llvm::is_contained(Reseated, *Idx))
+              Reseated.push_back(*Idx);
+          });
       if (Reseated.empty())
         return;
       std::pair<ReseatTarget, unsigned> RT{ReseatTarget::Unknown, 0};
@@ -3430,17 +3446,19 @@ static void extractStdInitEvents(
                     !T->getPointeeType().isConstQualified();
       if (!ByRef && !ByAddr)
         return;
-      SemaProfiles::forEachTargetLeaf(Src, [&](const Expr *Leaf) {
-        const Expr *G = SemaProfiles::ignoreTransparentCasts(Leaf);
-        if (ByAddr) {
-          const auto *UO = dyn_cast<UnaryOperator>(G);
-          if (!UO || UO->getOpcode() != UO_AddrOf)
-            return;
-          G = UO->getSubExpr();
-        }
-        if (std::optional<unsigned> Idx = Storage.markedPointerObject(G))
-          AppendReseat(*Idx, At, ReseatTarget::Escaped);
-      });
+      SemaProfiles::forEachTargetLeaf(
+          Src, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+            const Expr *G =
+                SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms);
+            if (ByAddr) {
+              G = SemaProfiles::addressOfOperand(G);
+              if (!G)
+                return;
+            }
+            if (std::optional<unsigned> Idx =
+                    Storage.markedPointerObject({G, Leaf.Arms}))
+              AppendReseat(*Idx, At, ReseatTarget::Escaped);
+          });
     };
     // A pointer or reference binding of \p Src as \p T, with the parse-time
     // funnel's kind, location, and target marking (SemaProfiles::
@@ -3462,19 +3480,22 @@ static void extractStdInitEvents(
       BindingSite Site{Kind,    Loc, TargetMarked, T->isReferenceType(),
                        Subject, {}};
       bool AnyTracked = false;
-      SemaProfiles::forEachTargetLeaf(Operand, [&](const Expr *Leaf) {
-        BindingLeaf L;
-        if (SemaProfiles::isFlowTrackedLeaf(Ctx, Leaf, AsPointerValue, DC)) {
-          AnyTracked = true;
-          JudgedLeaves.insert(Leaf);
-          TrackedStorage::Resolution R =
-              Storage.resolveFlowLeaf(Leaf, AsPointerValue);
-          L.Entity = R.Entity;
-        }
-        if (!L.Entity)
-          L.State = formState(S.Profiles().classifyInitBindingLeaf(Leaf, T, D));
-        Site.Leaves.push_back(L);
-      });
+      SemaProfiles::forEachTargetLeaf(
+          Operand, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+            BindingLeaf L;
+            if (SemaProfiles::isFlowTrackedLeaf(Ctx, Leaf, AsPointerValue,
+                                                DC)) {
+              AnyTracked = true;
+              JudgedLeaves.insert(Leaf.E);
+              TrackedStorage::Resolution R =
+                  Storage.resolveFlowLeaf(Leaf, AsPointerValue);
+              L.Entity = R.Entity;
+            }
+            if (!L.Entity)
+              L.State =
+                  formState(S.Profiles().classifyInitBindingLeaf(Leaf, T, D));
+            Site.Leaves.push_back(L);
+          });
       if (!AnyTracked)
         return;
       Sites.push_back(std::move(Site));
@@ -3495,12 +3516,12 @@ static void extractStdInitEvents(
       Site.Loc = Loc;
       bool AnyTracked = false, AnyPointee = false, AnyUninitObject = false;
       SemaProfiles::forEachTargetLeaf(
-          G, [&](const Expr *Leaf) {
+          G, [&](const SemaProfiles::ShapeLeaf &Leaf) {
             BindingLeaf L;
             if (SemaProfiles::isFlowTrackedLeaf(Ctx, Leaf,
                                                 /*AsPointerValue=*/false, DC)) {
               AnyTracked = true;
-              JudgedLeaves.insert(Leaf);
+              JudgedLeaves.insert(Leaf.E);
               TrackedStorage::Resolution R =
                   Storage.resolveFlowLeaf(Leaf, /*AsPointerValue=*/false);
               if (R.Entity) {
@@ -3912,16 +3933,17 @@ static void extractStdInitEvents(
         AppendAliasEscapes(Init, NE->getAllocatedType(), NE);
       } else if (const auto *DE = dyn_cast<CXXDeleteExpr>(St)) {
         // A delete-expression releases its operand's storage.
-        SmallVector<const Expr *, 2> Operands;
+        SmallVector<TrackedStorage::Resolution, 2> Operands;
         SemaProfiles::forEachTargetLeaf(
-            DE->getArgument(),
-            [&](const Expr *Leaf) { Operands.push_back(Leaf); });
+            DE->getArgument(), [&](const SemaProfiles::ShapeLeaf &Leaf) {
+              Operands.push_back(
+                  Storage.resolveFlowLeaf(Leaf, /*AsPointerValue=*/true));
+            });
         if (Operands.size() != 1)
           continue;
-        TrackedStorage::Resolution R =
-            Storage.resolveFlowLeaf(Operands.front(), /*AsPointerValue=*/true);
-        if (R.Entity && !R.Subobject)
-          BlockEvents.push_back({DefAssignEventKind::Kill, *R.Entity, DE});
+        if (Operands.front().Entity && !Operands.front().Subobject)
+          BlockEvents.push_back(
+              {DefAssignEventKind::Kill, *Operands.front().Entity, DE});
       } else if (const auto *ILE = dyn_cast<InitListExpr>(St)) {
         if (!ILE->isTransparent())
           AppendAggregateBindings(ILE->getType(), ILE->inits(),

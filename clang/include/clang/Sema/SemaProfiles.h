@@ -244,11 +244,24 @@ public:
   /// (a non-virtual diamond) have different paths.
   using BasePath = SmallVector<const CXXRecordDecl *, 2>;
 
-  /// Peel the transparent casts ignoreTransparentCasts peels -- parens,
-  /// implicit casts, and explicit casts of a pointer or glvalue -- from
-  /// \p E, prepending the derived-to-base steps they take to \p Path in
-  /// object-to-member order; returns the operand reached.
-  static const Expr *peelBaseCasts(const Expr *E, BasePath &Path);
+  /// One leaf of an lvalue or pointer shape (forEachTargetLeaf): the
+  /// expression \c E, and the arm \c E takes at each conditional nested
+  /// below one of its member, element, indirection, or address-of steps (an
+  /// arm is taken when it is listed). A plain expression is a leaf with no
+  /// nested conditional. \c Arms is valid only while the walk that yields the
+  /// leaf runs.
+  struct ShapeLeaf {
+    const Expr *E;
+    ArrayRef<const Expr *> Arms;
+    ShapeLeaf(const Expr *E, ArrayRef<const Expr *> Arms = {})
+        : E(E), Arms(Arms) {}
+  };
+
+  /// Peel what ignoreTransparentCasts peels from \p E, taking the arms
+  /// listed in \p Arms, and prepend the derived-to-base steps its casts take
+  /// to \p Path in object-to-member order; returns the operand reached.
+  static const Expr *peelBaseCasts(const Expr *E, BasePath &Path,
+                                   ArrayRef<const Expr *> Arms = {});
 
   /// The shape of an lvalue the std::init flow analysis may track: the
   /// object expression at the bottom of the member, element, and
@@ -275,10 +288,12 @@ public:
     /// member's class.
     BasePath Path;
   };
-  /// The shape of the glvalue \p E, or none when its chain bottoms out at
-  /// anything but a directly named local, a parameter, or `this` (a global,
-  /// a call, a member reached through another member's pointer).
-  static std::optional<FlowLeafShape> flowLeafShape(const Expr *E);
+  /// The shape of the glvalue \p E, taking the arms listed in \p Arms, or
+  /// none when its chain bottoms out at anything but a directly named local,
+  /// a parameter, or \c this (a global, a call, a member reached through
+  /// another member's pointer).
+  static std::optional<FlowLeafShape>
+  flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms = {});
 
   /// A class with a user-provided constructor is trusted (P4222R2 §5.1): its
   /// constructor body may have assigned a member, which local analysis
@@ -354,7 +369,7 @@ public:
   /// binding of a pointer) rather than as a glvalue. The parse-time checks
   /// leave such a source to the pass; a source with no tracked leaf, or one
   /// outside any function body, is judged at parse time without flow state.
-  static bool isFlowTrackedLeaf(const ASTContext &Ctx, const Expr *Leaf,
+  static bool isFlowTrackedLeaf(const ASTContext &Ctx, const ShapeLeaf &Leaf,
                                 bool AsPointerValue,
                                 const DeclContext *CurContext);
   /// True if any leaf of \p Src, bound as \p T, is flow-tracked in the
@@ -396,7 +411,7 @@ public:
   /// alone, for the CFG pass's judgment of a binding with tracked leaves;
   /// \p Body is the analyzed function, which decides whether `this` is under
   /// construction.
-  InitSourceState classifyInitBindingLeaf(const Expr *Leaf, QualType T,
+  InitSourceState classifyInitBindingLeaf(const ShapeLeaf &Leaf, QualType T,
                                           const Decl *Body) const;
   /// The access a leaf is classified for: a value read (the top-level
   /// [[uninit]] marker is the flow-based read pass's) or a scalar store (the
@@ -407,7 +422,8 @@ public:
   /// with the recognizers' access preset for \p Kind, for the CFG pass's
   /// judgment of an access with tracked leaves; \p Body as for
   /// classifyInitBindingLeaf.
-  InitSourceState classifyInitAccessLeaf(const Expr *Leaf, InitAccessKind Kind,
+  InitSourceState classifyInitAccessLeaf(const ShapeLeaf &Leaf,
+                                         InitAccessKind Kind,
                                          const Decl *Body) const;
 
   /// The [[ref_to_uninit]] marking of the pointer object an assignment
@@ -431,9 +447,14 @@ public:
   /// pointer or glvalue (paper §4.3: a cast of a marked pointer is itself
   /// marked; a reference cast denotes the same storage). Value casts like
   /// `(int)m` are not stripped -- they produce a new value, not the same
-  /// storage. Shared with the CFG pass in AnalysisBasedWarnings.cpp, so
-  /// recognition and flow tracking see through exactly the same casts.
-  static const Expr *ignoreTransparentCasts(const Expr *E);
+  /// storage -- and the arm of a conditional listed in \p Arms. Shared with
+  /// the CFG pass in AnalysisBasedWarnings.cpp, so recognition and flow
+  /// tracking see through exactly the same forms.
+  static const Expr *ignoreTransparentCasts(const Expr *E,
+                                            ArrayRef<const Expr *> Arms = {});
+
+  /// The operand of the address-of step \p E (a built-in \c &), or null.
+  static const Expr *addressOfOperand(const Expr *E);
 
   /// The construct a pointer or reference binding belongs to, selecting
   /// which declaration can carry [[ref_to_uninit]] and which diagnostic
@@ -746,8 +767,9 @@ public:
   /// shared by the parse-time checks and the CFG pass's event extraction
   /// (AnalysisBasedWarnings.cpp), so a wrapped lvalue is judged exactly like
   /// its leaf form.
-  static void forEachTargetLeaf(const Expr *E,
-                                llvm::function_ref<void(const Expr *Leaf)> F);
+  static void
+  forEachTargetLeaf(const Expr *E,
+                    llvm::function_ref<void(const ShapeLeaf &Leaf)> F);
 
   /// std::init / pointer_marker + union_marker (paper §4.1, §5.6): diagnose
   /// [[uninit]] placed on a pointer, a union variable, or a union member.

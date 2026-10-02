@@ -1327,6 +1327,10 @@ struct UninitAccessOpts {
   bool TrustRefToUninit = false;
   PointerAlias Alias = PointerAlias::None;
   bool ThisUnderConstruction = false;
+  /// The arms a classified leaf takes at its nested conditionals
+  /// (SemaProfiles::ShapeLeaf); a conditional with no listed arm combines
+  /// both.
+  ArrayRef<const Expr *> Arms;
 
   // Copy-then-mutate, so each helper names only the field it changes and
   // adding a field cannot silently drop out of a positional rebuild.
@@ -1348,6 +1352,11 @@ struct UninitAccessOpts {
   UninitAccessOpts withThisUnderConstruction(bool B) const {
     UninitAccessOpts O = *this;
     O.ThisUnderConstruction = B;
+    return O;
+  }
+  UninitAccessOpts withArms(ArrayRef<const Expr *> A) const {
+    UninitAccessOpts O = *this;
+    O.Arms = A;
     return O;
   }
 };
@@ -1427,54 +1436,93 @@ const ValueDecl *SemaProfiles::getDirectlyNamedDecl(const Expr *E) {
   return nullptr;
 }
 
-// Strip what the recognizers see through on the way to a named entity:
-// parens, implicit casts, and explicit casts whose operand is a pointer or
-// glvalue (paper §4.3: a cast of a marked pointer is itself marked; a
-// reference cast denotes the same storage). Implicit casts are re-stripped
-// after every explicit-cast peel -- a cast's operand may itself be
-// parenthesized or implicitly converted -- so a single leading
-// IgnoreParenImpCasts is not equivalent. Shared with the CFG pass
-// (AnalysisBasedWarnings.cpp), so flow tracking sees through exactly the
-// casts recognition does.
-const Expr *SemaProfiles::ignoreTransparentCasts(const Expr *E) {
-  E = E->IgnoreParenImpCasts();
-  while (const auto *CE = dyn_cast<ExplicitCastExpr>(E)) {
-    const Expr *Sub = CE->getSubExpr();
-    if (!Sub->getType()->isPointerType() && !Sub->isGLValue())
-      break;
-    E = Sub->IgnoreParenImpCasts();
-  }
-  return E;
+const Expr *SemaProfiles::addressOfOperand(const Expr *E) {
+  if (const auto *UO = dyn_cast<UnaryOperator>(E);
+      UO && UO->getOpcode() == UO_AddrOf)
+    return UO->getSubExpr();
+  return nullptr;
 }
 
-// Pass-through forms shared by the pointer and glvalue recognizers, which are
-// transparent to their operand: a single-element braced initializer { e }
-// binds from e (modeling
-// MismatchingNewDeleteDetector::getNewExprFromInitListOrExpr); a conditional
-// is uninit if either arm is, so a value that may be uninit forces a marked
-// target; a comma yields its right operand. \p EmptyListState classifies an
-// empty braced list: {} value-initializes a pointer to null, which the
-// pointer recognizer classifies Unknown (the null policy at its null arm),
-// while a glvalue has no empty-list form (Unknown); a multi-element list is
-// Unknown for both. Returns std::nullopt when E is not a pass-through form.
+/// The arms of the conditional \p CO; the GNU \c ?: form's true arm is
+/// its written common operand.
+static std::pair<const Expr *, const Expr *>
+conditionalArms(const AbstractConditionalOperator *CO) {
+  if (const auto *BCO = dyn_cast<BinaryConditionalOperator>(CO))
+    return {BCO->getCommon(), BCO->getFalseExpr()};
+  return {CO->getTrueExpr(), CO->getFalseExpr()};
+}
+
+/// The arm of the conditional \p E listed in \p Arms, or null.
+static const Expr *chosenArm(const Expr *E, ArrayRef<const Expr *> Arms) {
+  if (const auto *CO = dyn_cast<AbstractConditionalOperator>(E)) {
+    auto [T, F] = conditionalArms(CO);
+    if (llvm::is_contained(Arms, T))
+      return T;
+    if (llvm::is_contained(Arms, F))
+      return F;
+  }
+  return nullptr;
+}
+
+/// The operand a pass-through form \p E yields its lvalue or value from, or
+/// null: a comma's right operand, a single-element braced list's element,
+/// and the arm of a conditional listed in \p Arms.
+static const Expr *passThroughOperand(const Expr *E,
+                                      ArrayRef<const Expr *> Arms) {
+  if (const auto *BO = dyn_cast<BinaryOperator>(E); BO && BO->isCommaOp())
+    return BO->getRHS();
+  if (const auto *ILE = dyn_cast<InitListExpr>(E);
+      ILE && ILE->getNumInits() == 1)
+    return ILE->getInit(0);
+  return chosenArm(E, Arms);
+}
+
+// Implicit casts are re-stripped after every peel -- a cast's operand may
+// itself be parenthesized or implicitly converted -- so a single leading
+// IgnoreParenImpCasts is not equivalent.
+const Expr *SemaProfiles::ignoreTransparentCasts(const Expr *E,
+                                                 ArrayRef<const Expr *> Arms) {
+  while (true) {
+    E = E->IgnoreParenImpCasts();
+    if (const auto *CE = dyn_cast<ExplicitCastExpr>(E)) {
+      const Expr *Sub = CE->getSubExpr();
+      if (!Sub->getType()->isPointerType() && !Sub->isGLValue())
+        return E;
+      E = Sub;
+      continue;
+    }
+    if (const Expr *Arm = chosenArm(E, Arms)) {
+      E = Arm;
+      continue;
+    }
+    return E;
+  }
+}
+
+/// The pass-through forms (passThroughOperand) as the pointer and glvalue
+/// recognizers classify them: a form yielding one operand classifies as that
+/// operand (a single-element braced list { e } binds from e, modeling
+/// MismatchingNewDeleteDetector::getNewExprFromInitListOrExpr), and a
+/// conditional with no arm listed in \p Arms combines its arms (combineArms),
+/// so a value that may be uninit forces a marked target. \p EmptyListState
+/// classifies an empty braced list: {} value-initializes a pointer to null,
+/// which the pointer recognizer classifies Unknown (the null policy at its
+/// null arm), while a glvalue has no empty-list form (Unknown); a
+/// multi-element list is Unknown for both. Returns std::nullopt when \p E is
+/// not a pass-through form.
 template <typename RecurseFn>
 static std::optional<UninitStorage>
 classifyUninitPassThrough(const Expr *E, UninitStorage EmptyListState,
-                          RecurseFn Recurse) {
-  if (const auto *ILE = dyn_cast<InitListExpr>(E)) {
-    if (ILE->getNumInits() == 1)
-      return Recurse(ILE->getInit(0));
+                          ArrayRef<const Expr *> Arms, RecurseFn Recurse) {
+  if (const auto *ILE = dyn_cast<InitListExpr>(E);
+      ILE && ILE->getNumInits() != 1)
     return ILE->getNumInits() == 0 ? EmptyListState : UninitStorage::Unknown;
+  if (const Expr *Op = passThroughOperand(E, Arms))
+    return Recurse(Op);
+  if (const auto *CO = dyn_cast<AbstractConditionalOperator>(E)) {
+    auto [T, F] = conditionalArms(CO);
+    return combineArms(Recurse(T), Recurse(F));
   }
-  if (const auto *CO = dyn_cast<ConditionalOperator>(E))
-    return combineArms(Recurse(CO->getTrueExpr()), Recurse(CO->getFalseExpr()));
-  // The GNU `a ?: b` form: the true arm is the condition itself. getCommon()
-  // is the *written* operand -- recursing into it (rather than getTrueExpr(),
-  // which is an OpaqueValueExpr) keeps the recognizers free of OVE handling.
-  if (const auto *BCO = dyn_cast<BinaryConditionalOperator>(E))
-    return combineArms(Recurse(BCO->getCommon()), Recurse(BCO->getFalseExpr()));
-  if (const auto *BO = dyn_cast<BinaryOperator>(E); BO && BO->isCommaOp())
-    return Recurse(BO->getRHS());
   return std::nullopt;
 }
 
@@ -1757,7 +1805,8 @@ pointerRefersToUninitStorage(ASTContext &Ctx, const Expr *E,
   // null classification below (Unknown), keeping `= {}` and `= nullptr`
   // consistent.
   if (auto PassThrough = classifyUninitPassThrough(
-          E, /*EmptyListState=*/UninitStorage::Unknown, [&](const Expr *Sub) {
+          E, /*EmptyListState=*/UninitStorage::Unknown, Opts.Arms,
+          [&](const Expr *Sub) {
             return pointerRefersToUninitStorage(Ctx, Sub, Opts);
           }))
     return *PassThrough;
@@ -1783,9 +1832,8 @@ pointerRefersToUninitStorage(ASTContext &Ctx, const Expr *E,
     return glvalueDenotesUninitStorage(Ctx, E, Opts.withoutTopLevelDrop());
 
   // &G, where G denotes uninitialized storage.
-  if (const auto *UO = dyn_cast<UnaryOperator>(E))
-    if (UO->getOpcode() == UO_AddrOf)
-      return glvalueDenotesUninitStorage(Ctx, UO->getSubExpr(), Opts);
+  if (const Expr *G = SemaProfiles::addressOfOperand(E))
+    return glvalueDenotesUninitStorage(Ctx, G, Opts);
 
   // A structured binding classifies as the member or element it decomposes.
   if (const Expr *Bound = getStructuredBindingSource(E))
@@ -1924,7 +1972,8 @@ static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
   }
 
   if (auto PassThrough = classifyUninitPassThrough(
-          E, /*EmptyListState=*/UninitStorage::Unknown, [&](const Expr *Sub) {
+          E, /*EmptyListState=*/UninitStorage::Unknown, Opts.Arms,
+          [&](const Expr *Sub) {
             return glvalueDenotesUninitStorage(Ctx, Sub, Opts);
           }))
     return *PassThrough;
@@ -2328,15 +2377,16 @@ void SemaProfiles::judgeInitProfileBinding(InitBindingKind Kind,
 }
 
 SemaProfiles::InitSourceState
-SemaProfiles::classifyInitBindingLeaf(const Expr *Leaf, QualType T,
+SemaProfiles::classifyInitBindingLeaf(const ShapeLeaf &Leaf, QualType T,
                                       const Decl *Body) const {
   const CXXMethodDecl *MD =
       enclosingInstanceMethod(dyn_cast_or_null<DeclContext>(Body));
   UninitAccessOpts Opts =
       UninitBindAccess.withAlias(pointerAliasOf(T))
-          .withThisUnderConstruction(isa_and_nonnull<CXXConstructorDecl>(MD));
-  switch (
-      classifyUninitSource(getASTContext(), Leaf, T->isReferenceType(), Opts)) {
+          .withThisUnderConstruction(isa_and_nonnull<CXXConstructorDecl>(MD))
+          .withArms(Leaf.Arms);
+  switch (classifyUninitSource(getASTContext(), Leaf.E, T->isReferenceType(),
+                               Opts)) {
   case UninitStorage::Initialized:
     return InitSourceState::Initialized;
   case UninitStorage::Uninitialized:
@@ -2350,14 +2400,15 @@ SemaProfiles::classifyInitBindingLeaf(const Expr *Leaf, QualType T,
 }
 
 SemaProfiles::InitSourceState
-SemaProfiles::classifyInitAccessLeaf(const Expr *Leaf, InitAccessKind Kind,
+SemaProfiles::classifyInitAccessLeaf(const ShapeLeaf &Leaf, InitAccessKind Kind,
                                      const Decl *Body) const {
   const CXXMethodDecl *MD =
       enclosingInstanceMethod(dyn_cast_or_null<DeclContext>(Body));
   UninitAccessOpts Opts =
       (Kind == InitAccessKind::Read ? UninitReadAccess : UninitWriteAccess)
-          .withThisUnderConstruction(isa_and_nonnull<CXXConstructorDecl>(MD));
-  switch (glvalueDenotesUninitStorage(getASTContext(), Leaf, Opts)) {
+          .withThisUnderConstruction(isa_and_nonnull<CXXConstructorDecl>(MD))
+          .withArms(Leaf.Arms);
+  switch (glvalueDenotesUninitStorage(getASTContext(), Leaf.E, Opts)) {
   case UninitStorage::Initialized:
     return InitSourceState::Initialized;
   case UninitStorage::Uninitialized:
@@ -2370,7 +2421,8 @@ SemaProfiles::classifyInitAccessLeaf(const Expr *Leaf, InitAccessKind Kind,
   llvm_unreachable("unknown UninitStorage");
 }
 
-const Expr *SemaProfiles::peelBaseCasts(const Expr *E, BasePath &Path) {
+const Expr *SemaProfiles::peelBaseCasts(const Expr *E, BasePath &Path,
+                                        ArrayRef<const Expr *> Arms) {
   SmallVector<const CastExpr *, 4> Casts;
   E = E->IgnoreParens();
   while (true) {
@@ -2378,16 +2430,21 @@ const Expr *SemaProfiles::peelBaseCasts(const Expr *E, BasePath &Path) {
       E = FE->getSubExpr()->IgnoreParens();
       continue;
     }
-    const auto *CE = dyn_cast<CastExpr>(E);
-    if (!CE)
-      break;
-    if (isa<ExplicitCastExpr>(CE)) {
-      const Expr *Sub = CE->getSubExpr();
-      if (!Sub->getType()->isPointerType() && !Sub->isGLValue())
-        break;
+    if (const auto *CE = dyn_cast<CastExpr>(E)) {
+      if (isa<ExplicitCastExpr>(CE)) {
+        const Expr *Sub = CE->getSubExpr();
+        if (!Sub->getType()->isPointerType() && !Sub->isGLValue())
+          break;
+      }
+      Casts.push_back(CE);
+      E = CE->getSubExpr()->IgnoreParens();
+      continue;
     }
-    Casts.push_back(CE);
-    E = CE->getSubExpr()->IgnoreParens();
+    if (const Expr *Arm = chosenArm(E, Arms)) {
+      E = Arm->IgnoreParens();
+      continue;
+    }
+    break;
   }
   // The innermost cast applies first, and this step's casts sit closer to
   // the object than the caller's.
@@ -2403,9 +2460,9 @@ const Expr *SemaProfiles::peelBaseCasts(const Expr *E, BasePath &Path) {
 }
 
 std::optional<SemaProfiles::FlowLeafShape>
-SemaProfiles::flowLeafShape(const Expr *E) {
+SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
   FlowLeafShape S;
-  const Expr *Cur = peelBaseCasts(E, S.Path);
+  const Expr *Cur = peelBaseCasts(E, S.Path, Arms);
   while (true) {
     if (const auto *ME = dyn_cast<MemberExpr>(Cur)) {
       const auto *F = dyn_cast<FieldDecl>(ME->getMemberDecl());
@@ -2413,7 +2470,7 @@ SemaProfiles::flowLeafShape(const Expr *E) {
         return std::nullopt;
       if (!F->isAnonymousStructOrUnion())
         S.Named.push_back(F);
-      Cur = peelBaseCasts(ME->getBase(), S.Path);
+      Cur = peelBaseCasts(ME->getBase(), S.Path, Arms);
       if (ME->isArrow()) {
         S.ThroughPointer = true;
         break;
@@ -2422,7 +2479,7 @@ SemaProfiles::flowLeafShape(const Expr *E) {
     }
     if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(Cur)) {
       S.Subscript = true;
-      Cur = peelBaseCasts(ASE->getBase(), S.Path);
+      Cur = peelBaseCasts(ASE->getBase(), S.Path, Arms);
       // p[i] indexes the pointer's value; arr[i] the array glvalue its
       // peeled decay leaves behind.
       if (Cur->getType()->isPointerType()) {
@@ -2434,7 +2491,7 @@ SemaProfiles::flowLeafShape(const Expr *E) {
     if (const auto *UO = dyn_cast<UnaryOperator>(Cur);
         UO && UO->getOpcode() == UO_Deref) {
       S.ThroughPointer = true;
-      Cur = peelBaseCasts(UO->getSubExpr(), S.Path);
+      Cur = peelBaseCasts(UO->getSubExpr(), S.Path, Arms);
       break;
     }
     break;
@@ -2548,17 +2605,16 @@ SemaProfiles::enclosingInstanceMethod(const DeclContext *DC) {
   return nullptr;
 }
 
-bool SemaProfiles::isFlowTrackedLeaf(const ASTContext &Ctx, const Expr *Leaf,
-                                     bool AsPointerValue,
+bool SemaProfiles::isFlowTrackedLeaf(const ASTContext &Ctx,
+                                     const ShapeLeaf &Leaf, bool AsPointerValue,
                                      const DeclContext *CurContext) {
   if (!insideFunctionBody(CurContext))
     return false;
-  const Expr *E = ignoreTransparentCasts(Leaf);
+  const Expr *E = ignoreTransparentCasts(Leaf.E, Leaf.Arms);
   if (AsPointerValue) {
-    if (const auto *UO = dyn_cast<UnaryOperator>(E);
-        UO && UO->getOpcode() == UO_AddrOf)
-      return isFlowTrackedLeaf(Ctx, UO->getSubExpr(), /*AsPointerValue=*/false,
-                               CurContext);
+    if (const Expr *Op = addressOfOperand(E))
+      return isFlowTrackedLeaf(Ctx, ShapeLeaf(Op, Leaf.Arms),
+                               /*AsPointerValue=*/false, CurContext);
     // The value of a marked pointer, or a decayed [[uninit]] array.
     const auto *VD = dyn_cast_or_null<VarDecl>(getDirectlyNamedDecl(E));
     if (!VD || !VD->hasLocalStorage())
@@ -2567,7 +2623,7 @@ bool SemaProfiles::isFlowTrackedLeaf(const ASTContext &Ctx, const Expr *Leaf,
       return VD->hasAttr<RefToUninitAttr>();
     return VD->getType()->isArrayType() && VD->hasAttr<UninitAttr>();
   }
-  std::optional<FlowLeafShape> Shape = flowLeafShape(E);
+  std::optional<FlowLeafShape> Shape = flowLeafShape(E, Leaf.Arms);
   if (!Shape)
     return false;
   if (Shape->IsThis) {
@@ -2620,13 +2676,13 @@ bool SemaProfiles::hasFlowTrackedGlvalueLeaf(
   if (!G)
     return false;
   bool Any = false;
-  forEachTargetLeaf(G, [&](const Expr *Leaf) {
+  forEachTargetLeaf(G, [&](const ShapeLeaf &Leaf) {
     if (!isFlowTrackedLeaf(getASTContext(), Leaf, /*AsPointerValue=*/false,
                            SemaRef.CurContext))
       return;
     Any = true;
-    if (Leaves)
-      Leaves->push_back(Leaf);
+    if (Leaves && !llvm::is_contained(*Leaves, Leaf.E))
+      Leaves->push_back(Leaf.E);
   });
   return Any;
 }
@@ -2640,13 +2696,13 @@ bool SemaProfiles::hasFlowTrackedLeaf(
   if (!Src)
     return false;
   bool Any = false;
-  forEachTargetLeaf(Src, [&](const Expr *Leaf) {
+  forEachTargetLeaf(Src, [&](const ShapeLeaf &Leaf) {
     if (!isFlowTrackedLeaf(getASTContext(), Leaf, AsPointerValue,
                            SemaRef.CurContext))
       return;
     Any = true;
-    if (Leaves)
-      Leaves->push_back(Leaf);
+    if (Leaves && !llvm::is_contained(*Leaves, Leaf.E))
+      Leaves->push_back(Leaf.E);
   });
   return Any;
 }
@@ -2949,23 +3005,17 @@ void SemaProfiles::checkInitProfileSubobjectWrite(SourceLocation Loc,
 }
 
 std::optional<bool> SemaProfiles::resolveAssignTargetMarking(const Expr *E) {
-  E = SemaProfiles::ignoreTransparentCasts(E);
-  if (const auto *CO = dyn_cast<ConditionalOperator>(E)) {
-    std::optional<bool> T = resolveAssignTargetMarking(CO->getTrueExpr());
-    std::optional<bool> F = resolveAssignTargetMarking(CO->getFalseExpr());
-    return T == F ? T : std::nullopt;
-  }
-  if (const auto *BCO = dyn_cast<BinaryConditionalOperator>(E)) {
-    std::optional<bool> T = resolveAssignTargetMarking(BCO->getCommon());
-    std::optional<bool> F = resolveAssignTargetMarking(BCO->getFalseExpr());
-    return T == F ? T : std::nullopt;
-  }
-  if (const auto *BO = dyn_cast<BinaryOperator>(E); BO && BO->isCommaOp())
-    return resolveAssignTargetMarking(BO->getRHS());
-  const ValueDecl *VD = SemaProfiles::getDirectlyNamedDecl(E);
-  if (!VD || VD->getType()->isReferenceType())
-    return std::nullopt;
-  return VD->hasAttr<RefToUninitAttr>();
+  std::optional<bool> Marked;
+  bool Unknown = false;
+  forEachTargetLeaf(E, [&](const ShapeLeaf &Leaf) {
+    const ValueDecl *VD = getDirectlyNamedDecl(Leaf.E);
+    if (!VD || VD->getType()->isReferenceType() ||
+        (Marked && *Marked != VD->hasAttr<RefToUninitAttr>()))
+      Unknown = true;
+    else
+      Marked = VD->hasAttr<RefToUninitAttr>();
+  });
+  return Unknown ? std::nullopt : Marked;
 }
 
 void SemaProfiles::checkInitProfilePointerAssignment(Expr *LHS, Expr *RHS,
@@ -3021,35 +3071,22 @@ void SemaProfiles::checkInitProfileIncDec(Expr *Operand, SourceLocation OpLoc) {
   checkInitProfileSubobjectWrite(OpLoc, Operand);
 }
 
-void SemaProfiles::forEachTargetLeaf(const Expr *E,
-                                     llvm::function_ref<void(const Expr *)> F) {
+void SemaProfiles::forEachTargetLeaf(
+    const Expr *E, llvm::function_ref<void(const ShapeLeaf &)> F) {
   E = ignoreTransparentCasts(E);
-  // A conditional or comma shape names whichever lvalue the chosen arm
-  // does: walk each named arm.
-  if (const auto *CO = dyn_cast<ConditionalOperator>(E)) {
-    forEachTargetLeaf(CO->getTrueExpr(), F);
-    forEachTargetLeaf(CO->getFalseExpr(), F);
+  // A conditional names whichever lvalue the chosen arm does: each arm is a
+  // leaf of its own.
+  if (const auto *CO = dyn_cast<AbstractConditionalOperator>(E)) {
+    auto [T, Fa] = conditionalArms(CO);
+    forEachTargetLeaf(T, F);
+    forEachTargetLeaf(Fa, F);
     return;
   }
-  if (const auto *BCO = dyn_cast<BinaryConditionalOperator>(E)) {
-    // The written common operand doubles as the true arm, mirroring
-    // classifyUninitPassThrough's OVE avoidance.
-    forEachTargetLeaf(BCO->getCommon(), F);
-    forEachTargetLeaf(BCO->getFalseExpr(), F);
+  if (const Expr *Op = passThroughOperand(E, /*Arms=*/{})) {
+    forEachTargetLeaf(Op, F);
     return;
   }
-  if (const auto *BO = dyn_cast<BinaryOperator>(E); BO && BO->isCommaOp()) {
-    forEachTargetLeaf(BO->getRHS(), F);
-    return;
-  }
-  // A single-element braced initializer names its element, as it does for
-  // the recognizers (classifyUninitPassThrough).
-  if (const auto *ILE = dyn_cast<InitListExpr>(E);
-      ILE && ILE->getNumInits() == 1) {
-    forEachTargetLeaf(ILE->getInit(0), F);
-    return;
-  }
-  F(E);
+  F(ShapeLeaf(E));
 }
 
 /// The test::class_final pilot: fires on every completed non-lambda class.
