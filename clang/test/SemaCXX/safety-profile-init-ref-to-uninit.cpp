@@ -3500,6 +3500,54 @@ void test_nested_conditional_store(int *p [[ref_to_uninit]],
   int *n [[ref_to_uninit]] = q; // OK: q's referent is stored on some path
   (void)m; (void)n;
 }
+
+namespace std {
+template <class T> struct remove_reference { using type = T; };
+template <class T> struct remove_reference<T &> { using type = T; };
+template <class T> struct remove_reference<T &&> { using type = T; };
+template <class T> typename remove_reference<T>::type &&move(T &&t) noexcept;
+template <class T> T &&forward(typename remove_reference<T>::type &t) noexcept;
+template <class T> const T &as_const(T &t) noexcept;
+} // namespace std
+
+// A read through an identity call of a marked pointer reads its referent
+int test_identity_read(int *p [[ref_to_uninit]], int &r [[ref_to_uninit]]) {
+  int a = *std::move(p);              // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  int b = *std::forward<int *&>(p);   // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  int d = std::as_const(r);           // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  *p = 1;
+  r = 1;
+  int e = *std::move(p) + std::move(r); // OK
+  return a + b + d + e;
+}
+
+// An identity call's result binds what its argument binds
+void test_identity_binding(int *p [[ref_to_uninit]]) {
+  int *q = std::move(p);                    // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  int *m [[ref_to_uninit]] = std::move(p);  // OK
+  int *n [[ref_to_uninit]] = std::move(std::move(p)); // OK
+  int *const &rp = std::move(p);            // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  *p = 1;
+  int *w = std::move(p);                    // OK
+  (void)q; (void)m; (void)n; (void)rp; (void)w;
+}
+
+// An identity call is not a mutable alias of its argument
+void test_identity_no_alias(int *p [[ref_to_uninit]]) {
+  (void)std::forward<int *&>(p);
+  int *q = p; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)q;
+}
+
+// An identity call's lvalue result reseats the pointer it names
+int test_identity_reseat(int *p [[ref_to_uninit]], int *q [[ref_to_uninit]]) {
+  *p = 1;
+  std::forward<int *&>(p) = q;
+  int *w = p; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  *q = 1;
+  (void)w;
+  return *p; // OK: p refers to q's referent
+}
 // A flow-tracked binding inside a function template is judged on each
 // instantiation's own CFG, with the instantiation note; a never-instantiated
 // template's is not diagnosed.

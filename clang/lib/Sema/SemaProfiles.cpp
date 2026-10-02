@@ -1436,6 +1436,24 @@ const ValueDecl *SemaProfiles::getDirectlyNamedDecl(const Expr *E) {
   return nullptr;
 }
 
+bool SemaProfiles::isShapeTransparentBuiltin(unsigned BuiltinID) {
+  switch (BuiltinID) {
+  case Builtin::BImove:
+  case Builtin::BImove_if_noexcept:
+  case Builtin::BIforward:
+  case Builtin::BIforward_like:
+  case Builtin::BIas_const:
+    return true;
+  default:
+    return false;
+  }
+}
+
+bool SemaProfiles::isIdentityCall(const CallExpr *CE) {
+  return isShapeTransparentBuiltin(CE->getBuiltinCallee()) &&
+         CE->getNumArgs() == 1;
+}
+
 const Expr *SemaProfiles::addressOfOperand(const Expr *E) {
   if (const auto *UO = dyn_cast<UnaryOperator>(E);
       UO && UO->getOpcode() == UO_AddrOf)
@@ -1466,7 +1484,8 @@ static const Expr *chosenArm(const Expr *E, ArrayRef<const Expr *> Arms) {
 
 /// The operand a pass-through form \p E yields its lvalue or value from, or
 /// null: a comma's right operand, a single-element braced list's element,
-/// and the arm of a conditional listed in \p Arms.
+/// an identity call's argument (SemaProfiles::isIdentityCall), and the arm
+/// of a conditional listed in \p Arms.
 static const Expr *passThroughOperand(const Expr *E,
                                       ArrayRef<const Expr *> Arms) {
   if (const auto *BO = dyn_cast<BinaryOperator>(E); BO && BO->isCommaOp())
@@ -1474,6 +1493,9 @@ static const Expr *passThroughOperand(const Expr *E,
   if (const auto *ILE = dyn_cast<InitListExpr>(E);
       ILE && ILE->getNumInits() == 1)
     return ILE->getInit(0);
+  if (const auto *CE = dyn_cast<CallExpr>(E);
+      CE && SemaProfiles::isIdentityCall(CE))
+    return CE->getArg(0);
   return chosenArm(E, Arms);
 }
 
@@ -2720,9 +2742,11 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
   const auto *Parm = dyn_cast_or_null<ParmVarDecl>(Target);
   const auto *Callee =
       Parm ? dyn_cast<FunctionDecl>(Parm->getDeclContext()) : nullptr;
-  // A builtin that never evaluates its arguments binds nothing.
+  // A builtin that never evaluates its arguments binds nothing, nor does a
+  // call the checks see through (isShapeTransparentBuiltin).
   if (unsigned ID = Callee ? Callee->getBuiltinID() : 0;
-      ID && getASTContext().BuiltinInfo.isUnevaluated(ID))
+      ID && (getASTContext().BuiltinInfo.isUnevaluated(ID) ||
+             isShapeTransparentBuiltin(ID)))
     return;
   // The callee's lifecycle roles (see CalleeLifecycleRoles).
   CalleeLifecycleRoles Roles =

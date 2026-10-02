@@ -974,22 +974,28 @@ two.  The walk distributes each conditional at every step of the chain, not only
 at the top, and records the arm each leaf takes (``SemaProfiles::ShapeLeaf``),
 which every interpreter follows: a walk that stopped at a nested conditional
 while the recognizers saw through it would send tracked storage to the
-marker-only form judgment.  Disagreeing arms are kept apart rather than
-collapsed to an unidentified referent, which would lose the mix of tracked and
-untracked arms P4222R2 §4.9 rejects.  A templated body is never analyzed; each
-instantiation is analyzed on its own CFG, in which statements TreeTransform
-reused from the pattern are ordinary elements.  Consumers read the lattices as
-follows: a marked-target binding fires on ``Must`` and ``double_destroy`` on
-``Destroyed``; an unmarked-target binding, ``destroy_uninit``, a read through a
-marker, and a subobject write are suppressed by ``May``.  A destroy or release
-whose arms name different storage leaves each possibly assigned, not definitely,
-and not destroyed, and a mutable alias of a marked pointer handed out gives the
-pointer an anonymous referent in that state; arms that all name one storage
-destroy or release it.  A variable of an enclosing function reached by capture,
-whose state the enclosing body decides, enters with ``May`` set and ``Must``
-clear, so neither direction fires on it until the body itself stores.  The
-remaining blind spots are listed in `Known Gaps (std::init)`_ and in
-:doc:`ProfilesFramework`, "Limitations".
+marker-only form judgment.  The standard identity functions (``std::move``,
+``std::forward``, ``std::forward_like``, ``std::move_if_noexcept``,
+``std::as_const``) are a step of that walk, recognized by builtin ID
+(``SemaProfiles::isShapeTransparentBuiltin``), and a call to one binds nothing:
+judging its argument's binding to the parameter too would hand ``std::move``'s
+``T &&`` a mutable alias of a marked pointer, which makes the pointer's referent
+unknown, so ``*std::move(p)`` would read nothing.  Disagreeing arms are kept
+apart rather than collapsed to an unidentified referent, which would lose the
+mix of tracked and untracked arms P4222R2 §4.9 rejects.  A templated body is
+never analyzed; each instantiation is analyzed on its own CFG, in which
+statements TreeTransform reused from the pattern are ordinary elements.
+Consumers read the lattices as follows: a marked-target binding fires on
+``Must`` and ``double_destroy`` on ``Destroyed``; an unmarked-target binding,
+``destroy_uninit``, a read through a marker, and a subobject write are
+suppressed by ``May``.  A destroy or release whose arms name different storage
+leaves each possibly assigned, not definitely, and not destroyed, and a mutable
+alias of a marked pointer handed out gives the pointer an anonymous referent in
+that state; arms that all name one storage destroy or release it.  A variable of
+an enclosing function reached by capture, whose state the enclosing body
+decides, enters with ``May`` set and ``Must`` clear, so neither direction fires
+on it until the body itself stores.  The remaining blind spots are listed in
+`Known Gaps (std::init)`_ and in :doc:`ProfilesFramework`, "Limitations".
 
 
 .. _profiles-init-known-gaps:
@@ -1020,3 +1026,13 @@ Missed Diagnostics
   through the pointer, a store or ``[[now_init]]`` call through it credits
   nothing, and a marked binding to it asserts nothing: a later ``int *w = &u``
   stays the unmarked-direction error.
+- The identity functions are recognized by builtin ID: under
+  ``-fno-builtin`` (or ``-fno-builtin-std-<name>``) and for a user-written
+  identity function (``template <class T> T &&fwd(T &)``), the call is an
+  ordinary call -- its result is trusted, and a ``T *&`` parameter makes a
+  marked pointer's referent unknown.
+- A read of a plain ``[[uninit]]`` local through ``std::forward``,
+  ``std::forward_like``, ``std::as_const``, or ``std::move_if_noexcept``
+  (``return std::as_const(u);``), and a later read after such a call, is not
+  diagnosed: the plain-local analysis counts the call as an escape that
+  initializes the local (it recognizes ``std::move`` alone).

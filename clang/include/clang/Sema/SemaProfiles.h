@@ -447,9 +447,10 @@ public:
   /// pointer or glvalue (paper §4.3: a cast of a marked pointer is itself
   /// marked; a reference cast denotes the same storage). Value casts like
   /// `(int)m` are not stripped -- they produce a new value, not the same
-  /// storage; a comma's right operand and a single-element braced list's
-  /// element, which yield that operand's lvalue or value; and the arm of a
-  /// conditional listed in \p Arms. Shared with the CFG pass in
+  /// storage; a comma's right operand, a single-element braced list's
+  /// element, and an identity call's argument (isIdentityCall), which yield
+  /// that operand's lvalue or value; and the arm of a conditional listed in
+  /// \p Arms. Shared with the CFG pass in
   /// AnalysisBasedWarnings.cpp, so recognition and flow tracking see through
   /// exactly the same forms.
   static const Expr *ignoreTransparentCasts(const Expr *E,
@@ -457,6 +458,17 @@ public:
 
   /// The operand of the address-of step \p E (a built-in \c &), or null.
   static const Expr *addressOfOperand(const Expr *E);
+
+  /// True if \p CE calls one of the standard library functions that return
+  /// a reference to their argument (std::move, std::forward,
+  /// std::forward_like, std::move_if_noexcept, std::as_const), recognized by
+  /// builtin ID.
+  static bool isIdentityCall(const CallExpr *CE);
+
+  /// True if \p BuiltinID names a function whose call the std::init checks
+  /// see through (isIdentityCall): such a call binds nothing, and its
+  /// argument is judged where the result is used.
+  static bool isShapeTransparentBuiltin(unsigned BuiltinID);
 
   /// The construct a pointer or reference binding belongs to, selecting
   /// which declaration can carry [[ref_to_uninit]] and which diagnostic

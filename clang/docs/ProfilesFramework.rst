@@ -605,20 +605,20 @@ such a flow is intended.  A ``this``-capturing lambda might run immediately,
 so member reads in its body count at the point the lambda is created (and
 writes there initialize nothing -- the same strict policy).  For a *local*
 variable the analyses instead treat any escape as an assignment (see
-`Limitations`_).  A local copied or moved from a tracked local is tracked
-too: the copy's members inherit the source's per-member state at the copy
-point -- a copy does not inherit initialization (§5.2), it inherits
-whatever state the source has.  A by-value *parameter* of such a class is
-likewise a copy, of the caller's argument, so its marked members are
-tracked from an unassigned start: a read before a local assignment (or an
-escape of the parameter) is rejected even if the caller assigned the member
-first.  That is the call-boundary twin of the constructor-body strictness
--- the paper hands uninitialized-capable storage across calls through
-marked pointers and references (§4.3), not by-value slots -- and
-``[[profiles::suppress]]`` is the remedy where the by-value flow is
-intended.  Members of an object initialized by a *user-provided*
-constructor are trusted (§5.1) and not flow-tracked; only the defining
-constructor itself is checked, and a *delegating* constructor's body is not:
+`Limitations`_).  A local copied or moved from a tracked local (``Agg b = a;``,
+``Agg b = std::move(a);``) is tracked too: the copy's members inherit the
+source's per-member state at the copy point -- a copy does not inherit
+initialization (§5.2), it inherits whatever state the source has.  A by-value
+*parameter* of such a class is likewise a copy, of the caller's argument, so its
+marked members are tracked from an unassigned start: a read before a local
+assignment (or an escape of the parameter) is rejected even if the caller
+assigned the member first.  That is the call-boundary twin of the
+constructor-body strictness -- the paper hands uninitialized-capable storage
+across calls through marked pointers and references (§4.3), not by-value
+slots -- and ``[[profiles::suppress]]`` is the remedy where the by-value flow is
+intended.  Members of an object initialized by a *user-provided* constructor are
+trusted (§5.1) and not flow-tracked; only the defining constructor itself is
+checked, and a *delegating* constructor's body is not:
 its target initializes the members first (§5.1).  A *union's* own
 constructor is not flow-analyzed at all: its members are mutually exclusive,
 so whether the active member is set is deferred (§5.6), matching
@@ -680,23 +680,22 @@ pointer, reference, or function return may only refer to uninitialized
 memory, and an unmarked one only to initialized memory.  Whether a source
 refers to uninitialized memory is recognized from its form -- the address or
 a subobject of an ``[[uninit]]`` entity, the value or dereference of a
-marked pointer or reference, pointer and reference casts of those, a call to
-a marked function, a call to a known allocator (``malloc``,
-``aligned_alloc``, ``alloca``, and raw ``::operator new`` calls return
-uninitialized memory, ``calloc`` zero-initialized memory, and ``realloc`` is
-unclassified; §4.3 -- trusted recognition keys on Clang's builtin IDs, and
-where those are absent, under ``-fno-builtin`` or ``-ffreestanding``, a
-name-recognized allocator is *untrusted*: unclassified, so neither binding
-direction diagnoses -- never trusted as initialized like an arbitrary
-callee; the ``operator new``/``operator delete`` families are recognized by
-form and keep their recognition everywhere), and a ``new``
-expression that default-initializes a type with indeterminate scalars
-(``new int``, ``new int[n]``; §1.2) -- refined, inside a function body,
-by the flow state of tracked storage (below).  A named *function's* decayed
-pointer value is
-none of these: its ``[[ref_to_uninit]]`` describes the return value, so
-binding the function itself to a function pointer is accepted while a call
-to it stays a marked source:
+marked pointer or reference, pointer and reference casts of those and the
+standard identity functions applied to them, a call to a marked function, a call
+to a known allocator (``malloc``, ``aligned_alloc``, ``alloca``, and raw
+``::operator new`` calls return uninitialized memory, ``calloc``
+zero-initialized memory, and ``realloc`` is unclassified; §4.3 -- trusted
+recognition keys on Clang's builtin IDs, and where those are absent, under
+``-fno-builtin`` or ``-ffreestanding``, a name-recognized allocator is
+*untrusted*: unclassified, so neither binding direction diagnoses -- never
+trusted as initialized like an arbitrary callee; the
+``operator new``/``operator delete`` families are recognized by form and keep
+their recognition everywhere), and a ``new`` expression that default-initializes
+a type with indeterminate scalars (``new int``, ``new int[n]``; §1.2) --
+refined, inside a function body, by the flow state of tracked storage (below).
+A named *function's* decayed pointer value is none of these: its
+``[[ref_to_uninit]]`` describes the return value, so binding the function itself
+to a function pointer is accepted while a call to it stays a marked source:
 
 .. code-block:: c++
 
@@ -812,11 +811,15 @@ declared (once per instantiation of a template), never at a call that uses
 it, so a suppression for it belongs on the declaration.  A transparent cast is as transparent to a
 store as to a binding: ``(int &)u = 5`` initializes ``u`` whole,
 ``*(int *)p = 5`` the referent, and ``(int *&)p = q`` reseats ``p`` (§4.3).
-Whole-object assignment of a class-type referent never initializes: it is a
-member ``operator=`` call on uninitialized storage, rejected as above.  (A
-``void*`` escape of ``&p`` is not recognized: the missed reseat leaves the
-referent definitely initialized, which errs toward a false positive of the
-marked-target rule.)
+The standard identity functions -- ``std::move``, ``std::forward``,
+``std::forward_like``, ``std::move_if_noexcept``, and ``std::as_const`` -- are
+as transparent as such a cast: ``*std::move(p)`` reads what ``*p`` reads,
+``int *q = std::move(p)`` binds what ``int *q = p`` binds, and the call itself
+binds nothing.  Whole-object assignment of a class-type referent never
+initializes: it is a member ``operator=`` call on uninitialized storage,
+rejected as above.  (A ``void*`` escape of ``&p`` is not recognized: the missed
+reseat leaves the referent definitely initialized, which errs toward a false
+positive of the marked-target rule.)
 
 One kind of call *does* count as initialization: §6.2's ``[[now_init]]``
 attribute (its placement and spelling track an open committee question)

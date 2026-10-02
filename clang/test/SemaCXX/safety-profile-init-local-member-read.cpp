@@ -20,7 +20,14 @@
 // no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
 [[profiles::enforce(std::init)]];
 
-namespace std { enum class byte : unsigned char {}; class type_info; }
+namespace std {
+enum class byte : unsigned char {};
+class type_info;
+template <class T> struct remove_reference { using type = T; };
+template <class T> struct remove_reference<T &> { using type = T; };
+template <class T> typename remove_reference<T>::type &&move(T &&t) noexcept;
+template <class T> T &&forward(typename remove_reference<T>::type &t) noexcept;
+} // namespace std
 
 #ifdef LEADING_ERROR
 int leading_unrelated_error = undeclared_identifier;
@@ -29,7 +36,7 @@ int leading_unrelated_error = undeclared_identifier;
 #endif
 
 struct Agg {
-  int m [[uninit]]; // expected-note 20 {{member 'm' declared here}}
+  int m [[uninit]]; // expected-note 23 {{member 'm' declared here}}
 };
 void take_ref(Agg &);
 // The pointee is uninitialized memory, so the parameter carries the marker
@@ -631,6 +638,33 @@ int test_move_construction() {
   Agg a;
   Agg b = static_cast<Agg &&>(a);
   return b.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+}
+
+// An identity call names its argument as the copy's source
+int test_std_move_construction() {
+  Agg a;
+  Agg b = std::move(a);
+  return b.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+}
+
+int test_std_forward_construction() {
+  Agg a;
+  Agg b(std::forward<Agg &>(a));
+  return b.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+}
+
+int test_std_move_after_source_assigned() {
+  Agg a;
+  a.m = 5;
+  Agg b = std::move(a);
+  return b.m; // OK
+}
+
+int test_std_move_keeps_source_tracked() {
+  Agg a;
+  Agg b = std::move(a);
+  b.m = 1;
+  return a.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
 }
 
 // Paren and brace copy forms behave identically to the `=` form.

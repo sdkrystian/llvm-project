@@ -2851,8 +2851,11 @@ static void forEachArgumentBinding(
   };
   if (const auto *CE = dyn_cast<CallExpr>(CallLike)) {
     const FunctionDecl *Callee = CE->getDirectCallee();
-    if (unsigned ID = Callee ? Callee->getBuiltinID() : 0;
-        ID && Ctx.BuiltinInfo.hasCustomTypechecking(ID)) {
+    unsigned ID = Callee ? Callee->getBuiltinID() : 0;
+    // A call the checks see through binds nothing.
+    if (ID && SemaProfiles::isShapeTransparentBuiltin(ID))
+      return;
+    if (ID && Ctx.BuiltinInfo.hasCustomTypechecking(ID)) {
       if (ID == Builtin::BI__builtin_operator_new ||
           ID == Builtin::BI__builtin_operator_delete)
         for (const Expr *Arg : CE->arguments())
@@ -4003,9 +4006,9 @@ static const CXXRecordDecl *getTrackedLocalAggregate(const VarDecl *V) {
 
 // If V is copy- or move-constructed from a directly named variable, return
 // that source's DeclRefExpr and, in \p CastPath, the derived-to-base path a
-// slicing copy converts it through; null otherwise. The cast peel resolves
-// the move form (`Agg b = static_cast<Agg&&>(a);`) to its named operand,
-// mirroring the parse-time recognizers' pass-through.
+// slicing copy converts it through; null otherwise. The peel
+// (SemaProfiles::peelBaseCasts) resolves the move forms
+// (`static_cast<Agg &&>(a)`, `std::move(a)`) to the named operand.
 static const DeclRefExpr *getLocalCopySourceRef(const VarDecl *V,
                                                 BasePath &CastPath) {
   const Expr *Init = V->getInit();
