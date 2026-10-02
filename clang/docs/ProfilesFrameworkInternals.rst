@@ -857,16 +857,18 @@ one role parameter -- ``Construct`` for ``construct_at`` and the
 parameter and the default-construct forms, ``Destroy`` for ``destroy_at`` and
 the first iterator of ``std::destroy`` and ``std::destroy_n`` -- and matches
 only where that parameter of the called declaration is a pointer, so a
-specialization whose iterator is a class type falls outside it.  The rows are
-looked up at each call (``getCalleeLifecycleRoles``) and never attached as
-attributes: the library's declarations stay as written, so a module or header
-unit built without ``-fprofiles`` reads the same, and a library definition is
-judged against its author's markers alone.  The ``Construct`` rows are
-bidirectional like ``construct_at`` (P4222R2 §4.7 rejects an initialized
-range).  The default-construct forms assert without crediting: a credit there
-would legalize reads of the indeterminate scalars that default-initialization
-leaves.  ``ranges::`` CPOs are outside every key; the user-facing scope note
-lives in :doc:`ProfilesFramework`.
+specialization whose iterator is a class type falls outside it.  The ``Destroy``
+role names one parameter, so the execution-policy overloads of ``std::destroy``
+and ``std::destroy_n`` are ordinary rows.  The rows are looked up at each call
+(``getCalleeLifecycleRoles``) and never attached as attributes: the library's
+declarations stay as written, so a module or header unit built without
+``-fprofiles`` reads the same, and a library definition is judged against its
+author's markers alone.  The ``Construct`` rows are bidirectional like
+``construct_at`` (P4222R2 §4.7 rejects an initialized range).  The
+default-construct forms assert without crediting: a credit there would legalize
+reads of the indeterminate scalars that default-initialization leaves.
+``ranges::`` CPOs are outside every key; the user-facing scope note lives in
+:doc:`ProfilesFramework`.
 
 Library callees whose semantics the profile needs without an attribute are
 rows of the known-callee table (``KnownCallees`` in SemaProfiles.cpp), keyed

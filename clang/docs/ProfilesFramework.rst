@@ -908,17 +908,17 @@ second destroy is not a double destroy, and a read through a marker, a read of a
 subobject of an ``[[uninit]]`` object, or a subobject write is rejected.  Clang
 treats ``std::destroy_at`` this way itself -- a call to a ``std::destroy_at``
 whose first parameter is of pointer type destroys that argument's storage, and
-so does a call to ``std::destroy`` or ``std::destroy_n`` (P4222R2 §4.4) for its
-first iterator where that is a pointer; the end iterator is an ordinary
-argument -- so the construct/destroy/construct cycle is legal, a second
-destruction is rejected, a destroy of never-constructed storage is rejected too,
-and binding the destroyed storage to an ordinary pointer or reference is
-rejected as the unmarked-direction violation.  A function may carry both
-attributes -- a reinitializer that destroys and then reconstructs its
-argument's storage -- and models destroy-then-construct: the storage bound
-to its ``[[ref_to_uninit]]`` parameters is initialized after the call, and
-calling it on already-initialized storage is exactly its purpose, so it is
-accepted.  Neither attribute can be applied to a constructor; a static
+so does a call to ``std::destroy`` or ``std::destroy_n`` (P4222R2 §4.4) or
+their execution-policy overloads for its first iterator where that is a pointer;
+the end iterator is an ordinary argument -- so the construct/destroy/construct
+cycle is legal, a second destruction is rejected, a destroy of never-constructed
+storage is rejected too, and binding the destroyed storage to an ordinary
+pointer or reference is rejected as the unmarked-direction violation.  A
+function may carry both attributes -- a reinitializer that destroys and then
+reconstructs its argument's storage -- and models destroy-then-construct: the
+storage bound to its ``[[ref_to_uninit]]`` parameters is initialized after the
+call, and calling it on already-initialized storage is exactly its purpose, so
+it is accepted.  Neither attribute can be applied to a constructor; a static
 member or free function carries it instead
 (``[[now_init]] static Filler make(int *p [[ref_to_uninit]]);``).  Storage
 outside any function body is judged by its form: a destroy of a

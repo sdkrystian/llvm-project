@@ -39,6 +39,8 @@ template <class It, class Size> It uninitialized_value_construct_n(It first, Siz
 template <class P, class It, class T> void uninitialized_fill(P &&policy, It first, It last, const T &x);
 template <class It> void destroy(It first, It last);
 template <class It, class Size> It destroy_n(It first, Size n);
+template <class P, class It> void destroy(P &&policy, It first, It last);
+template <class P, class It, class Size> It destroy_n(P &&policy, It first, Size n);
 template <class T, __SIZE_TYPE__ N> T *begin(T (&a)[N]);
 template <class T, __SIZE_TYPE__ N> T *end(T (&a)[N]);
 template <class T> struct allocator { T *allocate(__SIZE_TYPE__ n); };
@@ -364,6 +366,16 @@ void destroy_first_iterator_only() {
   int x = b[0]; // OK
   int y = a[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
   (void)x; (void)y;
+}
+
+// The parallel-policy overloads of destroy and destroy_n destroy their first iterator
+void destroy_policy_overload() {
+  int a [[uninit]] [4];
+  std::destroy(Policy{}, a, a + 4); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+  std::uninitialized_fill(a, a + 4, 0);
+  std::destroy_n(Policy{}, a, 4);
+  int y = a[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  (void)y;
 }
 
 //--- referent.cpp

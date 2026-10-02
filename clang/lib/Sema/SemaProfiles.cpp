@@ -1675,7 +1675,9 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
     stdRow("uninitialized_default_construct_n", 3, 1,
            KnownParamRole::AssertUninit),
     stdRow("destroy", 2, 0, KnownParamRole::Destroy),
+    stdRow("destroy", 3, 1, KnownParamRole::Destroy),
     stdRow("destroy_n", 2, 0, KnownParamRole::Destroy),
+    stdRow("destroy_n", 3, 1, KnownParamRole::Destroy),
 };
 
 /// The table row for \p FD, if any -- the *trusted* match: the builtin ID,
