@@ -93,6 +93,13 @@ TEST(CFG, DependantBaseAddImplicitDtors) {
                 .getStatus());
 }
 
+// Constructing a CFG for an array new-expression whose size error recovery
+// could not determine should not crash.
+TEST(CFG, ArrayNewWithoutSize) {
+  const char *Code = "void f() { char *p = new char[](); }\n";
+  EXPECT_EQ(BuildResult::BuiltCFG, BuildCFG(Code).getStatus());
+}
+
 TEST(CFG, SwitchCoveredEnumNoDefault) {
   const char *Code = R"(
     enum class E {E1, E2};

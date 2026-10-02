@@ -60,6 +60,16 @@ struct FailedDefaultMemberInit {
   }
 };
 
+// A constructor is checked over a sizeless array new member initializer.
+struct DefaultMemberInitArrayNew {
+  char *p = new char[](); // expected-error {{cannot determine allocated array size from initializer}}
+  DefaultMemberInitArrayNew() {
+    int x; // expected-note {{variable 'x' is declared here}}
+    int y = x; // expected-error {{variable 'x' is read before initialization under profile 'test::cfg_hooks'}}
+    (void)y;
+  }
+};
+
 // A body after the errors above is checked.
 void after_errors() {
   int x; // expected-note {{variable 'x' is declared here}}
