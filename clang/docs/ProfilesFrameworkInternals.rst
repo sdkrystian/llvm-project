@@ -264,7 +264,11 @@ disabled for the declaration (``-w``, or a system-header declaration under
 ``-fno-profiles-exempt-system-headers``), the per-function dispatch runs
 ``runProfileOnlyCFGAnalysis`` instead of skipping -- the same analysis with
 the reporter in ``ProfileOnly`` mode, so an ordinary warning the error or
-flag is meant to silence cannot resurface.  ``Sema::ActOnFinishFunctionBody``
+flag is meant to silence cannot resurface.  The CFG builder and the riders
+assume a well-formed AST, which the warning pipeline ensures by analyzing no
+body after an error; ``isProfileCFGAnalyzableBody`` keeps that assumption on
+these paths by skipping a body an error may have left malformed (see
+`Known Gaps`_).  ``Sema::ActOnFinishFunctionBody``
 likewise keeps running per-function analysis after a TU error when such a
 profile is live; without this, the first error would disable the profile for
 every later function.
@@ -568,6 +572,28 @@ error while every other check exempts that code
 (``-fno-profiles-exempt-system-headers`` restores spec-exact checking).
 Profiles gated off in this compilation (``test::`` names without
 ``-fprofiles-test-profiles``) are inert on either side of the comparison.
+
+
+.. _profiles-known-gaps:
+
+Known Gaps
+==========
+
+Each entry is a place where the framework misses a check that P3589R2 or
+:doc:`ProfilesFramework` calls for, or applies one that they exempt.
+
+Analysis-Based Rules
+--------------------
+
+- After an error, a function body the error may have left malformed gets no
+  CFG-rider diagnostics: one whose own function scope reported an
+  unrecoverable error, or one that reaches an expression containing errors --
+  in its statements, a nested lambda body, or, for a constructor, the default
+  member initializers it uses.  An error elsewhere can leave such an
+  expression in an otherwise valid body, as a ``case`` label naming a
+  ``constexpr`` variable whose initializer failed.  The error rejects the
+  translation unit, so no violation is accepted; the body's rider
+  diagnostics appear once the error is fixed.
 
 
 Test Profiles

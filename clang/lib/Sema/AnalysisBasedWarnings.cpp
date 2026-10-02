@@ -3045,15 +3045,60 @@ static void runProfileExtraCFGPasses(Sema &S, const Decl *D,
       E.ExtraPass(S, D, AC, E);
 }
 
+/// Whether an expression under \p D's body, or under a constructor's member
+/// initializers and the default member initializers they use, contains
+/// errors.
+static bool containsErrorExpr(const Decl *D) {
+  SmallVector<const Stmt *, 32> Worklist;
+  if (const Stmt *Body = D->getBody())
+    Worklist.push_back(Body);
+  if (const auto *Ctor = dyn_cast<CXXConstructorDecl>(D))
+    for (const CXXCtorInitializer *Init : Ctor->inits())
+      if (const Expr *E = Init->getInit())
+        Worklist.push_back(E);
+  while (!Worklist.empty()) {
+    const Stmt *S = Worklist.pop_back_val();
+    if (const auto *E = dyn_cast<Expr>(S)) {
+      if (E->containsErrors())
+        return true;
+      if (const auto *DIE = dyn_cast<CXXDefaultInitExpr>(E))
+        Worklist.push_back(DIE->getExpr());
+    }
+    for (const Stmt *Child : S->children())
+      if (Child)
+        Worklist.push_back(Child);
+  }
+  return false;
+}
+
+/// Whether the profile-only pass may build a CFG of \p D, whose function
+/// scope is \p FSI: the CFG builder and the riders assume a well-formed AST,
+/// so a body whose own scope saw an unrecoverable error, or that reaches an
+/// expression containing errors, is skipped (see
+/// ProfilesFrameworkInternals.rst, "CFG Riders").
+static bool isProfileCFGAnalyzableBody(Sema &S,
+                                       const sema::FunctionScopeInfo &FSI,
+                                       const Decl *D) {
+  if (D->isInvalidDecl() || FSI.hasUnrecoverableErrorOccurred() ||
+      S.getDiagnostics().hasFatalErrorOccurred())
+    return false;
+  // An expression contains errors only after an error was emitted.
+  return !S.hasUncompilableErrorOccurred() || !containsErrorExpr(D);
+}
+
 /// The CFGProfiles rows ride the uninitialized-variables analysis, but
 /// profile rules emit errors, so they must run even
 /// where IssueWarnings skips the warning pipeline: once the TU has an
 /// uncompilable error, and when warnings are disabled for the declaration
 /// (-w, or a system-header decl under -fno-profiles-exempt-system-headers).
 /// Run just the profile-relevant analyses for a single function on those
-/// paths. Diagnostics are restricted to the profiles via the ProfileOnly
-/// reporter and the hooks' own gates.
-static void runProfileOnlyCFGAnalysis(Sema &S, const Decl *D) {
+/// paths, if isProfileCFGAnalyzableBody allows. Diagnostics are restricted to
+/// the profiles via the ProfileOnly reporter and the hooks' own gates.
+static void runProfileOnlyCFGAnalysis(Sema &S,
+                                      const sema::FunctionScopeInfo &FSI,
+                                      const Decl *D) {
+  if (!isProfileCFGAnalyzableBody(S, FSI, D))
+    return;
   AnalysisDeclContext AC(/*Mgr=*/nullptr, D);
 
   configureBaseCFGBuildOptions(AC);
@@ -3296,9 +3341,8 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
     // time); the -w and system-header skips must not silence profile rules,
     // which are errors (see runProfileOnlyCFGAnalysis).
     if (!cast<DeclContext>(D)->isDependentContext() && hasLiveCFGProfile() &&
-        !S.Context.isProfileExemptSystemHeaderLoc(D->getLocation()) &&
-        !D->isInvalidDecl() && !Diags.hasFatalErrorOccurred())
-      runProfileOnlyCFGAnalysis(S, D);
+        !S.Context.isProfileExemptSystemHeaderLoc(D->getLocation()))
+      runProfileOnlyCFGAnalysis(S, *fscope, D);
     return;
   }
 
@@ -3310,10 +3354,10 @@ void clang::sema::AnalysisBasedWarnings::IssueWarnings(
     // Flush out any possibly unreachable diagnostics.
     flushDiagnostics(S, fscope);
     // Profile rules are errors: keep the CFG profile pass alive after a TU
-    // error, on a valid decl so the CFG is buildable (see
-    // runProfileOnlyCFGAnalysis). Other analyses keep the early-out.
-    if (CFGProfileLive && !D->isInvalidDecl() && !Diags.hasFatalErrorOccurred())
-      runProfileOnlyCFGAnalysis(S, D);
+    // error (see runProfileOnlyCFGAnalysis). Other analyses keep the
+    // early-out.
+    if (CFGProfileLive)
+      runProfileOnlyCFGAnalysis(S, *fscope, D);
     return;
   }
 
