@@ -5,6 +5,8 @@
 // RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -isystem %t/sys -std=c++23 %t/system.cpp
 // RUN: %clang_cc1 -fsyntax-only -verify=expected,strict -fprofiles -fprofiles-verify-deferred-checks -fno-profiles-exempt-system-headers -isystem %t/sys -std=c++23 %t/system.cpp
 // RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %t/now_init_body.cpp
+// RUN: %clang_cc1 -triple x86_64-linux-gnu -fsyntax-only -verify=expected,array -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %t/va.cpp
+// RUN: %clang_cc1 -triple aarch64-linux-gnu -fsyntax-only -verify=expected,record -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %t/va.cpp
 
 // Clang knows the std::init roles of std::construct_at (its pointer first
 // parameter must refer to uninitialized memory and is initialized by the
@@ -643,4 +645,33 @@ void user() {
   int u [[uninit]];
   int *s = std::now_init(&u); // expected-note {{in instantiation of function template specialization 'std::now_init<int>' requested here}}
   (void)s;
+}
+
+//--- va.cpp
+// A va_list is checked like other storage; va_arg binds a class-type va_list
+// (AArch64, ARM) to a reference.
+[[profiles::enforce(std::init)]];
+
+// va_arg reads its va_list
+int va_arg_reads(int n, ...) {
+  __builtin_va_list ap [[uninit]];
+  int r = __builtin_va_arg(ap, int); // record-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  return r;
+}
+
+// A value-initialized va_list is accepted
+int value_initialized(int n, ...) {
+  __builtin_va_list ap = {};
+  __builtin_va_start(ap, n);
+  int r = __builtin_va_arg(ap, int);
+  __builtin_va_end(ap);
+  return r;
+}
+
+// An unmarked va_list without an initializer is diagnosed
+int unmarked(int n, ...) {
+  __builtin_va_list ap; // expected-error {{variable 'ap' must be initialized or marked '[[uninit]]' under profile 'std::init'}}
+  __builtin_va_start(ap, n);
+  __builtin_va_end(ap);
+  return 0;
 }

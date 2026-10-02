@@ -1107,3 +1107,5 @@ Missed Diagnostics
   whatever the byte count and the type: after ``memset(arr, 0, sizeof(int))`` a
   read of ``arr[3]`` is accepted, and a class object written by ``memcpy`` is
   credited although P4222R2 §6 asks for ``construct_at``.
+- ``va_arg`` on an array or pointer ``va_list`` (x86-64, i386, Windows) binds
+  nothing, so a ``va_arg`` before ``va_start`` is accepted there.

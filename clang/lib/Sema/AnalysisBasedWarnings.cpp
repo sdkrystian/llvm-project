@@ -3843,6 +3843,15 @@ static void extractStdInitEvents(
         // A message's parameter bindings; a method carries no lifecycle
         // attribute.
         AppendArgumentBindings(ME, SemaProfiles::CalleeLifecycleRoles());
+      } else if (const auto *VAE = dyn_cast<VAArgExpr>(St)) {
+        // A class-type va_list is bound to a reference parameter in C++
+        // (Sema::BuildVAArgExpr).
+        const Expr *List = VAE->getSubExpr();
+        if (!VAE->isMicrosoftABI() && Ctx.getLangOpts().CPlusPlus &&
+            List->getType()->isRecordType())
+          AddBinding(K::Parameter, List->getExprLoc(), /*TargetMarked=*/false,
+                     Ctx.getLValueReferenceType(List->getType()), List, nullptr,
+                     VAE);
       } else if (const auto *LE = dyn_cast<LambdaExpr>(St)) {
         if (Ctor)
           appendThisCaptureLambdaReadEvents(LE, Storage, StarThisCopyTrusted,

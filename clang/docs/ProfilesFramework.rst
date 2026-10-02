@@ -725,8 +725,9 @@ to a function pointer is accepted while a call to it stays a marked source:
 The check applies wherever a pointer or reference is bound: variable, member,
 and aggregate initialization, assignment, call arguments (including defaulted
 and variadic ones; a builtin that never evaluates its arguments, such as
-``__builtin_object_size``, binds none), Objective-C message arguments, a
-property assignment's value included (``a.p = &u`` binds the setter's parameter;
+``__builtin_object_size``, binds none), the ``va_list`` operand of ``va_arg``
+where ``va_list`` is a class type, Objective-C message arguments, a property
+assignment's value included (``a.p = &u`` binds the setter's parameter;
 a variadic method's extra arguments bind nothing), ``return`` and ``throw``
 statements (including returns inside lambdas and blocks -- a lambda's marker is
 written on its call operator, in the C++23 attribute position after the
