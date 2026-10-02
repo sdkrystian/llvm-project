@@ -2007,18 +2007,31 @@ def ExperimentalOption : DiagGroup<"experimental-option">;
 // Warnings about unguarded usages of AMDGPU target specific constructs
 def UnguardedBuiltinUsageAMDGPU : DiagGroup<"amdgpu-unguarded-builtin-usage">;
 
-// C++ profiles framework (P3589R2): one group per profile rule, nested in the
-// profile's group, all under -Wprofiles. Group names follow
-// profiles::getProfileDiagGroupName (clang/include/clang/Basic/Profiles.h).
-def ProfileTestTypeCastReinterpretCast : DiagGroup<"profile-test-type-cast-reinterpret-cast">;
-def ProfileTestTypeCast : DiagGroup<"profile-test-type-cast", [ProfileTestTypeCastReinterpretCast]>;
-def ProfileTestUninitRead : DiagGroup<"profile-test-uninit-read">;
-def ProfileTestCfgHooksLambda : DiagGroup<"profile-test-cfg-hooks-lambda">;
-def ProfileTestCfgHooks : DiagGroup<"profile-test-cfg-hooks", [ProfileTestCfgHooksLambda]>;
-def ProfileTestClassFinal : DiagGroup<"profile-test-class-final">;
-def ProfileTestCtorFinal : DiagGroup<"profile-test-ctor-final">;
-def ProfileTestArithZeroDivide : DiagGroup<"profile-test-arith-zero-divide">;
-def ProfileTestArith : DiagGroup<"profile-test-arith", [ProfileTestArithZeroDivide]>;
+// C++ profiles framework (P3589R2): each profile's diagnostic group, nested
+// in -Wprofiles, holds one group per named rule. The profile and rule names
+// on these records are the profiles registry (profiles::getProfileDiagGroupName
+// in clang/include/clang/Basic/Profiles.h); a group's name spells them in
+// lowercase, with "::", "_", and "." as "-".
+class ProfileGroup<string profile, list<DiagGroup> rules = []>
+    : DiagGroup<"profile-" # !subst("_", "-", !subst("::", "-", !tolower(profile))),
+                rules> {
+  string ProfileName = profile;
+}
+class ProfileRuleGroup<string profile, string rule>
+    : DiagGroup<"profile-" # !subst("_", "-", !subst("::", "-", !tolower(profile))) #
+                "-" # !subst(".", "-", !subst("_", "-", !tolower(rule)))> {
+  string ProfileName = profile;
+  string RuleName = rule;
+}
+def ProfileTestTypeCastReinterpretCast : ProfileRuleGroup<"test::type_cast", "reinterpret_cast">;
+def ProfileTestTypeCast : ProfileGroup<"test::type_cast", [ProfileTestTypeCastReinterpretCast]>;
+def ProfileTestUninitRead : ProfileGroup<"test::uninit_read">;
+def ProfileTestCfgHooksLambda : ProfileRuleGroup<"test::cfg_hooks", "lambda">;
+def ProfileTestCfgHooks : ProfileGroup<"test::cfg_hooks", [ProfileTestCfgHooksLambda]>;
+def ProfileTestClassFinal : ProfileGroup<"test::class_final">;
+def ProfileTestCtorFinal : ProfileGroup<"test::ctor_final">;
+def ProfileTestArithZeroDivide : ProfileRuleGroup<"test::arith", "zero_divide">;
+def ProfileTestArith : ProfileGroup<"test::arith", [ProfileTestArithZeroDivide]>;
 def Profiles : DiagGroup<"profiles", [ProfileTestTypeCast, ProfileTestUninitRead,
                                       ProfileTestCfgHooks, ProfileTestClassFinal,
                                       ProfileTestCtorFinal, ProfileTestArith]>;

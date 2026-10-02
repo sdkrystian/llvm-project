@@ -2168,6 +2168,48 @@ static void emitCategoryTable(const RecordKeeper &Records, raw_ostream &OS) {
   OS << "#endif // GET_CATEGORY_TABLE\n\n";
 }
 
+/// Emit the C++ profiles registry: one PROFILE(Name, Group) row per
+/// ProfileGroup, each followed by one PROFILE_RULE(Profile, Rule, Group) row
+/// per rule group nested in it. A rule group must be a ProfileRuleGroup of
+/// the same profile, nested in exactly one ProfileGroup.
+///
+/// \code
+/// #ifdef GET_PROFILE_TABLE
+/// PROFILE("test::arith", ProfileTestArith)
+/// PROFILE_RULE("test::arith", "zero_divide", ProfileTestArithZeroDivide)
+/// #endif
+/// \endcode
+static void emitProfileTable(const RecordKeeper &Records, raw_ostream &OS) {
+  OS << "\n#ifdef GET_PROFILE_TABLE\n";
+  DenseSet<const Record *> Nested;
+  for (const Record *Group :
+       Records.getAllDerivedDefinitionsIfDefined("ProfileGroup")) {
+    StringRef Profile = Group->getValueAsString("ProfileName");
+    OS << "PROFILE(\"" << Profile << "\", " << Group->getName() << ")\n";
+    for (const Record *Rule : Group->getValueAsListOfDefs("SubGroups")) {
+      if (!Rule->isSubClassOf("ProfileRuleGroup") ||
+          Rule->getValueAsString("ProfileName") != Profile)
+        PrintFatalError(Rule->getLoc(),
+                        "group '" + Rule->getName() + "' nested in profile '" +
+                            Profile +
+                            "' is not a ProfileRuleGroup of that profile");
+      if (!Nested.insert(Rule).second)
+        PrintFatalError(Rule->getLoc(), "rule group '" + Rule->getName() +
+                                            "' is nested in two profiles");
+      OS << "PROFILE_RULE(\"" << Profile << "\", \""
+         << Rule->getValueAsString("RuleName") << "\", " << Rule->getName()
+         << ")\n";
+    }
+  }
+  for (const Record *Rule :
+       Records.getAllDerivedDefinitionsIfDefined("ProfileRuleGroup"))
+    if (!Nested.contains(Rule))
+      PrintFatalError(Rule->getLoc(), "rule group '" + Rule->getName() +
+                                          "' is not nested in its profile's "
+                                          "ProfileGroup");
+  OS << "#endif // GET_PROFILE_TABLE\n\n";
+}
+
 void clang::EmitClangDiagGroups(const RecordKeeper &Records, raw_ostream &OS) {
   // Compute a mapping from a DiagGroup to all of its parents.
   DiagGroupParentMap DGParentMap(Records);
@@ -2199,6 +2241,7 @@ void clang::EmitClangDiagGroups(const RecordKeeper &Records, raw_ostream &OS) {
   emitDiagTable(DiagsInGroup, DiagsInPedantic, GroupsInPedantic, GroupNames,
                 OS);
   emitCategoryTable(Records, OS);
+  emitProfileTable(Records, OS);
 }
 
 //===----------------------------------------------------------------------===//

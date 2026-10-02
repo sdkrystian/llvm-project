@@ -8,8 +8,7 @@
 /// \file
 /// Shared value types and helpers of the C++ profiles framework (P3589R2):
 /// profile arguments and their canonical spelling, enforced-profile records,
-/// the diagnostic-group naming rule, and the profile-name-convention
-/// policies.
+/// the profiles registry, and the profile-name-convention policies.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -22,6 +21,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
+#include <optional>
 #include <string>
 
 namespace clang::profiles {
@@ -77,31 +77,19 @@ inline bool isProfileNameInert(llvm::StringRef Name, bool TestProfilesEnabled) {
   return !TestProfilesEnabled && Name.starts_with("test::");
 }
 
-/// The diagnostic group of \p Rule of the profile named \p Profile, or of
-/// the whole profile when \p Rule is empty: "profile-<profile>-<rule>" in
-/// lowercase, with "::", "_", and "." spelled "-" (test::arith / zero_divide
-/// is profile-test-arith-zero-divide). A name the implementation does not
-/// know yields a group that does not exist, which the diagnostics engine
-/// ignores, so an unknown profile enforces and suppresses nothing.
-inline std::string getProfileDiagGroupName(llvm::StringRef Profile,
-                                           llvm::StringRef Rule) {
-  std::string Name = "profile";
-  auto Append = [&](llvm::StringRef Part) {
-    Name += '-';
-    for (char C : Part) {
-      if (C == ':' || C == '_' || C == '.') {
-        if (Name.back() != '-')
-          Name += '-';
-      } else {
-        Name += toLowercase(C);
-      }
-    }
-  };
-  Append(Profile);
-  if (!Rule.empty())
-    Append(Rule);
-  return Name;
-}
+/// The name of the diagnostic group of the rule named \p Rule of the profile
+/// named \p Profile, or of the whole profile when \p Rule is empty, in the
+/// profiles registry (the ProfileGroup and ProfileRuleGroup records of
+/// DiagnosticGroups.td); names match exactly. None for a profile or rule
+/// the implementation does not know, which enforces and suppresses nothing.
+std::optional<llvm::StringRef> getProfileDiagGroupName(llvm::StringRef Profile,
+                                                       llvm::StringRef Rule);
+
+/// A profile (empty \c Rule) or named rule of the profiles registry.
+struct ProfileRegistryName {
+  llvm::StringRef Profile;
+  llvm::StringRef Rule;
+};
 
 /// P3589R2 [decl.attr.enforce]p5: profiles are compatible if they are the
 /// same -- by name; arguments configure a profile without changing its

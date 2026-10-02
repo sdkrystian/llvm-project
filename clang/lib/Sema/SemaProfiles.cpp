@@ -42,14 +42,15 @@ bool SemaProfiles::isProfileLive(StringRef Profile) {
   auto It = RulesEnabledByOption.find(Profile);
   if (It != RulesEnabledByOption.end())
     return It->second;
+  std::optional<StringRef> Group =
+      profiles::getProfileDiagGroupName(Profile, /*Rule=*/"");
   SmallVector<diag::kind, 16> Kinds;
-  bool Enabled =
-      !getDiagnostics().getDiagnosticIDs()->getDiagnosticsInGroup(
-          diag::Flavor::WarningOrError,
-          profiles::getProfileDiagGroupName(Profile, /*Rule=*/""), Kinds) &&
-      llvm::any_of(Kinds, [&](diag::kind K) {
-        return Ctx.isProfileRuleEnabledByOption(K);
-      });
+  bool Enabled = Group &&
+                 !getDiagnostics().getDiagnosticIDs()->getDiagnosticsInGroup(
+                     diag::Flavor::WarningOrError, *Group, Kinds) &&
+                 llvm::any_of(Kinds, [&](diag::kind K) {
+                   return Ctx.isProfileRuleEnabledByOption(K);
+                 });
   RulesEnabledByOption.try_emplace(Profile, Enabled);
   return Enabled;
 }
@@ -87,11 +88,13 @@ bool SemaProfiles::addProfileEnforcement(StringRef Name, StringRef Designator,
   // attribute on (the expansion site of a macro-spelled attribute); an inert
   // profile maps nothing. See ProfilesFrameworkInternals.rst,
   // "Enforcement and Suppression State".
-  if (Loc.isValid() &&
-      !profiles::isProfileNameInert(Name, getLangOpts().ProfilesTestProfiles))
+  if (Loc.isInvalid() ||
+      profiles::isProfileNameInert(Name, getLangOpts().ProfilesTestProfiles))
+    return true;
+  if (std::optional<StringRef> Group =
+          profiles::getProfileDiagGroupName(Name, /*Rule=*/""))
     mapProfileGroupFrom(
-        getDiagnostics(), profiles::getProfileDiagGroupName(Name, /*Rule=*/""),
-        diag::Severity::Error,
+        getDiagnostics(), *Group, diag::Severity::Error,
         getASTContext().getSourceManager().getExpansionLoc(Loc));
   return true;
 }
@@ -291,10 +294,11 @@ static void beginSuppressionOf(
   DiagnosticsEngine &Diags = S.getDiagnostics();
   Begin = S.getSourceManager().getExpansionLoc(Begin);
   for (const auto &[Profile, Rule] : Suppressions) {
+    std::optional<StringRef> Group =
+        profiles::getProfileDiagGroupName(Profile, Rule);
     SmallVector<diag::kind, 16> Kinds;
-    if (Diags.getDiagnosticIDs()->getDiagnosticsInGroup(
-            diag::Flavor::WarningOrError,
-            profiles::getProfileDiagGroupName(Profile, Rule), Kinds))
+    if (!Group || Diags.getDiagnosticIDs()->getDiagnosticsInGroup(
+                      diag::Flavor::WarningOrError, *Group, Kinds))
       continue;
     for (diag::kind Kind : Kinds) {
       DiagnosticMapping Current = Diags.getDiagnosticMappingAt(Kind, Begin);

@@ -1019,11 +1019,12 @@ ASTContext::ASTContext(LangOptions &LOpts, SourceManager &SM,
   for (const std::string &Name : LangOpts.ProfilesEnforce) {
     if (!getProfileEnforcement(Name))
       addEnforcedProfile(Name, Name, SourceLocation());
-    if (!profiles::isProfileNameInert(Name, LangOpts.ProfilesTestProfiles))
-      getDiagnostics().setSeverityForGroup(
-          diag::Flavor::WarningOrError,
-          profiles::getProfileDiagGroupName(Name, /*Rule=*/""),
-          diag::Severity::Error);
+    if (profiles::isProfileNameInert(Name, LangOpts.ProfilesTestProfiles))
+      continue;
+    if (std::optional<StringRef> Group =
+            profiles::getProfileDiagGroupName(Name, /*Rule=*/""))
+      getDiagnostics().setSeverityForGroup(diag::Flavor::WarningOrError, *Group,
+                                           diag::Severity::Error);
   }
 }
 

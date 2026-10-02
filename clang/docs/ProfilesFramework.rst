@@ -194,10 +194,13 @@ Diagnostic Groups
 Every profile rule's diagnostic belongs to the diagnostic group
 ``-Wprofile-<profile>-<rule>``, nested in ``-Wprofile-<profile>`` and, with
 every other profile, in ``-Wprofiles``; the group name lowercases the
-profile and rule names and spells ``::`` and ``_`` as ``-``
-(``std::init`` / ``uninit_read`` is ``-Wprofile-std-init-uninit-read``).
-Enforcement and suppression are expressed through these groups, so the
-ordinary diagnostic controls apply to profile rules as well:
+profile and rule names and spells ``::``, ``_``, and ``.`` as ``-`` (a rule
+``no_reinterpret`` of a profile ``acme::type`` is
+``-Wprofile-acme-type-no-reinterpret``).  The group name only spells the
+names: an attribute or ``-fprofiles-enforce=`` designates a profile, and a
+``rule:`` argument a rule of it, by its exact name.  Enforcement and
+suppression are expressed through these groups, so the ordinary diagnostic
+controls apply to profile rules as well:
 
 - A violation message ends in its group name, ``[-Wprofile-...]``, unless
   ``-fno-diagnostics-show-option`` is given.

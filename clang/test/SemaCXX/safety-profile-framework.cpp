@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-test-profiles -std=c++20 %s
+// RUN: %clang_cc1 -fsyntax-only -verify=expected,sign -fprofiles -fprofiles-test-profiles -Wsign-compare -std=c++20 %s
 
 // Enforce on empty-declaration at TU scope: OK
 [[profiles::enforce(test::type_cast)]]; // #enforce1
@@ -123,3 +124,7 @@ struct InlineSuppressPins {
 };
 int *suppressed_var_init [[profiles::suppress(test::type_cast)]] =
     reinterpret_cast<int *>(0); // OK
+
+// A profile the implementation does not know maps no diagnostic
+bool unknown_profile_maps_nothing(int a, unsigned b) { return a < b; } // sign-warning {{comparison of integers of different signs}}
+[[profiles::suppress(acme::unknown)]] bool unknown_suppression_maps_nothing(int a, unsigned b) { return a < b; } // sign-warning {{comparison of integers of different signs}}

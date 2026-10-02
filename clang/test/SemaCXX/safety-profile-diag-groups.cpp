@@ -15,9 +15,14 @@
 // RUN: not %clang_cc1 -fsyntax-only -fprofiles-test-profiles -fprofiles-enforce=test::type_cast -Wno-profiles -std=c++23 -DNO_ENFORCE %s 2>&1 | FileCheck %s --check-prefix=OPTION
 // RUN: not %clang_cc1 -fsyntax-only -fprofiles -fprofiles-test-profiles -std=c++23 -DPUSH_POP %s 2>&1 | FileCheck %s --check-prefix=OPTION
 // RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-test-profiles -std=c++23 -DPRAGMAS %s
+// RUN: %clang_cc1 -fsyntax-only -fprofiles -fprofiles-test-profiles -Wprofile-test-type-cast -std=c++23 -DNO_ENFORCE -DOTHER_SPELLING %s 2>&1 | FileCheck %s --check-prefix=WARN
 
 #ifndef NO_ENFORCE
 [[profiles::enforce(test::type_cast)]];
+#endif
+#ifdef OTHER_SPELLING
+// An enforcement of a differently spelled profile leaves the preview a warning
+[[profiles::enforce(Test::Type_Cast)]];
 #endif
 #ifdef PRAGMA_EVERYTHING
 #pragma clang diagnostic warning "-Weverything"

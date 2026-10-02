@@ -967,3 +967,17 @@ long use_cast_dependent() { return cast_dependent<int>(nullptr) + cast_dependent
 template <typename T>
 long cast_rebuilt() { return reinterpret_cast<long>(cast_source()); } // expected-error 3 {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
 long use_cast_rebuilt() { return cast_rebuilt<int>() + cast_rebuilt<long>(); } // expected-note 2 {{in instantiation of function template specialization}}
+
+// A suppression names its profile and rule exactly
+void test_suppress_other_spelling() {
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  [[profiles::suppress(TEST::Type_Cast)]] (void)reinterpret_cast<int*>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  [[profiles::suppress(test_type::cast)]] (void)reinterpret_cast<int*>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  [[profiles::suppress(test::type::cast)]] (void)reinterpret_cast<int*>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  [[profiles::suppress(test::type_cast, rule: "Reinterpret-Cast")]] (void)reinterpret_cast<int*>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  [[profiles::suppress(test::type_cast, rule: "reinterpret.cast")]] (void)reinterpret_cast<int*>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+}

@@ -64,11 +64,14 @@ error is a genuine error that ``-w`` does not silence.  The ``Warning``
 class also marks it SFINAE-suppressed:
 violations do not count as substitution failures and cannot change overload
 resolution, but selected specializations replay them when actually used.
-Every rule has its own group, ``profile-<profile>-<rule>``, nested in the
-profile's group ``profile-<profile>`` under ``-Wprofiles``; a rule-less
-diagnostic sits directly in the profile's group.  The names are derived by
-``profiles::getProfileDiagGroupName``.  The framework passes the profile
-name as ``%0``:
+Every named rule has its own group, a ``ProfileRuleGroup`` record nested
+in its profile's ``ProfileGroup`` record under ``-Wprofiles``; a rule-less
+diagnostic sits directly in the profile's group.  The records carry the
+profile and rule names and are the profiles registry:
+``profiles::getProfileDiagGroupName`` resolves a name to its group by exact
+match, and the ``-W`` name, ``profile-<profile>-<rule>``, is spelled from
+the names by TableGen and identifies nothing.  The framework passes the
+profile name as ``%0``:
 
 .. code-block:: text
 
@@ -99,8 +102,9 @@ Every profile follows the same recipe:
 1. Define the diagnostics: a ``ProfileRule`` in ``DiagnosticSemaKinds.td``
    for a compile-time rule, or a ``Trap`` in ``DiagnosticTrapKinds.td`` for
    a runtime-checked rule, in the rule's diagnostic group
-   (``DiagnosticGroups.td``; a new profile adds its group tree there, under
-   ``Profiles``).
+   (``DiagnosticGroups.td``: a new profile adds a ``ProfileGroup``, and a
+   ``ProfileRuleGroup`` per named rule, under ``Profiles``; the records
+   register its names).
 2. Pick each rule's host.  A rule decided where Sema knows the fact is a
    Sema check site -- an expression site, a declaration site, the
    class-completion funnel, or the constructor-finalization funnel (`Check
@@ -352,11 +356,11 @@ recorded when the attribute is processed -- and also reaches every state a
 ``#pragma clang diagnostic push`` saved, so a later ``pop`` cannot restore
 an unenforced state.  ``-fprofiles-enforce=`` maps the group in the initial
 state instead (the ``ASTContext`` constructor, a command-line mapping).  A
-profile the implementation does not know has no group, and mapping it does
-nothing, which is the specified behavior of an unknown profile.  A check
-site with an invalid location sees the latest recorded state: command-line
-enforcement plus whatever enforcement or suppression was most recently
-recorded anywhere in the unit.
+profile the implementation does not know has no entry in the registry, so
+nothing is mapped for it, which is the specified behavior of an unknown
+profile.  A check site with an invalid location sees the latest recorded
+state: command-line enforcement plus whatever enforcement or suppression
+was most recently recorded anywhere in the unit.
 
 The engine's own rungs then apply: the rule diagnostics are latent, so
 ``-w`` keeps an enforced rule, ``-Weverything`` in either form leaves the
