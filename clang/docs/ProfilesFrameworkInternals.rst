@@ -1047,6 +1047,12 @@ Deliberate Strictnesses
   ``[[uninit]]`` storage (Clang knows its lifecycle roles; see
   "Binding Pointers and References" in :doc:`ProfilesFramework`).
 
+- A user-defined allocator's ``allocate`` called directly returns initialized
+  memory (only ``std::allocator`` and ``std::allocator_traits`` are
+  recognized); libstdc++ before C++20 declares ``allocate`` in an internal
+  base, unrecognized; the remedies are a ``[[ref_to_uninit]]``-returning
+  wrapper or suppression.
+
 Missed Diagnostics
 ------------------
 
@@ -1119,3 +1125,7 @@ Missed Diagnostics
   storage.
 - ``va_end`` ends nothing: a ``va_arg`` or a second ``va_end`` after it is
   accepted.
+- ``make_unique_for_overwrite``, ``make_shared_for_overwrite``, and
+  ``allocate_shared_for_overwrite`` return smart pointers, which cannot carry
+  the marker; a read through one is accepted (P4222R2 §4.7).
+  ``allocate_at_least`` returns a class and is unrecognized.

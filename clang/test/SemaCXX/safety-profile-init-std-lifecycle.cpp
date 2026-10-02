@@ -46,7 +46,15 @@ template <class P, class It> void destroy(P &&policy, It first, It last);
 template <class P, class It, class Size> It destroy_n(P &&policy, It first, Size n);
 template <class T, __SIZE_TYPE__ N> T *begin(T (&a)[N]);
 template <class T, __SIZE_TYPE__ N> T *end(T (&a)[N]);
-template <class T> struct allocator { T *allocate(__SIZE_TYPE__ n); };
+template <class T> struct allocator {
+  T *allocate(__SIZE_TYPE__ n);
+  void deallocate(T *p, __SIZE_TYPE__ n);
+};
+template <class A> struct allocator_traits;
+template <class T> struct allocator_traits<allocator<T>> {
+  static T *allocate(allocator<T> &a, __SIZE_TYPE__ n);
+  static void deallocate(allocator<T> &a, T *p, __SIZE_TYPE__ n);
+};
 template <class T> T *addressof(T &r) noexcept;
 namespace ranges {
 inline constexpr struct {
@@ -330,10 +338,37 @@ void global_ns_fill() {
   ::uninitialized_fill(a, a + 3, 0); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 }
 
-// A range from an unannotated allocator is initialized memory
+// A range from std::allocator is uninitialized memory
 void allocator_range(std::allocator<int> &alloc) {
-  int *b = alloc.allocate(3);
-  std::uninitialized_fill_n(b, 3, 0); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int *b [[ref_to_uninit]] = alloc.allocate(3);
+  std::uninitialized_fill_n(b, 3, 0);
+  int x = *b; // OK
+  std::destroy_n(b, 3);
+  alloc.deallocate(b, 3);
+  (void)x;
+}
+
+// An unmarked pointer cannot hold std::allocator's storage
+void allocator_unmarked(std::allocator<int> &alloc) {
+  int *b = alloc.allocate(3); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)b;
+}
+
+// allocator_traits allocates and deallocates the same way
+void allocator_traits_range(std::allocator<int> &alloc) {
+  using Traits = std::allocator_traits<std::allocator<int>>;
+  int *b [[ref_to_uninit]] = Traits::allocate(alloc, 3);
+  int *c = Traits::allocate(alloc, 3); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  Traits::deallocate(alloc, b, 3);
+  (void)c;
+}
+
+// A read after deallocate reads released storage
+int allocator_read_after_deallocate(std::allocator<int> &alloc) {
+  int *b [[ref_to_uninit]] = alloc.allocate(1);
+  *b = 1;
+  alloc.deallocate(b, 1);
+  return *b; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
 }
 
 // destroy ends the lifetime of the range

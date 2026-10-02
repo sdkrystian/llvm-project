@@ -1516,6 +1516,42 @@ static bool isReplaceableGlobalOperatorDelete(const FunctionDecl *FD) {
          FD->isReplaceableGlobalAllocationFunction();
 }
 
+/// True for a member function named \p Name of a namespace-std class named
+/// \p Class (any specialization).
+static bool isStdClassMember(const FunctionDecl *FD, StringRef Class,
+                             StringRef Name) {
+  const auto *MD = dyn_cast<CXXMethodDecl>(FD);
+  if (!MD || !MD->getIdentifier() || MD->getName() != Name)
+    return false;
+  const CXXRecordDecl *RD = MD->getParent();
+  return RD->getIdentifier() && RD->getName() == Class &&
+         RD->isInStdNamespace();
+}
+
+/// std::allocator<T>::allocate and std::allocator_traits<A>::allocate with a
+/// pointer result: storage for objects that are not yet constructed
+/// ([allocator.members]p5).
+static bool isStdAllocate(const FunctionDecl *FD) {
+  return (isStdClassMember(FD, "allocator", "allocate") ||
+          isStdClassMember(FD, "allocator_traits", "allocate")) &&
+         FD->getReturnType()->isPointerType();
+}
+
+/// std::allocator<T>::deallocate(T *, size_t).
+static bool isStdAllocatorDeallocate(const FunctionDecl *FD) {
+  return isStdClassMember(FD, "allocator", "deallocate") &&
+         FD->getNumParams() == 2 &&
+         FD->getParamDecl(0)->getType()->isPointerType();
+}
+
+/// std::allocator_traits<A>::deallocate(A &, pointer, size_type) where
+/// pointer is a pointer type.
+static bool isStdAllocatorTraitsDeallocate(const FunctionDecl *FD) {
+  return isStdClassMember(FD, "allocator_traits", "deallocate") &&
+         FD->getNumParams() == 3 &&
+         FD->getParamDecl(1)->getType()->isPointerType();
+}
+
 namespace {
 using KnownParamRole = SemaProfiles::KnownParamRole;
 
@@ -1523,16 +1559,16 @@ using KnownParamRole = SemaProfiles::KnownParamRole;
 /// returns and what it does to the storage bound to one role parameter. A
 /// row is keyed by builtin ID (the C allocation, memory, and va_list families),
 /// by a form predicate (the operator new/delete families, which never carry a
-/// builtin ID), or by a namespace-std name and arity (the std lifecycle
-/// functions) -- the library knowledge P4222R2 §4.4 asks for, looked up at
-/// each call, so the library's declarations carry no annotation and a module
-/// built without -fprofiles reads the same. A builtin ID is absent under
-/// -fno-builtin / -ffreestanding (or on a non-matching declaration), where an
-/// allocator falls back to the trusted default and a release or initialization
-/// goes unrecognized -- a missed diagnostic or a missed relaxation, never a
-/// false positive or a false acceptance elsewhere. (getBuiltinFunctionEffects
-/// in SemaFunctionEffects.cpp groups almost exactly the allocator set for the
-/// \c allocating effect.)
+/// builtin ID, and the std::allocator and std::allocator_traits members), or by
+/// a namespace-std name and arity (the std lifecycle functions) -- the library
+/// knowledge P4222R2 §4.4 asks for, looked up at each call, so the library's
+/// declarations carry no annotation and a module built without -fprofiles reads
+/// the same. A builtin ID is absent under -fno-builtin / -ffreestanding (or on
+/// a non-matching declaration), where an allocator falls back to the trusted
+/// default and a release or initialization goes unrecognized -- a missed
+/// diagnostic or a missed relaxation, never a false positive or a false
+/// acceptance elsewhere. (getBuiltinFunctionEffects in SemaFunctionEffects.cpp
+/// groups almost exactly the allocator set for the \c allocating effect.)
 struct KnownCalleeEntry {
   /// The Arity of a row not keyed by namespace-std name.
   static constexpr unsigned NotStdRow = ~0u;
@@ -1686,6 +1722,11 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
     builtinRow(Builtin::BI__builtin_ms_va_copy,
                KnownCalleeReturn::ReturnsTrusted, "",
                KnownParamRole::InitializeAnyState),
+    formRow(isStdAllocate, KnownCalleeReturn::ReturnsUninitialized),
+    formRow(isStdAllocatorDeallocate, KnownCalleeReturn::ReturnsTrusted,
+            KnownParamRole::Release),
+    formRow(isStdAllocatorTraitsDeallocate, KnownCalleeReturn::ReturnsTrusted,
+            KnownParamRole::Release, 1),
     stdRow("construct_at", KnownCalleeEntry::AnyArity, 0,
            KnownParamRole::Construct),
     stdRow("destroy_at", KnownCalleeEntry::AnyArity, 0,

@@ -691,7 +691,8 @@ refers to uninitialized memory is recognized from its form -- the address
 value or dereference of a marked pointer or reference, pointer and reference
 casts of those and the standard identity functions applied to them, a call to a
 marked function, a call to a known allocator (``malloc``, ``aligned_alloc``,
-``alloca``, and raw ``::operator new`` calls return uninitialized memory,
+``alloca``, raw ``::operator new``, ``std::allocator<T>::allocate``, and
+``std::allocator_traits<A>::allocate`` calls return uninitialized memory,
 ``calloc`` zero-initialized memory, and ``realloc`` is unclassified; §4.3 --
 trusted recognition keys on Clang's builtin IDs, and where those are absent,
 under ``-fno-builtin`` or ``-ffreestanding``, a name-recognized allocator is
@@ -930,24 +931,24 @@ outside any function body is judged by its form: a destroy of a
 namespace-scope ``[[uninit]]`` object is ``destroy_uninit``.
 
 The standard storage-release callees are recognized without annotation and
-treated like ``[[now_uninit]]`` at the call: ``free``, ``realloc`` (its
-pointer argument), and replaceable global ``::operator delete`` /
-``::operator delete[]`` (sized and nothrow forms included; class-specific
-and destroying overloads excluded) accept a pointer in any state -- an
-RAII buffer's ``free(p)`` on a ``[[ref_to_uninit]]`` member is legal
-whether or not the buffer was ever written -- and end what is known about
-the storage, so a read through a marked pointer after ``free(p)`` is
-diagnosed again.  A release records no *destroyed* state, though: releasing
-storage
-ends no object's lifetime, so both orders relative to a ``[[now_uninit]]``
-call sit outside ``double_destroy``'s scope -- ``destroy_at(p); free(p);``
-is correct (different operations, correctly ordered).  The reverse order,
-``free(p); destroy_at(p);`` on a *marked* pointer, is the
-``destroy_uninit`` violation: after the release the pointee is uninitialized
-again when the destroy takes it.  Through
-an unmarked pointer the release changes no classification -- post-release
-use stays the invalidation profile's concern -- and only a second
-``[[now_uninit]]`` destroy of the same storage fires ``double_destroy``.  The ``delete`` and ``delete[]`` *expressions*
+treated like ``[[now_uninit]]`` at the call: ``free``, ``realloc`` (its pointer
+argument), ``std::allocator<T>::deallocate`` and
+``std::allocator_traits<A>::deallocate`` (their pointer argument), and
+replaceable global ``::operator delete`` / ``::operator delete[]`` (sized and
+nothrow forms included; class-specific and destroying overloads excluded) accept
+a pointer in any state -- an RAII buffer's ``free(p)`` on a
+``[[ref_to_uninit]]`` member is legal whether or not the buffer was ever
+written -- and end what is known about the storage, so a read through a marked
+pointer after ``free(p)`` is diagnosed again.  A release records no *destroyed*
+state, though: releasing storage ends no object's lifetime, so both orders
+relative to a ``[[now_uninit]]`` call sit outside ``double_destroy``'s scope --
+``destroy_at(p); free(p);`` is correct (different operations, correctly
+ordered).  The reverse order, ``free(p); destroy_at(p);`` on a *marked* pointer,
+is the ``destroy_uninit`` violation: after the release the pointee is
+uninitialized again when the destroy takes it.  Through an unmarked pointer the
+release changes no classification -- post-release use stays the invalidation
+profile's concern -- and only a second ``[[now_uninit]]`` destroy of the same
+storage fires ``double_destroy``.  The ``delete`` and ``delete[]`` *expressions*
 perform the same release, likewise recording no destroyed state
 -- with no diagnostic on the operand --
 so ``delete q;`` and ``::operator delete(q);`` agree on everything that
@@ -1168,12 +1169,6 @@ listed in :ref:`profiles-init-known-gaps`.
   are suppress-only: a marked pointer *member*'s referent and an element
   access (``ptr[i].x``) are not flow-tracked, so no prior fill legalizes
   either.
-- A range from an unannotated allocator is initialized memory, so
-  ``T *buf = alloc.allocate(n); std::uninitialized_fill_n(buf, n, v);`` is
-  rejected at ``buf``: the output range must refer to uninitialized memory,
-  and ``std::allocator<T>::allocate`` carries no ``[[ref_to_uninit]]``.
-  The remedies are a ``[[ref_to_uninit]]``-returning wrapper around
-  ``allocate`` or suppression.
 - The ``std::uninitialized_*`` credit reaches only what the whole-storage
   write reaches: an element-form range (``&arr[0]``, §5.4) or a class-type
   iterator earns nothing, and a marked pointer's further elements
