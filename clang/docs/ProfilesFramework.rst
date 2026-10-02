@@ -764,10 +764,12 @@ marked and unmarked targets alike (§4.3, §8: the marker means "zero or more
 uninitialized objects"); a *parameter* with a null default argument is not a
 null source (callers may pass any pointer).  A source whose form the recognizer cannot classify
 (pointer arithmetic, an integer-to-pointer cast) is likewise accepted for
-either target.  ``this`` outside a constructor is initialized, so a marked
-pointer or reference to an initialized member of the current object is
-rejected; inside a constructor body, mem-initializer, or default member
-initializer it is unclassified.
+either target.  A GNU statement expression yields its last expression and a
+pointer compound literal its initializer: ``int *q = ({ &u; })`` and
+``int *q = (int *){&u}`` bind ``&u``.  ``this`` outside a constructor is
+initialized, so a marked pointer or reference to an initialized member of the
+current object is rejected; inside a constructor body, mem-initializer, or
+default member initializer it is unclassified.
 
 The recognizer's answer is refined by *flow-tracked storage*: an
 ``[[uninit]]`` local, the referent of a ``[[ref_to_uninit]]`` local pointer

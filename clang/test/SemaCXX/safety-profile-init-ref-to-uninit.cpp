@@ -3567,6 +3567,19 @@ int test_addressof_read(int *p [[ref_to_uninit]]) {
   int z = *&*p;                // OK
   return x + y + z;
 }
+
+// A statement expression binds its result, a pointer compound literal its initializer
+void test_stmt_expr_and_compound_literal() {
+  int u [[uninit]];
+  int *a = ({ &u; });                         // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  int *b = (int *){&u};                       // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  int *m [[ref_to_uninit]] = ({ &u; });       // OK
+  take_uninit_ptr((int *){&u});               // OK
+  int *n [[ref_to_uninit]] = ({ &g_init; });  // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  u = 1;
+  int *c = ({ &u; });                         // OK
+  (void)a; (void)b; (void)m; (void)n; (void)c;
+}
 // A flow-tracked binding inside a function template is judged on each
 // instantiation's own CFG, with the instantiation note; a never-instantiated
 // template's is not diagnosed.
