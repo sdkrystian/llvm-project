@@ -109,9 +109,10 @@ void test_out_of_line_defaulted_nonvacuous_marker() {
   (void)n; (void)p;
 }
 
-// Declaration-order caveat (see Limitations): a marker written before the
-// '= default' definition has been parsed still sees the
-// declared-but-undefined constructor and stays rejected.
+// Declaration-order caveat (ProfilesFrameworkInternals.rst,
+// "Known Gaps (std::init)"): a marker written before the '= default' definition
+// has been parsed still sees the declared-but-undefined constructor and stays
+// rejected.
 struct DefaultedAfterMarker {
   int d [[uninit]];
   DefaultedAfterMarker();

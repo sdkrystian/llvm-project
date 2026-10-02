@@ -460,9 +460,8 @@ struct LambdaStarThisTrustedCopy {
 // false for it), a stored `T *self = this`, `&*this` -- is invisible to the
 // pass: reads through the alias are not attributed to the members (a missed
 // diagnostic, pinned here), and writes through it earn no credit (the
-// strictness half -- a false-positive-free direction). See the Limitations
-// doc; a capture-only special case would cover a sliver of the alias class
-// and was rejected.
+// strictness half -- a false-positive-free direction). See
+// ProfilesFrameworkInternals.rst, "Known Gaps (std::init)".
 struct AliasThisInitCapture {
   int m [[uninit]];
   AliasThisInitCapture() {

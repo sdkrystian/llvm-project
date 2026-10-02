@@ -138,10 +138,10 @@ void test_compound_and_incdec_stores() {
 // *subobject* below the marker initializes nothing (§5.4's piecemeal ban;
 // only whole-object construct_at could) and is rejected like the named
 // [[uninit]] twin above. An element store (p[3]) is accepted and initializes
-// nothing -- a documented gap against the paper's random-access ban (see
-// Limitations). A compound assignment through a still-uninitialized marker
-// reads uninitialized memory (full coverage in
-// safety-profile-init-ref-to-uninit.cpp).
+// nothing -- a documented gap against the paper's random-access ban
+// (ProfilesFrameworkInternals.rst, "Known Gaps (std::init)"). A compound
+// assignment through a still-uninitialized marker reads uninitialized memory
+// (full coverage in safety-profile-init-ref-to-uninit.cpp).
 [[ref_to_uninit]] int &get_uninit_ref();
 void test_write_through_ref_to_uninit(int *p [[ref_to_uninit]],
                                       int &r [[ref_to_uninit]],

@@ -2340,11 +2340,11 @@ static constexpr unsigned UnknownTarget = ~1u;
 /// its state (MayUnassigned: a path entering from an enclosing function, or
 /// past a mutable alias of a marked pointer, does not), escaped as a local
 /// aggregate on every path (Esc: the read leniency for locals,
-/// ProfilesFramework.rst, "Limitations"), destroyed on every path and not
-/// stored since (Destroyed), and, for a Pointee entity, the entity the marked
-/// pointer or reference refers to (Target). The join of predecessors intersects
-/// Must, Esc, and Destroyed, unites May and MayUnassigned, and keeps a Target
-/// the predecessors agree on.
+/// ProfilesFrameworkInternals.rst, "Known Gaps (std::init)"), destroyed on
+/// every path and not stored since (Destroyed), and, for a Pointee entity, the
+/// entity the marked pointer or reference refers to (Target). The join of
+/// predecessors intersects Must, Esc, and Destroyed, unites May and
+/// MayUnassigned, and keeps a Target the predecessors agree on.
 struct FlowState {
   llvm::BitVector Must, May, MayUnassigned, Esc, Destroyed;
   /// Per entity, meaningful for a Pointee: the entity's own index when the
@@ -3261,7 +3261,7 @@ static const DeclRefExpr *getLocalCopySourceRef(const VarDecl *V,
 /// decides what an initializer may read). An NSDMI's subexpressions are
 /// excluded although AddCXXDefaultInitExprInCtors puts them in the CFG, so a
 /// read of a tracked member inside another member's default initializer stays
-/// undetected (see ProfilesFramework.rst, "Limitations").
+/// undetected (see ProfilesFrameworkInternals.rst, "Known Gaps (std::init)").
 static void collectCtorBodyStmts(const CXXConstructorDecl *Ctor,
                                  llvm::SmallPtrSetImpl<const Stmt *> &Body) {
   forEachAnalyzedStmt(Ctor, [&](const Stmt *S) { Body.insert(S); });
@@ -3278,8 +3278,8 @@ static void collectCtorBodyStmts(const CXXConstructorDecl *Ctor,
 /// call kills or writes the storage bound to its parameters
 /// (appendLifecycleCallEvents); a this-capturing lambda reads members at its
 /// creation; a non-benign DeclRefExpr of a tracked aggregate local is an escape
-/// (the read leniency for locals, ProfilesFramework.rst, "Reads of
-/// Uninitialized Objects"); a tracked local's DeclStmt resets its storage
+/// (the read leniency for locals, ProfilesFrameworkInternals.rst,
+/// "Known Gaps (std::init)"); a tracked local's DeclStmt resets its storage
 /// (Reset), after which a tracked copy's copies each member's state. Every
 /// pointer or reference binding the body performs -- a variable or member
 /// initializer, an aggregate element, a call or constructor argument (declared,
@@ -4099,10 +4099,10 @@ static const DeclRefExpr *getLocalCopySourceRef(const VarDecl *V,
 /// parameter as a whole, and the referent of every [[ref_to_uninit]] local
 /// pointer or reference; a variable of an enclosing function the body reaches
 /// by capture is tracked from an unknown entry state. The read-tracking
-/// premises -- a copy does not inherit initialization (P4222R2 §5.2), a
-/// by-value parameter is a copy of the caller's argument, a defaulted parameter
-/// is not -- are argued in ProfilesFramework.rst,
-/// "Reads of Uninitialized Objects" and "Limitations".
+/// premises -- a copy does not inherit initialization, a by-value parameter is
+/// a copy of the caller's argument, a defaulted parameter is not -- are argued
+/// in ProfilesFrameworkInternals.rst, "Flow-Tracked Storage (std::init)" and
+/// "Known Gaps (std::init)".
 static void harvestTrackedLocals(Sema &S, const Decl *D,
                                  TrackedStorage &Storage) {
   // A marked local or parameter is tracked as a whole ([[uninit]]) or by
@@ -4222,7 +4222,7 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
 /// boxed expression's operand, and a captured statement's capture initializer,
 /// through which the region's statements use an enclosing variable in place. A
 /// deferred check below one is a known gap (ProfilesFrameworkInternals.rst,
-/// "Flow-Tracked Storage (std::init)").
+/// "Known Gaps (std::init)").
 static void collectUnenumeratedExprs(const ASTContext &Ctx, const Decl *D,
                                      llvm::SmallPtrSetImpl<const Expr *> &Out) {
   auto AddSubtree = [&](const Stmt *Root) {
@@ -4313,8 +4313,8 @@ static void verifyDeferredInitSites(
 /// neither constructor's reads are tracked, as ctor_uninit_member exempts
 /// both. The crediting policy -- whole-entity stores and lifecycle calls,
 /// plus any escape for a local aggregate's reads -- is stated in
-/// ProfilesFramework.rst, "Reads of Uninitialized Objects" and
-/// "Limitations".
+/// ProfilesFramework.rst, "Reads of Uninitialized Objects", and
+/// ProfilesFrameworkInternals.rst, "Known Gaps (std::init)".
 static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
                                        AnalysisDeclContext &,
                                        const CFGProfileEntry &Entry) {

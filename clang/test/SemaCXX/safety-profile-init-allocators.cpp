@@ -243,12 +243,13 @@ void test_destroy_calloc_result() {
   destroy_at((int *)calloc(1, 4)); // OK: zero-initialized
 }
 
-// The workaround for an ID-less deallocator (see Limitations): declare it
-// [[now_uninit]] with the pointer parameter marked [[ref_to_uninit]]. The
-// destroy role relaxes the binding and destroys the storage; the parameter
-// marker exempts it from destroy_uninit, so releasing a never-written
-// buffer -- a release function's contract -- stays legal in every run,
-// including the RAII-member shape, whose pointee is not flow-tracked.
+// The workaround for an ID-less deallocator (ProfilesFrameworkInternals.rst,
+// "Known Gaps (std::init)"): declare it [[now_uninit]] with the pointer
+// parameter marked [[ref_to_uninit]]. The destroy role relaxes the binding and
+// destroys the storage; the parameter marker exempts it from destroy_uninit, so
+// releasing a never-written buffer -- a release function's contract -- stays
+// legal in every run, including the RAII-member shape, whose pointee is not
+// flow-tracked.
 [[now_uninit]] void my_aligned_free(void *p [[ref_to_uninit]]);
 void test_annotated_release_never_written() {
   my_aligned_free(malloc(16)); // OK: releasing a never-written buffer
@@ -307,8 +308,8 @@ template void template_delete<int>(int *); // expected-note {{in instantiation o
 // __builtin_operator_delete binds its operand against a type-only entity
 // (no ParmVarDecl, no callee in sight), so the release relaxation cannot
 // key on it: marked storage keeps the unmarked-direction error -- a known
-// gap (see Limitations), like the builtin-ID-less _aligned_free and
-// reallocarray.
+// gap (ProfilesFrameworkInternals.rst, "Known Gaps (std::init)"), like the
+// builtin-ID-less _aligned_free and reallocarray.
 void test_builtin_operator_delete_gap(int *p [[ref_to_uninit]]) {
   __builtin_operator_delete(p); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}} \
                                 // nobuiltin-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}

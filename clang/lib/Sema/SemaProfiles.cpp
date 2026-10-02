@@ -683,7 +683,8 @@ std::optional<unsigned> SemaProfiles::defaultInitNonVacuityReason(QualType T) {
       // the class, which is what makes the constructor-definition check the
       // single diagnosis point. A marker written *before* the '= default'
       // definition has been parsed still sees the unrecovered state and
-      // stays rejected (see Limitations).
+      // stays rejected (ProfilesFrameworkInternals.rst,
+      // "Known Gaps (std::init)").
       if (!hasOutOfLineDefaultedDefaultCtor(Def) ||
           !defaultedDefaultCtorIsTrivial(getASTContext(), Def))
         return 0;
@@ -2902,14 +2903,13 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
     // check: the attribute declares destruction, whose operand is
     // initialized memory for a plain destructor-like callee and *any* state
     // for a raw-release one (free takes storage that may never have been
-    // constructed; see the Limitations note), and initialized storage is
-    // precisely what a dual-attributed reinitializer's destroy half exists
-    // for. Acceptance never diagnoses, so it reads the union of the release
-    // bits -- an untrusted name-only free still relaxes. Two states a
-    // [[now_uninit]] callee must not take: storage already destroyed
-    // (P4222R2 §1's double_destroy, a reinitializer included -- its destroy
-    // half is invalid on destroyed storage; construct_at is the sanctioned
-    // recovery path) and storage still or again uninitialized
+    // constructed), and initialized storage is precisely what a dual-attributed
+    // reinitializer's destroy half exists for. Acceptance never diagnoses, so
+    // it reads the union of the release bits -- an untrusted name-only free
+    // still relaxes. Two states a [[now_uninit]] callee must not take: storage
+    // already destroyed (P4222R2 §1's double_destroy, a reinitializer included
+    // -- its destroy half is invalid on destroyed storage; construct_at is the
+    // sanctioned recovery path) and storage still or again uninitialized
     // (destroy_uninit: destruction makes an object uninitialized, so a first
     // destroy of never-constructed storage is as much an access to raw
     // memory as a second one, "Lifetimes", p4222r2.md:922-927). Both key on
@@ -2919,13 +2919,13 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
     // (its marked parameter positively legalizes uninitialized sources; its
     // unmarked destroy-only parameters ride along -- a missed diagnostic,
     // not a rule), and a parameter carrying [[ref_to_uninit]] per parameter
-    // (the annotation spelling for an unrecognized storage-release function,
-    // the Limitations workaround for _aligned_free and kin). A source with a
-    // flow-tracked leaf is the CFG pass's (its Destroy sites judge both
-    // rules against the flow state, double_destroy included: destroyed
-    // storage exists only as flow state); the rest is judged here by form.
-    // An instantiation-dependent source defers exactly like
-    // judgeInitProfileBinding's.
+    // (the annotation spelling for an unrecognized storage-release function
+    // such as _aligned_free; ProfilesFrameworkInternals.rst,
+    // "Known Gaps (std::init)"). A source with a flow-tracked leaf is the CFG
+    // pass's (its Destroy sites judge both rules against the flow state,
+    // double_destroy included: destroyed storage exists only as flow state);
+    // the rest is judged here by form. An instantiation-dependent source defers
+    // exactly like judgeInitProfileBinding's.
     if (!Src || isa<RecoveryExpr>(Src->IgnoreParens()) ||
         (!D && Src->isInstantiationDependent()))
       return;

@@ -2713,7 +2713,7 @@ void test_construct_at_bridge() {
 // double_destroy violation: the callee's own parameters take initialized
 // storage -- destroying storage that is still or again uninitialized is the
 // dedicated destroy_uninit violation, while raw-release callees (free) keep
-// any-state acceptance (see Limitations).
+// any-state acceptance.
 template <class T>
 [[now_uninit]] void destroy_at(T *p);
 [[now_uninit]] void nu_wipe(int *p);
@@ -2761,8 +2761,7 @@ void test_assert_conditional_destroy(bool c) {
 // storage is as much an access to raw memory as a second one ("Lifetimes",
 // p4222r2.md:922-927 -- "it is an error to uninitialize an object twice").
 // Raw-release callees (free) keep any-state acceptance: taking storage
-// that may never have been constructed is their contract (see
-// Limitations).
+// that may never have been constructed is their contract.
 void test_destroy_never_initialized() {
   int u [[uninit]];
   nu_wipe(&u); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
@@ -2854,8 +2853,8 @@ void test_destroy_ternary_mixed_arms(int *p [[ref_to_uninit]],
 // Destroying through a marked pointer with no prior store is rejected: the
 // marker asserts an uninitialized referent at entry. A deliberate
 // strictness -- if a helper filled the referent, mark the helper
-// [[now_init]], store through the marker first, or suppress (see
-// Limitations).
+// [[now_init]], store through the marker first, or suppress
+// (ProfilesFrameworkInternals.rst, "Known Gaps (std::init)").
 void test_destroy_marked_no_store(int *p [[ref_to_uninit]]) {
   nu_wipe(p); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
 }
@@ -2885,9 +2884,10 @@ void test_destroy_after_now_init_fill() {
 // A destroy-role callee may declare a parameter [[ref_to_uninit]]: the
 // marker is the author's contract that the parameter takes
 // possibly-uninitialized storage -- the annotation spelling for an
-// unrecognized storage-release function (see Limitations) -- so
-// destroy_uninit yields to it. Per parameter, unlike the reinitializer's
-// call-wide exemption: a sibling unmarked parameter still fires.
+// unrecognized storage-release function (ProfilesFrameworkInternals.rst,
+// "Known Gaps (std::init)") -- so destroy_uninit yields to it. Per parameter,
+// unlike the reinitializer's call-wide exemption: a sibling unmarked parameter
+// still fires.
 [[now_uninit]] void nu_release(int *p [[ref_to_uninit]]);
 [[now_uninit]] void nu_release2(int *p [[ref_to_uninit]], int *q);
 void test_marked_param_destroy_exempt() {
@@ -3162,8 +3162,9 @@ void test_reinit_on_destroyed() {
 // The reinitializer exemption is call-wide: a dual-attributed callee's
 // *unmarked* destroy-only pointer parameters -- whose storage the paper
 // requires live -- are exempt from destroy_uninit too. A missed
-// diagnostic, not a rule (see Limitations); the marked parameter is what
-// positively legalizes fresh storage.
+// diagnostic, not a rule (ProfilesFrameworkInternals.rst,
+// "Known Gaps (std::init)"); the marked parameter is what positively legalizes
+// fresh storage.
 [[now_init]] [[now_uninit]] void nu_reinit2(int *p [[ref_to_uninit]], int *q);
 void test_reinit_exemption_is_call_wide() {
   int u [[uninit]], v [[uninit]];
