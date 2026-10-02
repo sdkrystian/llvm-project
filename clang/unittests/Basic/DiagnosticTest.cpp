@@ -482,6 +482,10 @@ protected:
                                                       diag::Severity S) {
     return {D, DiagnosticMapping::Make(S, /*IsUser=*/true, /*IsPragma=*/true)};
   }
+  /// A macro expansion at \p Offset of the main file.
+  SourceLocation expansionAt(unsigned Offset) {
+    return SM.createExpansionLoc(at(0), at(Offset), at(Offset), /*Length=*/4);
+  }
 };
 
 TEST_F(PositionalMappingTest, InsertsBeforeTheCurrentState) {
@@ -526,6 +530,36 @@ TEST_F(PositionalMappingTest, InsertRefreshesIncludedFiles) {
       SM.getLocForStartOfFile(Included).getLocWithOffset(4);
   EXPECT_EQ(levelAt(W1, InIncluded), DiagnosticsEngine::Warning);
   Diags.setDiagnosticMappingsAt({map(W1, diag::Severity::Ignored)}, at(10));
+  EXPECT_EQ(levelAt(W1, InIncluded), DiagnosticsEngine::Ignored);
+}
+
+TEST_F(PositionalMappingTest, AppendRefreshesAnExpansionQueriedAhead) {
+  Diags.setSeverity(W2, diag::Severity::Error, at(5));
+  SourceLocation Ahead = expansionAt(30);
+  EXPECT_EQ(levelAt(W1, Ahead), DiagnosticsEngine::Warning);
+  Diags.setSeverity(W1, diag::Severity::Ignored, at(20));
+  EXPECT_EQ(levelAt(W1, Ahead), DiagnosticsEngine::Ignored);
+}
+
+TEST_F(PositionalMappingTest, AppendAtAnExpansionPointRefreshesIt) {
+  Diags.setSeverity(W2, diag::Severity::Error, at(5));
+  SourceLocation Expansion = expansionAt(20);
+  EXPECT_EQ(levelAt(W1, Expansion), DiagnosticsEngine::Warning);
+  Diags.setSeverity(W1, diag::Severity::Ignored, at(20));
+  EXPECT_EQ(levelAt(W1, Expansion), DiagnosticsEngine::Ignored);
+}
+
+TEST_F(PositionalMappingTest, AppendInAnIncludedFileRefreshesTheIncluder) {
+  FileID Included = SM.createFileID(
+      MemoryBuffer::getMemBuffer(std::string(8, ' '), "inc.h"), SrcMgr::C_User,
+      /*LoadedID=*/0, /*LoadedOffset=*/0, at(15));
+  SourceLocation InIncluded =
+      SM.getLocForStartOfFile(Included).getLocWithOffset(2);
+  Diags.setSeverity(W1, diag::Severity::Ignored, InIncluded);
+  SourceLocation Ahead = expansionAt(30);
+  EXPECT_EQ(levelAt(W1, Ahead), DiagnosticsEngine::Ignored);
+  Diags.setSeverity(W1, diag::Severity::Error, InIncluded.getLocWithOffset(2));
+  EXPECT_EQ(levelAt(W1, Ahead), DiagnosticsEngine::Error);
   EXPECT_EQ(levelAt(W1, InIncluded), DiagnosticsEngine::Ignored);
 }
 

@@ -426,7 +426,9 @@ private:
     /// Add an initial diagnostic state.
     void appendFirst(DiagState *State);
 
-    /// Add a new latest state point.
+    /// Add a new latest state point. Files included or expanded at or after
+    /// the new point that already exist (created by a query ahead of it) take
+    /// the new state as their entry state.
     void append(SourceManager &SrcMgr, SourceLocation Loc, DiagState *State);
 
     /// Add a state point at \p Loc that is not the latest: a transition of
@@ -496,6 +498,9 @@ private:
       /// The points within the file where the state changes. There will always
       /// be at least one of these (the state on entry to the file).
       llvm::SmallVector<DiagStatePoint, 4> StateTransitions;
+
+      /// The files included or expanded into this one, by ParentOffset.
+      llvm::SmallVector<File *, 0> Children;
 
       DiagState *lookup(unsigned Offset) const;
     };

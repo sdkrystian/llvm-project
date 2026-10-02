@@ -427,7 +427,12 @@ keyed on positions, a token-cached body, default argument, or member
 initializer parsed after its class, and a template instantiated at any
 later point, find the dominion their tokens lie in without re-establishing
 anything: ``setDiagnosticMappingsAt`` inserts a transition when the lexer
-has already passed the location.
+has already passed the location.  The engine creates the state of a macro
+expansion or included file when a diagnostic is first queried in it, and a
+query can run ahead of a guard -- the misleading-indentation check reads the
+token after an ``if``, ``while``, or ``for`` body while the statement's guard
+is still open -- so ``DiagStateMap::append`` and ``insert`` also give each
+such file created after the new transition its new entry state.
 
 A construct whose attributes reach its Decl only after its leading tokens
 (a declarator-id attribute) is covered by two guards that stitch together:
@@ -457,9 +462,10 @@ declaration does not appear on the definition in the AST either.
 
 Where the recorded dominion departs from the construct's token range:
 
-- Positions are expansion sites, so a macro that expands to a suppressed
-  declaration or statement followed by further tokens suppresses the whole
-  expansion (the one under-check corner).
+- Positions are expansion sites, so a dominion that begins or ends inside a
+  macro expansion covers the whole expansion: a suppression spelled inside a
+  macro, or whose construct ends inside one, also suppresses the other
+  tokens of that expansion (the one under-check corner).
 - A ``#pragma clang diagnostic`` inside a token-cached construct (an inline
   member function body, a class-scope default argument or member
   initializer, a ``-fdelayed-template-parsing`` body) is recorded before the

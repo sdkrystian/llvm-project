@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-test-profiles -std=c++23 %s
+// RUN: %clang_cc1 -fsyntax-only -verify=expected,macro -fprofiles -fprofiles-test-profiles -std=c++23 -DMACRO_ENFORCE %s
 
 // The suppression-coverage matrix: one test::type_cast violation per parser
 // context that can carry [[profiles::suppress]], suppressed and unsuppressed.
@@ -6,7 +7,14 @@
 // place a new context's missing ProfileSuppressionDominion guard turns red
 // (see Parser::ProfileSuppressionDominion).
 
+#ifdef MACRO_ENFORCE
+// An enforcement spelled in a macro covers the rest of its expansion
+[[profiles::enforce(test::uninit_read)]];
+#define ENFORCE_AND_DECLARE [[profiles::enforce(test::type_cast)]]; long *enforced_in_macro = reinterpret_cast<long *>(0);
+ENFORCE_AND_DECLARE // macro-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+#else
 [[profiles::enforce(test::type_cast)]];
+#endif
 
 // Enum-head suppression covers the enumerator initializers
 enum [[profiles::suppress(test::type_cast)]] EnumHead {
@@ -101,3 +109,26 @@ void pragma_inside() {
   long after = (long)reinterpret_cast<long *>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
   (void)after;
 }
+
+// A macro statement after a suppressed if, while, or for is outside the dominion
+#define CAST_STMT (void)reinterpret_cast<long *>(0)
+void macro_after_suppressed(int c) {
+  [[profiles::suppress(test::type_cast)]] if (c) (void)0;
+  CAST_STMT; // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+  [[profiles::suppress(test::type_cast)]] while (c--) (void)0;
+  CAST_STMT; // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+  [[profiles::suppress(test::type_cast)]] for (;;) break;
+  CAST_STMT; // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+}
+
+// A suppression spelled inside a macro covers the whole expansion
+#define SUPPRESSED_CAST_STMT [[profiles::suppress(test::type_cast)]] CAST_STMT
+#define SUPPRESSED_CAST_STMTS [[profiles::suppress(test::type_cast)]] CAST_STMT; CAST_STMT
+#define SUPPRESSED_DECL [[profiles::suppress(test::type_cast)]] long macro_decl = (long)reinterpret_cast<long *>(0);
+void macro_spelled_suppression() {
+  SUPPRESSED_CAST_STMT;
+  SUPPRESSED_CAST_STMT;
+  SUPPRESSED_CAST_STMTS;
+  CAST_STMT; // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+}
+SUPPRESSED_DECL

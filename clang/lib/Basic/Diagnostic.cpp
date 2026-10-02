@@ -176,20 +176,26 @@ void DiagnosticsEngine::DiagStateMap::append(SourceManager &SrcMgr,
 
   FileIDAndOffset Decomp = SrcMgr.getDecomposedLoc(Loc);
   unsigned Offset = Decomp.second;
+  File *From = nullptr;
   for (File *F = getFile(SrcMgr, Decomp.first); F;
-       Offset = F->ParentOffset, F = F->Parent) {
+       From = F, Offset = F->ParentOffset, F = F->Parent) {
     F->HasLocalTransitions = true;
     auto &Last = F->StateTransitions.back();
     assert(Last.Offset <= Offset && "state transitions added out of order");
+    DiagState *Old = Last.State;
 
     if (Last.Offset == Offset) {
       if (Last.State == State)
         break;
       Last.State = State;
-      continue;
+    } else {
+      F->StateTransitions.push_back({State, Offset});
     }
 
-    F->StateTransitions.push_back({State, Offset});
+    // A file already created at or after the new point (a diagnostic query
+    // looked ahead of it) entered with the replaced state. In an enclosing
+    // file, one included at From's own offset is not ordered after From.
+    refreshEntryStates(F, From ? Offset + 1 : Offset, ~0u, Old, State);
   }
 }
 
@@ -216,10 +222,11 @@ void DiagnosticsEngine::DiagStateMap::insert(SourceManager &SrcMgr,
 void DiagnosticsEngine::DiagStateMap::refreshEntryStates(
     File *F, unsigned Offset, unsigned End, DiagState *Old,
     DiagState *State) const {
-  for (auto &IDAndFile : Files) {
-    File &Child = IDAndFile.second;
-    if (Child.Parent != F || Child.ParentOffset < Offset ||
-        Child.ParentOffset >= End || Child.StateTransitions[0].State != Old)
+  auto It = llvm::partition_point(
+      F->Children, [=](const File *C) { return C->ParentOffset < Offset; });
+  for (; It != F->Children.end() && (*It)->ParentOffset < End; ++It) {
+    File &Child = **It;
+    if (Child.StateTransitions[0].State != Old)
       continue;
     Child.StateTransitions[0].State = State;
     refreshEntryStates(&Child, 0,
@@ -268,6 +275,13 @@ DiagnosticsEngine::DiagStateMap::getFile(SourceManager &SrcMgr,
     F.Parent = getFile(SrcMgr, Decomp.first);
     F.ParentOffset = Decomp.second;
     F.StateTransitions.push_back({F.Parent->lookup(Decomp.second), 0});
+    auto &Siblings = F.Parent->Children;
+    Siblings.insert(llvm::partition_point(Siblings,
+                                          [&](const File *C) {
+                                            return C->ParentOffset <=
+                                                   F.ParentOffset;
+                                          }),
+                    &F);
   } else {
     // This is the (imaginary) root file into which we pretend all top-level
     // files are included; it descends from the initial state.
