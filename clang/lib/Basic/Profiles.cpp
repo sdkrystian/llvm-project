@@ -40,6 +40,11 @@ static constexpr diag::Group RegistryGroups[] = {
 #undef GET_PROFILE_TABLE
 };
 
+llvm::ArrayRef<profiles::ProfileRegistryName>
+profiles::getProfileRegistryNames() {
+  return RegistryNames;
+}
+
 std::optional<llvm::StringRef>
 profiles::getProfileDiagGroupName(llvm::StringRef Profile,
                                   llvm::StringRef Rule) {

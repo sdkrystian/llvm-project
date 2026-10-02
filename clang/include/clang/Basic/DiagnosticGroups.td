@@ -1191,6 +1191,7 @@ def NSReturnsMismatch : DiagGroup<"nsreturns-mismatch">;
 
 def IndependentClassAttribute : DiagGroup<"IndependentClass-attribute">;
 def UnknownAttributes : DiagGroup<"unknown-attributes">;
+def UnknownProfiles : DiagGroup<"unknown-profiles">;
 def IgnoredAttributes : DiagGroup<"ignored-attributes",
                                   [DllexportExplicitInstantiation]>;
 def Attributes : DiagGroup<"attributes", [UnknownAttributes,

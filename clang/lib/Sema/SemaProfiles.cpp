@@ -17,6 +17,7 @@
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/Basic/Module.h"
+#include "clang/Basic/SimpleTypoCorrection.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Sema/ParsedAttr.h"
 #include "clang/Sema/Sema.h"
@@ -112,6 +113,42 @@ static void unzipProfileArguments(ArrayRef<profiles::ProfileArgument> Arguments,
   }
 }
 
+/// True if \p Profile names a profile of the registry that is not inert in
+/// this compilation.
+static bool isKnownProfile(Sema &S, StringRef Profile) {
+  return !profiles::isProfileNameInert(Profile,
+                                       S.getLangOpts().ProfilesTestProfiles) &&
+         profiles::getProfileDiagGroupName(Profile, /*Rule=*/"");
+}
+
+/// Warn at \p Loc about a profile name that names no known profile but is a
+/// near miss of one, and about a rule name that names no rule of a known
+/// profile: neither enforces nor suppresses anything.
+static void diagnoseUnknownProfileNames(Sema &S, SourceLocation Loc,
+                                        StringRef Profile, StringRef Rule) {
+  if (!isKnownProfile(S, Profile)) {
+    SimpleTypoCorrection Correction(Profile);
+    for (const profiles::ProfileRegistryName &N :
+         profiles::getProfileRegistryNames())
+      if (N.Rule.empty() && isKnownProfile(S, N.Profile))
+        Correction.add(N.Profile);
+    if (Correction.hasCorrection())
+      S.Diag(Loc, diag::warn_profiles_unknown_profile)
+          << Profile << *Correction.getCorrection();
+    return;
+  }
+  if (Rule.empty() || profiles::getProfileDiagGroupName(Profile, Rule))
+    return;
+  SimpleTypoCorrection Correction(Rule);
+  for (const profiles::ProfileRegistryName &N :
+       profiles::getProfileRegistryNames())
+    if (N.Profile == Profile && !N.Rule.empty())
+      Correction.add(N.Rule);
+  S.Diag(Loc, diag::warn_profiles_unknown_rule)
+      << Profile << Rule << Correction.hasCorrection()
+      << Correction.getCorrection().value_or("");
+}
+
 bool SemaProfiles::processProfilesEnforceAttr(
     const ParsedAttr &AL, Module *Mod, SmallVectorImpl<StringRef> *NewNames,
     SmallVectorImpl<StringRef> *NewDesignators) {
@@ -130,6 +167,8 @@ bool SemaProfiles::processProfilesEnforceAttr(
     // every repetition of such a profile look new and re-append its
     // designator to the attribute's argument arrays.
     bool IsNew = !getASTContext().getProfileEnforcement(Name);
+    if (IsNew)
+      diagnoseUnknownProfileNames(SemaRef, AL.getLoc(), Name, /*Rule=*/"");
     if (!addProfileEnforcement(Name, Spelling, AL.getLoc()))
       continue;
 
@@ -269,6 +308,12 @@ SemaProfiles::makeProfilesSuppressAttr(const ParsedAttr &AL) {
   const auto &Args = AL.getProfileSuppressArgs();
   if (Args.Name.empty())
     return nullptr;
+  // Prefix attributes reach each declarator of a declaration; diagnose them
+  // once.
+  if (!AL.hasProcessingCache()) {
+    AL.setProcessingCache(0);
+    diagnoseUnknownProfileNames(SemaRef, AL.getLoc(), Args.Name, Args.Rule);
+  }
 
   SmallVector<StringRef, 4> RawArgumentKeys;
   SmallVector<StringRef, 4> RawArgumentValues;

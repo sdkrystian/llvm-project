@@ -154,6 +154,12 @@ there:
      fill(buffer, 1024);
    }
 
+A profile name the implementation does not know designates a profile with no
+rules, and a ``rule:`` argument that names no rule of its profile suppresses
+nothing.  ``-Wunknown-profiles`` warns about such a ``rule:`` of a profile
+Clang implements, and about a profile name in an ``enforce`` or ``suppress``
+attribute that is close to the name of one it implements.
+
 A suppression covers exactly the tokens of the declaration or statement it
 appertains to, nothing more; P3589R2 calls this token range the
 suppression's *dominion*.  The declarator-id position works too: on a

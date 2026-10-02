@@ -17,6 +17,7 @@
 
 #include "clang/Basic/CharInfo.h"
 #include "clang/Basic/SourceLocation.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -90,6 +91,9 @@ struct ProfileRegistryName {
   llvm::StringRef Profile;
   llvm::StringRef Rule;
 };
+
+/// Every profile and named rule of the profiles registry.
+llvm::ArrayRef<ProfileRegistryName> getProfileRegistryNames();
 
 /// P3589R2 [decl.attr.enforce]p5: profiles are compatible if they are the
 /// same -- by name; arguments configure a profile without changing its

@@ -11,6 +11,9 @@
 [[profiles::enforce(test::type_cast)]];
 // no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
 [[profiles::enforce(test::other)]];
+// no-profiles-warning@+2 {{'profiles::enforce' attribute ignored}}
+// expected-warning@+1 {{unknown profile 'test::typecast'; did you mean 'test::type_cast'?}}
+[[profiles::enforce(test::typecast)]];
 
 void test_violation() {
   int *p = reinterpret_cast<int*>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
@@ -46,7 +49,7 @@ void test_suppress_stmt_with_bare_rule() {
 
 void test_suppress_stmt_with_nonmatching_rule() {
   // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
-  [[profiles::suppress(test::type_cast, rule: "static_cast")]] {
+  [[profiles::suppress(test::type_cast, rule: "static_cast")]] { // expected-warning {{profile 'test::type_cast' has no rule 'static_cast'}}
     int *p = reinterpret_cast<int*>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
   }
 }
@@ -163,7 +166,8 @@ void param_suppress_other([[profiles::suppress(test::type_cast)]] int a, int *p 
 
 // Naming another rule does not suppress.
 // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
-void param_suppress_rule_mismatch([[profiles::suppress(test::type_cast, rule: "static_cast")]] int *p = reinterpret_cast<int*>(0)); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+void param_suppress_rule_mismatch([[profiles::suppress(test::type_cast, rule: "static_cast")]] int *p = reinterpret_cast<int*>(0)); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}} \
+                                                                                                                                    // expected-warning {{profile 'test::type_cast' has no rule 'static_cast'}}
 
 // On a function declaration, the prefix, declarator-id, and member
 // declarator-id suppression spellings agree: each covers the parameter
@@ -227,7 +231,8 @@ void test_suppress_on_condition_variable() {
   while ([[profiles::suppress(test::type_cast)]] int *p = reinterpret_cast<int*>(0)) break;
   if (int *p = reinterpret_cast<int*>(0)) {} // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
   // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
-  if ([[profiles::suppress(test::type_cast, rule: "static_cast")]] int *p = reinterpret_cast<int*>(0)) {} // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+  if ([[profiles::suppress(test::type_cast, rule: "static_cast")]] int *p = reinterpret_cast<int*>(0)) {} // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}} \
+                                                                                                          // expected-warning {{profile 'test::type_cast' has no rule 'static_cast'}}
 }
 
 // Suppress on null-statement is a no-op: the next statement is NOT suppressed.
@@ -606,7 +611,7 @@ void test_nongeneric_lambda_direct_suppress_rule() {
 // non-matching rule.
 void test_nongeneric_lambda_direct_suppress_wrong_rule() {
   // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
-  auto l = [] [[profiles::suppress(test::type_cast, rule: "static_cast")]] () {
+  auto l = [] [[profiles::suppress(test::type_cast, rule: "static_cast")]] () { // expected-warning {{profile 'test::type_cast' has no rule 'static_cast'}}
     int *p = reinterpret_cast<int*>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
   };
   l();
@@ -972,12 +977,21 @@ long use_cast_rebuilt() { return cast_rebuilt<int>() + cast_rebuilt<long>(); } /
 void test_suppress_other_spelling() {
   // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
   [[profiles::suppress(TEST::Type_Cast)]] (void)reinterpret_cast<int*>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
-  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  // no-profiles-warning@+2 {{'profiles::suppress' attribute ignored}}
+  // expected-warning@+1 {{unknown profile 'test_type::cast'; did you mean 'test::type_cast'?}}
   [[profiles::suppress(test_type::cast)]] (void)reinterpret_cast<int*>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
-  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  // no-profiles-warning@+2 {{'profiles::suppress' attribute ignored}}
+  // expected-warning@+1 {{unknown profile 'test::type::cast'; did you mean 'test::type_cast'?}}
   [[profiles::suppress(test::type::cast)]] (void)reinterpret_cast<int*>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
-  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  // no-profiles-warning@+2 {{'profiles::suppress' attribute ignored}}
+  // expected-warning@+1 {{profile 'test::type_cast' has no rule 'Reinterpret-Cast'; did you mean 'reinterpret_cast'?}}
   [[profiles::suppress(test::type_cast, rule: "Reinterpret-Cast")]] (void)reinterpret_cast<int*>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
-  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  // no-profiles-warning@+2 {{'profiles::suppress' attribute ignored}}
+  // expected-warning@+1 {{profile 'test::type_cast' has no rule 'reinterpret.cast'; did you mean 'reinterpret_cast'?}}
   [[profiles::suppress(test::type_cast, rule: "reinterpret.cast")]] (void)reinterpret_cast<int*>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
 }
+
+// A rule: that names no rule of its profile is diagnosed once per attribute
+// no-profiles-warning@+2 2 {{'profiles::suppress' attribute ignored}}
+// expected-warning@+1 {{profile 'test::type_cast' has no rule 'typo'}}
+[[profiles::suppress(test::type_cast, rule: "typo")]] int *rule_typo_a = nullptr, *rule_typo_b = nullptr;

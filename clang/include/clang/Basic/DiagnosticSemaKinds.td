@@ -14388,6 +14388,11 @@ def err_profiles_redecl_incompatible : Error<
 def err_profiles_suppress_justification_not_string : Error<
   "'justification' argument of 'profiles::suppress' must be a string "
   "literal">;
+def warn_profiles_unknown_profile : Warning<
+  "unknown profile '%0'; did you mean '%1'?">, InGroup<UnknownProfiles>;
+def warn_profiles_unknown_rule : Warning<
+  "profile '%0' has no rule '%1'%select{|; did you mean '%3'?}2">,
+  InGroup<UnknownProfiles>;
 def err_profile_type_cast_reinterpret : ProfileRule<
   "'reinterpret_cast' is unsafe under profile '%0'",
   ProfileTestTypeCastReinterpretCast>;
