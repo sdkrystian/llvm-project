@@ -915,15 +915,14 @@ entity's own bits), or unidentified.  The transfer function resolves every
 event and site leaf on such an entity through ``Target`` before applying
 it, and a ``Reseat`` event carries the new referent (``ReseatTarget``): the
 entity a single-leaf source names, what another marked pointer refers to,
-a fresh anonymous referent for an untracked source, or unidentified for a
-conditional source with a tracked arm.  An identified referent named by a
-marked binding is asserted unassigned (``Must`` and ``May`` cleared,
-``Destroyed`` and ``Esc`` kept); the ``Reseat`` follows the binding's
-``Binding`` event in block order, so the judgment sees the pre-assertion
-state.  A binding to a marked parameter is a ``Binding`` event only and
-asserts nothing.  The pass reports the
-``ref_to_uninit`` judgments of the
-body's bindings, the ``double_destroy`` / ``destroy_uninit`` judgments of
+a fresh anonymous referent for an untracked source, the target every arm of the
+source agrees on, or unidentified when the arms disagree and one is tracked.  An
+identified referent named by a marked binding is asserted unassigned (``Must``
+and ``May`` cleared, ``Destroyed`` and ``Esc`` kept); the ``Reseat`` follows the
+binding's ``Binding`` event in block order, so the judgment sees the
+pre-assertion state.  A binding to a marked parameter is a ``Binding`` event
+only and asserts nothing.  The pass reports the ``ref_to_uninit`` judgments of
+the body's bindings, the ``double_destroy`` / ``destroy_uninit`` judgments of
 its ``[[now_uninit]]`` calls, and the ``uninit_read`` / ``uninit_write``
 judgments of its reads through and stores below tracked storage at their
 program points through the shared violation gate.  The parse-time checks and
@@ -975,14 +974,15 @@ its own CFG, in which statements TreeTransform reused from the pattern are
 ordinary elements.  Consumers read the lattices as follows: a marked-target
 binding fires on ``Must`` and ``double_destroy`` on ``Destroyed``; an
 unmarked-target binding, ``destroy_uninit``, a read through a marker, and a
-subobject write are suppressed by ``May``.  A destroy or release on one of
-several arms leaves the entity possibly assigned, not definitely, and not
-destroyed; a mutable alias of a marked pointer handed out gives the pointer an
-anonymous referent in that state.  A variable of an enclosing function reached
-by capture, whose state the enclosing body decides, enters with ``May`` set and
-``Must`` clear, so neither direction fires on it until the body itself stores.
-The remaining blind spots are listed in `Known Gaps (std::init)`_ and in
-:doc:`ProfilesFramework`, "Limitations".
+subobject write are suppressed by ``May``.  A destroy or release whose arms name
+different storage leaves each possibly assigned, not definitely, and not
+destroyed, and a mutable alias of a marked pointer handed out gives the pointer
+an anonymous referent in that state; arms that all name one storage destroy or
+release it.  A variable of an enclosing function reached by capture, whose state
+the enclosing body decides, enters with ``May`` set and ``Must`` clear, so
+neither direction fires on it until the body itself stores.  The remaining blind
+spots are listed in `Known Gaps (std::init)`_ and in :doc:`ProfilesFramework`,
+"Limitations".
 
 
 .. _profiles-init-known-gaps:
@@ -1004,3 +1004,12 @@ Missed Diagnostics
 - The statements of a ``#pragma clang __debug captured`` region are not
   flow-checked: the CFG does not contain them, so their bindings, destroys,
   reads, and stores of flow-tracked storage are accepted.
+- A marked pointer whose referent the analysis cannot identify -- a copy
+  (``int *p2 [[ref_to_uninit]] = q;``) whose source ``q`` is later reseated to
+  an untracked source, a conditional initializer whose arms name different
+  storage (``c ? &u : &v``), a store whose target names several pointers or a
+  marked pointer on only some of its arms (``(c ? p : q) = &u``,
+  ``(c ? p : r) = &u``), a ``__block`` pointer -- fires in neither direction
+  through the pointer, a store or ``[[now_init]]`` call through it credits
+  nothing, and a marked binding to it asserts nothing: a later ``int *w = &u``
+  stays the unmarked-direction error.

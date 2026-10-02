@@ -518,6 +518,16 @@ void conditional_initializer(bool c) {
   (void)q; (void)r;
 }
 
+// A conditional initializer whose arms name one local refers to it
+void conditional_initializer_one_local(bool c) {
+  int u [[uninit]];
+  int *p [[ref_to_uninit]] = c ? &u : &u;
+  std::construct_at(p, 5);
+  int *q = &u; // OK
+  int r = *p;  // OK
+  (void)q; (void)r;
+}
+
 // A pointer to a subobject has an anonymous referent: construct_at through
 // it does not initialize the enclosing object.
 void subobject_pointer() {

@@ -2290,8 +2290,8 @@ struct DestroySite {
   SourceLocation Loc;
   bool Exempt = false;
   bool Judged = false;
-  /// The argument names several storages (a conditional or comma shape):
-  /// each may have been destroyed, none definitely.
+  /// The argument's arms name different storage: each may have been
+  /// destroyed, none definitely.
   bool Conditional = false;
   SmallVector<BindingLeaf, 2> Leaves;
   /// The entities destroyed: the whole entity each leaf names, or every
@@ -2978,13 +2978,26 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
         });
     return AnyTracked;
   };
+  // The leaves name one storage: each names the same whole entity, or the
+  // same object as a whole.
+  auto NameOneStorage = [](ArrayRef<ArgLeaf> Leaves) {
+    return llvm::all_of(Leaves, [&](const ArgLeaf &L) {
+      const ArgLeaf &First = Leaves.front();
+      return L.R.Entity == First.R.Entity &&
+             L.R.Subobject == First.R.Subobject && L.Whole == First.Whole;
+    });
+  };
   // The storage an argument names, as events of \p Kind: the resolved whole
   // entity, or every entity of the object passed as a whole.
   auto AppendFor = [&](const Expr *Arg, QualType ParamTy,
                        DefAssignEventKind Kind) {
     SmallVector<ArgLeaf, 2> Leaves;
     ResolveArg(Arg, ParamTy, Leaves);
-    if (Leaves.size() != 1)
+    if (Leaves.empty())
+      return;
+    if (NameOneStorage(Leaves))
+      Leaves.truncate(1);
+    else
       Kind = Kind == DefAssignEventKind::Write ? DefAssignEventKind::MayWrite
                                                : DefAssignEventKind::Escape;
     for (const ArgLeaf &L : Leaves) {
@@ -3006,19 +3019,20 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
     Site.Exempt =
         Roles.InitializesRefToUninitParams || P->hasAttr<RefToUninitAttr>();
     Site.Judged = ResolveArg(Arg, PT, Leaves);
-    Site.Conditional = Leaves.size() > 1;
+    Site.Conditional = !NameOneStorage(Leaves);
     for (const ArgLeaf &L : Leaves) {
       if (L.Tracked)
         JudgedLeaves.insert(L.E);
       BindingLeaf Leaf;
       if (L.R.Entity) {
         Leaf.Entity = L.R.Entity;
-        if (!L.R.Subobject)
+        if (!L.R.Subobject && !llvm::is_contained(Site.Affected, *L.R.Entity))
           Site.Affected.push_back(*L.R.Entity);
       } else {
         Leaf.State = L.Form;
         for (unsigned Idx = L.Whole.first; Idx != L.Whole.second; ++Idx)
-          Site.Affected.push_back(Idx);
+          if (!llvm::is_contained(Site.Affected, Idx))
+            Site.Affected.push_back(Idx);
       }
       Site.Leaves.push_back(Leaf);
     }
@@ -3333,11 +3347,11 @@ static void extractStdInitEvents(
     // leaf walk, and resolver (AddBinding, TrackedStorage::resolveFlowLeaf)
     // so the two agree on the source's shape: the one tracked entity a
     // single leaf names (`&u`, `&a.m`, `u` for a reference), what a single
-    // marked pointer or reference leaf refers to (`q`, `&*q`, `&r`), nothing
-    // identifiable when several leaves include a tracked one, and otherwise
-    // an anonymous referent -- also for a decayed [[uninit]] array, which
-    // the binding judges by the array's state but which names one element
-    // (P4222R2 §5.4).
+    // marked pointer or reference leaf refers to (`q`, `&*q`, `&r`), the target
+    // every leaf agrees on, nothing identifiable when the leaves disagree and
+    // one is tracked, and otherwise an anonymous referent -- also for a decayed
+    // [[uninit]] array, which the binding judges by the array's state but which
+    // names one element (P4222R2 §5.4).
     auto ReseatTargetFor =
         [&](const Expr *Src, QualType T) -> std::pair<ReseatTarget, unsigned> {
       std::pair<ReseatTarget, unsigned> Fresh{ReseatTarget::Fresh, 0};
@@ -3372,7 +3386,9 @@ static void extractStdInitEvents(
                     *R.Entity};
             Targets.push_back(RT);
           });
-      if (Targets.size() != 1)
+      if (Targets.empty())
+        return Fresh;
+      if (!llvm::all_equal(Targets))
         return AnyTracked ? std::pair{ReseatTarget::Unknown, 0u} : Fresh;
       return Targets.front();
     };
@@ -3939,9 +3955,13 @@ static void extractStdInitEvents(
               Operands.push_back(
                   Storage.resolveFlowLeaf(Leaf, /*AsPointerValue=*/true));
             });
-        if (Operands.size() != 1)
-          continue;
-        if (Operands.front().Entity && !Operands.front().Subobject)
+        // A release kills the one whole entity every leaf names.
+        if (llvm::all_of(Operands,
+                         [&](const TrackedStorage::Resolution &R) {
+                           return R.Entity && !R.Subobject &&
+                                  R.Entity == Operands.front().Entity;
+                         }) &&
+            !Operands.empty())
           BlockEvents.push_back(
               {DefAssignEventKind::Kill, *Operands.front().Entity, DE});
       } else if (const auto *ILE = dyn_cast<InitListExpr>(St)) {

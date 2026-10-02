@@ -2314,6 +2314,16 @@ void test_now_init_ternary_arms(bool c) {
   (void)m;
 }
 
+// A [[now_init]] argument whose arms name one storage initializes it
+void test_now_init_ternary_one_storage(bool c) {
+  int u [[uninit]];
+  now_init_fill(c ? &u : &u);
+  int *w = &u;                   // OK
+  int *m [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)w;
+  (void)m;
+}
+
 // A member is initialized as by a direct member store, with the same
 // boundaries: a member of a parameter-reached object is not flow-tracked.
 void test_now_init_member() {
@@ -2713,11 +2723,23 @@ void test_reseat_clears_destroyed(int *p [[ref_to_uninit]],
 // longer definitely initialized (the marked binding is legal again) nor
 // definitely uninitialized (the unmarked binding stays accepted), and no
 // destroyed state is recorded.
-void test_destroy_ternary_arm(int *p [[ref_to_uninit]], bool c) {
+void test_destroy_ternary_arm(int *p [[ref_to_uninit]],
+                              int *q [[ref_to_uninit]], bool c) {
   *p = 1;
-  nu_wipe(c ? p : p);
+  *q = 1;
+  nu_wipe(c ? p : q);
   take_uninit_ptr(p); // OK: the pointee is no longer definitely initialized
   int *u2 = p;        // OK: the pointee may still be initialized
+  (void)u2;
+}
+
+// A ternary-wrapped destroy whose arms name one pointer destroys its pointee
+void test_destroy_ternary_one_pointer(int *p [[ref_to_uninit]], bool c) {
+  *p = 1;
+  nu_wipe(c ? p : p);
+  take_uninit_ptr(p); // OK
+  int *u2 = p; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  nu_wipe(p); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
   (void)u2;
 }
 

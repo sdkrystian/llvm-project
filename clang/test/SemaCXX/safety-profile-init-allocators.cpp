@@ -216,6 +216,13 @@ void test_delete_then_destroy(int *p [[ref_to_uninit]]) {
   destroy_at(p); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}} \
                  // nobuiltin-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
 }
+// A delete whose arms name one pointer releases its referent
+void test_delete_ternary_one_pointer(int *p [[ref_to_uninit]], bool c) {
+  *p = 5;
+  delete (c ? p : p);
+  destroy_at(p); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}} \
+                 // nobuiltin-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+}
 // A genuine double destroy -- two [[now_uninit]] calls -- still fires, in
 // every profile-enforcing run (attribute-keyed, no builtin ID involved).
 void test_destroy_then_destroy(int *p [[ref_to_uninit]]) {

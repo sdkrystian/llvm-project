@@ -1275,15 +1275,6 @@ listed in :ref:`profiles-init-known-gaps`.
   model: a member assigned before the jump still counts as assigned after it.
 - A store through an alias of a pointer object (``int *&r = p; r = &u;``,
   ``*pp = &u``) is not checked: the alias cannot carry the target's marking.
-- A marked pointer whose referent the analysis cannot identify -- a copy
-  (``int *p2 [[ref_to_uninit]] = q;``) whose source ``q`` is later reseated
-  to an untracked source, a conditional initializer with a tracked arm
-  (``c ? &u : &v``), a store whose target names several pointers or a
-  marked pointer on only some of its arms (``(c ? p : q) = &u``,
-  ``(c ? p : r) = &u``), a ``__block`` pointer -- fires in neither
-  direction through the pointer, a store or ``[[now_init]]`` call through
-  it credits nothing, and a marked binding to it asserts nothing: a later
-  ``int *w = &u`` stays the unmarked-direction error.
 - ``[[uninit]]`` on a type whose default constructor is explicitly defaulted
   *after* its first declaration is accepted only once the ``= default``
   definition has been parsed: a marker written between the class definition
