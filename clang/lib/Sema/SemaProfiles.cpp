@@ -1541,6 +1541,10 @@ struct KnownCalleeEntry {
   unsigned Param = 0;
   /// What the callee does to the storage bound to Param.
   KnownParamRole Role = KnownParamRole::None;
+  /// A Construct role that applies only where default-initialization of
+  /// Param's pointee type leaves no scalar indeterminate
+  /// (defaultInitLeavesScalarIndeterminate); AssertUninit elsewhere.
+  bool ConstructIfDefaultInitDeterminate = false;
 
   bool isStdRow() const { return Arity != NotStdRow; }
 };
@@ -1573,13 +1577,15 @@ formRow(bool (*Form)(const FunctionDecl *), KnownCalleeReturn Return,
 }
 
 /// A row keyed by namespace-std name and arity.
-static constexpr KnownCalleeEntry stdRow(StringRef Name, unsigned Arity,
-                                         unsigned Param, KnownParamRole Role) {
+static constexpr KnownCalleeEntry
+stdRow(StringRef Name, unsigned Arity, unsigned Param, KnownParamRole Role,
+       bool ConstructIfDefaultInitDeterminate = false) {
   KnownCalleeEntry E;
   E.Name = Name;
   E.Arity = Arity;
   E.Param = Param;
   E.Role = Role;
+  E.ConstructIfDefaultInitDeterminate = ConstructIfDefaultInitDeterminate;
   return E;
 }
 
@@ -1666,14 +1672,14 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
     stdRow("uninitialized_value_construct", 3, 1, KnownParamRole::Construct),
     stdRow("uninitialized_value_construct_n", 2, 0, KnownParamRole::Construct),
     stdRow("uninitialized_value_construct_n", 3, 1, KnownParamRole::Construct),
-    stdRow("uninitialized_default_construct", 2, 0,
-           KnownParamRole::AssertUninit),
-    stdRow("uninitialized_default_construct", 3, 1,
-           KnownParamRole::AssertUninit),
-    stdRow("uninitialized_default_construct_n", 2, 0,
-           KnownParamRole::AssertUninit),
-    stdRow("uninitialized_default_construct_n", 3, 1,
-           KnownParamRole::AssertUninit),
+    stdRow("uninitialized_default_construct", 2, 0, KnownParamRole::Construct,
+           /*ConstructIfDefaultInitDeterminate=*/true),
+    stdRow("uninitialized_default_construct", 3, 1, KnownParamRole::Construct,
+           /*ConstructIfDefaultInitDeterminate=*/true),
+    stdRow("uninitialized_default_construct_n", 2, 0, KnownParamRole::Construct,
+           /*ConstructIfDefaultInitDeterminate=*/true),
+    stdRow("uninitialized_default_construct_n", 3, 1, KnownParamRole::Construct,
+           /*ConstructIfDefaultInitDeterminate=*/true),
     stdRow("destroy", 2, 0, KnownParamRole::Destroy),
     stdRow("destroy", 3, 1, KnownParamRole::Destroy),
     stdRow("destroy_n", 2, 0, KnownParamRole::Destroy),
@@ -1761,6 +1767,15 @@ SemaProfiles::getCalleeLifecycleRoles(const FunctionDecl *FD) {
   Roles.KnownParam = M.Entry->Param;
   Roles.KnownRole = M.Entry->Role;
   Roles.KnownTrusted = M.Trusted;
+  if (M.Entry->ConstructIfDefaultInitDeterminate) {
+    // The value type is the pointee of the instantiated range parameter.
+    QualType T = FD->getParamDecl(M.Entry->Param)->getType()->getPointeeType();
+    llvm::SmallPtrSet<const CXXRecordDecl *, 8> Visited;
+    if (T->isIncompleteType() ||
+        defaultInitLeavesScalarIndeterminateImpl(
+            FD->getASTContext(), T, /*HonorUninitMarkers=*/true, Visited))
+      Roles.KnownRole = KnownParamRole::AssertUninit;
+  }
   return Roles;
 }
 

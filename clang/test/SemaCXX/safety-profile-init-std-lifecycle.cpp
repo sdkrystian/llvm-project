@@ -243,7 +243,7 @@ void value_construct() {
   (void)y;
 }
 
-// default_construct and its _n form take an uninitialized range and credit nothing
+// default_construct of int takes an uninitialized range and credits nothing
 void default_construct() {
   int a [[uninit]] [3], b [[uninit]] [3];
   std::uninitialized_default_construct(a, a + 3);
@@ -253,6 +253,24 @@ void default_construct() {
   int c[3] = {};
   std::uninitialized_default_construct(c, c + 3); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   (void)y; (void)z;
+}
+
+// default_construct of a trivial class credits nothing
+struct Trivial { int v; };
+int default_construct_trivial(Trivial *p [[ref_to_uninit]]) {
+  std::uninitialized_default_construct_n(p, 1);
+  return p->v; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// default_construct initializes a range whose default-initialization leaves nothing indeterminate
+struct UserCtor { UserCtor(); int v; };
+struct AllNSDMI { int v = 0; };
+int default_construct_determinate(UserCtor *p [[ref_to_uninit]],
+                                  AllNSDMI *q [[ref_to_uninit]]) {
+  std::uninitialized_default_construct(p, p + 1);
+  std::uninitialized_default_construct_n(q, 1);
+  std::uninitialized_default_construct_n(q, 1); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  return p->v + q->v; // OK
 }
 
 // A class-type iterator is outside the marker: the call is inert

@@ -859,20 +859,22 @@ execution-policy overload, so the range must refer to uninitialized memory -- an
 initialized range is rejected, like the paper's
 ``uninitialized_fill(a1, 10)`` -- and is initialized whole by the call, while
 the source range of the copy and move forms is an ordinary unmarked parameter.
-``uninitialized_default_construct`` and its ``_n`` form require an uninitialized
-range and initialize nothing: default-initialization leaves a scalar
-indeterminate, so the range stays uninitialized.  The treatment applies where
-the iterator is a pointer (``arr, arr + n``); a call with a class-type iterator
-checks and initializes nothing.  The §4.4 ``now_init()`` identity function is
-treated the same way: the parameter of a ``std::now_init`` with one pointer
-parameter is treated as marked, so its argument must refer to uninitialized
-memory, its unmarked return is trusted as initialized (``*std::now_init(p)``
-reads the storage ``p`` refers to without verification -- the paper's
-"cast in disguise"), and the argument's own storage keeps its state (§6.1: use
-the returned pointer, not the original name); only the attribute legalizes the
-original *name* after the call.  The treatment is the call's alone: inside a
-library's definition the parameters carry only the markers the library wrote.
-The paper's marked definition
+``uninitialized_default_construct`` and its ``_n`` form initialize the range
+only where default-initialization of the value type leaves no scalar
+indeterminate -- a user-provided default constructor, a default member
+initializer on every scalar, ``std::string`` (§2) -- and otherwise require an
+uninitialized range that stays uninitialized (``int``, a trivial class).  The
+treatment applies where the iterator is a pointer (``arr, arr + n``); a call
+with a class-type iterator checks and initializes nothing.  The §4.4
+``now_init()`` identity function is treated the same way: the parameter of a
+``std::now_init`` with one pointer parameter is treated as marked, so its
+argument must refer to uninitialized memory, its unmarked return is trusted as
+initialized (``*std::now_init(p)`` reads the storage ``p`` refers to without
+verification -- the paper's "cast in disguise"), and the argument's own storage
+keeps its state (§6.1: use the returned pointer, not the original name); only
+the attribute legalizes the original *name* after the call.  The treatment is
+the call's alone: inside a library's definition the parameters carry only the
+markers the library wrote.  The paper's marked definition
 ``T* now_init(T* p [[ref_to_uninit]]) { return p; }`` violates the binding
 rule -- in a system header the `System Headers`_ exemption covers it, under
 ``-fno-profiles-exempt-system-headers`` the library writes

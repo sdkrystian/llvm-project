@@ -18,6 +18,7 @@ namespace std {
 template <class T, class... A> T *construct_at(T *p, A &&...args);
 template <class T> void destroy_at(T *p);
 template <class It, class T> void uninitialized_fill(It first, It last, const T &x);
+template <class It> void uninitialized_default_construct(It first, It last);
 } // namespace std
 
 //--- lib.cppm
@@ -28,6 +29,7 @@ export namespace std {
 using std::construct_at;
 using std::destroy_at;
 using std::uninitialized_fill;
+using std::uninitialized_default_construct;
 } // namespace std
 
 //--- use.cpp
@@ -60,6 +62,13 @@ int fill() {
   int a [[uninit]] [2];
   std::uninitialized_fill(a, a + 2, 0);
   return a[0];
+}
+
+// default_construct initializes a range whose default-initialization leaves nothing indeterminate
+struct NS { int v = 0; };
+int default_construct(NS *p [[ref_to_uninit]]) {
+  std::uninitialized_default_construct(p, p + 1);
+  return p->v;
 }
 
 //--- use-hu.cpp
