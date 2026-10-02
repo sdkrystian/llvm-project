@@ -2,6 +2,7 @@
 // RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -isystem %t/sys %t/corners.cpp
 // RUN: %clang_cc1 -fsyntax-only -verify=expected,omp -fprofiles -fprofiles-verify-deferred-checks -fopenmp -std=c++23 -isystem %t/sys %t/corners.cpp
 // RUN: %clang_cc1 -fsyntax-only -verify=expected,blocks -fprofiles -fprofiles-verify-deferred-checks -fblocks -std=c++23 -isystem %t/sys %t/corners.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -triple x86_64-windows-msvc -fms-extensions -DSEH -std=c++23 -isystem %t/sys %t/corners.cpp
 
 // The shapes the verification of std::init's deferred checks depends on
 // (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage (std::init)"): under
@@ -284,3 +285,38 @@ CoTask coroutine_await_uninit() {
 
 // A system-header body is not analyzed
 void call_sys_body() { sys_body(); }
+
+#ifdef SEH
+[[now_uninit]] void kill(int *p);
+
+// A body with an SEH __finally gets no flow-based checks
+void seh_finally(int *p [[ref_to_uninit]]) {
+  int u [[uninit]];
+  sink(&u);
+  int r = *p;
+  int v [[uninit]];
+  v = 1;
+  kill(&v);
+  kill(&v);
+  int w [[uninit]];
+  int x = w;
+  int y; // expected-error {{variable 'y' must be initialized or marked '[[uninit]]' under profile 'std::init'}}
+  (void)r; (void)x; (void)y;
+  __try {
+  } __finally {
+  }
+}
+
+// A constructor body with an SEH __finally gets no member-read check
+struct SehCtor {
+  int m [[uninit]];
+  SehCtor() {
+    int x = m;
+    (void)x;
+    m = 1;
+    __try {
+    } __finally {
+    }
+  }
+};
+#endif

@@ -1210,10 +1210,6 @@ listed in :ref:`profiles-init-known-gaps`.
   ``[[ref_to_uninit]]``, is the workaround -- the parameter marker keeps
   ``destroy_uninit`` from rejecting the release of a buffer that was
   never written (a release function's contract, unlike a destroy's).
-- A function body whose control flow the analysis cannot model -- one with an
-  Objective-C ``@finally`` or an SEH ``__finally`` -- gets none of the
-  flow-based checks: its bindings, reads, and stores of flow-tracked storage
-  are not diagnosed.
 - The read analysis of a plain ``[[uninit]]`` local considers no exception
   paths: after ``try { x = f(); } catch (...) {}`` a read of ``x`` is
   accepted although the handler path skips the assignment.  The member

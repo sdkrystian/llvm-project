@@ -83,15 +83,33 @@ void test_boxed() {
   (void)s;
 }
 
-// A body whose CFG cannot be built is not judged by flow
-void test_finally(A *a) {
+// A body with an @finally gets no flow-based checks
+void test_finally(A *a, int *p [[ref_to_uninit]]) {
   int u [[uninit]];
+  [a take:&u]; // OK
+  [a take:p]; // OK
+  int x = u; // OK
+  int y; // expected-error {{variable 'y' must be initialized or marked '[[uninit]]' under profile 'std::init'}}
+  (void)x; (void)y;
   u = 1;
   [a take:&u]; // OK
   @try {
   } @finally {
   }
 }
+
+// A constructor body with an @finally gets no member-read check
+struct FinallyCtor {
+  int m [[uninit]];
+  FinallyCtor() {
+    int x = m; // OK
+    (void)x;
+    m = 1;
+    @try {
+    } @finally {
+    }
+  }
+};
 
 // A message inside a method body is judged by the method's own flow
 @implementation A

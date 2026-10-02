@@ -1129,3 +1129,13 @@ Missed Diagnostics
   ``allocate_shared_for_overwrite`` return smart pointers, which cannot carry
   the marker; a read through one is accepted (P4222R2 §4.7).
   ``allocate_at_least`` returns a class and is unrecognized.
+- A function body that contains an Objective-C ``@finally`` or an SEH
+  ``__finally`` anywhere has no CFG (``CFGBuilder`` models neither), so none of
+  its flow-based checks run: reads of ``[[uninit]]`` locals and of tracked
+  members before their initialization, and every binding, destroy
+  (``destroy_uninit``, ``double_destroy``), read through a marker, and subobject
+  store of flow-tracked storage are accepted -- ``verifyDeferredInitSites``
+  drops the body's deferred checks.  A lambda or block inside such a body is
+  analyzed on its own, and the parse-time checks -- the declaration and
+  constructor rules, and every check of storage that is not flow-tracked --
+  still apply.
