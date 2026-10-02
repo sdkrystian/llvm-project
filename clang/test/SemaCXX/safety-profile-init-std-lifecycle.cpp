@@ -648,14 +648,38 @@ void user() {
 }
 
 //--- va.cpp
-// A va_list is checked like other storage; va_arg binds a class-type va_list
-// (AArch64, ARM) to a reference.
+// va_start and va_copy initialize their va_list whatever its state; va_arg
+// binds a class-type va_list (AArch64, ARM) to a reference.
 [[profiles::enforce(std::init)]];
 
-// va_arg reads its va_list
-int va_arg_reads(int n, ...) {
+// The canonical variadic idiom
+int sum(int n, ...) {
+  __builtin_va_list ap [[uninit]];
+  __builtin_va_start(ap, n);
+  int r = __builtin_va_arg(ap, int);
+  __builtin_va_end(ap);
+  return r;
+}
+
+// va_copy initializes its destination and reads its source
+int copy(int n, ...) {
+  __builtin_va_list ap [[uninit]], aq [[uninit]];
+  __builtin_va_copy(aq, ap); // array-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}} \
+                             // record-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  __builtin_va_start(ap, n);
+  __builtin_va_copy(aq, ap);
+  int r = __builtin_va_arg(aq, int);
+  __builtin_va_end(aq);
+  __builtin_va_end(ap);
+  return r;
+}
+
+// va_arg and va_end before va_start read an uninitialized va_list
+int before_start(int n, ...) {
   __builtin_va_list ap [[uninit]];
   int r = __builtin_va_arg(ap, int); // record-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  __builtin_va_end(ap); // array-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}} \
+                        // record-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   return r;
 }
 

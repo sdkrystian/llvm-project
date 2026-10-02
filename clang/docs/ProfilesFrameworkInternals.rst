@@ -883,7 +883,8 @@ parameter the call acts on, and what the call does to the storage bound to it
 arguments are ordinary bindings.  A row's *initializing parameter* is a role
 parameter whose storage the callee initializes whatever its prior state (the
 destination of ``memset``, ``memcpy``, and ``memmove``, and of their fortified
-``_chk`` builtins).  The binding to it is accepted in any live state, and the
+``_chk`` builtins, and the ``va_list`` of ``va_start`` and the destination of
+``va_copy``).  The binding to it is accepted in any live state, and the
 flow pass writes the argument's storage whole on a trusted match only: by name
 the acceptance survives but the credit does not, mirroring the release rows'
 ``Kill``, because a credit suppresses later diagnostics.  Unlike
@@ -1109,3 +1110,11 @@ Missed Diagnostics
   credited although P4222R2 §6 asks for ``construct_at``.
 - ``va_arg`` on an array or pointer ``va_list`` (x86-64, i386, Windows) binds
   nothing, so a ``va_arg`` before ``va_start`` is accepted there.
+- An argument of a builtin that Clang type-checks itself (other than
+  ``va_start``'s ``va_list``: ``__builtin_launder(&u)``,
+  ``__builtin_align_up(&u, 16)``, an atomic builtin's value operand), an
+  Objective-C boxed expression's operand, and a coroutine parameter passed to
+  its promise's constructor are not checked when they name flow-tracked
+  storage.
+- ``va_end`` ends nothing: a ``va_arg`` or a second ``va_end`` after it is
+  accepted.

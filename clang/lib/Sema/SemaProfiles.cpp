@@ -1504,8 +1504,8 @@ using KnownParamRole = SemaProfiles::KnownParamRole;
 
 /// A row of the known-callee table (KnownCallees): what a library callee
 /// returns and what it does to the storage bound to one role parameter. A
-/// row is keyed by builtin ID (the C allocation and memory families), by a
-/// form predicate (the operator new/delete families, which never carry a
+/// row is keyed by builtin ID (the C allocation, memory, and va_list families),
+/// by a form predicate (the operator new/delete families, which never carry a
 /// builtin ID), or by a namespace-std name and arity (the std lifecycle
 /// functions) -- the library knowledge P4222R2 §4.4 asks for, looked up at
 /// each call, so the library's declarations carry no annotation and a module
@@ -1650,6 +1650,24 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
                KnownParamRole::InitializeAnyState),
     builtinRow(Builtin::BI__builtin___memmove_chk,
                KnownCalleeReturn::ReturnsInitialized, "",
+               KnownParamRole::InitializeAnyState),
+    builtinRow(Builtin::BI__builtin_va_start, KnownCalleeReturn::ReturnsTrusted,
+               "", KnownParamRole::InitializeAnyState),
+    builtinRow(Builtin::BI__builtin_c23_va_start,
+               KnownCalleeReturn::ReturnsTrusted, "",
+               KnownParamRole::InitializeAnyState),
+    builtinRow(Builtin::BI__builtin_stdarg_start,
+               KnownCalleeReturn::ReturnsTrusted, "",
+               KnownParamRole::InitializeAnyState),
+    builtinRow(Builtin::BI__va_start, KnownCalleeReturn::ReturnsTrusted, "",
+               KnownParamRole::InitializeAnyState),
+    builtinRow(Builtin::BI__builtin_ms_va_start,
+               KnownCalleeReturn::ReturnsTrusted, "",
+               KnownParamRole::InitializeAnyState),
+    builtinRow(Builtin::BI__builtin_va_copy, KnownCalleeReturn::ReturnsTrusted,
+               "", KnownParamRole::InitializeAnyState),
+    builtinRow(Builtin::BI__builtin_ms_va_copy,
+               KnownCalleeReturn::ReturnsTrusted, "",
                KnownParamRole::InitializeAnyState),
     stdRow("construct_at", KnownCalleeEntry::AnyArity, 0,
            KnownParamRole::Construct),

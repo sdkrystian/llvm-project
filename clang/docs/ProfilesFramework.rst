@@ -975,6 +975,13 @@ only the acceptance survives, so a later read of the destination is
 diagnosed there, while the ``__builtin_`` spellings keep their IDs
 everywhere.
 
+``va_start`` and ``va_copy`` are recognized the same way: their ``va_list``
+destination accepts storage in any state and is initialized by the call, so
+``va_list ap [[uninit]]; va_start(ap, n); ... va_end(ap);`` is the variadic
+idiom (a ``va_list`` with neither an initializer nor the marker is
+``uninit_decl``), while ``va_copy``'s source and ``va_end``'s operand are
+ordinary unmarked parameters, so an uninitialized ``va_list`` is rejected there.
+
 
 Constructors
 ------------
@@ -1206,11 +1213,6 @@ listed in :ref:`profiles-init-known-gaps`.
   ``[[ref_to_uninit]]``, is the workaround -- the parameter marker keeps
   ``destroy_uninit`` from rejecting the release of a buffer that was
   never written (a release function's contract, unlike a destroy's).
-- An argument of a builtin that Clang type-checks itself
-  (``__builtin_launder(&u)``, ``__builtin_align_up(&u, 16)``, an atomic
-  builtin's value operand), an Objective-C boxed expression's operand, and a
-  coroutine parameter passed to its promise's constructor are not checked
-  when they name flow-tracked storage.
 - A function body whose control flow the analysis cannot model -- one with an
   Objective-C ``@finally`` or an SEH ``__finally`` -- gets none of the
   flow-based checks: its bindings, reads, and stores of flow-tracked storage

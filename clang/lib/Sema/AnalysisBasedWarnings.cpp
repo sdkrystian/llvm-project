@@ -2858,9 +2858,10 @@ static LeafState formState(SemaProfiles::InitSourceState S) {
 /// copy-initialized). A defaulted argument, judged at its declaration, is
 /// skipped. A builtin with custom type checking binds nothing except
 /// __builtin_operator_new / __builtin_operator_delete, whose arguments bind
-/// type-only parameters, and a builtin that never evaluates its arguments
-/// binds nothing. The one parameter walk behind every argument arm of
-/// extractStdInitEvents and appendLifecycleCallEvents.
+/// type-only parameters, and a known callee's role parameter (va_start's
+/// va_list), which binds its declared parameter; a builtin that never evaluates
+/// its arguments binds nothing. The one parameter walk behind every argument
+/// arm of extractStdInitEvents and appendLifecycleCallEvents.
 static void forEachArgumentBinding(
     const ASTContext &Ctx, const Expr *CallLike,
     llvm::function_ref<void(const ParmVarDecl *Parm, QualType ParamTy,
@@ -2888,9 +2889,19 @@ static void forEachArgumentBinding(
       return;
     if (ID && Ctx.BuiltinInfo.hasCustomTypechecking(ID)) {
       if (ID == Builtin::BI__builtin_operator_new ||
-          ID == Builtin::BI__builtin_operator_delete)
+          ID == Builtin::BI__builtin_operator_delete) {
         for (const Expr *Arg : CE->arguments())
           F(nullptr, Arg->getType(), Arg, /*Variadic=*/false);
+        return;
+      }
+      // A known callee's role parameter (va_start's va_list) is checked
+      // against its declaration like an ordinary argument.
+      if (std::optional<unsigned> I =
+              SemaProfiles::getCalleeLifecycleRoles(Callee).KnownParam;
+          I && *I < CE->getNumArgs()) {
+        const ParmVarDecl *Parm = Callee->getParamDecl(*I);
+        F(Parm, Parm->getType(), CE->getArg(*I), /*Variadic=*/false);
+      }
       return;
     }
     if (CE->isUnevaluatedBuiltinCall(Ctx))
