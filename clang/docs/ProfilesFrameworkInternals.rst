@@ -921,7 +921,11 @@ identified referent named by a marked binding is asserted unassigned (``Must``
 and ``May`` cleared, ``Destroyed`` and ``Esc`` kept); the ``Reseat`` follows the
 binding's ``Binding`` event in block order, so the judgment sees the
 pre-assertion state.  A binding to a marked parameter is a ``Binding`` event
-only and asserts nothing.  The pass reports the ``ref_to_uninit`` judgments of
+only and asserts nothing.  A tracked local's DeclStmt emits a ``Reset`` of its
+``[[uninit]]`` entity and of its member entities ahead of the declaration's own
+binding and copy events, clearing every bit: each execution of the declaration
+starts a new, unassigned object.  A marked pointer or reference is reseated by
+its initializer instead.  The pass reports the ``ref_to_uninit`` judgments of
 the body's bindings, the ``double_destroy`` / ``destroy_uninit`` judgments of
 its ``[[now_uninit]]`` calls, and the ``uninit_read`` / ``uninit_write``
 judgments of its reads through and stores below tracked storage at their
@@ -1040,3 +1044,9 @@ Missed Diagnostics
   (``return std::as_const(u);``), and a later read after such a call, is not
   diagnosed: the plain-local analysis counts the call as an escape that
   initializes the local (it recognizes ``std::move`` alone).
+- A jump past a tracked local's declaration into its scope -- a ``goto`` to a
+  label after it, a ``switch`` case label below it -- skips the declaration's
+  ``Reset``, so in a loop the storage keeps the state the previous iteration
+  left:
+  ``while (n--) { if (c) goto m; { int u [[uninit]]; m: sink(&u); u = 1; } }``
+  is accepted.

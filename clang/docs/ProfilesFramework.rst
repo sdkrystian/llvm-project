@@ -786,8 +786,9 @@ unmarked ``&u`` is rejected until ``u`` is stored -- and a destroyed
 referent stays destroyed.  A source the analysis does not track (an
 allocation, pointer arithmetic, a subobject, a decayed array) gives it an
 anonymous referent; paths that bind it differently leave the referent
-unidentified: nothing is asserted and nothing fires through the pointer.
-For tracked storage
+unidentified: nothing is asserted and nothing fires through the pointer.  Each
+execution of a tracked local's declaration -- a loop's next iteration, a
+backward ``goto`` -- begins a new, uninitialized object.  For tracked storage
 the binding is judged where it occurs, by the same local analysis that
 checks reads (§1.3): a whole-entity store (``u = 5``, ``*p = 5``, ``r = 5``,
 ``a.m = 5``, ``this->m = 5``), a ``[[now_init]]`` call, or
@@ -1282,9 +1283,6 @@ listed in :ref:`profiles-init-known-gaps`.
   initialized by the most-derived class).
 - A read of a tracked member inside another member's default initializer is
   not detected.
-- A backward ``goto`` across a tracked local's declaration
-  default-initializes the object again, which the member dataflow does not
-  model: a member assigned before the jump still counts as assigned after it.
 - A store through an alias of a pointer object (``int *&r = p; r = &u;``,
   ``*pp = &u``) is not checked: the alias cannot carry the target's marking.
 - ``[[uninit]]`` on a type whose default constructor is explicitly defaulted

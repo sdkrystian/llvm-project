@@ -2172,17 +2172,19 @@ TrackedStorage::markedPointerObject(const SemaProfiles::ShapeLeaf &Leaf) const {
 /// names an identified referent (Entity, ViaPointer), asserts it unassigned:
 /// Must and May cleared, Destroyed and Esc kept. Escape: Idx may have been
 /// destroyed or released on one of several arms, so it is possibly
-/// assigned, not definitely, and not destroyed. AggregateEscape: the tracked
-/// aggregate local owning member Idx escapes as a whole (a non-benign
-/// DeclRefExpr), so reads of the member are trusted from here (the local
-/// read leniency) while its assignment state is unchanged. Binding: a
-/// pointer or reference binding whose source has a tracked leaf
-/// (BindingSites[Aux]), judged by the binding rule. ReadThrough /
+/// assigned, not definitely, and not destroyed. Reset: Idx belongs to a local
+/// whose declaration runs here, which begins a new object each time (a loop's
+/// next iteration, a backward goto): unassigned, not escaped, and not
+/// destroyed. AggregateEscape: the tracked aggregate local owning member Idx
+/// escapes as a whole (a non-benign DeclRefExpr), so reads of the member are
+/// trusted from here (the local read leniency) while its assignment state is
+/// unchanged. Binding: a pointer or reference binding whose source has a
+/// tracked leaf (BindingSites[Aux]), judged by the binding rule. ReadThrough /
 /// SubobjectWrite: a read through, or a store below, tracked storage
 /// (AccessSites[Aux]), judged by uninit_read / uninit_write. An event on a
 /// Pointee entity acts on the storage the pointer refers to at its program
-/// point (referent). Every event carries the anchor expression the
-/// diagnostic and the suppression walk use.
+/// point (referent). Every event but a Reset carries the anchor expression
+/// the diagnostic and the suppression walk use.
 enum class DefAssignEventKind {
   Read,
   Write,
@@ -2193,6 +2195,7 @@ enum class DefAssignEventKind {
   Destroy,
   Reseat,
   Escape,
+  Reset,
   AggregateEscape,
   Binding,
   ReadThrough,
@@ -2624,6 +2627,12 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
         St.Destroyed.reset(*R);
       }
       break;
+    case DefAssignEventKind::Reset:
+      St.Must.reset(Ev.Idx);
+      St.May.reset(Ev.Idx);
+      St.Esc.reset(Ev.Idx);
+      St.Destroyed.reset(Ev.Idx);
+      break;
     case DefAssignEventKind::AggregateEscape:
       St.Esc.set(Ev.Idx);
       break;
@@ -2650,7 +2659,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
 /// the event replay above -- the same replay the reporting pass uses. Every
 /// transfer is monotone in each lattice (Read, Write, ReadWrite, MayWrite,
 /// and AggregateEscape only set bits, Copy projects the source's bits, Kill,
-/// Destroy, Reseat, and Escape are constant functions of their bits -- a
+/// Destroy, Reseat, Escape, and Reset are constant functions of their bits -- a
 /// Reseat's assertion clears its referent's Must and May like Kill), so a
 /// block's exit only ever descends from the join identity in a finite
 /// lattice and the iteration terminates. A pointer's Target lattice is flat
@@ -2706,8 +2715,8 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
     // Enqueue-skip subtlety: ExitState starts at the join identity, and a
     // block whose computed exit *equals* its stored exit enqueues no
     // successors. A transfer that drops a bit (Kill, Destroy, Reseat,
-    // Escape) makes a block entered at the identity exit *below* it, so a
-    // reachable block's first visit must propagate even when its computed
+    // Escape, Reset) makes a block entered at the identity exit *below* it, so
+    // a reachable block's first visit must propagate even when its computed
     // exit equals the stored identity (the Visited disjunct below) -- which
     // also makes Visited mean exactly "reachable from the entry".
     // Unreachable blocks are never enqueued (only successors of dequeued
@@ -3240,13 +3249,14 @@ static void collectCtorBodyStmts(const CXXConstructorDecl *Ctor,
 /// (appendLifecycleCallEvents); a this-capturing lambda reads members at its
 /// creation; a non-benign DeclRefExpr of a tracked aggregate local is an escape
 /// (the read leniency for locals, ProfilesFramework.rst, "Reads of
-/// Uninitialized Objects"); a tracked copy's DeclStmt copies each member's
-/// state. Every pointer or reference binding the body performs -- a variable or
-/// member initializer, an aggregate element, a call or constructor argument
-/// (declared, variadic, or the implicit object argument), a placement
-/// argument, an Objective-C message argument, a return, a throw, a
-/// new-expression's initializer, a pointer assignment, a lambda capture --
-/// becomes a Binding site when a leaf of its source names tracked storage
+/// Uninitialized Objects"); a tracked local's DeclStmt resets its storage
+/// (Reset), after which a tracked copy's copies each member's state. Every
+/// pointer or reference binding the body performs -- a variable or member
+/// initializer, an aggregate element, a call or constructor argument (declared,
+/// variadic, or the implicit object argument), a placement argument, an
+/// Objective-C message argument, a return, a throw, a new-expression's
+/// initializer, a pointer assignment, a lambda capture -- becomes a Binding
+/// site when a leaf of its source names tracked storage
 /// (SemaProfiles::isFlowTrackedLeaf: the parse-time funnel left exactly those
 /// to this pass), its other leaves classified by form; a binding that hands out
 /// a mutable alias of a marked pointer (`T *&` to `p`, `T **` to `&p`, a
@@ -3865,6 +3875,18 @@ static void extractStdInitEvents(
           const auto *V = dyn_cast<VarDecl>(Dcl);
           if (!V || V->isInvalidDecl())
             continue;
+          // A tracked object's storage is a new object, unassigned, each time
+          // its declaration runs.
+          if (auto It = Storage.LocalEntity.find(V);
+              It != Storage.LocalEntity.end() &&
+              Storage.Entities[It->second].K == TrackedEntity::Kind::WholeLocal)
+            BlockEvents.push_back(
+                {DefAssignEventKind::Reset, It->second, nullptr});
+          if (auto It = Storage.LocalRange.find(V);
+              It != Storage.LocalRange.end())
+            for (unsigned Idx = It->second.first; Idx != It->second.second;
+                 ++Idx)
+              BlockEvents.push_back({DefAssignEventKind::Reset, Idx, nullptr});
           // The variable's own binding (a decomposition's hidden variable
           // included); the DeclStmt element follows its initializer's
           // subexpression elements, so the judgment sees their effects.

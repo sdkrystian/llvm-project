@@ -2438,6 +2438,37 @@ void test_referent_in_loop(bool c) {
   }
 }
 
+// Each iteration's declaration begins a new, unassigned object
+void test_loop_local_redeclared(int n) {
+  for (int i = 0; i < n; ++i) {
+    int u [[uninit]];
+    ni_sink(&u); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+    u = i;
+    MemberCredit a;
+    mc_sink_ptr(&a.m); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+    a.m = i;
+  }
+}
+
+// A loop body's destroy before any store finds the new object unassigned
+void test_loop_local_redeclared_destroy(int n) {
+  while (n--) {
+    int u [[uninit]];
+    nu_wipe_in_loop(&u); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+    u = n;
+  }
+}
+
+// A backward goto across a tracked local's declaration begins a new object
+void test_backward_goto_redeclares(bool c) {
+again:
+  MemberCredit a;
+  mc_sink_ptr(&a.m); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  a.m = 1;
+  if (c)
+    goto again;
+}
+
 // A copy of a captured marked pointer refers to what the capture refers to:
 // the enclosing body decides its state until the copy's marker asserts it
 // uninitialized.
