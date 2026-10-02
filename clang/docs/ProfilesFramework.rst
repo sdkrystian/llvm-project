@@ -678,15 +678,15 @@ A pointer or reference must be bound consistently with its
 ``[[ref_to_uninit]]`` marking (rule ``ref_to_uninit``, §4.3): a marked
 pointer, reference, or function return may only refer to uninitialized
 memory, and an unmarked one only to initialized memory.  Whether a source
-refers to uninitialized memory is recognized from its form -- the address or
-a subobject of an ``[[uninit]]`` entity, the value or dereference of a
-marked pointer or reference, pointer and reference casts of those and the
-standard identity functions applied to them, a call to a marked function, a call
-to a known allocator (``malloc``, ``aligned_alloc``, ``alloca``, and raw
-``::operator new`` calls return uninitialized memory, ``calloc``
-zero-initialized memory, and ``realloc`` is unclassified; §4.3 -- trusted
-recognition keys on Clang's builtin IDs, and where those are absent, under
-``-fno-builtin`` or ``-ffreestanding``, a name-recognized allocator is
+refers to uninitialized memory is recognized from its form -- the address
+(``&x``, ``std::addressof(x)``) or a subobject of an ``[[uninit]]`` entity, the
+value or dereference of a marked pointer or reference, pointer and reference
+casts of those and the standard identity functions applied to them, a call to a
+marked function, a call to a known allocator (``malloc``, ``aligned_alloc``,
+``alloca``, and raw ``::operator new`` calls return uninitialized memory,
+``calloc`` zero-initialized memory, and ``realloc`` is unclassified; §4.3 --
+trusted recognition keys on Clang's builtin IDs, and where those are absent,
+under ``-fno-builtin`` or ``-ffreestanding``, a name-recognized allocator is
 *untrusted*: unclassified, so neither binding direction diagnoses -- never
 trusted as initialized like an arbitrary callee; the
 ``operator new``/``operator delete`` families are recognized by form and keep
@@ -815,11 +815,11 @@ The standard identity functions -- ``std::move``, ``std::forward``,
 ``std::forward_like``, ``std::move_if_noexcept``, and ``std::as_const`` -- are
 as transparent as such a cast: ``*std::move(p)`` reads what ``*p`` reads,
 ``int *q = std::move(p)`` binds what ``int *q = p`` binds, and the call itself
-binds nothing.  Whole-object assignment of a class-type referent never
-initializes: it is a member ``operator=`` call on uninitialized storage,
-rejected as above.  (A ``void*`` escape of ``&p`` is not recognized: the missed
-reseat leaves the referent definitely initialized, which errs toward a false
-positive of the marked-target rule.)
+binds nothing; ``std::addressof(x)`` is ``&x``.  Whole-object assignment of a
+class-type referent never initializes: it is a member ``operator=`` call on
+uninitialized storage, rejected as above.  (A ``void*`` escape of ``&p`` is not
+recognized: the missed reseat leaves the referent definitely initialized, which
+errs toward a false positive of the marked-target rule.)
 
 One kind of call *does* count as initialization: §6.2's ``[[now_init]]``
 attribute (its placement and spelling track an open committee question)

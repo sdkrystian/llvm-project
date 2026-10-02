@@ -111,6 +111,7 @@ template <class It, class Size> It destroy_n(It first, Size n);
 template <class T, __SIZE_TYPE__ N> T *begin(T (&a)[N]);
 template <class T, __SIZE_TYPE__ N> T *end(T (&a)[N]);
 template <class T> struct allocator { T *allocate(__SIZE_TYPE__ n); };
+template <class T> T *addressof(T &r) noexcept;
 namespace ranges {
 inline constexpr struct {
   template <class R, class T> void operator()(R &&r, const T &x) const;
@@ -129,6 +130,16 @@ void lifecycle() {
   std::construct_at(&u, 5);
   int v = u; // OK: the callee initialized u
   std::destroy_at(&u);
+  (void)v;
+}
+
+// std::addressof hands the lifecycle calls the object itself
+void lifecycle_addressof() {
+  int u [[uninit]];
+  std::construct_at(std::addressof(u), 5);
+  int v = u; // OK
+  std::destroy_at(std::addressof(u));
+  std::destroy_at(std::addressof(u)); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
   (void)v;
 }
 

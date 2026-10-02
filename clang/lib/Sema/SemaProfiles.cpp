@@ -1436,7 +1436,9 @@ const ValueDecl *SemaProfiles::getDirectlyNamedDecl(const Expr *E) {
   return nullptr;
 }
 
-bool SemaProfiles::isShapeTransparentBuiltin(unsigned BuiltinID) {
+/// True for the builtin ID of a standard identity function
+/// (SemaProfiles::isIdentityCall).
+static bool isIdentityBuiltin(unsigned BuiltinID) {
   switch (BuiltinID) {
   case Builtin::BImove:
   case Builtin::BImove_if_noexcept:
@@ -1449,15 +1451,29 @@ bool SemaProfiles::isShapeTransparentBuiltin(unsigned BuiltinID) {
   }
 }
 
+bool SemaProfiles::isShapeTransparentBuiltin(unsigned BuiltinID) {
+  return isIdentityBuiltin(BuiltinID) || BuiltinID == Builtin::BIaddressof ||
+         BuiltinID == Builtin::BI__addressof;
+}
+
 bool SemaProfiles::isIdentityCall(const CallExpr *CE) {
-  return isShapeTransparentBuiltin(CE->getBuiltinCallee()) &&
-         CE->getNumArgs() == 1;
+  return isIdentityBuiltin(CE->getBuiltinCallee()) && CE->getNumArgs() == 1;
 }
 
 const Expr *SemaProfiles::addressOfOperand(const Expr *E) {
   if (const auto *UO = dyn_cast<UnaryOperator>(E);
       UO && UO->getOpcode() == UO_AddrOf)
     return UO->getSubExpr();
+  if (const auto *CE = dyn_cast<CallExpr>(E); CE && CE->getNumArgs() == 1) {
+    switch (CE->getBuiltinCallee()) {
+    case Builtin::BIaddressof:
+    case Builtin::BI__addressof:
+    case Builtin::BI__builtin_addressof:
+      return CE->getArg(0);
+    default:
+      break;
+    }
+  }
   return nullptr;
 }
 
@@ -1853,7 +1869,7 @@ pointerRefersToUninitStorage(ASTContext &Ctx, const Expr *E,
   if (E->getType()->isArrayType())
     return glvalueDenotesUninitStorage(Ctx, E, Opts.withoutTopLevelDrop());
 
-  // &G, where G denotes uninitialized storage.
+  // &G or std::addressof(G), where G denotes uninitialized storage.
   if (const Expr *G = SemaProfiles::addressOfOperand(E))
     return glvalueDenotesUninitStorage(Ctx, G, Opts);
 

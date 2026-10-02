@@ -3508,6 +3508,7 @@ template <class T> struct remove_reference<T &&> { using type = T; };
 template <class T> typename remove_reference<T>::type &&move(T &&t) noexcept;
 template <class T> T &&forward(typename remove_reference<T>::type &t) noexcept;
 template <class T> const T &as_const(T &t) noexcept;
+template <class T> T *addressof(T &r) noexcept;
 } // namespace std
 
 // A read through an identity call of a marked pointer reads its referent
@@ -3547,6 +3548,18 @@ int test_identity_reseat(int *p [[ref_to_uninit]], int *q [[ref_to_uninit]]) {
   *q = 1;
   (void)w;
   return *p; // OK: p refers to q's referent
+}
+
+// std::addressof binds like the address-of operator
+void test_addressof_binding() {
+  int u [[uninit]];
+  int *m [[ref_to_uninit]] = std::addressof(u); // OK
+  int *q = std::addressof(u);                   // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  int *b = __builtin_addressof(u);              // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  take_uninit_ptr(std::addressof(u));           // OK
+  u = 1;
+  int *w = std::addressof(u);                   // OK
+  (void)m; (void)q; (void)b; (void)w;
 }
 // A flow-tracked binding inside a function template is judged on each
 // instantiation's own CFG, with the instantiation note; a never-instantiated

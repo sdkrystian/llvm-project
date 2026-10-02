@@ -456,7 +456,9 @@ public:
   static const Expr *ignoreTransparentCasts(const Expr *E,
                                             ArrayRef<const Expr *> Arms = {});
 
-  /// The operand of the address-of step \p E (a built-in \c &), or null.
+  /// The operand of the address-of step \p E -- the operand of a built-in
+  /// \c &, or the argument of std::addressof, std::__addressof, or
+  /// __builtin_addressof -- or null.
   static const Expr *addressOfOperand(const Expr *E);
 
   /// True if \p CE calls one of the standard library functions that return
@@ -466,8 +468,9 @@ public:
   static bool isIdentityCall(const CallExpr *CE);
 
   /// True if \p BuiltinID names a function whose call the std::init checks
-  /// see through (isIdentityCall): such a call binds nothing, and its
-  /// argument is judged where the result is used.
+  /// see through -- an identity function (isIdentityCall), or std::addressof
+  /// and std::__addressof (addressOfOperand): such a call binds nothing, and
+  /// its argument is judged where the result is used.
   static bool isShapeTransparentBuiltin(unsigned BuiltinID);
 
   /// The construct a pointer or reference binding belongs to, selecting
