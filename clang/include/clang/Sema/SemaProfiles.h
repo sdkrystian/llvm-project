@@ -565,9 +565,10 @@ public:
   };
 
   /// The body whose flow pass judges a check deferred in \p DC: the
-  /// function, method, or block \p DC is, looking through OpenMP captured
-  /// regions (the enclosing function's CFG contains them) -- the check's
-  /// analysis owner -- or null when \p DC is no body (a local class).
+  /// function, method, or block \p DC is, looking through captured regions
+  /// (the enclosing function's CFG contains an OpenMP region's statements, not
+  /// any other's) -- the check's analysis owner -- or null when \p DC is no
+  /// body (a local class).
   static const Decl *flowAnalysisOwner(const DeclContext *DC);
 
   /// Hand the sites recorded for the analysis owner \p Body to its flow

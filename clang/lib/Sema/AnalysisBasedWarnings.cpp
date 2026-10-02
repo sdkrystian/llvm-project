@@ -4103,14 +4103,15 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
   }
 }
 
-/// Add to \p Out every expression below a construct of \p D's body that the
-/// CFG contains and the parse-time funnels check but the std::init flow engine
-/// does not enumerate: an argument of a builtin with custom type checking
-/// (other than __builtin_operator_new and __builtin_operator_delete, which
-/// forEachArgumentBinding zips), an atomic builtin's operand, and an
-/// Objective-C boxed expression's operand. A deferred check below one is a
-/// known gap (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage
-/// (std::init)").
+/// Add to \p Out every expression below a construct of \p D's body that the CFG
+/// contains and the parse-time funnels check but the std::init flow engine does
+/// not enumerate: an argument of a builtin with custom type checking (other
+/// than __builtin_operator_new and __builtin_operator_delete, which
+/// forEachArgumentBinding zips), an atomic builtin's operand, an Objective-C
+/// boxed expression's operand, and a captured statement's capture initializer,
+/// through which the region's statements use an enclosing variable in place. A
+/// deferred check below one is a known gap (ProfilesFrameworkInternals.rst,
+/// "Flow-Tracked Storage (std::init)").
 static void collectUnenumeratedExprs(const ASTContext &Ctx, const Decl *D,
                                      llvm::SmallPtrSetImpl<const Expr *> &Out) {
   auto AddSubtree = [&](const Stmt *Root) {
@@ -4135,6 +4136,9 @@ static void collectUnenumeratedExprs(const ASTContext &Ctx, const Decl *D,
     } else if (isa<AtomicExpr, ObjCBoxedExpr>(Cur)) {
       for (const Stmt *Child : Cur->children())
         AddSubtree(Child);
+    } else if (const auto *CS = dyn_cast<CapturedStmt>(Cur)) {
+      for (const Expr *Init : CS->capture_inits())
+        AddSubtree(Init);
     }
   });
 }

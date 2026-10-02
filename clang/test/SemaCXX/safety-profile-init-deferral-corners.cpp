@@ -86,6 +86,20 @@ struct StmtExprInit {
   StmtExprInit() : k(({ int t [[uninit]]; t = 1; sink(&t); 1; })) {} // OK
 };
 
+// A debug captured region's statements are not flow sites
+void debug_captured() {
+  int u [[uninit]];
+#pragma clang __debug captured
+  {
+    sink(&u);
+  }
+#pragma clang __debug captured
+  {
+    u = 1;
+  }
+  u = 1;
+}
+
 // An init-capture is judged by the enclosing function's flow
 void init_capture() {
   int u [[uninit]];

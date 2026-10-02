@@ -948,41 +948,40 @@ not contain -- an argument of a builtin that does not evaluate it or of a
 side-effecting ``__builtin_assume``, a ``[[assume]]`` assumption, an
 unselected ``_Generic`` association or ``__builtin_choose_expr`` arm, an
 OpenMP clause expression the directive evaluates through a helper, a
-coroutine's parameter copies and promise construction, or a
-body whose CFG cannot be built -- and is dropped.  So is a leftover below a
-construct the CFG contains but the engine does not enumerate
-(``collectUnenumeratedExprs``): an argument of a builtin with custom type
-checking, an atomic builtin's operand, and an Objective-C boxed expression's
-operand.  Neither side judges such a check, which is a known gap.  Any other
-leftover is an enumeration bug: ``-fprofiles-verify-deferred-checks``
-(``-cc1`` only; the ``std::init`` tests pass it) reports each one as an
-error, and in every build it is then judged by form.  The record is
-verification only, never the source of the pass's sites: TreeTransform
-reuses non-dependent nodes, which never re-enter the funnels, so the CFG
-derivation stays authoritative and the invariant checked is that recorded
-sites are a subset of judged ones.  No site is recorded where no flow pass
-judges it -- an evaluation context other than a potentially-evaluated one, a
-discarded statement, an immediate function context, a dependent context
-(each instantiation records its own), a defaulted function's synthesized
-body -- and the record of a body whose pass does not run is dropped
-(``Sema::PopFunctionScopeInfo``), as is that of a body with an error that
-is not a profile violation, whose recovery can discard the recorded
-expressions.  The pass's resolver
-(``TrackedStorage::resolve``) and the predicate share one lvalue-shape walk,
-``SemaProfiles::flowLeafShape``, so no binding falls between the two.  A
-templated body is never analyzed; each instantiation is analyzed on its own
-CFG, in which statements TreeTransform reused from the pattern are ordinary
-elements.  Consumers read the lattices as follows: a marked-target binding
-fires on ``Must`` and ``double_destroy`` on ``Destroyed``; an
+``#pragma clang __debug captured`` region's statements, a coroutine's parameter
+copies and promise construction, or a body whose CFG cannot be built -- and is
+dropped.  So is a leftover below a construct the CFG contains but the engine
+does not enumerate (``collectUnenumeratedExprs``): an argument of a builtin with
+custom type checking, an atomic builtin's operand, an Objective-C boxed
+expression's operand, and a captured statement's capture initializer.  Apart
+from a capture initializer, which binds nothing the user wrote, neither side
+judges such a check (`Known Gaps (std::init)`_).  Any other leftover is an
+enumeration bug: ``-fprofiles-verify-deferred-checks`` (``-cc1`` only; the
+``std::init`` tests pass it) reports each one as an error, and in every build it
+is then judged by form.  The record is verification only, never the source of
+the pass's sites: TreeTransform reuses non-dependent nodes, which never re-enter
+the funnels, so the CFG derivation stays authoritative and the invariant checked
+is that recorded sites are a subset of judged ones.  No site is recorded where
+no flow pass judges it -- an evaluation context other than a
+potentially-evaluated one, a discarded statement, an immediate function context,
+a dependent context (each instantiation records its own), a defaulted function's
+synthesized body -- and the record of a body whose pass does not run is dropped
+(``Sema::PopFunctionScopeInfo``), as is that of a body with an error that is not
+a profile violation, whose recovery can discard the recorded expressions.  The
+pass's resolver (``TrackedStorage::resolve``) and the predicate share one
+lvalue-shape walk, ``SemaProfiles::flowLeafShape``, so no binding falls between
+the two.  A templated body is never analyzed; each instantiation is analyzed on
+its own CFG, in which statements TreeTransform reused from the pattern are
+ordinary elements.  Consumers read the lattices as follows: a marked-target
+binding fires on ``Must`` and ``double_destroy`` on ``Destroyed``; an
 unmarked-target binding, ``destroy_uninit``, a read through a marker, and a
-subobject write are suppressed by ``May``.  A
-destroy or release on one of several arms leaves the entity possibly
-assigned, not definitely, and not destroyed; a mutable alias of a marked
-pointer handed out gives the pointer an anonymous referent in that state.  A
-variable of an enclosing function reached by capture,
-whose state the enclosing body decides, enters with ``May`` set and ``Must``
-clear, so neither direction fires on it until the body itself stores.  The
-remaining blind spots are listed in `Known Gaps (std::init)`_ and in
+subobject write are suppressed by ``May``.  A destroy or release on one of
+several arms leaves the entity possibly assigned, not definitely, and not
+destroyed; a mutable alias of a marked pointer handed out gives the pointer an
+anonymous referent in that state.  A variable of an enclosing function reached
+by capture, whose state the enclosing body decides, enters with ``May`` set and
+``Must`` clear, so neither direction fires on it until the body itself stores.
+The remaining blind spots are listed in `Known Gaps (std::init)`_ and in
 :doc:`ProfilesFramework`, "Limitations".
 
 
@@ -1002,3 +1001,6 @@ Missed Diagnostics
 - A read of an ``[[uninit]]`` local declared inside an OpenMP region is not
   checked: the plain-local read analysis tracks only the variables the
   function declares directly, and a region's belong to its ``CapturedDecl``.
+- The statements of a ``#pragma clang __debug captured`` region are not
+  flow-checked: the CFG does not contain them, so their bindings, destroys,
+  reads, and stores of flow-tracked storage are accepted.
