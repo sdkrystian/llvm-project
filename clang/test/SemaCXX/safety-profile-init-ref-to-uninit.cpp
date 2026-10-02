@@ -1572,10 +1572,7 @@ void test_member_read_of_uninit_object() {
   take_value(s.y); // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
   PairHolder o [[uninit]];
   int y2 = o.p.x;  // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
-  // The arrow spelling reaches the member through a pointer, so the
-  // diagnostic's phrasing approximation picks the pointer wording; the read is
-  // diagnosed all the same.
-  int y3 = (&s)->x; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  int y3 = (&s)->x; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
   (void)y1; (void)y2; (void)y3;
 }
 
@@ -3560,6 +3557,15 @@ void test_addressof_binding() {
   u = 1;
   int *w = std::addressof(u);                   // OK
   (void)m; (void)q; (void)b; (void)w;
+}
+
+// An indirection through an address-of step reads the object itself
+int test_addressof_read(int *p [[ref_to_uninit]]) {
+  int x = *std::addressof(*p); // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  *p = 1;
+  int y = *std::addressof(*p); // OK
+  int z = *&*p;                // OK
+  return x + y + z;
 }
 // A flow-tracked binding inside a function template is judged on each
 // instantiation's own CFG, with the instantiation note; a never-instantiated

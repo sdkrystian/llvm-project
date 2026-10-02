@@ -36,7 +36,7 @@ int leading_unrelated_error = undeclared_identifier;
 #endif
 
 struct Agg {
-  int m [[uninit]]; // expected-note 23 {{member 'm' declared here}}
+  int m [[uninit]]; // expected-note 24 {{member 'm' declared here}}
 };
 void take_ref(Agg &);
 // The pointee is uninitialized memory, so the parameter carries the marker
@@ -665,6 +665,14 @@ int test_std_move_keeps_source_tracked() {
   Agg b = std::move(a);
   b.m = 1;
   return a.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+}
+
+// An arrow access through the object's address names its member
+int test_arrow_through_address() {
+  Agg a;
+  int x = (&a)->m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+  (&a)->m = 1;
+  return x + a.m; // OK
 }
 
 // Paren and brace copy forms behave identically to the `=` form.

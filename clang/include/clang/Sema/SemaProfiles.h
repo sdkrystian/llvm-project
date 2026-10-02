@@ -291,7 +291,9 @@ public:
   /// The shape of the glvalue \p E, taking the arms listed in \p Arms, or
   /// none when its chain bottoms out at anything but a directly named local,
   /// a parameter, or \c this (a global, a call, a member reached through
-  /// another member's pointer).
+  /// another member's pointer). An indirection of an address-of step
+  /// (\c *&x, \c (&x)->m, \c std::addressof(x)->m) continues from its
+  /// operand.
   static std::optional<FlowLeafShape>
   flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms = {});
 

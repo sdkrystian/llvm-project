@@ -815,7 +815,9 @@ The standard identity functions -- ``std::move``, ``std::forward``,
 ``std::forward_like``, ``std::move_if_noexcept``, and ``std::as_const`` -- are
 as transparent as such a cast: ``*std::move(p)`` reads what ``*p`` reads,
 ``int *q = std::move(p)`` binds what ``int *q = p`` binds, and the call itself
-binds nothing; ``std::addressof(x)`` is ``&x``.  Whole-object assignment of a
+binds nothing; ``std::addressof(x)`` is ``&x``.  An indirection through an
+address-of step names the object: ``*&x``, ``(&x)->m``, and
+``std::addressof(x)->m`` are ``x`` and ``x.m``.  Whole-object assignment of a
 class-type referent never initializes: it is a member ``operator=`` call on
 uninitialized storage, rejected as above.  (A ``void*`` escape of ``&p`` is not
 recognized: the missed reseat leaves the referent definitely initialized, which

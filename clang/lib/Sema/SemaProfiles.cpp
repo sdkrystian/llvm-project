@@ -2501,6 +2501,18 @@ std::optional<SemaProfiles::FlowLeafShape>
 SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
   FlowLeafShape S;
   const Expr *Cur = peelBaseCasts(E, S.Path, Arms);
+  // Step to the pointer operand of a * or ->: an address-of step's operand
+  // continues the chain (true); any other pointer reaches its storage
+  // through the pointer, which ends it.
+  auto StepThroughPointer = [&](const Expr *Ptr) {
+    Cur = peelBaseCasts(Ptr, S.Path, Arms);
+    if (const Expr *Op = addressOfOperand(Cur)) {
+      Cur = peelBaseCasts(Op, S.Path, Arms);
+      return true;
+    }
+    S.ThroughPointer = true;
+    return false;
+  };
   while (true) {
     if (const auto *ME = dyn_cast<MemberExpr>(Cur)) {
       const auto *F = dyn_cast<FieldDecl>(ME->getMemberDecl());
@@ -2508,12 +2520,13 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
         return std::nullopt;
       if (!F->isAnonymousStructOrUnion())
         S.Named.push_back(F);
-      Cur = peelBaseCasts(ME->getBase(), S.Path, Arms);
-      if (ME->isArrow()) {
-        S.ThroughPointer = true;
-        break;
+      if (!ME->isArrow()) {
+        Cur = peelBaseCasts(ME->getBase(), S.Path, Arms);
+        continue;
       }
-      continue;
+      if (StepThroughPointer(ME->getBase()))
+        continue;
+      break;
     }
     if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(Cur)) {
       S.Subscript = true;
@@ -2528,8 +2541,8 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
     }
     if (const auto *UO = dyn_cast<UnaryOperator>(Cur);
         UO && UO->getOpcode() == UO_Deref) {
-      S.ThroughPointer = true;
-      Cur = peelBaseCasts(UO->getSubExpr(), S.Path, Arms);
+      if (StepThroughPointer(UO->getSubExpr()))
+        continue;
       break;
     }
     break;
