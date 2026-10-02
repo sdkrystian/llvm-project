@@ -871,7 +871,7 @@ of the called specialization's range pointee leaves nothing indeterminate
 (``defaultInitLeavesScalarIndeterminate``, which skips ``[[uninit]]`` members)
 and ``AssertUninit`` rows otherwise: a credit there would legalize reads of the
 indeterminate scalars that default-initialization leaves.  ``ranges::`` CPOs are
-outside every key; the user-facing scope note lives in :doc:`ProfilesFramework`.
+outside every key (`Known Gaps (std::init)`_).
 
 Library callees whose semantics the profile needs without an attribute are
 rows of the known-callee table (``KnownCallees`` in SemaProfiles.cpp), keyed
@@ -1008,9 +1008,11 @@ alias of a marked pointer handed out gives the pointer an anonymous referent of
 unknown state (``May`` set, ``Must`` and ``MayUnassigned`` clear).  A variable
 of an enclosing function reached by capture, whose state the enclosing body
 decides, enters in that unknown state, so no binding, destroy, or read fires on
-it until the body itself stores to it or reseats it.  The remaining blind spots
-are listed in `Known Gaps (std::init)`_ and in :doc:`ProfilesFramework`,
-"Limitations".
+it until the body itself stores to it or reseats it.  A local copied or moved
+from a read-tracked local starts in the source's per-member state at the copy
+point: a copy does not inherit initialization, it copies the source's bits,
+initialized or not.  The remaining blind spots are listed in
+`Known Gaps (std::init)`_.
 
 
 .. _profiles-init-known-gaps:
@@ -1026,6 +1028,47 @@ cause a rejection.
 Deliberate Strictnesses
 -----------------------
 
+- Inside a constructor body, only a plain assignment to an ``[[uninit]]``
+  member (including through a transparent reference cast such as
+  ``(int &)m = 1`` -- the same casts the recognizers see through)
+  or a call to a ``[[now_init]]`` function counts as its
+  initialization -- the latter for the current-object storage bound to the
+  callee's ``[[ref_to_uninit]]`` parameters (``&m``, ``m``, or ``this``
+  itself, which credits every tracked member), as a genuine dataflow fact,
+  so a ``[[now_init]]`` call on one branch still does not satisfy a read at
+  the join (P4222R2 §1.3).  A ``[[now_uninit]]`` call is the credit's
+  destruction twin: a real kill bit for the same storage shapes, so a
+  destroy on one branch already spoils a read at the join, even though the
+  destroy may not have run.  Taking the member's address, binding a
+  reference to it, calling a member function, letting ``this`` escape, or
+  passing ``&m`` to a ``[[ref_to_uninit]]`` parameter of an *ordinary*
+  function earns no credit, so a later read of the member is rejected: the
+  paper rejects complex constructor code (P4222R2 §5.1) and credits a
+  callee's initialization only through a function marked ``[[now_init]]``
+  (P4222R2 §6); the remedy for an intended flow is ``[[now_init]]`` on the
+  callee or ``[[profiles::suppress]]``.
+- A by-value *parameter* of a tracked class is a copy of the caller's
+  argument, so its marked members are tracked from an unassigned start: a
+  read before a local assignment (or an escape of the parameter) is
+  rejected even if the caller assigned the member first (see "Reads of
+  Uninitialized Objects" in :doc:`ProfilesFramework`).  That is the
+  call-boundary twin of the constructor-body strictness: the paper hands
+  uninitialized-capable storage across calls through marked pointers and
+  references (P4222R2 §4.3), not by-value slots.  A parameter that declares
+  a default argument is not tracked: a defaulted call initializes the
+  parameter object directly (guaranteed elision -- no copy).  A *const*
+  by-value parameter cannot be assigned locally at all, so no code change
+  can satisfy the analysis -- suppression is the only remedy there.
+- A ``this``-capturing lambda might run immediately, so member reads in
+  its body count at the point the lambda is created, and writes there earn
+  no credit (see "Reads of Uninitialized Objects" in
+  :doc:`ProfilesFramework`): a lambda that is only ever run later, after
+  the members are assigned, is rejected the same way.  A ``*this`` capture
+  copy-constructs the whole object at the lambda's creation, reading every
+  member right there: it is rejected before every tracked member is
+  assigned -- unless the class has a *user-provided* copy constructor,
+  which is opaque and trusted (P4222R2 §5.1) -- and its body accesses go to
+  the copy, not the original.
 - The flow-based read checks -- of a plain local, a member, a subobject of an
   ``[[uninit]]`` object, and through a ``[[ref_to_uninit]]`` pointer or
   reference -- promote every use a path *may* reach uninitialized to the profile
@@ -1039,6 +1082,25 @@ Deliberate Strictnesses
   over-flags the same way
   (``if (c) std::construct_at(&s, v); ... if (c) s.x = 1;``).
 
+- Destroying through a ``[[ref_to_uninit]]`` pointer that was never stored
+  through is rejected by ``destroy_uninit``: the marker asserts an
+  uninitialized referent at entry or at its latest marked binding.  If a
+  helper filled the referent first, mark the helper ``[[now_init]]``, store
+  through the marker before the destroy, or suppress.
+- Passing ``&u`` to a ``[[ref_to_uninit]]`` parameter of an *ordinary*
+  function initializes nothing (see the constructor-body entry above), so a
+  later ``destroy_at(&u)`` is rejected by ``destroy_uninit`` even if the
+  callee filled the storage -- the same strictness, and the same remedies,
+  as the unmarked-direction binding after such a call: ``[[now_init]]`` on
+  the callee or suppression.
+- Member-wise initialization of a class-type referent through
+  ``[[ref_to_uninit]]`` is rejected even for trivially-copyable referents
+  (``ptr->x = 5``): below a member step only whole-object ``construct_at``
+  could initialize, which is unmodeled.  The remedies are ``construct_at``,
+  a whole scalar write for a scalar referent, or suppression.  Two corners
+  are suppress-only: a marked pointer *member*'s referent and an element
+  access (``ptr[i].x``) are not flow-tracked, so no prior fill legalizes
+  either.
 - Placement ``new`` into marked storage (``new (&u) T``) is rejected while the
   storage is uninitialized on every path reaching it -- the address binds an
   unmarked placement parameter, judged by flow like any binding, so a store on
@@ -1052,6 +1114,39 @@ Deliberate Strictnesses
   recognized); libstdc++ before C++20 declares ``allocate`` in an internal
   base, unrecognized; the remedies are a ``[[ref_to_uninit]]``-returning
   wrapper or suppression.
+- The ``std::uninitialized_*`` credit reaches only what the whole-storage
+  write reaches: an element-form range (``&arr[0]``, P4222R2 §1.3) or a
+  class-type iterator earns nothing, and a marked pointer's further elements
+  (``p[1]``) are never credited.  ``std::begin(arr)`` / ``std::end(arr)`` on
+  an ``[[uninit]]`` array is rejected on both sides (the array binds
+  ``begin``'s unmarked reference parameter, and the trusted return cannot
+  feed a marked range), so ``arr, arr + n`` is the spelling that works.  The
+  ``std::ranges::`` lifecycle CPOs are class objects, not named functions:
+  passing an ``[[uninit]]`` range to one binds its unmarked forwarding
+  reference.  ``std::fill`` assigns rather than initializes: into a
+  still-uninitialized ``[[uninit]]`` array it is rejected like any unmarked
+  binding (``std::uninitialized_fill`` and ``memset`` initialize).
+- ``__builtin_operator_delete`` binds its operand with no parameter
+  declaration in sight, so the storage-release relaxation cannot recognize
+  it: passing ``[[ref_to_uninit]]`` storage keeps the unmarked-direction
+  error.  ``_aligned_free`` and ``reallocarray`` carry no Clang builtin ID
+  and are likewise unrecognized; declaring such a function
+  ``[[now_uninit]]``, with its pointer parameter marked
+  ``[[ref_to_uninit]]``, is the workaround -- the parameter marker keeps
+  ``destroy_uninit`` from rejecting the release of a buffer that was
+  never written (a release function's contract, unlike a destroy's).
+- A ``void*`` escape of a marked pointer's address (``&p``) is not
+  recognized as a reseat: the referent stays definitely initialized, so a
+  later marked binding through the pointer can be rejected.
+- ``[[uninit]]`` on a type whose default constructor is explicitly defaulted
+  *after* its first declaration is accepted only once the ``= default``
+  definition has been parsed: a marker written between the class definition
+  and the constructor's still sees a declared-but-undefined constructor and
+  is rejected as running a constructor.
+- Storage that is not flow-tracked -- a class-type or array ``[[uninit]]``
+  member, a marked pointer member's referent -- is judged by its form alone
+  at every read, write, and destroy: a ``construct_at`` into it legalizes no
+  later access.
 
 Missed Diagnostics
 ------------------
@@ -1139,3 +1234,77 @@ Missed Diagnostics
   analyzed on its own, and the parse-time checks -- the declaration and
   constructor rules, and every check of storage that is not flow-tracked --
   still apply.
+- For *locals*, the flow engine (for a local aggregate's members) and the
+  uninitialized-variables analysis (for a plain local) treat any escape of
+  the variable as an assignment (member accesses are not escapes, including
+  accesses through anonymous aggregates and below a class or array member
+  whose type holds no pointer or reference; an access through a member that
+  does hold one is an escape), so a read after the escape is accepted.  The
+  paper credits a callee's initialization only through a function marked
+  ``[[now_init]]`` (P4222R2 §6).
+- A destroy of *unknown* storage is accepted (``destroy_uninit`` fires only
+  on an affirmative classification), and so is a destroy after a merely
+  *conditional* store: storage initialized on some path is accepted, short
+  of the paper's "for acceptance all alternatives must provide the desired
+  solution" (P4222R2 §9.2).  Reads are stricter: a destroy on any path
+  spoils a read at the join (P4222R2 §1.3); acceptance errs away from false
+  positives, reads toward the paper.
+- A reinitializer's exemption from ``destroy_uninit`` is call-wide, so its
+  *unmarked* destroy-only pointer parameters -- whose storage the paper
+  requires live -- are exempt too; a parameter that itself carries
+  ``[[ref_to_uninit]]`` is exempt per parameter (the release-function
+  spelling under Deliberate Strictnesses).
+- Under ``-fno-builtin`` or ``-ffreestanding``, a ``free`` or ``realloc``
+  recognized by name accepts a pointer in any state but records no
+  release, so a later read or destroy through the pointer is not diagnosed
+  there.  The acceptance survives by name because accepting a pointer never
+  diagnoses; the release does not, because later diagnostics fire on it.
+- The read analysis of a plain ``[[uninit]]`` local considers no exception
+  paths: after ``try { x = f(); } catch (...) {}`` a read of ``x`` is
+  accepted although the handler path skips the assignment.  The flow engine
+  considers them.
+- An element write through the marker (``p[3] = 0``) is accepted and never
+  credited -- a gap against the paper's random-access ban (P4222R2 §1.3,
+  §9.2); no read is legalized by it.  The asymmetry with ``[[uninit]] int
+  a[2]; a[0] = 1;`` -- rejected under the same paper rule -- follows the
+  paper's own span example (P4222R2 §4.6), which accepts the constant-index
+  element initialization and flags only reliance on the partial state.
+  Rejecting the element write too would turn every typed raw-buffer fill
+  loop through a marked pointer into a hard error, with range algorithms,
+  ``construct_at``, or suppression as the only remedies (``std::byte``
+  buffers excepted, P4222R2 §4.6).
+- A ``new`` expression whose result is not bound to anything (``new int;``)
+  is not checked.
+- A call through a function pointer cannot see parameter markers on the
+  pointed-to function, and a member call through a pointer-to-member bypasses
+  the object-argument check.
+- Members of anonymous structs and unions, and arrays of aggregates, are not
+  flow-tracked.
+- ``[[uninit]]`` members of locals copied from untracked sources (a call
+  result, a member, an element) are not flow-tracked: a copy does not
+  inherit initialization -- it copies indeterminate bits -- but the
+  source's per-member state is unknown, so reads of such members are
+  trusted (a missed diagnostic, never a false positive).  Copies of tracked
+  locals and by-value parameters *are* tracked (see "Reads of Uninitialized
+  Objects" in :doc:`ProfilesFramework`).
+- A by-value parameter with a default argument is not tracked (see the
+  by-value entry under Deliberate Strictnesses), so an *explicit* call
+  passing an uninitialized copy into such a parameter is not detected --
+  reads of its marked members in the callee are trusted.
+- An *alias* of ``this`` in a constructor body -- a stored
+  ``T *self = this;``, an init-capture ``[p = this]``, ``&*this`` -- is
+  invisible to the flow engine: reads through the alias are not attributed
+  to the members, and writes through it earn no credit (that half is a
+  strictness, never a false positive).
+- Virtual base subobjects are not checked by ``ctor_uninit_member`` (they are
+  initialized by the most-derived class).
+- A read of a tracked member inside another member's default initializer is
+  not detected.
+- A store through an alias of a pointer object (``int *&r = p; r = &u;``,
+  ``*pp = &u``) is not checked: the alias cannot carry the target's marking.
+- An assignment through a conditional, comma, or GNU ``?:`` target whose
+  arms differ in marking accepts either source: any single answer would
+  reject a legal combination.
+- A second ``destroy_at`` of storage that is not flow-tracked (a class-type
+  or array ``[[uninit]]`` member, a marked pointer member's referent) is not
+  a double destroy.
