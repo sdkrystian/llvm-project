@@ -845,37 +845,40 @@ and ``fill(arr)`` a local ``[[uninit]]`` array whole (§6's
 nothing, §5.4) -- with the same reverse-direction consequence (after a
 ``fill(&u)`` on every path, a second ``fill(&u)`` is rejected: ``u`` no
 longer refers to uninitialized memory, which incidentally catches double
-``construct_at``).  This is R2
-§4.5's requested library annotation, and Clang applies it itself: a
-``std::construct_at`` declaration whose first parameter is of pointer type
-receives ``[[now_init]]`` and the parameter marker implicitly, so the real
-``<memory>`` declaration checks the lifecycle *start* with no user
+``construct_at``).  This is the library annotation P4222R2 §4.4 requests, and
+Clang supplies it itself: a call to a ``std::construct_at`` whose first
+parameter is of pointer type is checked and credited as if the function were
+declared ``[[now_init]]`` with that parameter marked, so the real ``<memory>``
+declaration -- included textually or imported from a module or header unit,
+whatever options built it -- checks the lifecycle *start* with no user
 declaration.  The ``std::uninitialized_*`` family (P4222R2 §4.7, §6) is
-annotated the same way on the parameter that receives the output range:
+treated the same way on the parameter that receives the output range:
 ``uninitialized_fill``, ``uninitialized_copy``, ``uninitialized_move``, and
 ``uninitialized_value_construct``, each with its ``_n`` form and its
-execution-policy overload, receive the marker there and ``[[now_init]]``,
-so the range must refer to uninitialized memory -- an initialized range is
-rejected, like the paper's ``uninitialized_fill(a1, 10)`` -- and is
-initialized whole by the call, while the source range of the copy and move
-forms is an ordinary unmarked parameter.  ``uninitialized_default_construct``
-and its ``_n`` form receive the marker alone: default-initialization leaves
-a scalar indeterminate, so the range stays uninitialized.  The annotation
-takes effect where the iterator is a pointer (``arr, arr + n``); a
-class-type iterator drops the marker, and such a call checks and
-initializes nothing.  The §4.4 ``now_init()`` identity function is annotated the
-same way: a ``std::now_init`` declaration with one pointer parameter and a
-pointer return type receives the parameter marker, so its argument must
-refer to uninitialized memory, its unmarked return is trusted as initialized
-(``*std::now_init(p)`` reads the storage ``p`` refers to without
-verification -- the paper's "cast in disguise"), and the argument's own
-storage keeps its state (§6.1: use the returned pointer, not the original
-name); only the attribute legalizes the original *name* after the call.
-The library's ``return p;`` definition violates the binding rule: in a
-system header it is covered by the `System Headers`_ exemption, and under
-``-fno-profiles-exempt-system-headers`` the library must write
-``[[profiles::suppress(std::init)]]`` on the definition.  A definition
-outside a system header is diagnosed per instantiation.
+execution-policy overload, so the range must refer to uninitialized memory -- an
+initialized range is rejected, like the paper's
+``uninitialized_fill(a1, 10)`` -- and is initialized whole by the call, while
+the source range of the copy and move forms is an ordinary unmarked parameter.
+``uninitialized_default_construct`` and its ``_n`` form require an uninitialized
+range and initialize nothing: default-initialization leaves a scalar
+indeterminate, so the range stays uninitialized.  The treatment applies where
+the iterator is a pointer (``arr, arr + n``); a call with a class-type iterator
+checks and initializes nothing.  The §4.4 ``now_init()`` identity function is
+treated the same way: the parameter of a ``std::now_init`` with one pointer
+parameter is treated as marked, so its argument must refer to uninitialized
+memory, its unmarked return is trusted as initialized (``*std::now_init(p)``
+reads the storage ``p`` refers to without verification -- the paper's
+"cast in disguise"), and the argument's own storage keeps its state (§6.1: use
+the returned pointer, not the original name); only the attribute legalizes the
+original *name* after the call.  The treatment is the call's alone: inside a
+library's definition the parameters carry only the markers the library wrote.
+The paper's marked definition
+``T* now_init(T* p [[ref_to_uninit]]) { return p; }`` violates the binding
+rule -- in a system header the `System Headers`_ exemption covers it, under
+``-fno-profiles-exempt-system-headers`` the library writes
+``[[profiles::suppress(std::init)]]`` on it, and outside a system header it is
+diagnosed per instantiation -- while an unmarked definition is judged as
+written.
 
 The lifecycle *end* is the mirror attribute ``[[now_uninit]]`` -- the
 recording §4.4 notes is missing for ``destroy_at`` ("the object subjected to
@@ -903,13 +906,13 @@ the storage neither definitely initialized nor definitely destroyed: a
 marked binding is not forced, an unmarked binding stays accepted, a
 second destroy is not a double destroy, and a read through a marker, a read of a
 subobject of an ``[[uninit]]`` object, or a subobject write is rejected.  Clang
-declares ``std::destroy_at`` this way itself -- a ``std::destroy_at`` whose
-first parameter is of pointer type receives ``[[now_uninit]]`` implicitly, and
-so do ``std::destroy`` and ``std::destroy_n`` (P4222R2 §6) where their iterator
-is a pointer -- so
-the construct/destroy/construct cycle is legal, a second destruction is
-rejected, a destroy of never-constructed storage is rejected too, and
-binding the destroyed storage to an ordinary pointer or reference is
+treats ``std::destroy_at`` this way itself -- a call to a ``std::destroy_at``
+whose first parameter is of pointer type destroys that argument's storage, and
+so does a call to ``std::destroy`` or ``std::destroy_n`` (P4222R2 §4.4) for its
+first iterator where that is a pointer; the end iterator is an ordinary
+argument -- so the construct/destroy/construct cycle is legal, a second
+destruction is rejected, a destroy of never-constructed storage is rejected too,
+and binding the destroyed storage to an ordinary pointer or reference is
 rejected as the unmarked-direction violation.  A function may carry both
 attributes -- a reinitializer that destroys and then reconstructs its
 argument's storage -- and models destroy-then-construct: the storage bound
@@ -1153,13 +1156,6 @@ listed in :ref:`profiles-init-known-gaps`.
   are suppress-only: a marked pointer *member*'s referent and an element
   access (``ptr[i].x``) are not flow-tracked, so no prior fill legalizes
   either.
-- Placement ``new`` into marked storage (``new (&u) T``) is rejected
-  while the storage is uninitialized on some path reaching it -- the
-  address binds an unmarked placement parameter, judged by flow like any
-  binding, so a store on every path first makes it an ordinary placement --
-  and earns no credit; ``std::construct_at`` is the sanctioned spelling for
-  constructing into ``[[uninit]]`` storage (it carries the lifecycle
-  annotations implicitly, above).
 - A range from an unannotated allocator is initialized memory, so
   ``T *buf = alloc.allocate(n); std::uninitialized_fill_n(buf, n, v);`` is
   rejected at ``buf``: the output range must refer to uninitialized memory,
@@ -1181,25 +1177,6 @@ listed in :ref:`profiles-init-known-gaps`.
 
 **Missed diagnostics (never rejections):**
 
-- ``construct_at``/``destroy_at`` flow is modeled through the annotations:
-  a ``[[now_init]]``-annotated ``construct_at`` declaration checks the
-  lifecycle start (including double construction, via the reverse-direction
-  binding rule) and a ``[[now_uninit]]``-annotated ``destroy_at`` the end
-  (double destruction, use-after-destroy where the destroyed storage is
-  *bound*, and -- in both member dataflow passes -- a member read after the
-  destroy, which kills the member's assigned bit.  A direct named read of a
-  plain ``[[uninit]]`` *local* after a destroy stays with the flow-based
-  local-variable analysis, which treats the call as an escape in every
-  mode, so it is a missed diagnostic).
-- The implicit standard-library annotation takes effect on pointer
-  parameters only: ``std::construct_at`` and ``std::destroy_at`` with a
-  pointer first parameter, and the ``std::uninitialized_*`` family where its
-  iterator is a pointer.  A class-type iterator drops the marker, so such a
-  call checks nothing.  A whole ``[[uninit]]`` array passed as a range is
-  initialized or destroyed whatever the range's length.  ``std::destroy``'s
-  end iterator is a destroyed argument too: its usual spelling
-  (``arr + n``) is unclassified and inert, while a marked local pointer
-  passed there would be judged like the first.
 - The raw storage-release callees (``free``, ``realloc``, replaceable
   global ``operator delete``) accept storage that was never constructed:
   that is ``free``'s contract, not a gap -- only a ``[[now_uninit]]``

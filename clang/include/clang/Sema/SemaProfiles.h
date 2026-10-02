@@ -725,8 +725,9 @@ public:
     bool initializesParam(const ParmVarDecl *P) const;
   };
   /// Derive what \p FD does to the storage bound to its parameters: the
-  /// lifetime attributes plus the known-callee row. Shared by the parse-time
-  /// funnel and the CFG pass's argument and lifecycle arms.
+  /// lifetime attributes plus the known-callee row, looked up at the call
+  /// so the library's own declarations need no annotation. Shared by the
+  /// parse-time funnel and the CFG pass's argument and lifecycle arms.
   static CalleeLifecycleRoles getCalleeLifecycleRoles(const FunctionDecl *FD);
 
 private:
@@ -875,22 +876,6 @@ public:
   /// profile policy -- fires regardless of -fprofiles, like the parse-time
   /// marker subject checks.
   void checkNowInitVacuity(FunctionDecl *FD);
-
-  /// std::init: attach the lifecycle markers to a matching std::construct_at
-  /// (RefToUninit on the first parameter + NowInit) or std::destroy_at
-  /// (NowUninit) declaration, the parameter marker alone to a std::now_init
-  /// with one pointer parameter and a pointer return type (P4222R2 §4.4),
-  /// RefToUninit on the output range plus NowInit to the std::uninitialized_*
-  /// family, and NowUninit to std::destroy and std::destroy_n, so the real
-  /// library functions work under enforcement -- there is no portable way to
-  /// annotate namespace-std declarations from user code. The first three are
-  /// keyed on form (a first parameter of pointer type, dependent or not), the
-  /// families on name and arity with a pointer or dependent range parameter,
-  /// so the marker subject rules hold by construction or are re-checked at
-  /// instantiation. Idempotent across redeclarations and library
-  /// annotations. Called from Sema::AddKnownFunctionAttributes; see
-  /// ProfilesFrameworkInternals.rst.
-  void addKnownInitLifecycleAttributes(FunctionDecl *FD);
 
 private:
   /// Per profile, whether a rule diagnostic of it is enabled by a

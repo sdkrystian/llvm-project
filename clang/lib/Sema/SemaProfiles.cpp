@@ -1144,119 +1144,6 @@ void SemaProfiles::checkNowInitVacuity(FunctionDecl *FD) {
   FD->dropAttr<NowInitAttr>();
 }
 
-/// What addKnownInitLifecycleAttributes attaches for a KnownStdLifecycleRow.
-enum class KnownStdLifecycleEffect {
-  /// [[ref_to_uninit]] on the range parameter and [[now_init]]: the range
-  /// must be uninitialized and is initialized by the call.
-  Initialize,
-  /// [[ref_to_uninit]] on the range parameter alone.
-  AssertUninit,
-  /// [[now_uninit]] on the function: the range is destroyed.
-  Destroy,
-};
-
-/// A namespace-std function addKnownInitLifecycleAttributes annotates by name
-/// and arity; \c RangeParam receives the storage the function acts on. An
-/// execution-policy overload takes the policy first, shifting the range by
-/// one.
-struct KnownStdLifecycleRow {
-  StringRef Name;
-  unsigned Arity;
-  unsigned RangeParam;
-  KnownStdLifecycleEffect Effect;
-};
-
-/// The std::uninitialized_* rows (P4222R2 §6) and std::destroy / destroy_n.
-/// The default_construct forms credit nothing: default-initialization leaves
-/// a scalar indeterminate. The destroy forms have no policy rows: a policy's
-/// forwarding reference would be destroyed with the range.
-static constexpr KnownStdLifecycleRow KnownStdLifecycleRows[] = {
-    {"uninitialized_copy", 3, 2, KnownStdLifecycleEffect::Initialize},
-    {"uninitialized_copy", 4, 3, KnownStdLifecycleEffect::Initialize},
-    {"uninitialized_copy_n", 3, 2, KnownStdLifecycleEffect::Initialize},
-    {"uninitialized_copy_n", 4, 3, KnownStdLifecycleEffect::Initialize},
-    {"uninitialized_move", 3, 2, KnownStdLifecycleEffect::Initialize},
-    {"uninitialized_move", 4, 3, KnownStdLifecycleEffect::Initialize},
-    {"uninitialized_move_n", 3, 2, KnownStdLifecycleEffect::Initialize},
-    {"uninitialized_move_n", 4, 3, KnownStdLifecycleEffect::Initialize},
-    {"uninitialized_fill", 3, 0, KnownStdLifecycleEffect::Initialize},
-    {"uninitialized_fill", 4, 1, KnownStdLifecycleEffect::Initialize},
-    {"uninitialized_fill_n", 3, 0, KnownStdLifecycleEffect::Initialize},
-    {"uninitialized_fill_n", 4, 1, KnownStdLifecycleEffect::Initialize},
-    {"uninitialized_value_construct", 2, 0,
-     KnownStdLifecycleEffect::Initialize},
-    {"uninitialized_value_construct", 3, 1,
-     KnownStdLifecycleEffect::Initialize},
-    {"uninitialized_value_construct_n", 2, 0,
-     KnownStdLifecycleEffect::Initialize},
-    {"uninitialized_value_construct_n", 3, 1,
-     KnownStdLifecycleEffect::Initialize},
-    {"uninitialized_default_construct", 2, 0,
-     KnownStdLifecycleEffect::AssertUninit},
-    {"uninitialized_default_construct", 3, 1,
-     KnownStdLifecycleEffect::AssertUninit},
-    {"uninitialized_default_construct_n", 2, 0,
-     KnownStdLifecycleEffect::AssertUninit},
-    {"uninitialized_default_construct_n", 3, 1,
-     KnownStdLifecycleEffect::AssertUninit},
-    {"destroy", 2, 0, KnownStdLifecycleEffect::Destroy},
-    {"destroy_n", 2, 0, KnownStdLifecycleEffect::Destroy},
-};
-
-void SemaProfiles::addKnownInitLifecycleAttributes(FunctionDecl *FD) {
-  // Injected implicit attributes are indistinguishable from hand-written
-  // ones, so the funnels, the CFG pass, serialization, and suppression all
-  // apply unchanged, and template specializations inherit
-  // them from the pattern via attribute instantiation. The injected pair is
-  // consistent by construction (marker and NowInit added together, first
-  // parameter checked as a pointer), so checkNowInitVacuity -- which runs
-  // before this seam -- is never contradicted. std::now_init receives the
-  // parameter marker alone: its unmarked return is the trusted pointer and
-  // the argument's storage keeps its state (P4222R2 §4.4, §6.1).
-  if (!getLangOpts().Profiles || !FD->getIdentifier() ||
-      !FD->isInStdNamespace() || FD->getNumParams() < 1)
-    return;
-  ASTContext &Context = getASTContext();
-  // A row applies when its range parameter is a pointer or dependent; the
-  // instantiation re-check drops the marker of a class-type iterator.
-  for (const KnownStdLifecycleRow &Row : KnownStdLifecycleRows) {
-    if (FD->getName() != Row.Name || FD->getNumParams() != Row.Arity)
-      continue;
-    ParmVarDecl *P = FD->getParamDecl(Row.RangeParam);
-    if (!P->getType()->isDependentType() && !P->getType()->isPointerType())
-      return;
-    if (Row.Effect == KnownStdLifecycleEffect::Destroy) {
-      if (!FD->hasAttr<NowUninitAttr>())
-        FD->addAttr(NowUninitAttr::CreateImplicit(Context, FD->getLocation()));
-      return;
-    }
-    if (!P->hasAttr<RefToUninitAttr>())
-      P->addAttr(RefToUninitAttr::CreateImplicit(Context, P->getLocation()));
-    if (Row.Effect == KnownStdLifecycleEffect::Initialize &&
-        !FD->hasAttr<NowInitAttr>())
-      FD->addAttr(NowInitAttr::CreateImplicit(Context, FD->getLocation()));
-    return;
-  }
-  const ParmVarDecl *P0 = FD->getParamDecl(0);
-  if (!P0->getType()->isPointerType())
-    return;
-  if (FD->getName() == "construct_at") {
-    if (!P0->hasAttr<RefToUninitAttr>())
-      FD->getParamDecl(0)->addAttr(
-          RefToUninitAttr::CreateImplicit(Context, P0->getLocation()));
-    if (!FD->hasAttr<NowInitAttr>())
-      FD->addAttr(NowInitAttr::CreateImplicit(Context, FD->getLocation()));
-  } else if (FD->getName() == "destroy_at") {
-    if (!FD->hasAttr<NowUninitAttr>())
-      FD->addAttr(NowUninitAttr::CreateImplicit(Context, FD->getLocation()));
-  } else if (FD->getName() == "now_init") {
-    if (FD->getNumParams() == 1 && FD->getReturnType()->isPointerType() &&
-        !P0->hasAttr<RefToUninitAttr>())
-      FD->getParamDecl(0)->addAttr(
-          RefToUninitAttr::CreateImplicit(Context, P0->getLocation()));
-  }
-}
-
 // std::init / ref_to_uninit (paper §5). Two mutually-recursive local
 // recognizers over the syntactic form of a source expression -- no flow
 // analysis and no type-system tracking. Uninitialized storage is only ever
@@ -1589,7 +1476,7 @@ enum class KnownCalleeReturn {
   /// plus indeterminate tail.
   ReturnsUnknown,
   /// Returns what an unmarked direct callee returns: trusted as initialized
-  /// (a release callee's void return).
+  /// (a release callee's void return, a std lifecycle function's result).
   ReturnsTrusted,
 };
 
@@ -1617,31 +1504,45 @@ using KnownParamRole = SemaProfiles::KnownParamRole;
 
 /// A row of the known-callee table (KnownCallees): what a library callee
 /// returns and what it does to the storage bound to one role parameter. A
-/// row is keyed by builtin ID (the C allocation and memory families) or, for
-/// the operator new/delete families, which never carry a builtin ID, by a
-/// form predicate. A builtin ID is absent under -fno-builtin /
-/// -ffreestanding (or on a non-matching declaration), where an allocator
-/// falls back to the trusted default and a release or initialization goes
-/// unrecognized -- a missed diagnostic or a missed relaxation, never a false
-/// positive or a false acceptance elsewhere. (getBuiltinFunctionEffects in
-/// SemaFunctionEffects.cpp groups almost exactly the allocator set for the
+/// row is keyed by builtin ID (the C allocation and memory families), by a
+/// form predicate (the operator new/delete families, which never carry a
+/// builtin ID), or by a namespace-std name and arity (the std lifecycle
+/// functions) -- the library knowledge P4222R2 §4.4 asks for, looked up at
+/// each call, so the library's declarations carry no annotation and a module
+/// built without -fprofiles reads the same. A builtin ID is absent under
+/// -fno-builtin / -ffreestanding (or on a non-matching declaration), where an
+/// allocator falls back to the trusted default and a release or initialization
+/// goes unrecognized -- a missed diagnostic or a missed relaxation, never a
+/// false positive or a false acceptance elsewhere. (getBuiltinFunctionEffects
+/// in SemaFunctionEffects.cpp groups almost exactly the allocator set for the
 /// \c allocating effect.)
 struct KnownCalleeEntry {
-  /// The Clang builtin ID this row matches; 0 for a form row.
+  /// The Arity of a row not keyed by namespace-std name.
+  static constexpr unsigned NotStdRow = ~0u;
+  /// The Arity of a std row matching any parameter count.
+  static constexpr unsigned AnyArity = ~0u - 1;
+
+  /// The Clang builtin ID this row matches; 0 for a form or std row.
   unsigned BuiltinID = 0;
   /// The form predicate of a form row; null otherwise.
   bool (*Form)(const FunctionDecl *) = nullptr;
   /// A builtin row's library name, compared by the untrusted name-only
-  /// fallback (matchKnownCallee) when the builtin ID is absent; empty for
-  /// the __builtin_* spellings, which always keep their IDs. A per-row
-  /// literal rather than Builtin::Context::getName, which returns
-  /// std::string by value.
+  /// fallback (matchKnownCallee) when the builtin ID is absent -- empty for
+  /// the __builtin_* spellings, which always keep their IDs -- or a std
+  /// row's name. A per-row literal rather than Builtin::Context::getName,
+  /// which returns std::string by value.
   StringRef Name;
+  /// A std row's parameter count, or AnyArity; NotStdRow for every other
+  /// row.
+  unsigned Arity = NotStdRow;
   KnownCalleeReturn Return = KnownCalleeReturn::ReturnsTrusted;
-  /// The role parameter's index.
+  /// The role parameter's index; a std row matches only where that
+  /// parameter is a pointer, so a class-type iterator is outside the row.
   unsigned Param = 0;
   /// What the callee does to the storage bound to Param.
   KnownParamRole Role = KnownParamRole::None;
+
+  bool isStdRow() const { return Arity != NotStdRow; }
 };
 } // namespace
 
@@ -1671,7 +1572,20 @@ formRow(bool (*Form)(const FunctionDecl *), KnownCalleeReturn Return,
   return E;
 }
 
-/// The known-callee table; see KnownCalleeEntry.
+/// A row keyed by namespace-std name and arity.
+static constexpr KnownCalleeEntry stdRow(StringRef Name, unsigned Arity,
+                                         unsigned Param, KnownParamRole Role) {
+  KnownCalleeEntry E;
+  E.Name = Name;
+  E.Arity = Arity;
+  E.Param = Param;
+  E.Role = Role;
+  return E;
+}
+
+/// The known-callee table; see KnownCalleeEntry. An execution-policy
+/// overload of a std function takes the policy first, shifting its role
+/// parameter by one.
 static constexpr KnownCalleeEntry KnownCallees[] = {
     builtinRow(Builtin::BImalloc, KnownCalleeReturn::ReturnsUninitialized,
                "malloc"),
@@ -1731,13 +1645,45 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
     builtinRow(Builtin::BI__builtin___memmove_chk,
                KnownCalleeReturn::ReturnsInitialized, "",
                KnownParamRole::InitializeAnyState),
+    stdRow("construct_at", KnownCalleeEntry::AnyArity, 0,
+           KnownParamRole::Construct),
+    stdRow("destroy_at", KnownCalleeEntry::AnyArity, 0,
+           KnownParamRole::Destroy),
+    stdRow("now_init", 1, 0, KnownParamRole::AssertUninit),
+    stdRow("uninitialized_copy", 3, 2, KnownParamRole::Construct),
+    stdRow("uninitialized_copy", 4, 3, KnownParamRole::Construct),
+    stdRow("uninitialized_copy_n", 3, 2, KnownParamRole::Construct),
+    stdRow("uninitialized_copy_n", 4, 3, KnownParamRole::Construct),
+    stdRow("uninitialized_move", 3, 2, KnownParamRole::Construct),
+    stdRow("uninitialized_move", 4, 3, KnownParamRole::Construct),
+    stdRow("uninitialized_move_n", 3, 2, KnownParamRole::Construct),
+    stdRow("uninitialized_move_n", 4, 3, KnownParamRole::Construct),
+    stdRow("uninitialized_fill", 3, 0, KnownParamRole::Construct),
+    stdRow("uninitialized_fill", 4, 1, KnownParamRole::Construct),
+    stdRow("uninitialized_fill_n", 3, 0, KnownParamRole::Construct),
+    stdRow("uninitialized_fill_n", 4, 1, KnownParamRole::Construct),
+    stdRow("uninitialized_value_construct", 2, 0, KnownParamRole::Construct),
+    stdRow("uninitialized_value_construct", 3, 1, KnownParamRole::Construct),
+    stdRow("uninitialized_value_construct_n", 2, 0, KnownParamRole::Construct),
+    stdRow("uninitialized_value_construct_n", 3, 1, KnownParamRole::Construct),
+    stdRow("uninitialized_default_construct", 2, 0,
+           KnownParamRole::AssertUninit),
+    stdRow("uninitialized_default_construct", 3, 1,
+           KnownParamRole::AssertUninit),
+    stdRow("uninitialized_default_construct_n", 2, 0,
+           KnownParamRole::AssertUninit),
+    stdRow("uninitialized_default_construct_n", 3, 1,
+           KnownParamRole::AssertUninit),
+    stdRow("destroy", 2, 0, KnownParamRole::Destroy),
+    stdRow("destroy_n", 2, 0, KnownParamRole::Destroy),
 };
 
-/// The table row for \p FD, if any -- the *trusted* match: the builtin ID
-/// (or the operator form) guarantees the row's semantics. Builtin rows are
-/// consulted first; no collision is possible -- plain operator new/delete
-/// never carry the table's builtin IDs, and __builtin_operator_new is not an
-/// operator name -- so the order is cosmetic.
+/// The table row for \p FD, if any -- the *trusted* match: the builtin ID,
+/// the form, or the namespace-std name and arity guarantee the row's
+/// semantics. Builtin rows are consulted first; no collision is possible --
+/// plain operator new/delete never carry the table's builtin IDs,
+/// __builtin_operator_new is not an operator name, and no std row names a
+/// library builtin -- so the order is cosmetic.
 static const KnownCalleeEntry *findKnownCallee(const FunctionDecl *FD) {
   if (unsigned ID = FD->getBuiltinID())
     for (const KnownCalleeEntry &Entry : KnownCallees)
@@ -1745,6 +1691,16 @@ static const KnownCalleeEntry *findKnownCallee(const FunctionDecl *FD) {
         return &Entry;
   for (const KnownCalleeEntry &Entry : KnownCallees)
     if (Entry.Form && Entry.Form(FD))
+      return &Entry;
+  const IdentifierInfo *II = FD->getIdentifier();
+  if (!II || !FD->isInStdNamespace())
+    return nullptr;
+  for (const KnownCalleeEntry &Entry : KnownCallees)
+    if (Entry.isStdRow() && Entry.Name == II->getName() &&
+        (Entry.Arity == KnownCalleeEntry::AnyArity ||
+         Entry.Arity == FD->getNumParams()) &&
+        Entry.Param < FD->getNumParams() &&
+        FD->getParamDecl(Entry.Param)->getType()->isPointerType())
       return &Entry;
   return nullptr;
 }
@@ -1775,7 +1731,7 @@ static KnownCalleeMatch matchKnownCallee(const FunctionDecl *FD) {
     return {};
   StringRef Name = II->getName();
   for (const KnownCalleeEntry &Entry : KnownCallees)
-    if (!Entry.Name.empty() && Entry.Name == Name)
+    if (!Entry.isStdRow() && !Entry.Name.empty() && Entry.Name == Name)
       return {&Entry, /*Trusted=*/false};
   return {};
 }

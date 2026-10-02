@@ -5,83 +5,14 @@
 // RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -isystem %t/sys -std=c++23 %t/system.cpp
 // RUN: %clang_cc1 -fsyntax-only -verify=expected,strict -fprofiles -fprofiles-verify-deferred-checks -fno-profiles-exempt-system-headers -isystem %t/sys -std=c++23 %t/system.cpp
 // RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %t/now_init_body.cpp
-//
-// The lifecycle attributes are injected only under -fprofiles (enforcement
-// not required), and appear on both the pattern and its instantiations.
-// RUN: %clang_cc1 -ast-dump -fprofiles -std=c++23 %t/dump.cpp | FileCheck %s --check-prefix=INJECT
-// RUN: %clang_cc1 -ast-dump -std=c++23 %t/dump.cpp | FileCheck %s --check-prefix=PLAIN
 
-// Clang attaches the std::init lifecycle markers to std::construct_at
-// (RefToUninit on the first parameter + NowInit) and std::destroy_at
-// (NowUninit) itself, keyed on a pointer-typed first parameter, the
-// parameter marker alone to std::now_init (one pointer parameter, pointer
-// return), RefToUninit on the output range plus NowInit to the
-// std::uninitialized_* family (by name and arity; the default_construct
-// forms get the marker alone), and NowUninit to std::destroy and
-// std::destroy_n, so the real library functions are usable under
-// enforcement.
-
-// INJECT: FunctionDecl {{.*}} construct_at 'T *(T *, A &&...)'
-// INJECT: RefToUninitAttr {{.*}} Implicit
-// INJECT: NowInitAttr {{.*}} Implicit
-// INJECT: FunctionDecl {{.*}} construct_at 'int *(int *, int &&)' implicit_instantiation
-// INJECT: RefToUninitAttr {{.*}} Implicit
-// INJECT: NowInitAttr {{.*}} Implicit
-// INJECT: FunctionDecl {{.*}} destroy_at 'void (T *)'
-// INJECT: NowUninitAttr {{.*}} Implicit
-// INJECT: FunctionDecl {{.*}} now_init 'T *(T *)'
-// INJECT: RefToUninitAttr {{.*}} Implicit
-// INJECT: FunctionDecl {{.*}} now_init 'int *(int *)' implicit_instantiation
-// INJECT: RefToUninitAttr {{.*}} Implicit
-// INJECT-NOT: NowInitAttr
-// INJECT: FunctionDecl {{.*}} uninitialized_fill 'void (It, It, const T &)'
-// INJECT-NEXT: ParmVarDecl {{.*}} first 'It'
-// INJECT-NEXT: RefToUninitAttr {{.*}} Implicit
-// INJECT: NowInitAttr {{.*}} Implicit
-// INJECT: FunctionDecl {{.*}} uninitialized_fill 'void (int *, int *, const int &)' implicit_instantiation
-// INJECT: ParmVarDecl {{.*}} first 'int *'
-// INJECT-NEXT: RefToUninitAttr {{.*}} Implicit
-// INJECT: NowInitAttr {{.*}} Implicit
-// INJECT: FunctionDecl {{.*}} uninitialized_fill 'void (Iter, Iter, const int &)' implicit_instantiation
-// INJECT-NOT: RefToUninitAttr
-// INJECT: NowInitAttr {{.*}} Implicit
-// INJECT: FunctionDecl {{.*}} uninitialized_copy 'Out (In, In, Out)'
-// INJECT-NOT: RefToUninitAttr
-// INJECT: ParmVarDecl {{.*}} result 'Out'
-// INJECT-NEXT: RefToUninitAttr {{.*}} Implicit
-// INJECT: NowInitAttr {{.*}} Implicit
-// INJECT: FunctionDecl {{.*}} destroy 'void (It, It)'
-// INJECT-NOT: RefToUninitAttr
-// INJECT: NowUninitAttr {{.*}} Implicit
-// INJECT: FunctionDecl {{.*}} destroy_n 'It (It, Size)'
-// INJECT-NOT: RefToUninitAttr
-// INJECT: NowUninitAttr {{.*}} Implicit
-
-// PLAIN-NOT: RefToUninitAttr
-// PLAIN-NOT: NowInitAttr
-// PLAIN-NOT: NowUninitAttr
-
-//--- dump.cpp
-namespace std {
-template <class T, class... A> T *construct_at(T *p, A &&...args);
-template <class T> void destroy_at(T *p);
-template <class T> T *now_init(T *p);
-template <class It, class T> void uninitialized_fill(It first, It last, const T &x);
-template <class In, class Out> Out uninitialized_copy(In first, In last, Out result);
-template <class It> void destroy(It first, It last);
-template <class It, class Size> It destroy_n(It first, Size n);
-} // namespace std
-
-struct Iter { int *p; };
-
-void instantiate(int *p) {
-  std::construct_at(p, 5);
-  std::destroy_at(p);
-  std::now_init(p);
-  std::uninitialized_fill(p, p + 1, 0);
-  std::uninitialized_copy(p, p + 1, p);
-  std::uninitialized_fill(Iter{p}, Iter{p}, 0);
-}
+// Clang knows the std::init roles of std::construct_at (its pointer first
+// parameter must refer to uninitialized memory and is initialized by the
+// call) and std::destroy_at (the call destroys it), std::now_init's pointer
+// parameter (uninitialized, keeps its state), the std::uninitialized_*
+// output range (by name and arity), and std::destroy's and
+// std::destroy_n's first iterator, and looks them up at each call, so the
+// real library functions are usable under enforcement.
 
 //--- local.cpp
 [[profiles::enforce(std::init)]];
@@ -424,6 +355,17 @@ void destroy_end_iterator() {
   std::destroy(arr, arr + 4); // OK
 }
 
+// Only the first iterator's storage is destroyed
+void destroy_first_iterator_only() {
+  int a [[uninit]] [4], b [[uninit]] [4];
+  std::uninitialized_fill(a, a + 4, 0);
+  std::uninitialized_fill(b, b + 4, 0);
+  std::destroy(a, b);
+  int x = b[0]; // OK
+  int y = a[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  (void)x; (void)y;
+}
+
 //--- referent.cpp
 // A marked local pointer or reference refers to the storage its latest
 // binding names (ProfilesFramework.rst, "Binding Pointers and References"),
@@ -605,22 +547,25 @@ int destroy_one_path_read_through(int *p [[ref_to_uninit]], bool c) {
 }
 
 //--- sys/init_mem.h
+inline void *operator new(__SIZE_TYPE__, void *p) noexcept { return p; }
 namespace std {
-template <class T, class... A> T *construct_at(T *p, A &&...args);
+template <class T, class... A> T *construct_at(T *p, A &&...args) {
+  return ::new (static_cast<void *>(p)) T(static_cast<A &&>(args)...);
+}
 template <class T> void destroy_at(T *p);
 template <class T> T *now_init(T *p) {
-  return p; // strict-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  return p;
 }
 template <class It, class T> void uninitialized_fill(It first, It last, const T &x);
 template <class In, class Out> Out uninitialized_copy(In first, In last, Out result);
 } // namespace std
 
 //--- system.cpp
-// Declarations in a system header are annotated the same way, and the checks
-// still fire: the violation is located at the user's call site, outside the
-// system-header exemption. The library's now_init definition violates the
-// binding rule inside the header, which only
-// -fno-profiles-exempt-system-headers diagnoses.
+// Calls to functions declared in a system header are checked the same way:
+// the violation is located at the user's call site, outside the
+// system-header exemption. The roles are the call's: the library's
+// unmarked definitions are judged against their own declarations, so
+// -fno-profiles-exempt-system-headers finds nothing in them.
 [[profiles::enforce(std::init)]];
 #include <init_mem.h>
 
@@ -633,12 +578,10 @@ void user() {
   (void)v;
 }
 
-// The now_init definition's violation lies in the system header; the call
-// site's marker check is the user's.
+// The call site's marker check is the user's
 void now_init_user() {
   int u [[uninit]];
   int *s = std::now_init(&u); // OK
-  // strict-note@-1 {{in instantiation of function template specialization 'std::now_init<int>' requested here}}
   int x = 1;
   std::now_init(&x); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   (void)s;
@@ -661,7 +604,7 @@ void uninitialized_user() {
 [[profiles::enforce(std::init)]];
 
 namespace std {
-template <class T> T *now_init(T *p) {
+template <class T> T *now_init(T *p [[ref_to_uninit]]) {
   return p; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 }
 } // namespace std

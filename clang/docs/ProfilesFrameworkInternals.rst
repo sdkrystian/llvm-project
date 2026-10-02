@@ -849,53 +849,43 @@ indeterminate, trusting user-provided default constructors -- the paper's
 trust-the-constructor principle (P4222R2 §5.1), which is also why members
 of objects initialized by a user-provided constructor are not flow-tracked.
 
-Clang itself supplies the standard library's lifecycle annotations:
-``SemaProfiles::addKnownInitLifecycleAttributes``, called from
-``Sema::AddKnownFunctionAttributes`` for every function declaration, attaches
-an implicit ``RefToUninitAttr`` (first parameter) plus ``NowInitAttr`` to a
-``std::construct_at``, and ``NowUninitAttr`` to a ``std::destroy_at``, whose
-first parameter is of pointer type, and the ``RefToUninitAttr`` alone to a
-``std::now_init`` with one pointer parameter and a pointer return type (no
-lifecycle attribute: the function credits nothing, P4222R2 §4.4).  The form
-key keeps the marker subject rules holding by construction (a ``T*``
-parameter is a pointer by form even when ``T`` is dependent), and the seam
-runs after declaration merging and after ``checkNowInitVacuity``, so the
-vacuity check never sees a half-injected pair.  Implicit attributes are
-indistinguishable from hand-written ones, so the funnels, the CFG pass's
-lifecycle arm, serialization, and suppression apply unchanged, and
-specializations inherit them from the pattern via attribute instantiation.
-The ``uninitialized_*`` family is keyed by name and arity instead
-(``KnownStdLifecycleRows``): the output range's parameter is marked when it
-is a pointer or dependent, and a specialization whose iterator is a class
-type drops the implicit marker silently at the instantiation re-check, so
-the call goes inert.  The attribute route makes the family bidirectional,
-like ``construct_at`` (P4222R2 §4.7 rejects an initialized range).  The
-default-construct forms get the marker without ``[[now_init]]``: a credit
-there would legalize reads of the indeterminate scalars that
-default-initialization leaves.  ``destroy`` and ``destroy_n`` are rows too,
-with ``[[now_uninit]]`` and no marker; they have no execution-policy rows,
-because the attribute destroys every pointer or reference argument,
-including the policy's forwarding reference.  ``ranges::`` CPOs sit outside
-both keys; the user-facing scope note lives in :doc:`ProfilesFramework`.
+Clang itself supplies the standard library's lifecycle roles: the std lifecycle
+functions are rows of ``KnownCallees`` keyed by namespace-std name and arity
+(``std::construct_at`` and ``std::destroy_at`` of any arity).  A std row names
+one role parameter -- ``Construct`` for ``construct_at`` and the
+``std::uninitialized_*`` output range, ``AssertUninit`` for ``std::now_init``'s
+parameter and the default-construct forms, ``Destroy`` for ``destroy_at`` and
+the first iterator of ``std::destroy`` and ``std::destroy_n`` -- and matches
+only where that parameter of the called declaration is a pointer, so a
+specialization whose iterator is a class type falls outside it.  The rows are
+looked up at each call (``getCalleeLifecycleRoles``) and never attached as
+attributes: the library's declarations stay as written, so a module or header
+unit built without ``-fprofiles`` reads the same, and a library definition is
+judged against its author's markers alone.  The ``Construct`` rows are
+bidirectional like ``construct_at`` (P4222R2 §4.7 rejects an initialized
+range).  The default-construct forms assert without crediting: a credit there
+would legalize reads of the indeterminate scalars that default-initialization
+leaves.  ``ranges::`` CPOs are outside every key; the user-facing scope note
+lives in :doc:`ProfilesFramework`.
 
 Library callees whose semantics the profile needs without an attribute are
 rows of the known-callee table (``KnownCallees`` in SemaProfiles.cpp), keyed
-by builtin ID or, for the ``operator new`` / ``operator delete`` families, by
-form, with a name-only *untrusted* fallback where the ID is absent; the
-roles reach the funnels and the CFG pass through ``getCalleeLifecycleRoles``.  A
-row names its *role parameter*, the one parameter the call acts on, and what the
-call does to the storage bound to it (``KnownParamRole``); the roles are per
-parameter, so the callee's other arguments are ordinary bindings.  A row's
-*initializing parameter* is a role parameter whose storage the callee
-initializes whatever its prior state (the destination of ``memset``, ``memcpy``,
-and ``memmove``, and of their fortified ``_chk`` builtins).  The binding to it
-is accepted in any live state, and the flow pass writes the argument's storage
-whole on a trusted match only: by name the acceptance survives but the credit
-does not, mirroring the release rows' ``Kill``, because a credit suppresses
-later diagnostics.  Unlike ``[[ref_to_uninit]]`` with ``[[now_init]]``, the role
-is one-directional: it asserts nothing about the prior state, so an
-initialized destination is legal and a repeated call is no double
-initialization.
+by builtin ID, by form for the ``operator new`` / ``operator delete`` families,
+or by namespace-std name and arity, with a name-only *untrusted* fallback where
+the ID is absent; the roles reach the funnels and the CFG pass through
+``getCalleeLifecycleRoles``.  A row names its *role parameter*, the one
+parameter the call acts on, and what the call does to the storage bound to it
+(``KnownParamRole``); the roles are per parameter, so the callee's other
+arguments are ordinary bindings.  A row's *initializing parameter* is a role
+parameter whose storage the callee initializes whatever its prior state (the
+destination of ``memset``, ``memcpy``, and ``memmove``, and of their fortified
+``_chk`` builtins).  The binding to it is accepted in any live state, and the
+flow pass writes the argument's storage whole on a trusted match only: by name
+the acceptance survives but the credit does not, mirroring the release rows'
+``Kill``, because a credit suppresses later diagnostics.  Unlike
+``[[ref_to_uninit]]`` with ``[[now_init]]``, the role is one-directional: it
+asserts nothing about the prior state, so an initialized destination is legal
+and a repeated call is no double initialization.
 
 
 Flow-Tracked Storage (std::init)
@@ -1043,6 +1033,14 @@ Deliberate Strictnesses
   over-flags the same way
   (``if (c) std::construct_at(&s, v); ... if (c) s.x = 1;``).
 
+- Placement ``new`` into marked storage (``new (&u) T``) is rejected while the
+  storage is uninitialized on every path reaching it -- the address binds an
+  unmarked placement parameter, judged by flow like any binding, so a store on
+  some path first makes it an ordinary placement -- and earns no credit;
+  ``std::construct_at`` is the sanctioned spelling for constructing into
+  ``[[uninit]]`` storage (Clang knows its lifecycle roles; see
+  "Binding Pointers and References" in :doc:`ProfilesFramework`).
+
 Missed Diagnostics
 ------------------
 
@@ -1086,3 +1084,22 @@ Missed Diagnostics
   captures is not diagnosed unless the body itself leaves the referent
   uninitialized on some path: the captured storage enters the body in an
   unknown state (``[&p] { return *p; }`` is accepted).
+- ``construct_at``/``destroy_at`` flow is modeled through their known roles:
+  ``construct_at`` checks the lifecycle start (double construction via the
+  reverse-direction rule) and ``destroy_at`` the end (double destruction,
+  use-after-destroy where the storage is *bound*, and a member read after the
+  destroy).  A direct named read of a plain ``[[uninit]]`` *local* after a
+  destroy stays with the local-variable analysis, which treats the call as an
+  escape, so it is a missed diagnostic.
+- Clang's knowledge of the standard library's lifecycle functions applies where
+  the role parameter is a pointer: ``std::construct_at``, ``std::destroy_at``,
+  ``std::now_init`` with a pointer first parameter, and the
+  ``std::uninitialized_*`` family, ``std::destroy`` and ``std::destroy_n`` where
+  the iterator is a pointer; a call with a class-type iterator checks nothing.
+  A whole ``[[uninit]]`` array passed as a range is initialized or destroyed
+  whatever the range's length, and ``std::construct_at(arr, v)`` on a decayed
+  ``[[uninit]]`` array initializes the whole array.
+- ``memset``, ``memcpy``, and ``memmove`` initialize their whole destination
+  whatever the byte count and the type: after ``memset(arr, 0, sizeof(int))`` a
+  read of ``arr[3]`` is accepted, and a class object written by ``memcpy`` is
+  credited although P4222R2 §6 asks for ``construct_at``.
