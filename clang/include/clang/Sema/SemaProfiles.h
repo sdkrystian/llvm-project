@@ -447,9 +447,11 @@ public:
   /// pointer or glvalue (paper §4.3: a cast of a marked pointer is itself
   /// marked; a reference cast denotes the same storage). Value casts like
   /// `(int)m` are not stripped -- they produce a new value, not the same
-  /// storage -- and the arm of a conditional listed in \p Arms. Shared with
-  /// the CFG pass in AnalysisBasedWarnings.cpp, so recognition and flow
-  /// tracking see through exactly the same forms.
+  /// storage; a comma's right operand and a single-element braced list's
+  /// element, which yield that operand's lvalue or value; and the arm of a
+  /// conditional listed in \p Arms. Shared with the CFG pass in
+  /// AnalysisBasedWarnings.cpp, so recognition and flow tracking see through
+  /// exactly the same forms.
   static const Expr *ignoreTransparentCasts(const Expr *E,
                                             ArrayRef<const Expr *> Arms = {});
 
@@ -760,13 +762,14 @@ private:
                                const Decl *AfterFlowPass = nullptr);
 
 public:
-  /// Enumerate the lvalue leaves the store target, binding source, or
-  /// lifecycle argument \p E can name: peel transparent casts and
-  /// single-element braced initializers, walk conditional arms and comma
-  /// right operands, and hand each leaf to \p F. The one target-shape walk
-  /// shared by the parse-time checks and the CFG pass's event extraction
-  /// (AnalysisBasedWarnings.cpp), so a wrapped lvalue is judged exactly like
-  /// its leaf form.
+  /// Enumerate the leaves the store target, binding source, read, or lifecycle
+  /// argument \p E can name, and hand each to \p F: peel what
+  /// ignoreTransparentCasts peels, and distribute every conditional -- at the
+  /// top, or below a member, element, indirection, or address-of step -- into
+  /// one leaf per arm, so *(c ? p : q) has the leaves of c ? *p : *q. The one
+  /// shape walk shared by the parse-time checks and the CFG pass's event
+  /// extraction (AnalysisBasedWarnings.cpp), so a wrapped lvalue is judged
+  /// exactly like its leaf form.
   static void
   forEachTargetLeaf(const Expr *E,
                     llvm::function_ref<void(const ShapeLeaf &Leaf)> F);

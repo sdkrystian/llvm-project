@@ -43,14 +43,13 @@ struct CtorBody {
 void test_member_store(bool c) {
   Pair s [[uninit]];
   s.x = 1;     // expected-error {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
-  // The arrow and conditional-operator spellings fall off the dot-member
-  // chain, so the diagnostic's phrasing approximation picks the plain
-  // "uninitialized storage" wording -- the same approximation the read
-  // diagnostic documents for `(&s)->x` -- and the write is rejected all
-  // the same.
+  // The arrow spelling falls off the dot-member chain, so the diagnostic's
+  // phrasing approximation picks the plain "uninitialized storage" wording --
+  // the same approximation the read diagnostic documents for `(&s)->x` --
+  // and the write is rejected all the same.
   (&s)->x = 1; // expected-error {{writing a member of uninitialized storage does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
   Pair t [[uninit]];
-  (c ? s : t).x = 1; // expected-error {{writing a member of uninitialized storage does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
+  (c ? s : t).x = 1; // expected-error {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
 
   WithMarkedMember b [[uninit]];
   b.m = 1; // expected-error {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}

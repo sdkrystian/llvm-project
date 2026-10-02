@@ -738,9 +738,9 @@ follows:
        for the same row through its ``ExtraPass`` hook: one
        ``TrackedStorage`` entity table (the current object's and tracked
        locals' ``[[uninit]]`` scalar members), one ``extractStdInitEvents``
-       loop whose arms resolve every lvalue through
-       ``TrackedStorage::resolve`` and distribute comma, conditional, and GNU
-       ``?:`` shapes to their leaves, and one definite-assignment run over a
+       loop whose arms resolve every leaf of the one shape walk
+       (``SemaProfiles::forEachTargetLeaf``) through
+       ``TrackedStorage::resolve``, and one definite-assignment run over a
        CFG of its own, built with exception edges over a fully linearized
        shape (the shared CFG the other analyses see is untouched); the
        ``CallExpr`` arm turns a ``[[now_init]]`` call into a ``Gen`` bit for
@@ -966,23 +966,30 @@ potentially-evaluated one, a discarded statement, an immediate function context,
 a dependent context (each instantiation records its own), a defaulted function's
 synthesized body -- and the record of a body whose pass does not run is dropped
 (``Sema::PopFunctionScopeInfo``), as is that of a body with an error that is not
-a profile violation, whose recovery can discard the recorded expressions.  The
-pass's resolver (``TrackedStorage::resolve``) and the predicate share one
-lvalue-shape walk, ``SemaProfiles::flowLeafShape``, so no binding falls between
-the two.  A templated body is never analyzed; each instantiation is analyzed on
-its own CFG, in which statements TreeTransform reused from the pattern are
-ordinary elements.  Consumers read the lattices as follows: a marked-target
-binding fires on ``Must`` and ``double_destroy`` on ``Destroyed``; an
-unmarked-target binding, ``destroy_uninit``, a read through a marker, and a
-subobject write are suppressed by ``May``.  A destroy or release whose arms name
-different storage leaves each possibly assigned, not definitely, and not
-destroyed, and a mutable alias of a marked pointer handed out gives the pointer
-an anonymous referent in that state; arms that all name one storage destroy or
-release it.  A variable of an enclosing function reached by capture, whose state
-the enclosing body decides, enters with ``May`` set and ``Must`` clear, so
-neither direction fires on it until the body itself stores.  The remaining blind
-spots are listed in `Known Gaps (std::init)`_ and in :doc:`ProfilesFramework`,
-"Limitations".
+a profile violation, whose recovery can discard the recorded expressions.  One
+walk enumerates the leaves of a shape (``SemaProfiles::forEachTargetLeaf``) and
+one chain resolver interprets each (``SemaProfiles::flowLeafShape``, shared by
+``TrackedStorage::resolve`` and the predicate), so no binding falls between the
+two.  The walk distributes each conditional at every step of the chain, not only
+at the top, and records the arm each leaf takes (``SemaProfiles::ShapeLeaf``),
+which every interpreter follows: a walk that stopped at a nested conditional
+while the recognizers saw through it would send tracked storage to the
+marker-only form judgment.  Disagreeing arms are kept apart rather than
+collapsed to an unidentified referent, which would lose the mix of tracked and
+untracked arms P4222R2 §4.9 rejects.  A templated body is never analyzed; each
+instantiation is analyzed on its own CFG, in which statements TreeTransform
+reused from the pattern are ordinary elements.  Consumers read the lattices as
+follows: a marked-target binding fires on ``Must`` and ``double_destroy`` on
+``Destroyed``; an unmarked-target binding, ``destroy_uninit``, a read through a
+marker, and a subobject write are suppressed by ``May``.  A destroy or release
+whose arms name different storage leaves each possibly assigned, not definitely,
+and not destroyed, and a mutable alias of a marked pointer handed out gives the
+pointer an anonymous referent in that state; arms that all name one storage
+destroy or release it.  A variable of an enclosing function reached by capture,
+whose state the enclosing body decides, enters with ``May`` set and ``Must``
+clear, so neither direction fires on it until the body itself stores.  The
+remaining blind spots are listed in `Known Gaps (std::init)`_ and in
+:doc:`ProfilesFramework`, "Limitations".
 
 
 .. _profiles-init-known-gaps:

@@ -1491,8 +1491,8 @@ const Expr *SemaProfiles::ignoreTransparentCasts(const Expr *E,
       E = Sub;
       continue;
     }
-    if (const Expr *Arm = chosenArm(E, Arms)) {
-      E = Arm;
+    if (const Expr *Op = passThroughOperand(E, Arms)) {
+      E = Op;
       continue;
     }
     return E;
@@ -2440,8 +2440,8 @@ const Expr *SemaProfiles::peelBaseCasts(const Expr *E, BasePath &Path,
       E = CE->getSubExpr()->IgnoreParens();
       continue;
     }
-    if (const Expr *Arm = chosenArm(E, Arms)) {
-      E = Arm->IgnoreParens();
+    if (const Expr *Op = passThroughOperand(E, Arms)) {
+      E = Op->IgnoreParens();
       continue;
     }
     break;
@@ -3071,6 +3071,46 @@ void SemaProfiles::checkInitProfileIncDec(Expr *Operand, SourceLocation OpLoc) {
   checkInitProfileSubobjectWrite(OpLoc, Operand);
 }
 
+/// The operand of the member, element, indirection, or address-of step
+/// \p E whose conditionals forEachTargetLeaf distributes, or null. A
+/// non-field member names storage independent of its base.
+static const Expr *shapeChainOperand(const Expr *E) {
+  if (const auto *ME = dyn_cast<MemberExpr>(E))
+    return isa<FieldDecl, IndirectFieldDecl>(ME->getMemberDecl())
+               ? ME->getBase()
+               : nullptr;
+  if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(E))
+    return ASE->getBase();
+  if (const auto *UO = dyn_cast<UnaryOperator>(E);
+      UO && UO->getOpcode() == UO_Deref)
+    return UO->getSubExpr();
+  return SemaProfiles::addressOfOperand(E);
+}
+
+/// Descend the chain below \p Cur, appending to \p Arms the arm taken at
+/// each conditional reached, and call \p Emit once per combination of arms.
+static void forEachNestedArmChoice(const Expr *Cur,
+                                   SmallVectorImpl<const Expr *> &Arms,
+                                   llvm::function_ref<void()> Emit) {
+  while (true) {
+    Cur = SemaProfiles::ignoreTransparentCasts(Cur);
+    if (const auto *CO = dyn_cast<AbstractConditionalOperator>(Cur)) {
+      auto [T, F] = conditionalArms(CO);
+      for (const Expr *Arm : {T, F}) {
+        Arms.push_back(Arm);
+        forEachNestedArmChoice(Arm, Arms, Emit);
+        Arms.pop_back();
+      }
+      return;
+    }
+    Cur = shapeChainOperand(Cur);
+    if (!Cur) {
+      Emit();
+      return;
+    }
+  }
+}
+
 void SemaProfiles::forEachTargetLeaf(
     const Expr *E, llvm::function_ref<void(const ShapeLeaf &)> F) {
   E = ignoreTransparentCasts(E);
@@ -3082,11 +3122,8 @@ void SemaProfiles::forEachTargetLeaf(
     forEachTargetLeaf(Fa, F);
     return;
   }
-  if (const Expr *Op = passThroughOperand(E, /*Arms=*/{})) {
-    forEachTargetLeaf(Op, F);
-    return;
-  }
-  F(ShapeLeaf(E));
+  SmallVector<const Expr *, 4> Arms;
+  forEachNestedArmChoice(E, Arms, [&] { F(ShapeLeaf(E, Arms)); });
 }
 
 /// The test::class_final pilot: fires on every completed non-lambda class.

@@ -590,9 +590,10 @@ of a plain local considers no exception paths, see `Limitations`_).  A
 compound
 assignment (``x += 1``) or an increment or
 decrement reads the old value first, so it is diagnosed like a read.  A
-comma or conditional lvalue reads (or assigns) whichever member the chosen
-arm names; an assignment through a conditional whose arms name different
-members assigns neither for the purpose of a later read.  Inside
+comma or conditional lvalue, written whole or below a member access, subscript,
+indirection, or ``&`` (``(c ? a : b).m``), reads (or assigns) whichever member
+the chosen arm names; an assignment through a conditional whose arms name
+different members assigns neither for the purpose of a later read.  Inside
 a constructor body only that plain whole-member assignment counts as
 initialization: passing ``&m`` to a function (even one whose parameter is
 marked
@@ -752,11 +753,13 @@ that does not directly name a pointer declaration -- a reference to a
 pointer, ``*pp``, an array element -- has unknown marking and accepts either
 source as well.  A conditional *source* whose arms disagree -- one
 initialized, one uninitialized -- is rejected for either target (P4222R2
-§4.9: mixing requires suppression).  A parameter's marker written on any declaration of the function is
-inherited by the parameter's later redeclarations, so a header's marker
-carries to the source file's definition (the §7.2 header/source split); the
-definition keeps its read-through checking and call sites after the
-redeclaration still see the marker.  A null pointer source -- ``nullptr``, ``0``, ``{}``, or a local
+§4.9: mixing requires suppression).  The same holds below a member access,
+subscript, indirection, or ``&``: ``*(c ? p : q)`` is judged as ``c ? *p : *q``.
+A parameter's marker written on any declaration of the function is inherited by
+the parameter's later redeclarations, so a header's marker carries to the source
+file's definition (the §7.2 header/source split); the definition keeps its
+read-through checking and call sites after the redeclaration still see the
+marker.  A null pointer source -- ``nullptr``, ``0``, ``{}``, or a local
 variable initialized to null -- refers to no object, so it is accepted for
 marked and unmarked targets alike (§4.3, §8: the marker means "zero or more
 uninitialized objects"); a *parameter* with a null default argument is not a

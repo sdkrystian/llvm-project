@@ -3450,6 +3450,56 @@ void test_tracked_and_untracked_sources(bool c) {
   int *r4 [[ref_to_uninit]] = &g_uninit; // OK
   (void)r1; (void)r2; (void)r3; (void)r4;
 }
+
+// A conditional or comma below an indirection names each arm's referent
+void test_nested_conditional_read(int *p [[ref_to_uninit]],
+                                  int *q [[ref_to_uninit]], bool c) {
+  *p = 1;
+  int a = *(c ? p : p);      // OK
+  int b = *((void)0, p);     // OK
+  int &r = *(c ? p : p);     // OK
+  int d = *(c ? p : q);      // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  int e = *(c ? p : &g_init); // OK
+  *q = 1;
+  int f = *(c ? p : q);      // OK
+  (void)a; (void)b; (void)r; (void)d; (void)e; (void)f;
+}
+
+// A nested conditional with an untracked arm combines the arm's form state
+void test_nested_conditional_untracked_arm(int *p [[ref_to_uninit]], bool c) {
+  int x = *(c ? p : &g_init); // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  (void)x;
+}
+
+// A conditional below an address-of names each arm's storage
+void test_nested_conditional_address(bool c) {
+  int u [[uninit]], v [[uninit]];
+  int *m [[ref_to_uninit]] = &(c ? u : v); // OK
+  u = 1;
+  int *q = &(c ? u : u);                   // OK
+  int *w [[ref_to_uninit]] = &(c ? u : v); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int &r = ((void)0, u);                   // OK
+  (void)m; (void)q; (void)w; (void)r;
+}
+
+// A conditional below a member access names each arm's member
+void test_nested_conditional_member(bool c) {
+  MemberCredit a, b;
+  a.m = 1;
+  int *q = &(c ? a : a).m; // OK
+  int *r = &(c ? a : b).m; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)q; (void)r;
+}
+
+// A store through a nested conditional writes the one storage its arms name
+void test_nested_conditional_store(int *p [[ref_to_uninit]],
+                                   int *q [[ref_to_uninit]], bool c) {
+  *(c ? p : p) = 1;
+  int *m [[ref_to_uninit]] = p; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  *(c ? p : q) = 2;
+  int *n [[ref_to_uninit]] = q; // OK: q's referent is stored on some path
+  (void)m; (void)n;
+}
 // A flow-tracked binding inside a function template is judged on each
 // instantiation's own CFG, with the instantiation note; a never-instantiated
 // template's is not diagnosed.
