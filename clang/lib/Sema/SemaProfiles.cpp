@@ -31,6 +31,7 @@
 #include "clang/Sema/ParsedAttr.h"
 #include "clang/Sema/Sema.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallPtrSet.h"
 
 using namespace clang;
 
@@ -2720,14 +2721,23 @@ const Expr *SemaProfiles::peelBaseCasts(const Expr *E, BasePath &Path,
 std::optional<SemaProfiles::FlowLeafShape>
 SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
   FlowLeafShape S;
-  const Expr *Cur = peelBaseCasts(E, S.Path, Arms);
+  // The named steps, leaf first, and how many of them lie on the leaf side
+  // of the outermost element step seen so far.
+  MemberPath LeafFirst;
+  unsigned NamedBelowElement = 0;
+  // The casts peeled below a step belong to the object the step accesses:
+  // the latest named step's, or the leaf's own before any.
+  auto Bases = [&]() -> BasePath & {
+    return LeafFirst.empty() ? S.LeafBases : LeafFirst.back().Bases;
+  };
+  const Expr *Cur = peelBaseCasts(E, Bases(), Arms);
   // Step to the pointer operand of a * or ->: an address-of step's operand
   // continues the chain (true); any other pointer reaches its storage
   // through the pointer, which ends it.
   auto StepThroughPointer = [&](const Expr *Ptr) {
-    Cur = peelBaseCasts(Ptr, S.Path, Arms);
+    Cur = peelBaseCasts(Ptr, Bases(), Arms);
     if (const Expr *Op = addressOfOperand(Cur)) {
-      Cur = peelBaseCasts(Op, S.Path, Arms);
+      Cur = peelBaseCasts(Op, Bases(), Arms);
       return true;
     }
     S.ThroughPointer = true;
@@ -2739,9 +2749,9 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
       if (!F)
         return std::nullopt;
       if (!F->isAnonymousStructOrUnion())
-        S.Named.push_back(F);
+        LeafFirst.push_back({BasePath(), F});
       if (!ME->isArrow()) {
-        Cur = peelBaseCasts(ME->getBase(), S.Path, Arms);
+        Cur = peelBaseCasts(ME->getBase(), Bases(), Arms);
         continue;
       }
       if (StepThroughPointer(ME->getBase()))
@@ -2750,9 +2760,9 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
     }
     // a.*pm, p->*pm: a member step that names no member.
     if (const BinaryOperator *BO = asDataMemberPointerAccess(Cur)) {
-      S.Named.push_back(nullptr);
+      LeafFirst.push_back({BasePath(), nullptr});
       if (BO->getOpcode() == BO_PtrMemD) {
-        Cur = peelBaseCasts(BO->getLHS(), S.Path, Arms);
+        Cur = peelBaseCasts(BO->getLHS(), Bases(), Arms);
         continue;
       }
       if (StepThroughPointer(BO->getLHS()))
@@ -2761,7 +2771,8 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
     }
     if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(Cur)) {
       S.Subscript = true;
-      Cur = peelBaseCasts(ASE->getBase(), S.Path, Arms);
+      NamedBelowElement = LeafFirst.size();
+      Cur = peelBaseCasts(ASE->getBase(), Bases(), Arms);
       // p[i] indexes the pointer's value; arr[i] the array glvalue its
       // peeled decay leaves behind.
       if (Cur->getType()->isPointerType()) {
@@ -2778,6 +2789,9 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
     }
     break;
   }
+  S.Members.assign(LeafFirst.rbegin(), LeafFirst.rend());
+  S.ElementFreePrefix =
+      S.Subscript ? LeafFirst.size() - NamedBelowElement : LeafFirst.size();
   if (isa<CXXThisExpr>(Cur)) {
     if (!S.ThroughPointer)
       return std::nullopt;
@@ -2799,8 +2813,11 @@ bool SemaProfiles::hasUserProvidedCtor(const CXXRecordDecl *RD) {
   });
 }
 
-bool SemaProfiles::isFlowTrackedMemberField(const ASTContext &Ctx,
-                                            const FieldDecl *F) {
+/// True if \p F is a member the flow analysis tracks as a scalar: an
+/// [[uninit]] built-in scalar (arithmetic or enum) member with no default
+/// member initializer, std::byte excepted (P4222R2 §4.6).
+static bool isFlowTrackedScalarMember(const ASTContext &Ctx,
+                                      const FieldDecl *F) {
   if (!F->hasAttr<UninitAttr>() || !F->getDeclName() ||
       F->hasInClassInitializer())
     return false;
@@ -2810,19 +2827,88 @@ bool SemaProfiles::isFlowTrackedMemberField(const ASTContext &Ctx,
   return !Ctx.getBaseElementType(T)->isStdByteType();
 }
 
-bool SemaProfiles::isFlowTrackedMemberOf(const ASTContext &Ctx,
-                                         const CXXRecordDecl *RD,
-                                         ArrayRef<const CXXRecordDecl *> Path,
-                                         const FieldDecl *F) {
+namespace {
+/// The depth-first walk of SemaProfiles::forEachFlowTrackedMember.
+struct FlowTrackedMemberWalk {
+  using MemberStep = SemaProfiles::MemberStep;
+  const ASTContext &Ctx;
+  llvm::function_ref<void(ArrayRef<MemberStep>, bool)> Visit;
+  /// The steps to the object being walked.
+  SemaProfiles::MemberPath Prefix;
+  /// The records on the walk's stack.
+  llvm::SmallPtrSet<const CXXRecordDecl *, 8> InProgress;
+
+  /// Visit the members of the object of class \p RD reached through
+  /// \p Prefix and the derived-to-base path \p Bases.
+  void walk(const CXXRecordDecl *RD, SemaProfiles::BasePath &Bases) {
+    if (!InProgress.insert(RD).second)
+      return;
+    for (const FieldDecl *F : RD->fields()) {
+      if (!isFlowTrackedScalarMember(Ctx, F))
+        continue;
+      Prefix.push_back({Bases, F});
+      Visit(Prefix, /*Whole=*/false);
+      Prefix.pop_back();
+    }
+    for (const CXXBaseSpecifier &BS : RD->bases()) {
+      if (BS.isVirtual())
+        continue;
+      const CXXRecordDecl *BRD = BS.getType()->getAsCXXRecordDecl();
+      if (!BRD || !BRD->hasDefinition() ||
+          SemaProfiles::hasUserProvidedCtor(BRD->getDefinition()))
+        continue;
+      Bases.push_back(BRD->getCanonicalDecl());
+      walk(BRD->getDefinition(), Bases);
+      Bases.pop_back();
+    }
+    InProgress.erase(RD);
+  }
+};
+} // namespace
+
+void SemaProfiles::forEachFlowTrackedMember(
+    const ASTContext &Ctx, const CXXRecordDecl *RD,
+    llvm::function_ref<void(ArrayRef<MemberStep>, bool Whole)> Visit) {
   if (!RD || !RD->hasDefinition())
-    return false;
-  bool Found = false;
-  forEachCandidateUninitField(RD->getDefinition(),
-                              [&](const BasePath &P, const FieldDecl *G) {
-                                if (G == F && llvm::ArrayRef(P) == Path)
-                                  Found = isFlowTrackedMemberField(Ctx, G);
-                              });
-  return Found;
+    return;
+  FlowTrackedMemberWalk Walk{Ctx, Visit, {}, {}};
+  BasePath Bases;
+  Walk.walk(RD->getDefinition(), Bases);
+}
+
+ArrayRef<SemaProfiles::FlowTrackedMember>
+SemaProfiles::flowTrackedMembers(const CXXRecordDecl *RD) const {
+  if (!RD || !RD->hasDefinition())
+    return {};
+  RD = RD->getDefinition();
+  if (RD->isBeingDefined())
+    return {};
+  std::unique_ptr<SmallVector<FlowTrackedMember, 4>> &Table =
+      FlowTrackedMemberTables[RD];
+  if (!Table) {
+    Table = std::make_unique<SmallVector<FlowTrackedMember, 4>>();
+    forEachFlowTrackedMember(
+        getASTContext(), RD, [&](ArrayRef<MemberStep> Path, bool Whole) {
+          Table->push_back({MemberPath(Path.begin(), Path.end()), Whole});
+        });
+  }
+  return *Table;
+}
+
+std::optional<SemaProfiles::FlowMemberMatch>
+SemaProfiles::matchFlowTrackedMember(const CXXRecordDecl *RD,
+                                     const FlowLeafShape &Shape) const {
+  ArrayRef<MemberStep> Steps =
+      ArrayRef(Shape.Members).take_front(Shape.ElementFreePrefix);
+  if (Steps.empty())
+    return std::nullopt;
+  ArrayRef<FlowTrackedMember> Table = flowTrackedMembers(RD);
+  for (unsigned I = 0, N = Table.size(); I != N; ++I) {
+    ArrayRef<MemberStep> Path = Table[I].first;
+    if (Path.size() <= Steps.size() && Steps.take_front(Path.size()) == Path)
+      return FlowMemberMatch{I, (unsigned)Path.size()};
+  }
+  return std::nullopt;
 }
 
 const CXXRecordDecl *SemaProfiles::getTrackableSlotClass(QualType T) {
@@ -2887,15 +2973,14 @@ SemaProfiles::enclosingInstanceMethod(const DeclContext *DC) {
   return nullptr;
 }
 
-bool SemaProfiles::isFlowTrackedLeaf(const ASTContext &Ctx,
-                                     const ShapeLeaf &Leaf, bool AsPointerValue,
-                                     const DeclContext *CurContext) {
+bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
+                                     const DeclContext *CurContext) const {
   if (!insideFunctionBody(CurContext))
     return false;
   const Expr *E = ignoreTransparentCasts(Leaf.E, Leaf.Arms);
   if (AsPointerValue) {
     if (const Expr *Op = addressOfOperand(E))
-      return isFlowTrackedLeaf(Ctx, ShapeLeaf(Op, Leaf.Arms),
+      return isFlowTrackedLeaf(ShapeLeaf(Op, Leaf.Arms),
                                /*AsPointerValue=*/false, CurContext);
     // The value of a marked pointer, or a decayed [[uninit]] array.
     const auto *VD = dyn_cast_or_null<VarDecl>(getDirectlyNamedDecl(E));
@@ -2909,11 +2994,8 @@ bool SemaProfiles::isFlowTrackedLeaf(const ASTContext &Ctx,
   if (!Shape)
     return false;
   if (Shape->IsThis) {
-    if (Shape->Named.size() != 1 || Shape->Subscript)
-      return false;
     const CXXMethodDecl *MD = enclosingInstanceMethod(CurContext);
-    return MD && isFlowTrackedMemberOf(Ctx, MD->getParent(), Shape->Path,
-                                       Shape->Named.front());
+    return MD && matchFlowTrackedMember(MD->getParent(), *Shape);
   }
   const VarDecl *V = Shape->Local;
   if (!V->hasLocalStorage())
@@ -2930,11 +3012,8 @@ bool SemaProfiles::isFlowTrackedLeaf(const ASTContext &Ctx,
   if (V->hasAttr<RefToUninitAttr>() && V->getType()->isReferenceType())
     return !Shape->Subscript;
   // a.m: a tracked member of an aggregate local or by-value parameter.
-  if (Shape->Named.size() != 1 || Shape->Subscript)
-    return false;
   const CXXRecordDecl *RD = flowTrackedAggregateClass(V);
-  return RD &&
-         isFlowTrackedMemberOf(Ctx, RD, Shape->Path, Shape->Named.front());
+  return RD && matchFlowTrackedMember(RD, *Shape);
 }
 
 const Expr *SemaProfiles::bindingSourceOperand(const Expr *Src, QualType T,
@@ -2959,8 +3038,7 @@ bool SemaProfiles::hasFlowTrackedGlvalueLeaf(
     return false;
   bool Any = false;
   forEachTargetLeaf(G, [&](const ShapeLeaf &Leaf) {
-    if (!isFlowTrackedLeaf(getASTContext(), Leaf, /*AsPointerValue=*/false,
-                           SemaRef.CurContext))
+    if (!isFlowTrackedLeaf(Leaf, /*AsPointerValue=*/false, SemaRef.CurContext))
       return;
     Any = true;
     if (Leaves && !llvm::is_contained(*Leaves, Leaf.E))
@@ -2979,8 +3057,7 @@ bool SemaProfiles::hasFlowTrackedLeaf(
     return false;
   bool Any = false;
   forEachTargetLeaf(Src, [&](const ShapeLeaf &Leaf) {
-    if (!isFlowTrackedLeaf(getASTContext(), Leaf, AsPointerValue,
-                           SemaRef.CurContext))
+    if (!isFlowTrackedLeaf(Leaf, AsPointerValue, SemaRef.CurContext))
       return;
     Any = true;
     if (Leaves && !llvm::is_contained(*Leaves, Leaf.E))

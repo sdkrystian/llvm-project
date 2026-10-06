@@ -1842,6 +1842,8 @@ static bool isCurrentObjectBase(const Expr *E) {
 }
 
 using BasePath = SemaProfiles::BasePath;
+using MemberStep = SemaProfiles::MemberStep;
+using MemberPath = SemaProfiles::MemberPath;
 
 /// One flow-tracked std::init storage entity of the analyzed body: an
 /// [[uninit]] scalar member of the current object or of a directly named
@@ -1852,11 +1854,11 @@ using BasePath = SemaProfiles::BasePath;
 struct TrackedEntity {
   enum class Kind { CurrentObjectMember, LocalMember, WholeLocal, Pointee };
   Kind K;
-  /// The derived-to-base path from the object's class to Field's class
-  /// (member kinds).
-  BasePath Path;
-  /// The member (member kinds); null otherwise.
-  const FieldDecl *Field = nullptr;
+  /// The member path from the object (member kinds; its key in the object's
+  /// SemaProfiles::flowTrackedMembers table); empty otherwise.
+  MemberPath Steps;
+  /// The member is tracked as a whole object (member kinds).
+  bool Whole = false;
   /// The type of the storage the entity stands for: the member's or the
   /// local's declared type, or the referent type of a marked pointer or
   /// reference (its anonymous referent). A credit or store covers the entity
@@ -1870,6 +1872,11 @@ struct TrackedEntity {
   /// on no path definitely, and on no path known unassigned -- rather than
   /// unassigned.
   bool UnknownEntry = false;
+
+  /// The member a member entity stands for; null otherwise.
+  const FieldDecl *field() const {
+    return Steps.empty() ? nullptr : Steps.back().Field;
+  }
 };
 
 /// True if \p T transitively holds a pointer, reference, or member pointer
@@ -1987,17 +1994,23 @@ static bool designationCovers(const ASTContext &Ctx, QualType Designated,
 /// over it. Each object's entities are contiguous, so a whole-object event
 /// covers a range.
 struct TrackedStorage {
-  explicit TrackedStorage(const ASTContext &Ctx) : Ctx(Ctx) {}
+  explicit TrackedStorage(Sema &S) : Ctx(S.Context), Profiles(S.Profiles()) {}
 
   const ASTContext &Ctx;
+  const SemaProfiles &Profiles;
   SmallVector<TrackedEntity, 8> Entities;
   /// The contiguous entity range of each tracked local's members.
   llvm::DenseMap<const VarDecl *, std::pair<unsigned, unsigned>> LocalRange;
+  /// The class of each local in LocalRange.
+  llvm::DenseMap<const VarDecl *, const CXXRecordDecl *> LocalClass;
   /// The WholeLocal or Pointee entity of a marked local or parameter.
   llvm::DenseMap<const VarDecl *, unsigned> LocalEntity;
   /// The current object's range (an instance member function body); empty
   /// otherwise.
   std::pair<unsigned, unsigned> CurrentObjectRange{0, 0};
+  /// The class of the current object whose members are tracked; null when
+  /// none is.
+  const CXXRecordDecl *CurrentObjectClass = nullptr;
   /// The tracked local a tracked copy was copy- or move-constructed from,
   /// and the derived-to-base path of the conversion a slicing copy applied
   /// to it (empty for a same-class copy).
@@ -2007,16 +2020,14 @@ struct TrackedStorage {
   };
   llvm::DenseMap<const VarDecl *, CopyOrigin> CopySource;
 
-  /// Append one entity per flow-tracked member of \p RD
-  /// (SemaProfiles::isFlowTrackedMemberField, including the members of its
+  /// Append one entity per entry of \p RD's flow-tracked member table
+  /// (SemaProfiles::flowTrackedMembers, including the members of its
   /// non-virtual, constructor-less bases, which nothing can have assigned
-  /// before the containing object's user code runs) for the object \p Base
-  /// (null: the current object), with the given read-tracking and entry
-  /// state. Class-type and array members (which would need construct_at
-  /// flow modeling) and pointers (rejected under [[uninit]]) are out of
-  /// scope. Returns the appended range; a local's range is recorded only
-  /// when non-empty.
-  std::pair<unsigned, unsigned> addObject(Sema &S, const VarDecl *Base,
+  /// before the containing object's user code runs), in table order, for the
+  /// object \p Base (null: the current object), with the given read-tracking
+  /// and entry state. Returns the appended range; a local's range is recorded
+  /// only when non-empty.
+  std::pair<unsigned, unsigned> addObject(const VarDecl *Base,
                                           const CXXRecordDecl *RD,
                                           bool TrackReads, bool UnknownEntry);
 
@@ -2025,11 +2036,15 @@ struct TrackedStorage {
   unsigned addLocalEntity(TrackedEntity::Kind K, const VarDecl *V,
                           bool UnknownEntry);
 
-  /// The entity of member \p F reached through \p Path in the object
-  /// \p Base (null: the current object), if tracked.
+  /// The member entity of the object \p Base (null: the current object)
+  /// whose member path is \p Steps, if tracked.
   std::optional<unsigned> find(const VarDecl *Base,
-                               ArrayRef<const CXXRecordDecl *> Path,
-                               const FieldDecl *F) const;
+                               ArrayRef<MemberStep> Steps) const;
+
+  /// The entity range of the object \p Base (null: the current object) and
+  /// its class, or an empty range and null.
+  std::pair<std::pair<unsigned, unsigned>, const CXXRecordDecl *>
+  objectRange(const VarDecl *Base) const;
 
   /// What resolving a glvalue found: the tracked entity it names -- Subobject
   /// when it reaches storage below that entity (a member or element of an
@@ -2109,29 +2124,31 @@ struct TrackedStorage {
             ArrayRef<const CXXRecordDecl *> Base) const;
 };
 
-std::pair<unsigned, unsigned>
-TrackedStorage::addObject(Sema &S, const VarDecl *Base, const CXXRecordDecl *RD,
-                          bool TrackReads, bool UnknownEntry) {
+std::pair<unsigned, unsigned> TrackedStorage::addObject(const VarDecl *Base,
+                                                        const CXXRecordDecl *RD,
+                                                        bool TrackReads,
+                                                        bool UnknownEntry) {
   unsigned Begin = Entities.size();
-  SemaProfiles::forEachCandidateUninitField(
-      RD, [&](const BasePath &Path, const FieldDecl *F) {
-        if (!SemaProfiles::isFlowTrackedMemberField(S.Context, F))
-          return;
-        for (unsigned I = Begin, N = Entities.size(); I != N; ++I)
-          if (Entities[I].Field == F && Entities[I].Path == Path)
-            return;
-        TrackedEntity E{Base ? TrackedEntity::Kind::LocalMember
-                             : TrackedEntity::Kind::CurrentObjectMember,
-                        Path, F, F->getType()};
-        E.TrackReads = TrackReads;
-        E.UnknownEntry = UnknownEntry;
-        Entities.push_back(std::move(E));
-      });
+  for (const SemaProfiles::FlowTrackedMember &M :
+       Profiles.flowTrackedMembers(RD)) {
+    TrackedEntity E;
+    E.K = Base ? TrackedEntity::Kind::LocalMember
+               : TrackedEntity::Kind::CurrentObjectMember;
+    E.Steps = M.first;
+    E.Whole = M.second;
+    E.Type = M.first.back().Field->getType();
+    E.TrackReads = TrackReads;
+    E.UnknownEntry = UnknownEntry;
+    Entities.push_back(std::move(E));
+  }
   std::pair<unsigned, unsigned> Range{Begin, (unsigned)Entities.size()};
-  if (!Base)
+  if (!Base) {
     CurrentObjectRange = Range;
-  else if (Range.first != Range.second)
+    CurrentObjectClass = RD;
+  } else if (Range.first != Range.second) {
     LocalRange[Base] = Range;
+    LocalClass[Base] = RD;
+  }
   return Range;
 }
 
@@ -2143,25 +2160,30 @@ unsigned TrackedStorage::addLocalEntity(TrackedEntity::Kind K, const VarDecl *V,
   QualType T = V->getType();
   if (K == TrackedEntity::Kind::Pointee)
     T = T->isPointerType() ? T->getPointeeType() : T.getNonReferenceType();
-  TrackedEntity E{K, BasePath(), nullptr, T};
+  TrackedEntity E;
+  E.K = K;
+  E.Type = T;
   E.TrackReads = false;
   E.UnknownEntry = UnknownEntry;
   Entities.push_back(std::move(E));
   return LocalEntity[V] = Entities.size() - 1;
 }
 
-std::optional<unsigned>
-TrackedStorage::find(const VarDecl *Base, ArrayRef<const CXXRecordDecl *> Path,
-                     const FieldDecl *F) const {
-  std::pair<unsigned, unsigned> Range = CurrentObjectRange;
-  if (Base) {
-    auto It = LocalRange.find(Base);
-    if (It == LocalRange.end())
-      return std::nullopt;
-    Range = It->second;
-  }
+std::pair<std::pair<unsigned, unsigned>, const CXXRecordDecl *>
+TrackedStorage::objectRange(const VarDecl *Base) const {
+  if (!Base)
+    return {CurrentObjectRange, CurrentObjectClass};
+  auto It = LocalRange.find(Base);
+  if (It == LocalRange.end())
+    return {{0, 0}, nullptr};
+  return {It->second, LocalClass.lookup(Base)};
+}
+
+std::optional<unsigned> TrackedStorage::find(const VarDecl *Base,
+                                             ArrayRef<MemberStep> Steps) const {
+  std::pair<unsigned, unsigned> Range = objectRange(Base).first;
   for (unsigned I = Range.first; I != Range.second; ++I)
-    if (Entities[I].Field == F && llvm::ArrayRef(Entities[I].Path) == Path)
+    if (ArrayRef(Entities[I].Steps) == Steps)
       return I;
   return std::nullopt;
 }
@@ -2182,7 +2204,7 @@ TrackedStorage::belowBase(std::pair<unsigned, unsigned> Range,
                           ArrayRef<const CXXRecordDecl *> Base) const {
   std::optional<unsigned> First, Last;
   for (unsigned I = Range.first; I != Range.second; ++I) {
-    ArrayRef<const CXXRecordDecl *> Path = Entities[I].Path;
+    ArrayRef<const CXXRecordDecl *> Path = Entities[I].Steps.front().Bases;
     if (Path.size() < Base.size() || Path.take_front(Base.size()) != Base)
       continue;
     if (!First)
@@ -2203,23 +2225,38 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
   // derived-to-base step or does not cover the entity's type.
   auto DesignatesPart = [&](unsigned Idx) {
     return !Designated.isNull() &&
-           (!Shape->Path.empty() || !covers(Designated, Idx, RawExempt));
+           (!Shape->LeafBases.empty() || !covers(Designated, Idx, RawExempt));
   };
   Resolution R;
+  // The member entity of the object with entity range \p Range and class
+  // \p RD whose path the leaf's steps start with
+  // (SemaProfiles::matchFlowTrackedMember); storage below it is a subobject.
+  auto ResolveMember = [&](std::pair<unsigned, unsigned> Range,
+                           const CXXRecordDecl *RD) {
+    std::optional<SemaProfiles::FlowMemberMatch> M =
+        Profiles.matchFlowTrackedMember(RD, *Shape);
+    if (!M)
+      return false;
+    assert(Range.second - Range.first ==
+               Profiles.flowTrackedMembers(RD).size() &&
+           "an object's entities are its class's member table");
+    unsigned Idx = Range.first + M->Index;
+    R.Entity = Idx;
+    R.Subobject = Shape->Members.size() > M->Length || Shape->Subscript ||
+                  DesignatesPart(Idx);
+    return true;
+  };
   if (Shape->IsThis) {
+    if (Shape->Members.empty())
+      return {};
+    const MemberStep &Top = Shape->Members.front();
     // An access at any depth below a step through a pointer to data member
     // may reach any member below the object it applies to.
-    if (!Shape->Named.empty() && !Shape->Named.back()) {
-      R.Opaque = belowBase(CurrentObjectRange, Shape->Named.size() == 1
-                                                   ? Shape->Path
-                                                   : BasePath());
+    if (!Top.Field) {
+      R.Opaque = belowBase(CurrentObjectRange, Top.Bases);
       return R;
     }
-    if (Shape->Named.size() != 1 || Shape->Subscript)
-      return {};
-    R.Entity = find(nullptr, Shape->Path, Shape->Named.front());
-    // The path is the member's own: only the type decides.
-    R.Subobject = R.Entity && !covers(Designated, *R.Entity, RawExempt);
+    ResolveMember(CurrentObjectRange, CurrentObjectClass);
     return R;
   }
   const VarDecl *V = Shape->Local;
@@ -2229,7 +2266,7 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
       return {};
     if (std::optional<unsigned> Idx = markedPointerObject(V)) {
       R.Entity = Idx;
-      R.Subobject = !Shape->Named.empty() || DesignatesPart(*Idx);
+      R.Subobject = !Shape->Members.empty() || DesignatesPart(*Idx);
     }
     return R;
   }
@@ -2239,48 +2276,46 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
     const TrackedEntity &Ent = Entities[It->second];
     if (Ent.K == TrackedEntity::Kind::WholeLocal) {
       R.Entity = It->second;
-      R.Subobject = !Shape->Named.empty() || Shape->Subscript ||
+      R.Subobject = !Shape->Members.empty() || Shape->Subscript ||
                     DesignatesPart(It->second);
     } else if (Ent.K == TrackedEntity::Kind::Pointee &&
                V->getType()->isReferenceType() && !Shape->Subscript) {
       R.Entity = It->second;
-      R.Subobject = !Shape->Named.empty() || DesignatesPart(It->second);
+      R.Subobject = !Shape->Members.empty() || DesignatesPart(It->second);
     }
     return R;
   }
   // V.m: a member of a tracked aggregate local, or a consuming access of one.
-  auto RangeIt = LocalRange.find(V);
-  if (RangeIt == LocalRange.end() || Shape->Named.empty())
+  auto [Range, RD] = objectRange(V);
+  if (Range.first == Range.second || Shape->Members.empty())
     return {};
   R.LocalBase = Shape->LocalRef;
   // The member directly on the object.
-  const FieldDecl *Top = Shape->Named.back();
-  if (!Top) {
+  const MemberStep &Top = Shape->Members.front();
+  if (!Top.Field) {
     // x.*pm: any member, modeled by its reads; below it, a pointer-to-member
     // step's type is unknown here, so the access escapes the object.
-    if (Shape->Named.size() == 1 && !Shape->Subscript) {
-      R.Opaque = belowBase(RangeIt->second, Shape->Path);
+    if (Shape->Members.size() == 1 && !Shape->Subscript) {
+      R.Opaque = belowBase(Range, Top.Bases);
       R.Benign = true;
     }
     return R;
   }
-  if (Shape->Named.size() == 1 && !Shape->Subscript) {
-    if (std::optional<unsigned> Idx = find(V, Shape->Path, Top)) {
-      R.Entity = Idx;
-      R.Subobject = !covers(Designated, *Idx, RawExempt);
-      R.Benign = true;
-      return R;
-    }
-    // An untracked sibling consumes the base without exposing the object
-    // only when it cannot itself reach a tracked member: a pointer or
-    // reference member may denote one, and a class or array member may hold
-    // such a value.
-    QualType FT = Top->getType();
+  if (ResolveMember(Range, RD)) {
+    R.Benign = true;
+    return R;
+  }
+  // An untracked sibling consumes the base without exposing the object
+  // only when it cannot itself reach a tracked member: a pointer or
+  // reference member may denote one, and a class or array member may hold
+  // such a value.
+  QualType FT = Top.Field->getType();
+  if (Shape->Members.size() == 1 && !Shape->Subscript) {
     R.Benign = FT->isIntegralOrEnumerationType() || FT->isFloatingType();
     return R;
   }
   llvm::SmallPtrSet<const RecordDecl *, 8> Visited;
-  R.Benign = !typeHoldsPointerOrReference(Top->getType(), Visited);
+  R.Benign = !typeHoldsPointerOrReference(FT, Visited);
   return R;
 }
 
@@ -3018,7 +3053,7 @@ static void reportMemberReadsBeforeInit(
               Name, diag::err_init_member_read_before_init, R->getBeginLoc(),
               /*D=*/nullptr, /*PostParse=*/true))
         continue;
-      const FieldDecl *F = Storage.Entities[I].Field;
+      const FieldDecl *F = Storage.Entities[I].field();
       S.Diag(R->getBeginLoc(), diag::err_init_member_read_before_init)
           << Name << F->getDeclName();
       S.Diag(F->getLocation(), diag::note_init_uninit_member_here)
@@ -3365,8 +3400,7 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
             if (!CastPath.empty())
               L.R.Subobject = true;
           }
-          L.Tracked = SemaProfiles::isFlowTrackedLeaf(S.Context, Leaf,
-                                                      AsPointerValue, DC);
+          L.Tracked = S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC);
           AnyTracked |= L.Tracked;
           if (!L.R.Entity) {
             const Expr *G =
@@ -3853,7 +3887,7 @@ static void extractStdInitEvents(
       SemaProfiles::forEachTargetLeaf(
           Operand, [&](const SemaProfiles::ShapeLeaf &Leaf) {
             AnyTracked |=
-                SemaProfiles::isFlowTrackedLeaf(Ctx, Leaf, AsPointerValue, DC);
+                S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC);
             std::pair<ReseatTarget, unsigned> RT = Fresh;
             TrackedStorage::Resolution R =
                 Storage.resolveFlowLeaf(Leaf, AsPointerValue);
@@ -3988,8 +4022,7 @@ static void extractStdInitEvents(
       SemaProfiles::forEachTargetLeaf(
           Operand, [&](const SemaProfiles::ShapeLeaf &Leaf) {
             BindingLeaf L;
-            if (SemaProfiles::isFlowTrackedLeaf(Ctx, Leaf, AsPointerValue,
-                                                DC)) {
+            if (S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC)) {
               AnyTracked = true;
               JudgedLeaves.insert(Leaf.E);
               TrackedStorage::Resolution R =
@@ -4027,8 +4060,8 @@ static void extractStdInitEvents(
       SemaProfiles::forEachTargetLeaf(
           G, [&](const SemaProfiles::ShapeLeaf &Leaf) {
             BindingLeaf L;
-            if (SemaProfiles::isFlowTrackedLeaf(Ctx, Leaf,
-                                                /*AsPointerValue=*/false, DC)) {
+            if (S.Profiles().isFlowTrackedLeaf(Leaf,
+                                               /*AsPointerValue=*/false, DC)) {
               AnyTracked = true;
               JudgedLeaves.insert(Leaf.E);
               TrackedStorage::Resolution R = Storage.resolveFlowLeaf(
@@ -4195,9 +4228,15 @@ static void extractStdInitEvents(
           AppendAliasEscapes(CI->getInit(), F->getType(), CI->getInit());
           if (!Ctor)
             continue;
-          if (std::optional<unsigned> Idx = Storage.find(nullptr, {}, F))
-            BlockEvents.push_back(
-                {DefAssignEventKind::Write, *Idx, CI->getInit()});
+          // Every entity whose path starts at that member.
+          for (unsigned Idx = Storage.CurrentObjectRange.first;
+               Idx != Storage.CurrentObjectRange.second; ++Idx) {
+            const MemberStep &First = Storage.Entities[Idx].Steps.front();
+            if (First.Bases.empty() && First.Field &&
+                First.Field->getCanonicalDecl() == F->getCanonicalDecl())
+              BlockEvents.push_back(
+                  {DefAssignEventKind::Write, Idx, CI->getInit()});
+          }
         } else if (Ctor && CI->isBaseInitializer()) {
           // Every entity below that base: its path starts with the base.
           const auto *BRD = CI->getBaseClass()->getAsCXXRecordDecl();
@@ -4205,8 +4244,8 @@ static void extractStdInitEvents(
             continue;
           for (unsigned Idx = Storage.CurrentObjectRange.first;
                Idx != Storage.CurrentObjectRange.second; ++Idx) {
-            const BasePath &Path = Storage.Entities[Idx].Path;
-            if (!Path.empty() && Path.front() == BRD->getCanonicalDecl())
+            const BasePath &Bases = Storage.Entities[Idx].Steps.front().Bases;
+            if (!Bases.empty() && Bases.front() == BRD->getCanonicalDecl())
               BlockEvents.push_back(
                   {DefAssignEventKind::Write, Idx, CI->getInit()});
           }
@@ -4456,20 +4495,23 @@ static void extractStdInitEvents(
             }
           }
           // A tracked copy: each dest member's state becomes its source
-          // member's -- the source entity at the copy's derived-to-base path
-          // followed by the member's own path, so a sliced copy maps onto the
-          // right base subobject. A source entity that does not exist cannot
-          // occur (the dest's members are a subset of the source's); fall
-          // back to Write (assume assigned) if it somehow does.
+          // member's -- the source entity whose path is the member's own with
+          // the copy's derived-to-base path prepended to its first step, so a
+          // sliced copy maps onto the right base subobject. A source entity
+          // that does not exist cannot occur (the dest's members are a subset
+          // of the source's); fall back to Write (assume assigned) if it
+          // somehow does.
           auto CopyIt = Storage.CopySource.find(V);
           if (CopyIt == Storage.CopySource.end())
             continue;
           auto Range = Storage.LocalRange.find(V)->second;
           for (unsigned Idx = Range.first; Idx != Range.second; ++Idx) {
-            BasePath SrcPath(CopyIt->second.Path);
-            SrcPath.append(Storage.Entities[Idx].Path);
-            if (std::optional<unsigned> SrcIdx = Storage.find(
-                    CopyIt->second.Src, SrcPath, Storage.Entities[Idx].Field))
+            MemberPath SrcSteps(Storage.Entities[Idx].Steps);
+            BasePath &First = SrcSteps.front().Bases;
+            First.insert(First.begin(), CopyIt->second.Path.begin(),
+                         CopyIt->second.Path.end());
+            if (std::optional<unsigned> SrcIdx =
+                    Storage.find(CopyIt->second.Src, SrcSteps))
               BlockEvents.push_back(
                   {DefAssignEventKind::Copy, Idx, V->getInit(), *SrcIdx});
             else
@@ -4650,7 +4692,7 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
     Owned.insert(P);
     HarvestMarked(P, /*UnknownEntry=*/false);
     if (const CXXRecordDecl *RD = SemaProfiles::flowTrackedAggregateClass(P))
-      Storage.addObject(S, P, RD,
+      Storage.addObject(P, RD,
                         /*TrackReads=*/!P->hasDefaultArg() &&
                             SemaProfiles::getTrackableSlotClass(P->getType()),
                         /*UnknownEntry=*/false);
@@ -4680,7 +4722,7 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
   for (const VarDecl *V : Locals) {
     HarvestMarked(V, /*UnknownEntry=*/false);
     if (const CXXRecordDecl *RD = getTrackedLocalAggregate(V))
-      Storage.addObject(S, V, RD, /*TrackReads=*/true, /*UnknownEntry=*/false);
+      Storage.addObject(V, RD, /*TrackReads=*/true, /*UnknownEntry=*/false);
   }
   // The copy harvest chains from a read-tracked local only, so it runs
   // before the binding-only objects are added.
@@ -4704,7 +4746,7 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
             !Storage.Entities[SrcIt->second.first].TrackReads)
           continue;
         std::pair<unsigned, unsigned> Range =
-            Storage.addObject(S, V, RD, /*TrackReads=*/true,
+            Storage.addObject(V, RD, /*TrackReads=*/true,
                               /*UnknownEntry=*/false);
         if (Range.first == Range.second)
           continue;
@@ -4716,7 +4758,7 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
   for (const VarDecl *V : Locals)
     if (!Storage.LocalRange.count(V))
       if (const CXXRecordDecl *RD = SemaProfiles::flowTrackedAggregateClass(V))
-        Storage.addObject(S, V, RD, /*TrackReads=*/false,
+        Storage.addObject(V, RD, /*TrackReads=*/false,
                           /*UnknownEntry=*/false);
   // Variables of enclosing functions, from an unknown entry state.
   llvm::SmallPtrSet<const VarDecl *, 4> Seen;
@@ -4726,7 +4768,7 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
     HarvestMarked(V, /*UnknownEntry=*/true);
     if (!Storage.LocalRange.count(V) && !Storage.LocalEntity.count(V))
       if (const CXXRecordDecl *RD = SemaProfiles::flowTrackedAggregateClass(V))
-        Storage.addObject(S, V, RD, /*TrackReads=*/false,
+        Storage.addObject(V, RD, /*TrackReads=*/false,
                           /*UnknownEntry=*/true);
   }
 }
@@ -4836,7 +4878,7 @@ static void verifyDeferredInitSites(
 static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
                                        AnalysisDeclContext &,
                                        const CFGProfileEntry &Entry) {
-  TrackedStorage Storage(S.Context);
+  TrackedStorage Storage(S);
   const auto *Ctor = dyn_cast<CXXConstructorDecl>(D);
   if (Ctor && (Ctor->isDelegatingConstructor() || Ctor->getParent()->isUnion()))
     Ctor = nullptr;
@@ -4844,7 +4886,7 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
   if (const CXXMethodDecl *MD =
           SemaProfiles::enclosingInstanceMethod(dyn_cast<DeclContext>(D))) {
     if (const CXXRecordDecl *RD = MD->getParent()->getDefinition())
-      Storage.addObject(S, /*Base=*/nullptr, RD, /*TrackReads=*/Ctor != nullptr,
+      Storage.addObject(/*Base=*/nullptr, RD, /*TrackReads=*/Ctor != nullptr,
                         /*UnknownEntry=*/false);
     // A [*this] capture copy-constructs the whole object; its whole-object
     // reads are appended only without a user-provided copy constructor (see

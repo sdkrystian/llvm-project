@@ -991,7 +991,14 @@ skip it as they skip a rebuilt default argument or initializer
 One walk enumerates the leaves of a shape
 (``SemaProfiles::forEachTargetLeaf``) and one chain resolver interprets each
 (``SemaProfiles::flowLeafShape``, shared by ``TrackedStorage::resolve`` and the
-predicate), so no binding falls between the two.  The walk distributes each
+predicate), so no binding falls between the two.  A member entity is keyed by
+its member path: per member step, the derived-to-base path from the step's
+object to the member's class, then the member.  A class's tracked member paths
+form a table (``SemaProfiles::flowTrackedMembers``), enumerated depth-first so
+the paths under any prefix are contiguous, and an object's member entities are
+that table in order; one matcher (``SemaProfiles::matchFlowTrackedMember``)
+finds the entry an lvalue's member steps start with, for both the predicate and
+the resolver.  The walk distributes each
 conditional at every step of the chain, not only at the top, and records the
 arm each leaf takes (``SemaProfiles::ShapeLeaf``), which every interpreter
 follows: a walk that stopped at a nested conditional while the recognizers saw

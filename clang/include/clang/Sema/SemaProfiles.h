@@ -22,10 +22,12 @@
 #include "clang/Basic/DiagnosticIDs.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Sema/SemaBase.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
+#include <memory>
 #include <optional>
 
 namespace clang {
@@ -267,6 +269,23 @@ public:
   static const Expr *peelBaseCasts(const Expr *E, BasePath &Path,
                                    ArrayRef<const Expr *> Arms = {});
 
+  /// One member step of an lvalue chain: the derived-to-base path from the
+  /// object the step accesses to \c Field's class, then \c Field. A null
+  /// \c Field is a pointer-to-data-member step (\c .* or \c ->*;
+  /// asDataMemberPointerAccess), which names no member. Steps compare fields
+  /// by canonical declaration, so a definition merged from modules matches.
+  struct MemberStep {
+    BasePath Bases;
+    const FieldDecl *Field = nullptr;
+    bool operator==(const MemberStep &O) const {
+      return (Field ? Field->getCanonicalDecl() : nullptr) ==
+                 (O.Field ? O.Field->getCanonicalDecl() : nullptr) &&
+             Bases == O.Bases;
+    }
+  };
+  /// The member steps from an object to a subobject, object first.
+  using MemberPath = SmallVector<MemberStep, 1>;
+
   /// The shape of an lvalue the std::init flow analysis may track: the
   /// object expression at the bottom of the member, element, and
   /// dereference chain, and the chain itself. Shared by the parse-time
@@ -283,15 +302,18 @@ public:
     /// The chain reaches its storage through a pointer value -- `*p`,
     /// `p->m`, `p[i]`, `this->m` -- rather than through the object itself.
     bool ThroughPointer = false;
-    /// The named member steps, leaf first; anonymous-record steps are
-    /// transparent, and a pointer-to-data-member step (`.*`, `->*`;
-    /// asDataMemberPointerAccess) is a null entry, which names no member.
-    SmallVector<const FieldDecl *, 2> Named;
+    /// The named member steps, object first. Anonymous-record steps are
+    /// transparent: the casts on their objects fold into the next named step
+    /// toward the leaf.
+    MemberPath Members;
+    /// The number of steps of \c Members before the first element step.
+    unsigned ElementFreePrefix = 0;
     /// An element step (`a[i]`) occurs in the chain.
     bool Subscript = false;
-    /// The derived-to-base path from the object's class to the innermost
-    /// member's class.
-    BasePath Path;
+    /// The derived-to-base path the leaf's own casts take from the object
+    /// the last step of \c Members designates (from the bottom object when
+    /// \c Members is empty).
+    BasePath LeafBases;
   };
   /// The shape of the glvalue \p E, taking the arms listed in \p Arms, or
   /// none when its chain bottoms out at anything but a directly named local,
@@ -307,42 +329,39 @@ public:
   /// cannot see, so its members are not flow-tracked for reads.
   static bool hasUserProvidedCtor(const CXXRecordDecl *RD);
 
-  /// Visit the candidate fields of \p RD and of its non-virtual,
-  /// constructor-less base classes, recursively, each with its
-  /// derived-to-base path from \p RD.
-  template <typename Fn>
-  static void forEachCandidateUninitField(const CXXRecordDecl *RD, Fn Visit) {
-    SmallVector<std::pair<const CXXRecordDecl *, BasePath>, 4> RecordStack;
-    RecordStack.push_back({RD, BasePath()});
-    while (!RecordStack.empty()) {
-      auto [Cur, Path] = RecordStack.pop_back_val();
-      for (const FieldDecl *F : Cur->fields())
-        Visit(Path, F);
-      for (const CXXBaseSpecifier &BS : Cur->bases()) {
-        if (BS.isVirtual())
-          continue;
-        const CXXRecordDecl *BRD = BS.getType()->getAsCXXRecordDecl();
-        if (BRD && BRD->hasDefinition() &&
-            !hasUserProvidedCtor(BRD->getDefinition())) {
-          BasePath BP(Path);
-          BP.push_back(BRD->getCanonicalDecl());
-          RecordStack.push_back({BRD->getDefinition(), std::move(BP)});
-        }
-      }
-    }
-  }
+  /// Visit the member path of each member the flow analysis tracks in an
+  /// object of class \p RD, with whether it is tracked as a whole object
+  /// (\p Whole), which the enumeration never descends into. The walk is
+  /// depth-first -- a class's fields in order, then its non-virtual bases
+  /// without a user-provided constructor -- so the paths under any prefix
+  /// are contiguous. Tracked are the [[uninit]] built-in scalar (arithmetic
+  /// or enum) members with no default member initializer, std::byte
+  /// excepted (P4222R2 §4.6).
+  static void forEachFlowTrackedMember(
+      const ASTContext &Ctx, const CXXRecordDecl *RD,
+      llvm::function_ref<void(ArrayRef<MemberStep>, bool Whole)> Visit);
 
-  /// True if \p F is a member the flow analysis tracks: an [[uninit]]
-  /// built-in scalar (arithmetic or enum) member with no default member
-  /// initializer, std::byte excepted (P4222R2 §4.6).
-  static bool isFlowTrackedMemberField(const ASTContext &Ctx,
-                                       const FieldDecl *F);
-  /// True if \p F, reached through \p Path from \p RD, is a tracked member
-  /// of an object of class \p RD.
-  static bool isFlowTrackedMemberOf(const ASTContext &Ctx,
-                                    const CXXRecordDecl *RD,
-                                    ArrayRef<const CXXRecordDecl *> Path,
-                                    const FieldDecl *F);
+  /// One entry of a class's flow-tracked member table: the member path and
+  /// whether the member is tracked as a whole object.
+  using FlowTrackedMember = std::pair<MemberPath, bool>;
+  /// The flow-tracked members of an object of class \p RD, in
+  /// forEachFlowTrackedMember order; cached per complete class, and empty
+  /// for a class without a definition or still being defined.
+  ArrayRef<FlowTrackedMember> flowTrackedMembers(const CXXRecordDecl *RD) const;
+
+  /// A match of an lvalue's member steps against a class's flow-tracked
+  /// member table: the entry's index, and its path's length.
+  struct FlowMemberMatch {
+    unsigned Index;
+    unsigned Length;
+  };
+  /// The entry of \p RD's flow-tracked member table whose path is a prefix
+  /// of the element-free steps of \p Shape (at most one is), if any. The
+  /// storage \p Shape names is a subobject of that member when \p Shape has
+  /// more steps or an element step.
+  std::optional<FlowMemberMatch>
+  matchFlowTrackedMember(const CXXRecordDecl *RD,
+                         const FlowLeafShape &Shape) const;
 
   /// The type-shape half of the read-tracking guards: a non-union,
   /// non-dependent class with no user-provided constructor anywhere in the
@@ -376,9 +395,8 @@ public:
   /// binding of a pointer) rather than as a glvalue. The parse-time checks
   /// leave such a source to the pass; a source with no tracked leaf, or one
   /// outside any function body, is judged at parse time without flow state.
-  static bool isFlowTrackedLeaf(const ASTContext &Ctx, const ShapeLeaf &Leaf,
-                                bool AsPointerValue,
-                                const DeclContext *CurContext);
+  bool isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
+                         const DeclContext *CurContext) const;
   /// True if any leaf of \p Src, bound as \p T, is flow-tracked in the
   /// current context (isFlowTrackedLeaf); the tracked leaves are appended to
   /// \p Leaves when given.
@@ -944,6 +962,11 @@ private:
   /// (recordDeferredInitSite).
   llvm::DenseMap<const Decl *, SmallVector<DeferredInitSite, 4>>
       DeferredInitSites;
+
+  /// Per complete class, its flow-tracked member table (flowTrackedMembers).
+  mutable llvm::DenseMap<const CXXRecordDecl *,
+                         std::unique_ptr<SmallVector<FlowTrackedMember, 4>>>
+      FlowTrackedMemberTables;
 };
 
 } // namespace clang
