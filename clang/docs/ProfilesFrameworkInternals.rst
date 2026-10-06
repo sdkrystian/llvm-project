@@ -918,12 +918,13 @@ entities (``TrackedEntity``: ``[[uninit]]`` locals, the referents of marked
 local pointers and references, and marked scalar members of locals and of
 the current object, also inside member subobjects), extracts one event stream
 from a CFG of its own
-(exception edges, fully linearized), runs a forward dataflow over five bit
+(exception edges, fully linearized), runs a forward dataflow over bit
 vectors per entity -- ``Must`` (assigned on every path), ``May`` (assigned
 on some path), ``MayUnassigned`` (unassigned on some path that knows the
-entity's state), ``Esc`` (escaped; read leniency for local aggregates), and
-``MayDestroyed`` (destroyed on some path and not stored since) -- plus, per
-marked pointer or reference, ``Target``, the entity it refers to at that
+entity's state), ``Esc`` (escaped; read leniency for local aggregates),
+``MayDestroyed`` (destroyed on some path and not stored since), and the ones
+described where they are used (``FlowState``) -- plus, per marked pointer or
+reference, ``Target``, the entity it refers to at that
 point: an ``[[uninit]]`` local, a tracked member, another pointer's
 anonymous referent, itself (an anonymous referent whose state is the
 entity's own bits), or unidentified.  The transfer function resolves every
@@ -1014,13 +1015,23 @@ to a lifecycle parameter (``isCurrentObjectLifecycleUse``) or the parse-time
 funnel deferred a marked binding of it (a body with none builds no CFG for it):
 it enters initialized, its credits and destroys apply
 beside its members', and an access below it is judged against it on every
-path.  The enumeration
-enters a *container* -- a named, unmarked, non-reference, non-array member with
-no default member initializer whose default constructor is not user-provided
-(``SemaProfiles::getDefaultInitTrackableClass``) -- up to eight member steps
-deep and until 64 paths and containers are visited, so a credit, kill, or
-written initializer of a container covers the contiguous range under it, and a
-value copy of it (``FlowLeafUse::ValueCopy``) reads the range on every path.
+path.  In every member function, each ``[[ref_to_uninit]]`` pointer member
+reachable from the current object through members by value
+(``SemaProfiles::markedPointerMembers``) has a ``MemberPointee`` entity for
+its referent: it enters asserted uninitialized (``FlowState::EntryAsserted``,
+which only the destroy judgment reads) unless a constructor's initializer
+reseats it -- its written initializer, its default member initializer, or the
+written initializer of a member subobject or base holding it, by the braced
+element naming it or else to an unidentified referent; a store to the member
+reseats it; and a member call on the object holding it, a pointer or
+reference binding of that object, and a ``this`` capture escape it.  The
+enumeration enters a *container* -- a named, unmarked, non-reference,
+non-array member with no default member initializer whose default constructor
+is not user-provided (``SemaProfiles::getDefaultInitTrackableClass``) -- up to
+eight member steps deep and until 64 paths and containers are visited, so a
+credit, kill, or written initializer of a container covers the contiguous
+range under it, and a value copy of it (``FlowLeafUse::ValueCopy``) reads the
+range on every path.
 In a constructor body the current object's containers are tracked whole like a
 local's.
 One matcher (``SemaProfiles::matchFlowTrackedMember``) finds the entry an
@@ -1186,10 +1197,15 @@ Deliberate Strictnesses
   ``[[ref_to_uninit]]`` is rejected even for trivially-copyable referents
   (``ptr->x = 5``): below a member step only whole-object ``construct_at``
   could initialize, which is unmodeled.  The remedies are ``construct_at``,
-  a whole scalar write for a scalar referent, or suppression.  Two corners
-  are suppress-only: a marked pointer *member*'s referent and an element
-  access (``ptr[i].x``) are not flow-tracked, so no prior fill legalizes
-  either.
+  a whole scalar write for a scalar referent, or suppression.  One corner
+  is suppress-only: an element access (``ptr[i].x``) is not flow-tracked, so
+  no prior fill legalizes it.
+- A marked pointer member's referent is asserted uninitialized at the entry of
+  every member function other than a constructor that initializes the
+  member: a read through it is rejected until the same body stores or
+  constructs it (``std::now_init`` is the remedy for a referent another
+  member function initialized), and a member call on the object (a const one
+  too: its pointee is not const) leaves it unknown.
 - Placement ``new`` into marked storage (``new (&u) T``) is rejected while the
   storage is uninitialized on every path reaching it -- the address binds an
   unmarked placement parameter, judged by flow like any binding, so a store on
@@ -1248,9 +1264,10 @@ Deliberate Strictnesses
   uninitialized start, like a scalar member's, because the constructor's
   initialization is not visible there (the P4222R2 §5 exposure analysis is not
   implemented).
-- Storage that is not flow-tracked -- a marked pointer member's referent --
-  is judged by its form alone at every read, write, and destroy: a
-  ``construct_at`` into it legalizes no later access.
+- Storage that is not flow-tracked -- the referent of a marked pointer member
+  of an object other than the current one (``o.p``, ``q->p``) -- is judged by
+  its form alone at every read, write, and destroy: a ``construct_at`` into
+  it legalizes no later access.
 
 Missed Diagnostics
 ------------------
@@ -1392,8 +1409,14 @@ Missed Diagnostics
   constructor initialized the member before the object is exposed
   (P4222R2 §5) is not checked.
 - A ``delete`` expression is judged as a destroy only when its operand is
-  flow-tracked: through a marked pointer member or a global, ``delete p`` of
-  never-constructed storage is not ``destroy_uninit``, while ``p->~T()`` is.
+  flow-tracked: through a global or another object's marked pointer member,
+  ``delete p`` of never-constructed storage is not ``destroy_uninit``, while
+  ``p->~T()`` is.
+- A destroy of a marked pointer member's referent that only the entry
+  assertion calls uninitialized is accepted (the destructor's
+  ``std::destroy(elem, elem + n)``), so a member function that destroys a
+  referent nothing constructed is not ``destroy_uninit``; a second destroy in
+  the same body is ``double_destroy``.
 - The member-wise copies of a defaulted copy or move function and the member
   calls inside a defaulted comparison are not judged; only the binding of the
   source object at the defaulted function's use is.
@@ -1444,5 +1467,5 @@ Missed Diagnostics
 - An assignment through a conditional, comma, or GNU ``?:`` target whose
   arms differ in marking accepts either source: any single answer would
   reject a legal combination.
-- A second ``destroy_at`` of storage that is not flow-tracked (a marked
-  pointer member's referent) is not a double destroy.
+- A second ``destroy_at`` of storage that is not flow-tracked (the referent
+  of another object's marked pointer member) is not a double destroy.

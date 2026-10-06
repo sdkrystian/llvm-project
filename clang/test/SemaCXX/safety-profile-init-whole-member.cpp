@@ -21,6 +21,7 @@ template <class It> constexpr void destroy(It first, It last);
 } // namespace std
 extern "C" void *memset(void *, int, std::size_t);
 extern "C" void *malloc(std::size_t);
+extern "C" void free(void *);
 
 //--- test.cpp
 // no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
@@ -399,7 +400,7 @@ void untracked_pins(Box *p) {
 // Storage reached through a marked pointer member or an allocator still counts
 struct HoldsMarked {
   Global *q [[ref_to_uninit]];
-  int read() { return q->agg.x; } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  int read() { return q->agg.x; } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
 };
 void allocated() {
   ((Global *)malloc(sizeof(Global)))->agg.x = 1; // expected-error {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
@@ -505,3 +506,98 @@ struct ReturnsThis {
     return this; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   }
 };
+
+// The P4222R2 §4.6 Vector: a marked pointer member's referent is flow-tracked in member functions
+struct VectorMemory {
+  S *elem [[ref_to_uninit]];
+  int n = 0;
+  explicit VectorMemory(int c) : elem((S *)malloc(c * sizeof(S))) {}
+  ~VectorMemory() { free(elem); }
+};
+struct Vector {
+  VectorMemory mem;
+  explicit Vector(int c) : mem(c) {}
+  void push_back(const S &x) {
+    std::construct_at(mem.elem + mem.n, x);
+    ++mem.n;
+  }
+  ~Vector() { std::destroy(mem.elem, mem.elem + mem.n); } // OK
+  void construct_then_destroy() {
+    std::construct_at(mem.elem, 1, 2);
+    std::destroy_at(mem.elem); // OK
+  }
+  void destroy_twice() {
+    std::destroy_at(mem.elem);
+    std::destroy_at(mem.elem); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  }
+  S &front() { return *mem.elem; } // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+};
+
+// A const member function may destroy the referent
+struct VectorConstPop {
+  VectorMemory mem;
+  explicit VectorConstPop(int c) : mem(c) {}
+  void pop_all() const { std::destroy(mem.elem, mem.elem + mem.n); }
+  void after_pop() {
+    std::construct_at(mem.elem, 1, 2);
+    pop_all();
+    std::construct_at(mem.elem, 3, 4); // OK
+  }
+};
+
+// A this capture or an alias of the current object may reseat the referent
+struct AliasedElem {
+  S *e [[ref_to_uninit]];
+  AliasedElem();
+  void through_capture() {
+    std::construct_at(e);
+    [this] { e = (S *)malloc(sizeof(S)); }();
+    std::construct_at(e); // OK
+  }
+  void through_alias() {
+    std::construct_at(e);
+    AliasedElem *self = this;
+    self->e = (S *)malloc(sizeof(S));
+    std::construct_at(e); // OK
+  }
+  void through_marked_alias() {
+    S *p [[ref_to_uninit]] = e;
+    std::destroy_at(p); // OK
+  }
+};
+
+// A default member initializer sets the marked pointer member
+struct DefaultInitElem {
+  S *e [[ref_to_uninit]] = (S *)malloc(sizeof(S));
+  DefaultInitElem() { std::destroy_at(e); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+};
+
+// A braced initializer of a member subobject sets the marked pointer member inside it
+struct ElemHolder {
+  S *e [[ref_to_uninit]];
+};
+struct ContainerInitElem {
+  ElemHolder h;
+  ContainerInitElem() : h{(S *)malloc(sizeof(S))} { std::destroy_at(h.e); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+};
+
+template <class T> struct TVectorMemory {
+  T *elem [[ref_to_uninit]];
+  int n = 0;
+  explicit TVectorMemory(int c) : elem((T *)malloc(c * sizeof(T))) {}
+  ~TVectorMemory() { free(elem); }
+};
+template <class T> struct TVector {
+  TVectorMemory<T> mem;
+  explicit TVector(int c) : mem(c) {}
+  ~TVector() { std::destroy(mem.elem, mem.elem + mem.n); } // OK
+  void construct_then_destroy() {
+    std::construct_at(mem.elem);
+    std::destroy_at(mem.elem); // OK
+  }
+  void destroy_twice() {
+    std::destroy_at(mem.elem);
+    std::destroy_at(mem.elem); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  }
+};
+template struct TVector<S>; // expected-note {{in instantiation of member function 'TVector<S>::destroy_twice' requested here}}

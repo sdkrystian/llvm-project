@@ -1852,7 +1852,10 @@ using MemberPath = SemaProfiles::MemberPath;
 /// SemaProfiles::forEachFlowTrackedMember), an [[uninit]] local or parameter
 /// as a whole, the referent of a [[ref_to_uninit]] local pointer or
 /// reference (parameters included), which the dataflow identifies per program
-/// point (FlowState::Target), or the current object as a whole outside its
+/// point (FlowState::Target), the referent of a [[ref_to_uninit]] pointer
+/// member of the current object (MemberPointee, keyed by the member's path;
+/// SemaProfiles::markedPointerMembers), which enters asserted
+/// (FlowState::EntryAsserted), or the current object as a whole outside its
 /// constructors, which enters live (SemaProfiles::FlowLeafUse).
 struct TrackedEntity {
   enum class Kind {
@@ -1860,6 +1863,7 @@ struct TrackedEntity {
     LocalMember,
     WholeLocal,
     Pointee,
+    MemberPointee,
     CurrentObject
   };
   Kind K;
@@ -1884,7 +1888,16 @@ struct TrackedEntity {
 
   /// The member a member entity stands for; null otherwise.
   const FieldDecl *field() const {
-    return Steps.empty() ? nullptr : Steps.back().Field;
+    return isMember() ? Steps.back().Field : nullptr;
+  }
+  /// A member of the current object or of a local.
+  bool isMember() const {
+    return K == Kind::CurrentObjectMember || K == Kind::LocalMember;
+  }
+  /// The referent of a marked pointer or reference, identified per program
+  /// point (FlowState::Target).
+  bool isPointee() const {
+    return K == Kind::Pointee || K == Kind::MemberPointee;
   }
 };
 
@@ -2023,6 +2036,10 @@ struct TrackedStorage {
   /// The CurrentObject entity, when the body binds the current object to a
   /// lifecycle role or destroys it.
   std::optional<unsigned> CurrentObjectRoot;
+  /// The MemberPointee entities, in markedPointerMembers order, and the
+  /// current object's class they belong to.
+  std::pair<unsigned, unsigned> MemberPointerRange{0, 0};
+  const CXXRecordDecl *MemberPointerClass = nullptr;
   /// The tracked local a tracked copy was copy- or move-constructed from,
   /// and the derived-to-base path of the conversion a slicing copy applied
   /// to it (empty for a same-class copy).
@@ -2042,6 +2059,32 @@ struct TrackedStorage {
   std::pair<unsigned, unsigned> addObject(const VarDecl *Base,
                                           const CXXRecordDecl *RD,
                                           bool TrackReads, bool UnknownEntry);
+
+  /// Append a MemberPointee entity for each marked pointer member of the
+  /// current object of class \p RD.
+  void addMemberPointerRoots(const CXXRecordDecl *RD) {
+    unsigned Begin = Entities.size();
+    for (const MemberPath &Path : Profiles.markedPointerMembers(RD)) {
+      TrackedEntity E;
+      E.K = TrackedEntity::Kind::MemberPointee;
+      E.Steps = Path;
+      E.Type = Path.back().Field->getType()->getPointeeType();
+      E.TrackReads = false;
+      Entities.push_back(std::move(E));
+    }
+    MemberPointerRange = {Begin, (unsigned)Entities.size()};
+    MemberPointerClass = RD;
+  }
+  /// The MemberPointee entity of the pointer member at \p Path, if tracked.
+  std::optional<unsigned> memberPointerRoot(ArrayRef<MemberStep> Path) const {
+    if (MemberPointerRange.first == MemberPointerRange.second)
+      return std::nullopt;
+    std::optional<unsigned> I =
+        Profiles.findMarkedPointerMember(MemberPointerClass, Path);
+    if (!I)
+      return std::nullopt;
+    return MemberPointerRange.first + *I;
+  }
 
   /// Append the CurrentObject entity of class \p RD.
   void addCurrentObjectRoot(const CXXRecordDecl *RD) {
@@ -2094,17 +2137,18 @@ struct TrackedStorage {
   /// directly named tracked local (V.m, V.c.m, through containers), an
   /// [[uninit]] local or a subobject of it (u, u.x, arr[i]), or a marked local
   /// pointer's or reference's referent or a subobject of it (*p, p->m, r, r.m;
-  /// never an element, P4222R2 §5.4). A sub-access below another named class
-  /// or array member of a tracked aggregate (x.in.v, x.arr[0]) names no
-  /// entity and is benign or an escape by that member's type. The one
-  /// resolver behind every event arm, so a leaf
-  /// affects flow state exactly as SemaProfiles::isFlowTrackedLeaf says it
-  /// is tracked. A credit, store, or access passes its \p Designated type
-  /// (and \p RawExempt; see designationCovers): a whole entity reached
-  /// through a derived-to-base step or a designation that does not cover it
-  /// is a subobject. A marked pointer's or reference's referent is checked
-  /// against its anonymous referent's type here and against the storage it
-  /// refers to by the transfer function (DefAssignEvent::Designated).
+  /// never an element, P4222R2 §5.4), or a marked pointer member's referent
+  /// (*elem, mem.elem->x). A sub-access below another named class or array
+  /// member of a tracked aggregate (x.in.v, x.arr[0]) names no entity and is
+  /// benign or an escape by that member's type. The one resolver behind every
+  /// event arm, so a leaf affects flow state exactly as
+  /// SemaProfiles::isFlowTrackedLeaf says it is tracked. A credit, store, or
+  /// access passes its \p Designated type (and \p RawExempt; see
+  /// designationCovers): a whole entity reached through a derived-to-base step
+  /// or a designation that does not cover it is a subobject. A marked pointer's
+  /// or reference's referent is checked against its anonymous referent's type
+  /// here and against the storage it refers to by the transfer function
+  /// (DefAssignEvent::Designated).
   Resolution resolve(const SemaProfiles::ShapeLeaf &Leaf,
                      QualType Designated = QualType(),
                      bool RawExempt = false) const;
@@ -2130,8 +2174,9 @@ struct TrackedStorage {
   /// referent cannot be reseated and is not one), if tracked.
   std::optional<unsigned> markedPointerObject(const VarDecl *V) const;
   /// The same for the pointer object the glvalue \p E directly names through
-  /// transparent casts: the object a store reseats or an alias binding
-  /// escapes.
+  /// transparent casts -- a marked pointer member of the current object
+  /// included (its MemberPointee): the object a store reseats or an alias
+  /// binding escapes.
   std::optional<unsigned>
   markedPointerObject(const SemaProfiles::ShapeLeaf &Leaf) const;
 
@@ -2283,7 +2328,7 @@ TrackedStorage::objectPart(const SemaProfiles::ShapeLeaf &Leaf,
   if (Shape->IsThis) {
     // A constructor reads the current object's members from the unassigned
     // entry state.
-    if (Shape->Members.empty() ||
+    if (!Shape->PointerMembers.empty() || Shape->Members.empty() ||
         CurrentObjectRange.first == CurrentObjectRange.second ||
         !Entities[CurrentObjectRange.first].TrackReads)
       return {0, 0};
@@ -2357,6 +2402,18 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
     return partRange(Range, RD, Steps.take_front(OpaqueStep),
                      Steps[OpaqueStep].Bases);
   };
+  if (Shape->IsThis && !Shape->PointerMembers.empty()) {
+    // *elem, elem->m: a marked pointer member's referent or a subobject of
+    // it; never an element.
+    if (Shape->Subscript)
+      return {};
+    if (std::optional<unsigned> Idx =
+            memberPointerRoot(Shape->PointerMembers)) {
+      R.Entity = Idx;
+      R.Subobject = !Steps.empty() || DesignatesPart(*Idx);
+    }
+    return R;
+  }
   if (Shape->IsThis) {
     // *this: the current object as a whole, when its lifetime is tracked.
     if (Steps.empty() && !Shape->Subscript && CurrentObjectRoot) {
@@ -2452,7 +2509,7 @@ TrackedStorage::resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
     R.Subobject = !covers(Designated, *CurrentObjectRoot, RawExempt);
     return R;
   }
-  if (std::optional<unsigned> Idx = markedPointerObject(E)) {
+  if (std::optional<unsigned> Idx = markedPointerObject({E, Leaf.Arms})) {
     R.Entity = Idx;
     R.Subobject = !covers(Designated, *Idx, RawExempt);
   }
@@ -2471,8 +2528,18 @@ TrackedStorage::markedPointerObject(const VarDecl *V) const {
 
 std::optional<unsigned>
 TrackedStorage::markedPointerObject(const SemaProfiles::ShapeLeaf &Leaf) const {
-  const auto *V = dyn_cast_or_null<VarDecl>(SemaProfiles::getDirectlyNamedDecl(
-      SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms)));
+  const Expr *E = SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms);
+  // A marked pointer member of the current object.
+  if (isa<MemberExpr>(E) && E->getType()->isPointerType()) {
+    std::optional<SemaProfiles::FlowLeafShape> Shape =
+        SemaProfiles::flowLeafShape(E, Leaf.Arms);
+    if (!Shape || !Shape->IsThis || !Shape->PointerMembers.empty() ||
+        Shape->Subscript || !Shape->LeafBases.empty())
+      return std::nullopt;
+    return memberPointerRoot(Shape->Members);
+  }
+  const auto *V =
+      dyn_cast_or_null<VarDecl>(SemaProfiles::getDirectlyNamedDecl(E));
   return V ? markedPointerObject(V) : std::nullopt;
 }
 
@@ -2695,6 +2762,10 @@ static constexpr unsigned UnknownTarget = ~1u;
 /// MayDestroyed, and keeps a Target the predecessors agree on.
 struct FlowState {
   llvm::BitVector Must, May, MayUnassigned, Esc, MayDestroyed;
+  /// Uninitialized on some path only by a marked pointer member's entry
+  /// assertion: a MemberPointee's own referent at entry, until a store,
+  /// credit, destroy, release, or reseat gives evidence. Joined by union.
+  llvm::BitVector EntryAsserted;
   /// Per entity, meaningful for a Pointee: the entity's own index when the
   /// pointer refers to an anonymous referent whose state is the entity's
   /// bits, another entity's index when it refers to that entity's storage
@@ -2708,7 +2779,7 @@ struct FlowState {
   /// anonymous referent.
   FlowState(unsigned N, bool Top)
       : Must(N, Top), May(N, false), MayUnassigned(N, !Top), Esc(N, Top),
-        MayDestroyed(N, false), Target(N, TopTarget) {
+        MayDestroyed(N, false), EntryAsserted(N, false), Target(N, TopTarget) {
     if (!Top)
       for (unsigned I = 0; I != N; ++I)
         Target[I] = I;
@@ -2719,6 +2790,7 @@ struct FlowState {
     MayUnassigned |= O.MayUnassigned;
     Esc &= O.Esc;
     MayDestroyed |= O.MayDestroyed;
+    EntryAsserted |= O.EntryAsserted;
     for (unsigned I = 0, N = Target.size(); I != N; ++I) {
       if (Target[I] == TopTarget)
         Target[I] = O.Target[I];
@@ -2728,7 +2800,8 @@ struct FlowState {
   }
   bool operator==(const FlowState &O) const {
     return Must == O.Must && May == O.May && MayUnassigned == O.MayUnassigned &&
-           Esc == O.Esc && MayDestroyed == O.MayDestroyed && Target == O.Target;
+           Esc == O.Esc && MayDestroyed == O.MayDestroyed &&
+           EntryAsserted == O.EntryAsserted && Target == O.Target;
   }
   bool operator!=(const FlowState &O) const { return !(*this == O); }
 };
@@ -2756,7 +2829,7 @@ struct PendingViolation {
 /// there for a Pointee one, or none when that referent is not identified.
 static std::optional<unsigned> referent(unsigned Idx, const FlowState &St,
                                         const TrackedStorage &Storage) {
-  if (Storage.Entities[Idx].K != TrackedEntity::Kind::Pointee)
+  if (!Storage.Entities[Idx].isPointee())
     return Idx;
   unsigned T = St.Target[Idx];
   if (T == UnknownTarget || T == TopTarget)
@@ -2876,9 +2949,10 @@ static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
           R && St.MayDestroyed.test(*R) &&
           !(Site.Destroyer == SemaProfiles::InitDestroyer::ScopeExit &&
             St.Esc.test(*R));
-      // The state of a member of an escaped local is no evidence that a
-      // destroy takes uninitialized storage.
-      if (R && St.Esc.test(*R)) {
+      // A marked pointer member's entry assertion alone is no evidence that
+      // a destroy takes uninitialized storage, nor is the state of a member
+      // of an escaped local.
+      if (R && (St.EntryAsserted.test(*R) || St.Esc.test(*R))) {
         Acc = Acc ? combineLeafStates(*Acc, LeafState::Unknown)
                   : LeafState::Unknown;
         continue;
@@ -2957,6 +3031,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
     St.May.set(I);
     St.MayUnassigned.reset(I);
     St.MayDestroyed.reset(I);
+    St.EntryAsserted.reset(I);
   };
   // The storage a Write or MayWrite reaches: Idx's referent, when the
   // designation covers it (a Pointee's own anonymous referent was checked at
@@ -2992,8 +3067,10 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       Write(Ev.Idx);
       break;
     case DefAssignEventKind::MayWrite:
-      if (std::optional<unsigned> R = WriteTarget(Ev))
+      if (std::optional<unsigned> R = WriteTarget(Ev)) {
         St.May.set(*R);
+        St.EntryAsserted.reset(*R);
+      }
       break;
     case DefAssignEventKind::Copy:
       St.Must[Ev.Idx] = St.Must.test(Ev.Aux);
@@ -3001,6 +3078,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       St.MayUnassigned[Ev.Idx] = St.MayUnassigned.test(Ev.Aux);
       St.Esc[Ev.Idx] = St.Esc.test(Ev.Aux);
       St.MayDestroyed[Ev.Idx] = St.MayDestroyed.test(Ev.Aux);
+      St.EntryAsserted[Ev.Idx] = St.EntryAsserted.test(Ev.Aux);
       break;
     case DefAssignEventKind::Kill:
       if (std::optional<unsigned> R = referent(Ev.Idx, St, Storage)) {
@@ -3008,6 +3086,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
         St.May.reset(*R);
         St.MayUnassigned.set(*R);
         St.Esc.reset(*R);
+        St.EntryAsserted.reset(*R);
       }
       break;
     case DefAssignEventKind::Destroy: {
@@ -3020,6 +3099,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
           continue;
         St.Must.reset(*R);
         St.MayUnassigned.set(*R);
+        St.EntryAsserted.reset(*R);
         if (Site.Conditional) {
           St.May.set(*R);
           St.MayDestroyed.set(*R);
@@ -3046,6 +3126,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
         St.May[Ev.Idx] = Ev.RT == ReseatTarget::Escaped;
         St.MayUnassigned[Ev.Idx] = Ev.RT != ReseatTarget::Escaped;
         St.MayDestroyed.reset(Ev.Idx);
+        St.EntryAsserted.reset(Ev.Idx);
         break;
       case ReseatTarget::Entity:
         NewTarget = Ev.Aux;
@@ -3075,6 +3156,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
         St.May.set(*R);
         St.MayUnassigned.set(*R);
         St.MayDestroyed.reset(*R);
+        St.EntryAsserted.reset(*R);
       }
       break;
     case DefAssignEventKind::Reset:
@@ -3083,6 +3165,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       St.MayUnassigned.set(Ev.Idx);
       St.Esc.reset(Ev.Idx);
       St.MayDestroyed.reset(Ev.Idx);
+      St.EntryAsserted.reset(Ev.Idx);
       break;
     case DefAssignEventKind::AggregateEscape:
       St.Esc.set(Ev.Idx);
@@ -3144,6 +3227,8 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
       FunctionEntry.Must.set(I);
       FunctionEntry.May.set(I);
       FunctionEntry.MayUnassigned.reset(I);
+    } else if (Storage.Entities[I].K == TrackedEntity::Kind::MemberPointee) {
+      FunctionEntry.EntryAsserted.set(I);
     }
   }
   const CFGBlock &CFGEntry = cfg.getEntry();
@@ -3854,6 +3939,25 @@ static void collectCtorBodyStmts(const CXXConstructorDecl *Ctor, const CFG &cfg,
       Body.insert(Synthetic);
 }
 
+/// The element a braced aggregate initializer \p Init gives the subobject at
+/// \p Path below the object it initializes, through nested braced lists; null
+/// when a step is not such an element (a constructor call, a class with
+/// bases, a designator the list does not reach).
+static const Expr *aggregateInitializerFor(const Expr *Init,
+                                           ArrayRef<MemberStep> Path) {
+  for (const MemberStep &S : Path) {
+    const auto *ILE = dyn_cast_or_null<InitListExpr>(Init->IgnoreImplicit());
+    if (!ILE || !S.Field || !S.Bases.empty())
+      return nullptr;
+    const auto *RD = dyn_cast<CXXRecordDecl>(S.Field->getParent());
+    if (!RD || RD->getNumBases() ||
+        S.Field->getFieldIndex() >= ILE->getNumInits())
+      return nullptr;
+    Init = ILE->getInit(S.Field->getFieldIndex());
+  }
+  return Init;
+}
+
 /// Recover the per-block std::init events of \p cfg over \p Storage: the one
 /// extraction loop of the engine. Every store arm resolves through
 /// TrackedStorage::resolve and distributes a comma, conditional, or GNU ?:
@@ -4027,8 +4131,7 @@ static void extractStdInitEvents(
                       ->getType()
                       ->isArrayType()) &&
                 R.Entity && !R.Subobject)
-              RT = {Storage.Entities[*R.Entity].K ==
-                            TrackedEntity::Kind::Pointee
+              RT = {Storage.Entities[*R.Entity].isPointee()
                         ? ReseatTarget::ViaPointer
                         : ReseatTarget::Entity,
                     *R.Entity};
@@ -4047,6 +4150,30 @@ static void extractStdInitEvents(
       if (!llvm::all_equal(Targets))
         return AnyTracked ? std::pair{ReseatTarget::Unknown, 0u} : Fresh;
       return Targets.front();
+    };
+    // A member call on, or an alias of, the object \p Object -- the current
+    // object (also when null) or a member of it, by value -- at \p At may
+    // reseat the marked pointer members below it or destroy their pointees:
+    // their referents become unknown.
+    auto EscapeMemberPointers = [&](const Expr *Object, const Expr *At) {
+      ArrayRef<MemberStep> Prefix;
+      std::optional<SemaProfiles::FlowLeafShape> Shape;
+      if (Object && !isCurrentObjectBase(Object)) {
+        if (Object->getType()->isPointerType())
+          return;
+        Shape = SemaProfiles::flowLeafShape(Object);
+        if (!Shape || !Shape->IsThis || !Shape->PointerMembers.empty() ||
+            Shape->Subscript)
+          return;
+        Prefix = Shape->Members;
+      }
+      for (unsigned I = Storage.MemberPointerRange.first;
+           I != Storage.MemberPointerRange.second; ++I) {
+        ArrayRef<MemberStep> Steps = Storage.Entities[I].Steps;
+        if (Steps.size() > Prefix.size() &&
+            Steps.take_front(Prefix.size()) == Prefix)
+          AppendReseat(I, At, ReseatTarget::Escaped);
+      }
     };
     // A store to \p G: one Write (or ReadWrite) when every leaf names the
     // same whole entity; otherwise the chosen arm is unknown, so each named
@@ -4117,6 +4244,23 @@ static void extractStdInitEvents(
     auto AppendAliasEscapes = [&](const Expr *Src, QualType T, const Expr *At) {
       if (!Src || T.isNull())
         return;
+      // A pointer or reference to the current object or to a member
+      // subobject reaches the marked pointer members below it, whose pointees
+      // even a const alias may destroy or reseat.
+      if ((T->isPointerType() || T->isReferenceType()) &&
+          Storage.MemberPointerRange.first != Storage.MemberPointerRange.second)
+        SemaProfiles::forEachTargetLeaf(
+            Src, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+              const Expr *G =
+                  SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms);
+              if (T->isPointerType() && !isa<CXXThisExpr>(G)) {
+                G = SemaProfiles::addressOfOperand(G);
+                if (!G)
+                  return;
+              }
+              if (isa<CXXThisExpr>(G) || G->getType()->isRecordType())
+                EscapeMemberPointers(G, At);
+            });
       bool ByRef = SemaProfiles::pointerAliasKind(T) ==
                    SemaProfiles::PointerAliasKind::Mutable;
       bool ByAddr = T->isPointerType() &&
@@ -4239,7 +4383,7 @@ static void extractStdInitEvents(
                   Leaf, /*AsPointerValue=*/false, Designated);
               if (R.Entity) {
                 const TrackedEntity &Ent = Storage.Entities[*R.Entity];
-                bool Pointee = Ent.K == TrackedEntity::Kind::Pointee;
+                bool Pointee = Ent.isPointee();
                 // A subobject of an [[uninit]] local or of a read-tracked
                 // member tracked whole; a store to part of any read-tracked
                 // member is one of an [[uninit]] object too (a read of a
@@ -4396,8 +4540,48 @@ static void extractStdInitEvents(
         // it; a written base initializer (e.g. `: Base{1}`) gives the tracked
         // members of that constructor-less base subtree their values.
         const CXXCtorInitializer *CI = OptInit->getInitializer();
-        if (!CI->isWritten())
+        // A marked pointer member's default member initializer reseats it.
+        if (!CI->isWritten()) {
+          if (const FieldDecl *F =
+                  CI->isAnyMemberInitializer() ? CI->getAnyMember() : nullptr)
+            if (std::optional<unsigned> Root =
+                    Storage.memberPointerRoot(MemberStep{BasePath(), F})) {
+              const Expr *Init = CI->getInit();
+              if (const auto *DIE = dyn_cast<CXXDefaultInitExpr>(Init))
+                Init = DIE->getExpr();
+              std::pair<ReseatTarget, unsigned> RT =
+                  ReseatTargetFor(Init, F->getType());
+              AppendReseat(*Root, CI->getInit(), RT.first, RT.second);
+            }
           continue;
+        }
+        // The marked pointer members below a member or base its written
+        // initializer constructs refer to what that construction set.
+        for (unsigned Idx = Storage.MemberPointerRange.first;
+             Idx != Storage.MemberPointerRange.second; ++Idx) {
+          const MemberPath &Steps = Storage.Entities[Idx].Steps;
+          const MemberStep &First = Steps.front();
+          bool Below =
+              CI->isAnyMemberInitializer()
+                  ? Steps.size() > 1 && First.Bases.empty() &&
+                        First.Field->getCanonicalDecl() ==
+                            CI->getAnyMember()->getCanonicalDecl()
+                  : CI->isBaseInitializer() && !First.Bases.empty() &&
+                        CI->getBaseClass()->getAsCXXRecordDecl() &&
+                        First.Bases.front() == CI->getBaseClass()
+                                                   ->getAsCXXRecordDecl()
+                                                   ->getCanonicalDecl();
+          if (!Below)
+            continue;
+          std::pair<ReseatTarget, unsigned> RT{ReseatTarget::Unknown, 0};
+          if (const Expr *Elem =
+                  CI->isAnyMemberInitializer()
+                      ? aggregateInitializerFor(CI->getInit(),
+                                                ArrayRef(Steps).drop_front())
+                      : nullptr)
+            RT = ReseatTargetFor(Elem, Steps.back().Field->getType());
+          AppendReseat(Idx, CI->getInit(), RT.first, RT.second);
+        }
         if (CI->isAnyMemberInitializer()) {
           const FieldDecl *F = CI->getAnyMember();
           if (!F)
@@ -4406,6 +4590,14 @@ static void extractStdInitEvents(
                      F->hasAttr<RefToUninitAttr>(), F->getType(), CI->getInit(),
                      nullptr, CI->getInit());
           AppendAliasEscapes(CI->getInit(), F->getType(), CI->getInit());
+          // A marked pointer member refers to what its initializer names.
+          MemberStep Step{BasePath(), F};
+          if (std::optional<unsigned> Root =
+                  Storage.memberPointerRoot(ArrayRef(Step))) {
+            std::pair<ReseatTarget, unsigned> RT =
+                ReseatTargetFor(CI->getInit(), F->getType());
+            AppendReseat(*Root, CI->getInit(), RT.first, RT.second);
+          }
           if (!Ctor)
             continue;
           // Every entity whose path starts at that member.
@@ -4589,6 +4781,7 @@ static void extractStdInitEvents(
           AddBinding(K::ObjectArgument, Object->IgnoreImplicit()->getExprLoc(),
                      /*TargetMarked=*/false, T, Object, ObjectMethod, CE,
                      SemaProfiles::isDefaultedComparison(ObjectMethod));
+          EscapeMemberPointers(Object, CE);
         }
         if (const auto *PDE = dyn_cast<CXXPseudoDestructorExpr>(
                 CE->getCallee()->IgnoreParens()))
@@ -4631,6 +4824,9 @@ static void extractStdInitEvents(
         for (const LambdaCapture &C : LE->captures()) {
           const Expr *Init =
               InitIt != LE->capture_init_end() ? *InitIt++ : nullptr;
+          // A this capture reaches the marked pointer members.
+          if (C.capturesThis())
+            EscapeMemberPointers(/*Object=*/nullptr, LE);
           if (!C.capturesVariable())
             continue;
           const auto *V = dyn_cast<VarDecl>(C.getCapturedVar());
@@ -5168,9 +5364,11 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
   bool StarThisCopyTrusted = false;
   if (const CXXMethodDecl *MD =
           SemaProfiles::enclosingInstanceMethod(dyn_cast<DeclContext>(D))) {
-    if (const CXXRecordDecl *RD = MD->getParent()->getDefinition())
+    if (const CXXRecordDecl *RD = MD->getParent()->getDefinition()) {
       Storage.addObject(/*Base=*/nullptr, RD, /*TrackReads=*/Ctor != nullptr,
                         /*UnknownEntry=*/false);
+      Storage.addMemberPointerRoots(RD);
+    }
     // A [*this] capture copy-constructs the whole object; its whole-object
     // reads are appended only without a user-provided copy constructor (see
     // ProfilesFrameworkInternals.rst, "Known Gaps (std::init)").

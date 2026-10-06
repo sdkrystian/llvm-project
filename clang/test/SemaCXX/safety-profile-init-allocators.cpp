@@ -248,8 +248,7 @@ void test_destroy_calloc_result() {
 // parameter marked [[ref_to_uninit]]. The destroy role relaxes the binding and
 // destroys the storage; the parameter marker exempts it from destroy_uninit, so
 // releasing a never-written buffer -- a release function's contract -- stays
-// legal in every run, including the RAII-member shape, whose pointee is not
-// flow-tracked.
+// legal in every run, including the RAII-member shape.
 [[now_uninit]] void my_aligned_free(void *p [[ref_to_uninit]]);
 void test_annotated_release_never_written() {
   my_aligned_free(malloc(16)); // OK: releasing a never-written buffer
@@ -258,6 +257,22 @@ struct RAIIAnnotated {
   int *p [[ref_to_uninit]];
   RAIIAnnotated() : p((int *)malloc(16)) {}
   ~RAIIAnnotated() { my_aligned_free(p); } // OK: any state, like free(p)
+};
+
+// A marked pointer member's referent is flow-tracked in member functions
+struct RAIITracked {
+  int *p [[ref_to_uninit]];
+  RAIITracked() : p((int *)malloc(16)) {}
+  int store_then_read() {
+    *p = 1;
+    return *p; // OK
+  }
+  int release_then_read() {
+    *p = 1;
+    free(p);
+    return *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  }
+  ~RAIITracked() { free(p); } // OK
 };
 
 // A class-specific operator delete is not replaceable; its semantics belong

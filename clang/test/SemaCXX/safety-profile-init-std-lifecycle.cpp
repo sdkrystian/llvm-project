@@ -1113,11 +1113,15 @@ void delete_constructed() {
   delete p;
 }
 
-// An explicit destructor call through a marked pointer member is judged by form
+// An explicit destructor call through a marked pointer member destroys its referent, which only the marker asserts uninitialized
 struct DestroysMarkedMember {
   DtorPayload *p [[ref_to_uninit]];
   void reset() {
-    p->~DtorPayload(); // expected-error {{uninitialized storage is destroyed by a destructor call under profile 'std::init'}}
+    p->~DtorPayload(); // OK
+  }
+  void reset_twice() {
+    p->~DtorPayload();
+    p->~DtorPayload(); // expected-error {{storage already destroyed by a destructor call is destroyed again under profile 'std::init'}}
   }
 };
 

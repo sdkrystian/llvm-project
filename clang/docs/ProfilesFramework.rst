@@ -837,9 +837,16 @@ mem-initializer, or default member initializer it is unclassified.
 
 The recognizer's answer is refined by *flow-tracked storage*: an
 ``[[uninit]]`` local, the referent of a ``[[ref_to_uninit]]`` local pointer
-or reference (parameters included), and an ``[[uninit]]`` scalar member of a
+or reference (parameters included), an ``[[uninit]]`` scalar member of a
 directly named local or of the current object, directly or inside a member
-subobject.  A marked pointer's or
+subobject, and, in a member function, the referent of a ``[[ref_to_uninit]]``
+pointer member of the current object (``*elem``, ``mem.elem->x``), which the
+marker asserts uninitialized when the function is entered -- so the
+destructor's ``std::destroy(elem, elem + n)`` is accepted, while a read through
+``elem`` is rejected until the same function stores or constructs the
+referent; a member call on the object holding the member, a pointer or
+reference to that object, or a ``this`` capture leaves the referent unknown.  A
+marked pointer's or
 reference's referent is, at each point, the storage its latest binding
 names: after ``int *p [[ref_to_uninit]] = &u;`` the local ``u``, after
 ``p = q`` whatever ``q`` refers to there, after ``p = &a.m`` that member.

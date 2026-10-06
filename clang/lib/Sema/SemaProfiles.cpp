@@ -2874,6 +2874,18 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
   S.Members.assign(LeafFirst.rbegin(), LeafFirst.rend());
   S.ElementFreePrefix =
       S.Subscript ? LeafFirst.size() - NamedBelowElement : LeafFirst.size();
+  // A pointer member of the current object, reached through members by value.
+  if (S.ThroughPointer && isa<MemberExpr>(Cur)) {
+    std::optional<FlowLeafShape> Ptr = flowLeafShape(Cur, Arms);
+    if (!Ptr || !Ptr->IsThis || !Ptr->PointerMembers.empty() ||
+        Ptr->Subscript || Ptr->Members.empty() || !Ptr->LeafBases.empty() ||
+        llvm::any_of(Ptr->Members,
+                     [](const MemberStep &M) { return !M.Field; }))
+      return std::nullopt;
+    S.IsThis = true;
+    S.PointerMembers = std::move(Ptr->Members);
+    return S;
+  }
   if (isa<CXXThisExpr>(Cur)) {
     if (!S.ThroughPointer)
       return std::nullopt;
@@ -3006,6 +3018,105 @@ struct FlowTrackedMemberWalk {
   }
 };
 } // namespace
+
+namespace {
+/// The depth-first walk of SemaProfiles::forEachMarkedPointerMember.
+struct MarkedPointerMemberWalk {
+  using MemberStep = SemaProfiles::MemberStep;
+  llvm::function_ref<void(ArrayRef<MemberStep>)> Visit;
+  SemaProfiles::MemberPath Prefix;
+  llvm::SmallPtrSet<const CXXRecordDecl *, 8> InProgress;
+  unsigned Paths = 0;
+
+  /// Visit the marked pointer members of the object of class \p RD reached
+  /// through \p Prefix and the derived-to-base path \p Bases.
+  void walk(const CXXRecordDecl *RD, SemaProfiles::BasePath &Bases) {
+    if (!InProgress.insert(RD).second)
+      return;
+    walkFields(RD, Bases);
+    for (const CXXBaseSpecifier &BS : RD->bases()) {
+      if (BS.isVirtual())
+        continue;
+      const CXXRecordDecl *BRD = BS.getType()->getAsCXXRecordDecl();
+      if (!BRD || !BRD->hasDefinition())
+        continue;
+      Bases.push_back(BRD->getCanonicalDecl());
+      walk(BRD->getDefinition(), Bases);
+      Bases.pop_back();
+    }
+    InProgress.erase(RD);
+  }
+
+  void walkFields(const RecordDecl *RD, SemaProfiles::BasePath &Bases) {
+    for (const FieldDecl *F : RD->fields()) {
+      if (F->isAnonymousStructOrUnion()) {
+        if (const RecordDecl *Anon = F->getType()->getAsRecordDecl();
+            Anon && !Anon->isUnion())
+          walkFields(Anon, Bases);
+        continue;
+      }
+      if (!F->getDeclName())
+        continue;
+      QualType T = F->getType();
+      if (T->isPointerType() && F->hasAttr<RefToUninitAttr>()) {
+        Prefix.push_back({Bases, F});
+        Visit(Prefix);
+        ++Paths;
+        Prefix.pop_back();
+        continue;
+      }
+      const CXXRecordDecl *Inner = T->getAsCXXRecordDecl();
+      if (!Inner || T->isReferenceType() || T->isDependentType() ||
+          !Inner->hasDefinition() || Inner->isUnion() ||
+          Prefix.size() + 1 >= FlowTrackedMemberWalk::MaxDepth ||
+          Paths >= FlowTrackedMemberWalk::MaxPaths)
+        continue;
+      ++Paths;
+      Prefix.push_back({Bases, F});
+      SemaProfiles::BasePath InnerBases;
+      walk(Inner->getDefinition(), InnerBases);
+      Prefix.pop_back();
+    }
+  }
+};
+} // namespace
+
+void SemaProfiles::forEachMarkedPointerMember(
+    const CXXRecordDecl *RD,
+    llvm::function_ref<void(ArrayRef<MemberStep>)> Visit) {
+  if (!RD || !RD->hasDefinition())
+    return;
+  MarkedPointerMemberWalk Walk{Visit, {}, {}};
+  BasePath Bases;
+  Walk.walk(RD->getDefinition(), Bases);
+}
+
+ArrayRef<SemaProfiles::MemberPath>
+SemaProfiles::markedPointerMembers(const CXXRecordDecl *RD) const {
+  if (!RD || !RD->hasDefinition())
+    return {};
+  RD = RD->getDefinition();
+  if (RD->isBeingDefined())
+    return {};
+  if (auto It = MarkedPointerMemberTables.find(RD);
+      It != MarkedPointerMemberTables.end())
+    return *It->second;
+  auto Table = std::make_unique<SmallVector<MemberPath, 2>>();
+  forEachMarkedPointerMember(RD, [&](ArrayRef<MemberStep> Path) {
+    Table->emplace_back(Path.begin(), Path.end());
+  });
+  return *(MarkedPointerMemberTables[RD] = std::move(Table));
+}
+
+std::optional<unsigned>
+SemaProfiles::findMarkedPointerMember(const CXXRecordDecl *RD,
+                                      ArrayRef<MemberStep> Path) const {
+  ArrayRef<MemberPath> Table = markedPointerMembers(RD);
+  for (unsigned I = 0, N = Table.size(); I != N; ++I)
+    if (ArrayRef(Table[I]) == Path)
+      return I;
+  return std::nullopt;
+}
 
 void SemaProfiles::forEachFlowTrackedMember(
     const ASTContext &Ctx, const CXXRecordDecl *RD,
@@ -3170,6 +3281,14 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
                                /*AsPointerValue=*/false, CurContext, Use);
     if (isa<CXXThisExpr>(E))
       return CurrentObjectTracked();
+    // The value of a marked pointer member of the current object.
+    if (E->getType()->isPointerType() && isa<MemberExpr>(E)) {
+      std::optional<FlowLeafShape> Ptr = flowLeafShape(E, Leaf.Arms);
+      const CXXMethodDecl *MD = enclosingInstanceMethod(CurContext);
+      return Ptr && Ptr->IsThis && Ptr->PointerMembers.empty() &&
+             !Ptr->Subscript && Ptr->LeafBases.empty() && MD &&
+             findMarkedPointerMember(MD->getParent(), Ptr->Members);
+    }
     // The value of a marked pointer.
     const auto *VD = dyn_cast_or_null<VarDecl>(getDirectlyNamedDecl(E));
     return VD && VD->hasLocalStorage() && VD->getType()->isPointerType() &&
@@ -3180,6 +3299,11 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
     return false;
   if (Shape->IsThis) {
     const CXXMethodDecl *MD = enclosingInstanceMethod(CurContext);
+    // *elem, elem->m: a marked pointer member's referent or a subobject of
+    // it; an element (elem[i]) is never tracked.
+    if (!Shape->PointerMembers.empty())
+      return MD && !Shape->Subscript &&
+             findMarkedPointerMember(MD->getParent(), Shape->PointerMembers);
     if (Shape->Members.empty() && !Shape->Subscript)
       return CurrentObjectTracked();
     if (!MD)

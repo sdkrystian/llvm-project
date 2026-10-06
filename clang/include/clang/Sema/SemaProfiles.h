@@ -314,6 +314,11 @@ public:
     /// the last step of \c Members designates (from the bottom object when
     /// \c Members is empty).
     BasePath LeafBases;
+    /// For a chain through a pointer member of the current object
+    /// (\c this->mem.elem->x, \c *elem), the member steps from the current
+    /// object to that pointer; \c Members are then the steps below its
+    /// referent. Empty otherwise.
+    MemberPath PointerMembers;
   };
   /// The shape of the glvalue \p E, taking the arms listed in \p Arms, or
   /// none when its chain bottoms out at anything but a directly named local,
@@ -355,6 +360,22 @@ public:
   /// forEachFlowTrackedMember order; cached per complete class, and empty
   /// for a class without a definition or still being defined.
   ArrayRef<FlowTrackedMember> flowTrackedMembers(const CXXRecordDecl *RD) const;
+
+  /// Visit the member path of each [[ref_to_uninit]] pointer member of an
+  /// object of class \p RD, reached through named, non-reference members of
+  /// class type -- user-provided constructors allowed -- and non-virtual
+  /// bases, with forEachFlowTrackedMember's walk order, transparent
+  /// anonymous structs, and bounds.
+  static void forEachMarkedPointerMember(
+      const CXXRecordDecl *RD,
+      llvm::function_ref<void(ArrayRef<MemberStep>)> Visit);
+  /// The paths of forEachMarkedPointerMember for \p RD, cached as
+  /// flowTrackedMembers is.
+  ArrayRef<MemberPath> markedPointerMembers(const CXXRecordDecl *RD) const;
+  /// The index of \p Path in markedPointerMembers(\p RD), if there.
+  std::optional<unsigned>
+  findMarkedPointerMember(const CXXRecordDecl *RD,
+                          ArrayRef<MemberStep> Path) const;
 
   /// A match of an lvalue's member steps against a class's flow-tracked
   /// member table: the entry's index, and its path's length.
@@ -413,7 +434,9 @@ public:
   /// and judged by its members' state. For a MarkedTarget or a Destroy, the
   /// current object as a whole (\c this, \c *this) in an instance member
   /// function other than a constructor is tracked: the pass tracks its
-  /// lifetime when the body binds it so (P4222R2 §4.6). For a ValueCopy -- the
+  /// lifetime when the body binds it so (P4222R2 §4.6). A [[ref_to_uninit]]
+  /// pointer member of the current object (markedPointerMembers) is tracked
+  /// for every use, as a marked local pointer is. For a ValueCopy -- the
   /// source of an unmarked value copy (isValueCopySource) -- a subobject of
   /// such a local enclosing tracked members is tracked and read by its
   /// members' state; in a constructor body, so are the current object's
@@ -1036,6 +1059,10 @@ private:
   mutable llvm::DenseMap<const CXXRecordDecl *,
                          std::unique_ptr<SmallVector<FlowTrackedMember, 4>>>
       FlowTrackedMemberTables;
+  /// Per complete class, its marked pointer members (markedPointerMembers).
+  mutable llvm::DenseMap<const CXXRecordDecl *,
+                         std::unique_ptr<SmallVector<MemberPath, 2>>>
+      MarkedPointerMemberTables;
 };
 
 } // namespace clang
