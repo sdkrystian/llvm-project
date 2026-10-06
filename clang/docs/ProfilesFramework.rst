@@ -970,7 +970,13 @@ treatment applies where the iterator is a pointer (``arr, arr + n``), and a
 decayed ``[[uninit]]`` array member is its whole array: in a constructor,
 ``std::uninitialized_fill(arr, arr + n, v)`` initializes the member ``arr``
 and ``std::destroy(arr, arr + n)`` destroys it; a call with a class-type
-iterator checks and initializes nothing.  The §4.4
+iterator checks and initializes nothing.  The ``std::ranges`` objects of the
+same names -- ``ranges::construct_at``, ``ranges::destroy_at``,
+``ranges::destroy``, ``ranges::destroy_n``, and the ``ranges::uninitialized_*``
+family -- are treated the same way where the iterator is a pointer or the
+range is an array: ``std::ranges::uninitialized_fill(arr4, xval)`` initializes
+an ``[[uninit]]`` array ``arr4`` whole (§5.5), and the sentinel of an output
+range, like an end iterator, is accepted in any state.  The §4.4
 ``now_init()`` identity function is treated the same way: the parameter of a
 ``std::now_init`` with one pointer parameter is treated as marked, so its
 argument must refer to uninitialized memory, its unmarked return is trusted as

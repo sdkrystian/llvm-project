@@ -1645,6 +1645,8 @@ enum class KnownCalleeKey : uint8_t {
   Form,
   /// A namespace-std function name and arity: the std lifecycle functions.
   StdName,
+  /// A std::ranges customization point object's name and call arity.
+  RangesCPO,
 };
 
 /// The shape a name-keyed row's role parameter must have in the called
@@ -1652,20 +1654,22 @@ enum class KnownCalleeKey : uint8_t {
 enum class ParamShape : uint8_t {
   /// An object pointer: a pointer iterator.
   Pointer,
+  /// A reference to an array: an array range.
+  ArrayReference,
 };
 
 /// A row of the known-callee table (KnownCallees): what a library callee
 /// returns and what it does to the storage bound to one role parameter. A row
-/// is keyed by builtin ID, by a form predicate, or by a std name and arity
-/// (KnownCalleeKey) -- the library knowledge P4222R2 §4.4 asks for, looked up
-/// at each call, so the library's declarations carry no annotation and a
-/// module built without -fprofiles reads the same. A builtin ID is absent
-/// under -fno-builtin / -ffreestanding (or on a non-matching declaration),
-/// where an allocator falls back to the trusted default and a release or
-/// initialization goes unrecognized -- a missed diagnostic or a missed
-/// relaxation, never a false positive or a false acceptance elsewhere.
-/// (getBuiltinFunctionEffects in SemaFunctionEffects.cpp groups almost exactly
-/// the allocator set for the \c allocating effect.)
+/// is keyed by builtin ID, by a form predicate, by a std name and arity, or by
+/// a std::ranges object's name and call arity (KnownCalleeKey) -- the library
+/// knowledge P4222R2 §4.4 asks for, looked up at each call, so the library's
+/// declarations carry no annotation and a module built without -fprofiles reads
+/// the same. A builtin ID is absent under -fno-builtin / -ffreestanding (or on
+/// a non-matching declaration), where an allocator falls back to the trusted
+/// default and a release or initialization goes unrecognized -- a missed
+/// diagnostic or a missed relaxation, never a false positive or a false
+/// acceptance elsewhere. (getBuiltinFunctionEffects in SemaFunctionEffects.cpp
+/// groups almost exactly the allocator set for the \c allocating effect.)
 struct KnownCalleeEntry {
   /// The Arity of a name-keyed row matching any parameter count.
   static constexpr unsigned AnyArity = ~0u;
@@ -1748,9 +1752,35 @@ stdRow(StringRef Name, unsigned Arity, unsigned Param, KnownParamRole Role,
   return E;
 }
 
+/// A row keyed by the name of a std::ranges customization point object and
+/// the arity of its call operator, for the overload taking a pointer
+/// iterator.
+static constexpr KnownCalleeEntry
+cpoRow(StringRef Name, unsigned Arity, unsigned Param, KnownParamRole Role,
+       unsigned EndParam = KnownCalleeEntry::NoEndParam,
+       bool ConstructIfDefaultInitDeterminate = false) {
+  KnownCalleeEntry E = stdRow(Name, Arity, Param, Role, EndParam,
+                              ConstructIfDefaultInitDeterminate);
+  E.Key = KnownCalleeKey::RangesCPO;
+  return E;
+}
+
+/// A cpoRow for the overload taking a range, which matches where the range
+/// is an array.
+static constexpr KnownCalleeEntry
+cpoRangeRow(StringRef Name, unsigned Arity, unsigned Param, KnownParamRole Role,
+            bool ConstructIfDefaultInitDeterminate = false) {
+  KnownCalleeEntry E =
+      cpoRow(Name, Arity, Param, Role, KnownCalleeEntry::NoEndParam,
+             ConstructIfDefaultInitDeterminate);
+  E.Shape = ParamShape::ArrayReference;
+  return E;
+}
+
 /// The known-callee table; see KnownCalleeEntry. An execution-policy
 /// overload of a std function takes the policy first, shifting its role
-/// parameter by one.
+/// parameter by one. A std::ranges overload takes an iterator and a sentinel,
+/// or a range; the copy and move forms take an output sentinel.
 static constexpr KnownCalleeEntry KnownCallees[] = {
     builtinRow(Builtin::BImalloc, KnownCalleeReturn::ReturnsUninitialized,
                "malloc"),
@@ -1872,6 +1902,33 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
     stdRow("destroy", 3, 1, KnownParamRole::Destroy, 2),
     stdRow("destroy_n", 2, 0, KnownParamRole::Destroy),
     stdRow("destroy_n", 3, 1, KnownParamRole::Destroy),
+    cpoRow("construct_at", KnownCalleeEntry::AnyArity, 0,
+           KnownParamRole::Construct),
+    cpoRow("destroy_at", 1, 0, KnownParamRole::Destroy),
+    cpoRow("destroy", 2, 0, KnownParamRole::Destroy, 1),
+    cpoRangeRow("destroy", 1, 0, KnownParamRole::Destroy),
+    cpoRow("destroy_n", 2, 0, KnownParamRole::Destroy),
+    cpoRow("uninitialized_fill", 3, 0, KnownParamRole::Construct, 1),
+    cpoRangeRow("uninitialized_fill", 2, 0, KnownParamRole::Construct),
+    cpoRow("uninitialized_fill_n", 3, 0, KnownParamRole::Construct),
+    cpoRow("uninitialized_copy", 4, 2, KnownParamRole::Construct, 3),
+    cpoRangeRow("uninitialized_copy", 2, 1, KnownParamRole::Construct),
+    cpoRow("uninitialized_copy_n", 4, 2, KnownParamRole::Construct, 3),
+    cpoRow("uninitialized_move", 4, 2, KnownParamRole::Construct, 3),
+    cpoRangeRow("uninitialized_move", 2, 1, KnownParamRole::Construct),
+    cpoRow("uninitialized_move_n", 4, 2, KnownParamRole::Construct, 3),
+    cpoRow("uninitialized_value_construct", 2, 0, KnownParamRole::Construct, 1),
+    cpoRangeRow("uninitialized_value_construct", 1, 0,
+                KnownParamRole::Construct),
+    cpoRow("uninitialized_value_construct_n", 2, 0, KnownParamRole::Construct),
+    cpoRow("uninitialized_default_construct", 2, 0, KnownParamRole::Construct,
+           1, /*ConstructIfDefaultInitDeterminate=*/true),
+    cpoRangeRow("uninitialized_default_construct", 1, 0,
+                KnownParamRole::Construct,
+                /*ConstructIfDefaultInitDeterminate=*/true),
+    cpoRow("uninitialized_default_construct_n", 2, 0, KnownParamRole::Construct,
+           KnownCalleeEntry::NoEndParam,
+           /*ConstructIfDefaultInitDeterminate=*/true),
 };
 
 /// True if a parameter of type \p T has the shape \p Shape.
@@ -1879,6 +1936,8 @@ static bool hasParamShape(QualType T, ParamShape Shape) {
   switch (Shape) {
   case ParamShape::Pointer:
     return T->isPointerType();
+  case ParamShape::ArrayReference:
+    return T->isReferenceType() && T.getNonReferenceType()->isArrayType();
   }
   llvm_unreachable("unknown ParamShape");
 }
@@ -1894,12 +1953,53 @@ static bool matchesNameKeyedRow(const KnownCalleeEntry &Entry,
          hasParamShape(FD->getParamDecl(Entry.Param)->getType(), Entry.Shape);
 }
 
+/// The namespace named \p Name directly inside std that encloses \p D, or
+/// null; std may be reached through an inline namespace (libc++'s __1).
+static const NamespaceDecl *enclosingStdSubNamespace(const Decl *D,
+                                                     StringRef Name) {
+  for (const DeclContext *DC = D->getDeclContext();
+       DC && !DC->isTranslationUnit(); DC = DC->getParent())
+    if (const auto *NS = dyn_cast<NamespaceDecl>(DC);
+        NS && NS->getIdentifier() && NS->getName() == Name &&
+        NS->getParent()->isStdNamespace())
+      return NS;
+  return nullptr;
+}
+
+/// The RangesCPO row for \p FD, if any: \p FD is the call operator, static
+/// or with an implicit object parameter, of a class that std::ranges
+/// encloses, and the member of std::ranges named by the row -- an inline
+/// namespace's member, such as libc++'s __cpo, or a using-declaration's
+/// target included -- is a variable of that class.
+static const KnownCalleeEntry *findRangesCPORow(const FunctionDecl *FD) {
+  const auto *MD = dyn_cast<CXXMethodDecl>(FD);
+  if (!MD || MD->getOverloadedOperator() != OO_Call ||
+      MD->isExplicitObjectMemberFunction())
+    return nullptr;
+  const CXXRecordDecl *RD = MD->getParent()->getCanonicalDecl();
+  const NamespaceDecl *Ranges = enclosingStdSubNamespace(RD, "ranges");
+  if (!Ranges)
+    return nullptr;
+  IdentifierTable &Idents = FD->getASTContext().Idents;
+  for (const KnownCalleeEntry &Entry : KnownCallees) {
+    if (Entry.Key != KnownCalleeKey::RangesCPO ||
+        !matchesNameKeyedRow(Entry, FD))
+      continue;
+    for (const NamedDecl *ND : Ranges->lookup(&Idents.get(Entry.Name)))
+      if (const auto *VD = dyn_cast<VarDecl>(ND->getUnderlyingDecl()))
+        if (const CXXRecordDecl *VarClass = VD->getType()->getAsCXXRecordDecl();
+            VarClass && VarClass->getCanonicalDecl() == RD)
+          return &Entry;
+  }
+  return nullptr;
+}
+
 /// The table row for \p FD, if any -- the *trusted* match: the builtin ID,
-/// the form, or the namespace-std name and arity guarantee the row's
-/// semantics. Builtin rows are consulted first; no collision is possible --
-/// plain operator new/delete never carry the table's builtin IDs,
-/// __builtin_operator_new is not an operator name, and no std row names a
-/// library builtin -- so the order is cosmetic.
+/// the form, the namespace-std name and arity, or the std::ranges object's
+/// name and arity guarantee the row's semantics. Builtin rows are consulted
+/// first; no collision is possible -- plain operator new/delete never carry
+/// the table's builtin IDs, __builtin_operator_new is not an operator name,
+/// and no std row names a library builtin -- so the order is cosmetic.
 static const KnownCalleeEntry *findKnownCallee(const FunctionDecl *FD) {
   if (unsigned ID = FD->getBuiltinID())
     for (const KnownCalleeEntry &Entry : KnownCallees)
@@ -1908,6 +2008,8 @@ static const KnownCalleeEntry *findKnownCallee(const FunctionDecl *FD) {
   for (const KnownCalleeEntry &Entry : KnownCallees)
     if (Entry.Key == KnownCalleeKey::Form && Entry.Form(FD))
       return &Entry;
+  if (const KnownCalleeEntry *Entry = findRangesCPORow(FD))
+    return Entry;
   const IdentifierInfo *II = FD->getIdentifier();
   if (!II || !FD->isInStdNamespace())
     return nullptr;
@@ -1986,7 +2088,8 @@ SemaProfiles::getCalleeLifecycleRoles(const FunctionDecl *FD) {
   if (M.Entry->ConstructIfDefaultInitDeterminate ||
       (M.Entry->Form == isStdAllocatorTraitsConstruct &&
        FD->getNumParams() == 2 && allocatorHasOwnMember(FD, "construct"))) {
-    // The value type is the pointee of the instantiated range parameter.
+    // The value type is what the instantiated range parameter points or
+    // refers to; an array stands for its elements.
     QualType T = FD->getParamDecl(M.Entry->Param)->getType()->getPointeeType();
     llvm::SmallPtrSet<const CXXRecordDecl *, 8> Visited;
     if (T->isIncompleteType() ||

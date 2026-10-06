@@ -19,6 +19,13 @@ template <class T, class... A> T *construct_at(T *p, A &&...args);
 template <class T> void destroy_at(T *p);
 template <class It, class T> void uninitialized_fill(It first, It last, const T &x);
 template <class It> void uninitialized_default_construct(It first, It last);
+namespace ranges {
+struct __uninitialized_fill_fn {
+  template <class I, class S, class T> I operator()(I first, S last, const T &x) const;
+  template <class R, class T> R &operator()(R &&r, const T &x) const;
+};
+inline constexpr __uninitialized_fill_fn uninitialized_fill{};
+} // namespace ranges
 } // namespace std
 
 //--- lib.cppm
@@ -30,6 +37,9 @@ using std::construct_at;
 using std::destroy_at;
 using std::uninitialized_fill;
 using std::uninitialized_default_construct;
+namespace ranges {
+using std::ranges::uninitialized_fill;
+} // namespace ranges
 } // namespace std
 
 //--- use.cpp
@@ -71,6 +81,20 @@ int default_construct(NS *p [[ref_to_uninit]]) {
   return p->v;
 }
 
+// ranges::uninitialized_fill initializes an [[uninit]] array range
+int ranges_fill() {
+  int a [[uninit]] [2];
+  std::ranges::uninitialized_fill(a, 0);
+  return a[0];
+}
+
+// A second ranges::uninitialized_fill is a double initialization
+void ranges_fill_twice() {
+  int a [[uninit]] [2];
+  std::ranges::uninitialized_fill(a, 0);
+  std::ranges::uninitialized_fill(a, 1); // expected-error {{reference marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
 //--- use-hu.cpp
 import "std.h";
 
@@ -86,4 +110,11 @@ void construct_twice() {
   int u [[uninit]];
   std::construct_at(&u, 1);
   std::construct_at(&u, 2); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A second ranges::uninitialized_fill is a double initialization
+void ranges_fill_twice() {
+  int a [[uninit]] [2];
+  std::ranges::uninitialized_fill(a, 0);
+  std::ranges::uninitialized_fill(a, 1); // expected-error {{reference marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
 }

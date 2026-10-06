@@ -8,14 +8,17 @@
 // RUN: %clang_cc1 -triple x86_64-linux-gnu -fsyntax-only -verify=expected,array -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %t/va.cpp
 // RUN: %clang_cc1 -triple aarch64-linux-gnu -fsyntax-only -verify=expected,record -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %t/va.cpp
 // RUN: %clang_cc1 -triple i386-linux-gnu -fsyntax-only -verify=expected,pointer -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %t/va.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %t/ranges_libcxx.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %t/ranges_static.cpp
 
 // Clang knows the std::init roles of std::construct_at (its pointer first
 // parameter must refer to uninitialized memory and is initialized by the
 // call) and std::destroy_at (the call destroys it), std::now_init's pointer
 // parameter (uninitialized, keeps its state), the std::uninitialized_*
 // output range (by name and arity), and std::destroy's and
-// std::destroy_n's first iterator, and looks them up at each call, so the
-// real library functions are usable under enforcement.
+// std::destroy_n's first iterator, and of the std::ranges customization point
+// objects of the same names, and looks them up at each call, so the real
+// library functions are usable under enforcement.
 
 //--- local.cpp
 [[profiles::enforce(std::init)]];
@@ -63,10 +66,41 @@ template <class T> struct allocator_traits<allocator<T>> {
   template <class U> static void destroy(allocator<T> &a, U *p);
 };
 template <class T> T *addressof(T &r) noexcept;
+enum class byte : unsigned char {};
 namespace ranges {
-inline constexpr struct {
+struct __uninitialized_fill_fn {
+  template <class I, class S, class T> I operator()(I first, S last, const T &x) const;
+  template <class R, class T> R &operator()(R &&r, const T &x) const;
+};
+inline constexpr __uninitialized_fill_fn uninitialized_fill{};
+struct __uninitialized_copy_fn {
+  template <class I, class IS, class O, class OS> void operator()(I ifirst, IS ilast, O ofirst, OS olast) const;
+  template <class IR, class OR> void operator()(IR &&inr, OR &&outr) const;
+};
+inline constexpr __uninitialized_copy_fn uninitialized_copy{};
+struct __uninitialized_default_construct_fn {
+  template <class I, class S> I operator()(I first, S last) const;
+  template <class R> R &operator()(R &&r) const;
+};
+inline constexpr __uninitialized_default_construct_fn uninitialized_default_construct{};
+struct __destroy_fn {
+  template <class I, class S> I operator()(I first, S last) const noexcept;
+  template <class R> R &operator()(R &&r) const noexcept;
+};
+inline constexpr __destroy_fn destroy{};
+struct __construct_at_fn {
+  template <class T, class... A> T *operator()(T *p, A &&...args) const;
+};
+inline constexpr __construct_at_fn construct_at{};
+struct __destroy_at_fn {
+  template <class T> void operator()(T *p) const noexcept;
+};
+inline constexpr __destroy_at_fn destroy_at{};
+// Not a lifecycle CPO.
+struct __fill_like_fn {
   template <class R, class T> void operator()(R &&r, const T &x) const;
-} uninitialized_fill;
+};
+inline constexpr __fill_like_fn fill_like{};
 } // namespace ranges
 } // namespace std
 
@@ -476,11 +510,120 @@ void policy_overload() {
   (void)y;
 }
 
-// A ranges CPO object is not annotated
-void ranges_cpo() {
+// ranges::uninitialized_fill initializes an [[uninit]] array range
+int ranges_cpo() {
   int a2 [[uninit]] [3];
-  std::ranges::uninitialized_fill(a2, 10); // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  std::ranges::uninitialized_fill(a2, 10);
+  return a2[0]; // OK
 }
+
+// ranges::uninitialized_fill rejects an initialized range
+void ranges_initialized_range() {
+  int a[3] = {};
+  std::ranges::uninitialized_fill(a, 10); // expected-error {{reference marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A second ranges::uninitialized_fill is a double initialization
+void ranges_double_fill() {
+  int a [[uninit]] [3];
+  std::ranges::uninitialized_fill(a, 1);
+  std::ranges::uninitialized_fill(a, 2); // expected-error {{reference marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A read before ranges::uninitialized_fill reads uninitialized memory
+int ranges_read_before_fill() {
+  int a [[uninit]] [3];
+  int x = a[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  std::ranges::uninitialized_fill(a, 1);
+  return x;
+}
+
+// The iterator overload takes a pointer and its sentinel
+int ranges_iterator_form(int *p [[ref_to_uninit]], int *e [[ref_to_uninit]]) {
+  std::ranges::uninitialized_fill(p, e, 0);
+  return *p; // OK
+}
+
+// The §5.5 arr4 example fills an [[uninit]] array of class type
+struct X55 { int v; };
+int paper_5_5_arr4(const X55 &xval) {
+  X55 arr4 [[uninit]] [20];
+  std::ranges::uninitialized_fill(arr4, xval);
+  return arr4[0].v; // OK
+}
+
+// ranges::uninitialized_copy initializes its output range, not its input
+int ranges_copy(const int (&src)[3]) {
+  int a [[uninit]] [3];
+  std::ranges::uninitialized_copy(src, a);
+  int b [[uninit]] [3];
+  std::ranges::uninitialized_copy(src, src + 3, b, b + 3);
+  int c[3] = {};
+  std::ranges::uninitialized_copy(src, c); // expected-error {{reference marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  return a[0] + b[0]; // OK
+}
+
+// ranges::uninitialized_default_construct credits only a range whose default-initialization leaves nothing indeterminate
+int ranges_default_construct() {
+  int a [[uninit]] [3];
+  std::ranges::uninitialized_default_construct(a);
+  std::ranges::uninitialized_default_construct(a); // OK: still uninitialized
+  std::byte b [[uninit]] [3];
+  std::ranges::uninitialized_default_construct(b);
+  std::ranges::uninitialized_default_construct(b); // expected-error {{reference marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  return a[0] + (int)b[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// ranges::destroy ends the lifetime of the range
+int ranges_destroy() {
+  int a [[uninit]] [3];
+  std::ranges::uninitialized_fill(a, 1);
+  std::ranges::destroy(a);
+  std::ranges::destroy(a); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  return a[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// ranges::destroy of never-constructed storage
+void ranges_destroy_never_constructed() {
+  int a [[uninit]] [3];
+  std::ranges::destroy(a, a + 3); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+}
+
+// ranges::construct_at and ranges::destroy_at act like std::construct_at and std::destroy_at
+int ranges_construct_destroy_at() {
+  int u [[uninit]];
+  std::ranges::construct_at(&u, 5);
+  int v = u; // OK
+  std::ranges::destroy_at(&u);
+  std::ranges::destroy_at(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  return v;
+}
+
+// A ranges CPO with a class-type iterator is inert
+void ranges_class_iterator() {
+  int arr [[uninit]] [4];
+  Iter b{arr}, e{arr + 4};
+  std::ranges::uninitialized_fill(b, e, 0); // OK
+  int x = arr[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  (void)x;
+}
+
+// A std::ranges object whose name is not a lifecycle CPO's is not annotated
+void ranges_other_object() {
+  int a [[uninit]] [3];
+  std::ranges::fill_like(a, 1); // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// ranges::uninitialized_fill initializes an [[uninit]] array member in a constructor
+struct RangesFilledMember {
+  int arr [[uninit]] [4];
+  RangesFilledMember() {
+    int x = arr[1]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+    std::ranges::uninitialized_fill(arr, 0);
+    int y = arr[1]; // OK
+    (void)x; (void)y;
+  }
+};
 
 // std::begin on an [[uninit]] array is rejected on both sides
 void begin_end() {
@@ -1365,4 +1508,110 @@ int unmarked(int n, ...) {
   __builtin_va_start(ap, n);
   __builtin_va_end(ap);
   return 0;
+}
+
+//--- ranges_libcxx.cpp
+// The std::ranges lifecycle CPOs in libc++'s layout: the classes are members
+// of std::__1::ranges and the objects of its inline namespace __cpo.
+[[profiles::enforce(std::init)]];
+
+namespace std {
+inline namespace __1 {
+namespace ranges {
+struct __uninitialized_fill {
+  template <class _ForwardIterator, class _Sentinel, class _Tp>
+  _ForwardIterator operator()(_ForwardIterator __first, _Sentinel __last, const _Tp &__x) const;
+  template <class _ForwardRange, class _Tp>
+  _ForwardRange &operator()(_ForwardRange &&__range, const _Tp &__x) const;
+};
+inline namespace __cpo {
+inline constexpr auto uninitialized_fill = __uninitialized_fill{};
+} // namespace __cpo
+struct __destroy {
+  template <class _InputIterator, class _Sentinel>
+  _InputIterator operator()(_InputIterator __first, _Sentinel __last) const noexcept;
+  template <class _InputRange>
+  _InputRange &operator()(_InputRange &&__range) const noexcept;
+};
+inline namespace __cpo {
+inline constexpr auto destroy = __destroy{};
+} // namespace __cpo
+struct __construct_at {
+  template <class _Tp, class... _Args>
+  _Tp *operator()(_Tp *__location, _Args &&...__args) const;
+};
+inline namespace __cpo {
+inline constexpr auto construct_at = __construct_at{};
+} // namespace __cpo
+} // namespace ranges
+} // namespace __1
+} // namespace std
+
+// ranges::uninitialized_fill initializes an [[uninit]] array range
+int fill() {
+  int a [[uninit]] [3];
+  std::ranges::uninitialized_fill(a, 1);
+  return a[0]; // OK
+}
+
+// A second ranges::uninitialized_fill is a double initialization
+void fill_twice() {
+  int a [[uninit]] [3];
+  std::ranges::uninitialized_fill(a, 1);
+  std::ranges::uninitialized_fill(a, 2); // expected-error {{reference marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// ranges::destroy ends the lifetime of the range
+int fill_destroy_read() {
+  int a [[uninit]] [3];
+  std::ranges::uninitialized_fill(a, a + 3, 1);
+  std::ranges::destroy(a);
+  return a[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A second ranges::construct_at is a double construction
+int construct_twice() {
+  int u [[uninit]];
+  std::ranges::construct_at(&u, 1);
+  std::ranges::construct_at(&u, 2); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  return u;
+}
+
+//--- ranges_static.cpp
+// A CPO with a static call operator lines its parameters up like one with an
+// implicit object parameter.
+[[profiles::enforce(std::init)]];
+
+namespace std::ranges {
+struct __uninitialized_fill_fn {
+  template <class I, class S, class T> static I operator()(I first, S last, const T &x);
+  template <class R, class T> static R &operator()(R &&r, const T &x);
+};
+inline constexpr __uninitialized_fill_fn uninitialized_fill{};
+} // namespace std::ranges
+
+// The range overload initializes an [[uninit]] array range
+int fill() {
+  int a [[uninit]] [3];
+  std::ranges::uninitialized_fill(a, 1);
+  return a[0]; // OK
+}
+
+// The iterator overload after the range overload is a double initialization
+void fill_twice() {
+  int a [[uninit]] [3];
+  std::ranges::uninitialized_fill(a, 1);
+  std::ranges::uninitialized_fill(a, a + 3, 2); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// An initialized range is rejected
+void fill_initialized() {
+  int a[3] = {};
+  std::ranges::uninitialized_fill(a, 1); // expected-error {{reference marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// The iterator overload takes a pointer and its sentinel
+int fill_iterators(int *p [[ref_to_uninit]], int *e [[ref_to_uninit]]) {
+  std::ranges::uninitialized_fill(p, e, 1);
+  return *p; // OK
 }

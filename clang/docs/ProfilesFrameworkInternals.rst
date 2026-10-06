@@ -867,8 +867,9 @@ one role parameter -- ``Construct`` for ``construct_at`` and the
 ``std::uninitialized_*`` output range, ``AssertUninit`` for ``std::now_init``'s
 parameter, ``Destroy`` for ``destroy_at`` and the first iterator of
 ``std::destroy`` and ``std::destroy_n`` -- and matches only where that parameter
-of the called declaration is a pointer, so a specialization whose iterator is a
-class type falls outside it.  A range row also names the range's end iterator
+of the called declaration has the row's shape (``ParamShape``), a pointer for
+every namespace-std row, so a specialization whose iterator is a class type
+falls outside it.  A range row also names the range's end iterator
 (``EndParam``; ``CalleeLifecycleRoles::isEndParam``), whose binding is
 accepted in any state and which earns no credit and no destroy.  The
 ``Destroy`` role names one parameter, so the execution-policy overloads of
@@ -883,14 +884,22 @@ default-construct rows are ``Construct`` rows only where default-initialization
 of the called specialization's range pointee leaves nothing indeterminate
 (``defaultInitLeavesScalarIndeterminate``, which skips ``[[uninit]]`` members)
 and ``AssertUninit`` rows otherwise: a credit there would legalize reads of the
-indeterminate scalars that default-initialization leaves.  ``ranges::`` CPOs are
-outside every key (`Known Gaps (std::init)`_).
+indeterminate scalars that default-initialization leaves.  The ``std::ranges``
+lifecycle CPOs are rows keyed by their object's name and their call operator's
+arity (``findRangesCPORow``): the callee is the call operator, static or not,
+of a class that ``std::ranges`` encloses, and the namespace's member of the
+row's name -- seen through an inline namespace such as libc++'s ``__cpo`` -- is
+a variable of that class, so the class's own name, which differs between
+libstdc++ and libc++, never matters.  An iterator overload's row names its
+sentinel as the end iterator, and a range overload's row matches where the
+forwarding reference binds an array (``ParamShape::ArrayReference``).
 
 Library callees whose semantics the profile needs without an attribute are
 rows of the known-callee table (``KnownCallees`` in SemaProfiles.cpp), keyed
 by builtin ID, by form for the ``operator new`` / ``operator delete`` families,
-or by namespace-std name and arity, with a name-only *untrusted* fallback where
-the ID is absent; the roles reach the funnels and the CFG pass through
+or by the name of a namespace-std function or ``std::ranges`` object and its
+arity (``KnownCalleeKey``), with a name-only *untrusted* fallback where the ID
+is absent; the roles reach the funnels and the CFG pass through
 ``getCalleeLifecycleRoles``.  A row names its *role parameter*, the one
 parameter the call acts on, and what the call does to the storage bound to it
 (``KnownParamRole``); the roles are per parameter, so the callee's other
@@ -1241,12 +1250,11 @@ Deliberate Strictnesses
   (``p[1]``) are never credited.  ``std::begin(arr)`` / ``std::end(arr)`` on
   an ``[[uninit]]`` array is rejected on both sides (the array binds
   ``begin``'s unmarked reference parameter, and the trusted return cannot
-  feed a marked range), so ``arr, arr + n`` is the spelling that works.  The
-  ``std::ranges::`` lifecycle CPOs are class objects, not named functions:
-  passing an ``[[uninit]]`` range to one binds its unmarked forwarding
-  reference.  ``std::fill`` assigns rather than initializes: into a
-  still-uninitialized ``[[uninit]]`` array it is rejected like any unmarked
-  binding (``std::uninitialized_fill`` and ``memset`` initialize).
+  feed a marked range), so ``arr, arr + n`` and the ``std::ranges`` range
+  overloads are the spellings that work.  ``std::fill`` assigns rather than
+  initializes: into a still-uninitialized ``[[uninit]]`` array it is rejected
+  like any unmarked binding (``std::uninitialized_fill`` and ``memset``
+  initialize).
 - ``__builtin_operator_delete`` binds its operand with no parameter
   declaration in sight, so the storage-release relaxation cannot recognize
   it: passing ``[[ref_to_uninit]]`` storage keeps the unmarked-direction
@@ -1345,7 +1353,9 @@ Missed Diagnostics
   the role parameter is a pointer: ``std::construct_at``, ``std::destroy_at``,
   ``std::now_init`` with a pointer first parameter, and the
   ``std::uninitialized_*`` family, ``std::destroy`` and ``std::destroy_n`` where
-  the iterator is a pointer; a call with a class-type iterator checks nothing.
+  the iterator is a pointer, and their ``std::ranges`` objects where the
+  iterator is a pointer or the range is an array; a call with a class-type
+  iterator or range checks nothing.
   A whole ``[[uninit]]`` array passed as a range is initialized or destroyed
   whatever the range's length.
 - Storage of no type -- a marked ``void *``'s referent, such as a ``malloc``
