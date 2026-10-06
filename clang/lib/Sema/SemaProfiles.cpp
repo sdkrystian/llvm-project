@@ -1588,6 +1588,8 @@ struct KnownCalleeEntry {
   static constexpr unsigned NotStdRow = ~0u;
   /// The Arity of a std row matching any parameter count.
   static constexpr unsigned AnyArity = ~0u - 1;
+  /// The EndParam of a row whose role parameter has no end iterator.
+  static constexpr unsigned NoEndParam = ~0u;
 
   /// The Clang builtin ID this row matches; 0 for a form or std row.
   unsigned BuiltinID = 0;
@@ -1612,6 +1614,9 @@ struct KnownCalleeEntry {
   /// Param's pointee type leaves no scalar indeterminate
   /// (defaultInitLeavesScalarIndeterminate); AssertUninit elsewhere.
   bool ConstructIfDefaultInitDeterminate = false;
+  /// The index of the end iterator of the range Param begins, or NoEndParam
+  /// (P4222R2 §4.4 annotates both iterators).
+  unsigned EndParam = NoEndParam;
 
   bool isStdRow() const { return Arity != NotStdRow; }
 };
@@ -1646,12 +1651,14 @@ formRow(bool (*Form)(const FunctionDecl *), KnownCalleeReturn Return,
 /// A row keyed by namespace-std name and arity.
 static constexpr KnownCalleeEntry
 stdRow(StringRef Name, unsigned Arity, unsigned Param, KnownParamRole Role,
+       unsigned EndParam = KnownCalleeEntry::NoEndParam,
        bool ConstructIfDefaultInitDeterminate = false) {
   KnownCalleeEntry E;
   E.Name = Name;
   E.Arity = Arity;
   E.Param = Param;
   E.Role = Role;
+  E.EndParam = EndParam;
   E.ConstructIfDefaultInitDeterminate = ConstructIfDefaultInitDeterminate;
   return E;
 }
@@ -1754,24 +1761,26 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
     stdRow("uninitialized_move", 4, 3, KnownParamRole::Construct),
     stdRow("uninitialized_move_n", 3, 2, KnownParamRole::Construct),
     stdRow("uninitialized_move_n", 4, 3, KnownParamRole::Construct),
-    stdRow("uninitialized_fill", 3, 0, KnownParamRole::Construct),
-    stdRow("uninitialized_fill", 4, 1, KnownParamRole::Construct),
+    stdRow("uninitialized_fill", 3, 0, KnownParamRole::Construct, 1),
+    stdRow("uninitialized_fill", 4, 1, KnownParamRole::Construct, 2),
     stdRow("uninitialized_fill_n", 3, 0, KnownParamRole::Construct),
     stdRow("uninitialized_fill_n", 4, 1, KnownParamRole::Construct),
-    stdRow("uninitialized_value_construct", 2, 0, KnownParamRole::Construct),
-    stdRow("uninitialized_value_construct", 3, 1, KnownParamRole::Construct),
+    stdRow("uninitialized_value_construct", 2, 0, KnownParamRole::Construct, 1),
+    stdRow("uninitialized_value_construct", 3, 1, KnownParamRole::Construct, 2),
     stdRow("uninitialized_value_construct_n", 2, 0, KnownParamRole::Construct),
     stdRow("uninitialized_value_construct_n", 3, 1, KnownParamRole::Construct),
     stdRow("uninitialized_default_construct", 2, 0, KnownParamRole::Construct,
-           /*ConstructIfDefaultInitDeterminate=*/true),
+           1, /*ConstructIfDefaultInitDeterminate=*/true),
     stdRow("uninitialized_default_construct", 3, 1, KnownParamRole::Construct,
-           /*ConstructIfDefaultInitDeterminate=*/true),
+           2, /*ConstructIfDefaultInitDeterminate=*/true),
     stdRow("uninitialized_default_construct_n", 2, 0, KnownParamRole::Construct,
+           KnownCalleeEntry::NoEndParam,
            /*ConstructIfDefaultInitDeterminate=*/true),
     stdRow("uninitialized_default_construct_n", 3, 1, KnownParamRole::Construct,
+           KnownCalleeEntry::NoEndParam,
            /*ConstructIfDefaultInitDeterminate=*/true),
-    stdRow("destroy", 2, 0, KnownParamRole::Destroy),
-    stdRow("destroy", 3, 1, KnownParamRole::Destroy),
+    stdRow("destroy", 2, 0, KnownParamRole::Destroy, 1),
+    stdRow("destroy", 3, 1, KnownParamRole::Destroy, 2),
     stdRow("destroy_n", 2, 0, KnownParamRole::Destroy),
     stdRow("destroy_n", 3, 1, KnownParamRole::Destroy),
 };
@@ -1857,6 +1866,8 @@ SemaProfiles::getCalleeLifecycleRoles(const FunctionDecl *FD) {
   Roles.KnownParam = M.Entry->Param;
   Roles.KnownRole = M.Entry->Role;
   Roles.KnownTrusted = M.Trusted;
+  if (M.Entry->EndParam < FD->getNumParams())
+    Roles.EndParam = M.Entry->EndParam;
   if (M.Entry->ConstructIfDefaultInitDeterminate) {
     // The value type is the pointee of the instantiated range parameter.
     QualType T = FD->getParamDecl(M.Entry->Param)->getType()->getPointeeType();
@@ -1885,6 +1896,11 @@ bool SemaProfiles::CalleeLifecycleRoles::isMarkedParam(
 bool SemaProfiles::CalleeLifecycleRoles::isInitializingParam(
     const ParmVarDecl *P) const {
   return roleOf(P) == KnownParamRole::InitializeAnyState;
+}
+
+bool SemaProfiles::CalleeLifecycleRoles::isEndParam(
+    const ParmVarDecl *P) const {
+  return EndParam == P->getFunctionScopeIndex();
 }
 
 bool SemaProfiles::CalleeLifecycleRoles::destroysParam(
@@ -2928,8 +2944,9 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
   bool TargetMarked =
       Target && bindingTargetCanCarryMarker(Kind) &&
       (Parm ? Roles.isMarkedParam(Parm) : Target->hasAttr<RefToUninitAttr>());
-  // An initializing parameter accepts storage in any live state.
-  if (Parm && Roles.isInitializingParam(Parm))
+  // An initializing parameter or a range's end iterator accepts storage in
+  // any state.
+  if (Parm && (Roles.isInitializingParam(Parm) || Roles.isEndParam(Parm)))
     return;
   bool Destroys = Parm && Roles.destroysParam(Parm);
   if (Destroys || (Parm && Roles.releasesParam(Parm, /*TrustedOnly=*/false))) {

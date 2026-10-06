@@ -733,6 +733,9 @@ public:
     std::optional<unsigned> KnownParam;
     /// What the row does to the storage bound to KnownParam.
     KnownParamRole KnownRole = KnownParamRole::None;
+    /// The known-callee row's end iterator of the range at KnownParam, if
+    /// the row has one: it bounds the range and is accepted in any state.
+    std::optional<unsigned> EndParam;
     /// Whether the row matched by builtin ID, form, or namespace-std name
     /// rather than by the name-only fallback, which -fno-builtin /
     /// -ffreestanding leaves: the name says what the function is meant to
@@ -747,6 +750,10 @@ public:
     /// True if \p P is an initializing parameter, trusted or by name: its
     /// binding accepts storage in any live state.
     bool isInitializingParam(const ParmVarDecl *P) const;
+    /// True if \p P is the row's end iterator (EndParam): its binding
+    /// accepts storage in any state, and the call neither initializes nor
+    /// destroys what it points to.
+    bool isEndParam(const ParmVarDecl *P) const;
     /// True if the call ends the lifetime of the storage bound to \p P.
     bool destroysParam(const ParmVarDecl *P) const;
     /// True if the call releases the storage bound to \p P; a name-only

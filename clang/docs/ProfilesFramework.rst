@@ -877,6 +877,10 @@ execution-policy overload, so the range must refer to uninitialized memory -- an
 initialized range is rejected, like the paper's
 ``uninitialized_fill(a1, 10)`` -- and is initialized whole by the call, while
 the source range of the copy and move forms is an ordinary unmarked parameter.
+The end iterator of the output range (``uninitialized_fill``,
+``uninitialized_value_construct``, and ``uninitialized_default_construct``)
+bounds the range: it is accepted in any state, marked or not, and the call
+neither initializes nor destroys what it points to.
 ``uninitialized_default_construct`` and its ``_n`` form initialize the range
 only where default-initialization of the value type leaves no scalar
 indeterminate -- a user-provided default constructor, a default member
@@ -930,10 +934,11 @@ treats ``std::destroy_at`` this way itself -- a call to a ``std::destroy_at``
 whose first parameter is of pointer type destroys that argument's storage, and
 so does a call to ``std::destroy`` or ``std::destroy_n`` (P4222R2 §4.4) or
 their execution-policy overloads for its first iterator where that is a pointer;
-the end iterator is an ordinary argument -- so the construct/destroy/construct
-cycle is legal, a second destruction is rejected, a destroy of never-constructed
-storage is rejected too, and binding the destroyed storage to an ordinary
-pointer or reference is rejected as the unmarked-direction violation.  An
+the end iterator is accepted in any state, as for ``uninitialized_fill`` -- so
+the construct/destroy/construct cycle is legal, a second destruction is
+rejected, a destroy of never-constructed storage is rejected too, and binding
+the destroyed storage to an ordinary pointer or reference is rejected as the
+unmarked-direction violation.  An
 explicit destructor call (``p->~T()``, ``s.~T()``, and a scalar's
 pseudo-destructor call) is the same destroy -- ``std::destroy_at`` is specified
 as one ([specialized.destroy]) -- and the diagnostics name it a destructor

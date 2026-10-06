@@ -4077,9 +4077,10 @@ static void extractStdInitEvents(
     // The argument bindings of the call-like \p CallLike
     // (forEachArgumentBinding) of a callee with \p Roles: a VariadicArgument
     // binding per variadic argument, a Parameter binding per declared
-    // parameter other than an initializing one -- none for a [[now_uninit]]
-    // or storage-release callee, whose parameters run the destroy rules
-    // instead -- and the mutable aliases each argument hands out.
+    // parameter other than an initializing one or a range's end iterator --
+    // none for a [[now_uninit]] or storage-release callee, whose parameters
+    // run the destroy rules instead -- and the mutable aliases each argument
+    // hands out.
     auto AppendArgumentBindings =
         [&](const Expr *CallLike,
             const SemaProfiles::CalleeLifecycleRoles &Roles) {
@@ -4094,7 +4095,8 @@ static void extractStdInitEvents(
                 else if (!Parm ||
                          !(Roles.destroysParam(Parm) ||
                            Roles.releasesParam(Parm, /*TrustedOnly=*/false) ||
-                           Roles.isInitializingParam(Parm)))
+                           Roles.isInitializingParam(Parm) ||
+                           Roles.isEndParam(Parm)))
                   AddBinding(K::Parameter, Loc,
                              Parm && Roles.isMarkedParam(Parm), T, Arg, nullptr,
                              CallLike, isWholeCopySource(Parm));

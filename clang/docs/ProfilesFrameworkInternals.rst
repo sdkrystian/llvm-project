@@ -865,9 +865,12 @@ one role parameter -- ``Construct`` for ``construct_at`` and the
 parameter, ``Destroy`` for ``destroy_at`` and the first iterator of
 ``std::destroy`` and ``std::destroy_n`` -- and matches only where that parameter
 of the called declaration is a pointer, so a specialization whose iterator is a
-class type falls outside it.  The ``Destroy`` role names one parameter, so the
-execution-policy overloads of ``std::destroy`` and ``std::destroy_n`` are
-ordinary rows.  The rows are looked up at each call
+class type falls outside it.  A range row also names the range's end iterator
+(``EndParam``; ``CalleeLifecycleRoles::isEndParam``), whose binding is
+accepted in any state and which earns no credit and no destroy.  The
+``Destroy`` role names one parameter, so the execution-policy overloads of
+``std::destroy`` and ``std::destroy_n`` are ordinary rows.  The rows are looked
+up at each call
 (``getCalleeLifecycleRoles``) and never attached as attributes: the library's
 declarations stay as written, so a module or header unit built without
 ``-fprofiles`` reads the same, and a library definition is judged against its

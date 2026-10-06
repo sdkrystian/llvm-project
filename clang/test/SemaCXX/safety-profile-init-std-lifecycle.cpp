@@ -474,6 +474,51 @@ void destroy_policy_overload() {
   (void)y;
 }
 
+// A marked end iterator is accepted by uninitialized_fill
+void fill_marked_end(int *b [[ref_to_uninit]], int *e [[ref_to_uninit]]) {
+  std::uninitialized_fill(b, e, 0);
+}
+
+// A marked end iterator is accepted by uninitialized_value_construct
+void value_construct_marked_end(int *b [[ref_to_uninit]],
+                                int *e [[ref_to_uninit]]) {
+  std::uninitialized_value_construct(b, e);
+}
+
+// A marked end iterator is accepted by destroy
+void destroy_marked_end(int *b [[ref_to_uninit]], int *e [[ref_to_uninit]]) {
+  std::uninitialized_fill(b, e, 0);
+  std::destroy(b, e);
+}
+
+// A marked end iterator is accepted by the policy overload
+void fill_policy_marked_end(int *b [[ref_to_uninit]],
+                            int *e [[ref_to_uninit]]) {
+  std::uninitialized_fill(Policy{}, b, e, 0);
+}
+
+// Marked member iterators are accepted
+struct MarkedRange {
+  int *b [[ref_to_uninit]];
+  int *e [[ref_to_uninit]];
+  void fill() { std::uninitialized_fill(b, e, 0); }
+};
+
+// A marked local end iterator is accepted
+void fill_marked_local_end(int *b [[ref_to_uninit]], int n) {
+  int *e [[ref_to_uninit]] = b + n;
+  std::uninitialized_fill(b, e, 0);
+}
+
+// Only the first iterator's storage is initialized
+void fill_first_iterator_only() {
+  int a [[uninit]] [4], b [[uninit]] [4];
+  std::uninitialized_fill(a, b, 0);
+  int x = a[0]; // OK
+  int y = b[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  (void)x; (void)y;
+}
+
 struct ScopedDtor { int x; ~ScopedDtor(); };
 struct ScopedTrivial { int x; };
 
