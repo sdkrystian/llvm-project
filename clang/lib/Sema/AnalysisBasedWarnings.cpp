@@ -3848,9 +3848,86 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
                         bool RawExempt = false,
                         SemaProfiles::FlowLeafUse Use =
                             SemaProfiles::FlowLeafUse::Plain) {
-    // A handle argument names no tracked storage.
-    if (SemaProfiles::isHandleType(ParamTy))
-      return false;
+    bool AnyTracked = false;
+    // One leaf, used as a pointer value or a glvalue, below the casts
+    // \p OuterPath; a leaf no entity tracks takes \p Form's state.
+    auto AddLeaf = [&](const SemaProfiles::ShapeLeaf &Leaf, bool AsPointerValue,
+                       ArrayRef<const CXXRecordDecl *> OuterPath,
+                       llvm::function_ref<LeafState()> Form) {
+      ArgLeaf L{Leaf.E, Storage.resolveFlowLeaf(Leaf, AsPointerValue,
+                                                Designated, RawExempt)};
+      // A credit through a conversion to a base class names the base
+      // subobject, whatever its designated type.
+      if (L.R.Entity && !Designated.isNull()) {
+        BasePath CastPath(OuterPath);
+        SemaProfiles::peelBaseCasts(Leaf.E, CastPath, Leaf.Arms);
+        if (!CastPath.empty()) {
+          L.R.Subobject = true;
+          L.R.Sub = SubKey();
+        }
+      }
+      L.Tracked = S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC, Use);
+      if (L.Tracked && Use == SemaProfiles::FlowLeafUse::MarkedTarget &&
+          !L.R.Entity)
+        L.Part = Storage.objectPart(Leaf, AsPointerValue, OuterPath);
+      AnyTracked |= L.Tracked;
+      // The current object's lifetime entity stands beside its members.
+      if (!L.R.Entity || L.R.Entity == Storage.CurrentObjectRoot) {
+        const Expr *G = SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms);
+        if (const Expr *Op = SemaProfiles::addressOfOperand(G);
+            AsPointerValue && Op)
+          G = SemaProfiles::ignoreTransparentCasts(Op, Leaf.Arms);
+        L.Whole = Storage.wholeObject(G, Leaf.Arms);
+        if (!Designated.isNull())
+          L.Whole =
+              designatedWholeRange(Storage, Leaf, AsPointerValue, G, L.Whole,
+                                   OuterPath, Designated, RawExempt);
+        L.Form = Form();
+      }
+      Leaves.push_back(L);
+    };
+    // A handle's storage is what its walk reaches through a transfer leaf
+    // (SemaProfiles::forEachHandleSourceLeaf), a Partial leaf's a subobject
+    // of it; a range taken by reference is its own storage, else what its
+    // walk reaches.
+    if (SemaProfiles::isHandleType(ParamTy.getNonReferenceType())) {
+      using HandleLeaf = SemaProfiles::HandleLeaf;
+      auto Visit = [&](auto &Self, const HandleLeaf &HL) -> void {
+        auto FormOf = [&](const SemaProfiles::ShapeLeaf &Leaf) {
+          return formState(S.Profiles().classifyInitHandleLeaf(
+              {Leaf.E, HL.M, HL.Partial, Leaf.Arms}, D));
+        };
+        if (HL.M == HandleLeaf::Mode::Handle) {
+          ArgLeaf L{HL.E, {}};
+          L.Form = FormOf(HL.E);
+          Leaves.push_back(L);
+          return;
+        }
+        SemaProfiles::forEachTargetLeaf(
+            HL.E, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+              AddLeaf(Leaf, HL.M == HandleLeaf::Mode::PointerValue, {},
+                      [&] { return FormOf(Leaf); });
+              ArgLeaf &L = Leaves.back();
+              if (HL.Partial && L.R.Entity) {
+                L.R.Subobject = true;
+                L.R.Sub = SubKey();
+              }
+              if (HL.M == HandleLeaf::Mode::Range && !L.R.Entity &&
+                  L.Whole.first == L.Whole.second) {
+                Leaves.pop_back();
+                SemaProfiles::forEachHandleSourceLeaf(
+                    Leaf.E,
+                    [&](const HandleLeaf &Inner) { Self(Self, Inner); });
+              }
+            });
+      };
+      if (ParamTy->isReferenceType())
+        Visit(Visit, HandleLeaf{Arg, HandleLeaf::Mode::Range});
+      else
+        SemaProfiles::forEachHandleSourceLeaf(
+            Arg, [&](const HandleLeaf &HL) { Visit(Visit, HL); });
+      return AnyTracked;
+    }
     bool AsPointerValue;
     const Expr *Operand =
         SemaProfiles::bindingSourceOperand(Arg, ParamTy, AsPointerValue);
@@ -3859,46 +3936,16 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
     // The derived-to-base casts above the leaves, which the leaf walk peels.
     BasePath OuterPath;
     SemaProfiles::peelBaseCasts(Operand, OuterPath);
-    bool AnyTracked = false;
     SemaProfiles::forEachTargetLeaf(
         Operand, [&](const SemaProfiles::ShapeLeaf &Leaf) {
-          ArgLeaf L{Leaf.E, Storage.resolveFlowLeaf(Leaf, AsPointerValue,
-                                                    Designated, RawExempt)};
-          // A credit through a conversion to a base class names the base
-          // subobject, whatever its designated type.
-          if (L.R.Entity && !Designated.isNull()) {
-            BasePath CastPath(OuterPath);
-            SemaProfiles::peelBaseCasts(Leaf.E, CastPath, Leaf.Arms);
-            if (!CastPath.empty()) {
-              L.R.Subobject = true;
-              L.R.Sub = SubKey();
-            }
-          }
-          L.Tracked =
-              S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC, Use);
-          if (L.Tracked && Use == SemaProfiles::FlowLeafUse::MarkedTarget &&
-              !L.R.Entity)
-            L.Part = Storage.objectPart(Leaf, AsPointerValue, OuterPath);
-          AnyTracked |= L.Tracked;
-          // The current object's lifetime entity stands beside its members.
-          if (!L.R.Entity || L.R.Entity == Storage.CurrentObjectRoot) {
-            const Expr *G =
-                SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms);
-            if (const Expr *Op = SemaProfiles::addressOfOperand(G);
-                AsPointerValue && Op)
-              G = SemaProfiles::ignoreTransparentCasts(Op, Leaf.Arms);
-            L.Whole = Storage.wholeObject(G, Leaf.Arms);
-            if (!Designated.isNull())
-              L.Whole = designatedWholeRange(Storage, Leaf, AsPointerValue, G,
-                                             L.Whole, OuterPath, Designated,
-                                             RawExempt);
-            L.Form = formState(
+          AddLeaf(Leaf, AsPointerValue, OuterPath, [&] {
+            return formState(
                 S.Profiles().classifyInitBindingLeaf(Leaf, ParamTy, D));
-          }
-          Leaves.push_back(L);
+          });
         });
     return AnyTracked;
   };
+
   // The leaves name one storage: each names the same whole entity, or the
   // same object as a whole.
   auto NameOneStorage = [](ArrayRef<ArgLeaf> Leaves) {
@@ -4033,8 +4080,12 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
       if (!Roles.initializesParam(P))
         return;
       QualType PT = P->getType();
+      // A class iterator or range designates its value type.
       QualType Designated =
           PT->isPointerType() ? PT->getPointeeType() : PT.getNonReferenceType();
+      if (SemaProfiles::isHandleType(Designated))
+        if (QualType VT = SemaProfiles::rangeValueType(PT); !VT.isNull())
+          Designated = VT;
       bool RawExempt =
           (Roles.InitializesRefToUninitParams && Roles.isMarkedParam(P)) ||
           Roles.isInitializingParam(P);
@@ -4578,16 +4629,17 @@ static void extractStdInitEvents(
     auto AddBindingAs = [&](K Kind, SourceLocation Loc, bool TargetMarked,
                             QualType T, const Expr *Src,
                             const NamedDecl *Subject, const Expr *At,
-                            bool EveryPath) {
+                            bool EveryPath, bool AsRange) {
       bool IsHandle = SemaProfiles::isHandleType(T);
       if (!Src || T.isNull() || T->isDependentType() ||
           (!T->isPointerType() && !T->isReferenceType() && !IsHandle) ||
           isa<RecoveryExpr>(Src->IgnoreParens()))
         return;
-      BindingSite Site{Kind,    Loc, TargetMarked, T->isReferenceType(),
-                       Subject, {},  EveryPath};
-      if (IsHandle)
-        Site.HandleType = T;
+      BindingSite Site{
+          Kind,    Loc, TargetMarked, T->isReferenceType() && !AsRange,
+          Subject, {},  EveryPath};
+      if (IsHandle || AsRange)
+        Site.HandleType = T.getNonReferenceType();
       bool AnyTracked = false;
       // The derived-to-base casts above the leaves, which the leaf walk peels.
       BasePath OuterPath;
@@ -4621,28 +4673,53 @@ static void extractStdInitEvents(
           L.State = Form();
         Site.Leaves.push_back(L);
       };
-      if (IsHandle) {
+      if (IsHandle || AsRange) {
         // A handle's state comes from the storage its walk reaches
-        // (SemaProfiles::forEachHandleSourceLeaf).
-        using Mode = SemaProfiles::HandleLeaf::Mode;
-        SemaProfiles::forEachHandleSourceLeaf(
-            Src, [&](const SemaProfiles::HandleLeaf &HL) {
-              auto FormOf = [&](const SemaProfiles::ShapeLeaf &Leaf) {
-                return formState(S.Profiles().classifyInitHandleLeaf(
-                    {Leaf.E, HL.M, HL.Partial, Leaf.Arms}, D));
-              };
-              if (HL.M == Mode::Handle) {
-                BindingLeaf L;
-                L.State = FormOf(HL.E);
-                Site.Leaves.push_back(L);
-                return;
-              }
-              SemaProfiles::forEachTargetLeaf(
-                  HL.E, [&](const SemaProfiles::ShapeLeaf &Leaf) {
-                    AddLeaf(Leaf, HL.M == Mode::PointerValue,
-                            [&] { return FormOf(Leaf); });
-                  });
-            });
+        // (SemaProfiles::forEachHandleSourceLeaf); a range's from its own
+        // storage, else from the storage its walk reaches.
+        using HandleLeaf = SemaProfiles::HandleLeaf;
+        auto Visit = [&](auto &Self, const HandleLeaf &HL) -> void {
+          auto FormOf = [&](const SemaProfiles::ShapeLeaf &Leaf,
+                            HandleLeaf::Mode M) {
+            return formState(S.Profiles().classifyInitHandleLeaf(
+                {Leaf.E, M, HL.Partial, Leaf.Arms}, D));
+          };
+          if (HL.M == HandleLeaf::Mode::Handle) {
+            BindingLeaf L;
+            L.State = FormOf(HL.E, HL.M);
+            Site.Leaves.push_back(L);
+            return;
+          }
+          SemaProfiles::forEachTargetLeaf(
+              HL.E, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+                if (HL.M != HandleLeaf::Mode::Range ||
+                    S.Profiles().isFlowTrackedLeaf(
+                        Leaf, /*AsPointerValue=*/false, DC,
+                        TargetMarked ? SemaProfiles::FlowLeafUse::MarkedTarget
+                                     : SemaProfiles::FlowLeafUse::Plain)) {
+                  AddLeaf(Leaf, HL.M == HandleLeaf::Mode::PointerValue,
+                          [&] { return FormOf(Leaf, HL.M); });
+                  return;
+                }
+                if (Leaf.E->isGLValue()) {
+                  LeafState Storage = FormOf(Leaf, HandleLeaf::Mode::Storage);
+                  if (Storage != LeafState::Initialized) {
+                    BindingLeaf L;
+                    L.State = Storage;
+                    Site.Leaves.push_back(L);
+                    return;
+                  }
+                }
+                SemaProfiles::forEachHandleSourceLeaf(
+                    Leaf.E,
+                    [&](const HandleLeaf &Inner) { Self(Self, Inner); });
+              });
+        };
+        if (AsRange)
+          Visit(Visit, HandleLeaf{Src, HandleLeaf::Mode::Range});
+        else
+          SemaProfiles::forEachHandleSourceLeaf(
+              Src, [&](const HandleLeaf &HL) { Visit(Visit, HL); });
       } else {
         bool AsPointerValue;
         const Expr *Operand =
@@ -4670,13 +4747,15 @@ static void extractStdInitEvents(
     auto AddBinding = [&](K Kind, SourceLocation Loc, bool TargetMarked,
                           QualType T, const Expr *Src, const NamedDecl *Subject,
                           const Expr *At, bool EveryPath = false,
+                          bool AsRange = false,
                           const ValueDecl *Target = nullptr) {
-      AddBindingAs(Kind, Loc, TargetMarked, T, Src, Subject, At, EveryPath);
-      if (!TargetMarked && !T.isNull() && !T->isDependentType() &&
+      AddBindingAs(Kind, Loc, TargetMarked, T, Src, Subject, At, EveryPath,
+                   AsRange);
+      if (!TargetMarked && !AsRange && !T.isNull() && !T->isDependentType() &&
           SemaProfiles::bindsHandleByReference(Kind, T, Target))
         AddBindingAs(Kind, Loc, /*TargetMarked=*/false,
                      T.getNonReferenceType().getUnqualifiedType(), Src, Subject,
-                     At, /*EveryPath=*/false);
+                     At, /*EveryPath=*/false, /*AsRange=*/false);
     };
     // A read through (\p IsWrite false) or a store below tracked storage,
     // with the parse-time check's location (the glvalue for a read, the
@@ -4807,10 +4886,15 @@ static void extractStdInitEvents(
                            Roles.transfersParam(Parm) ||
                            (SemaProfiles::isHandleType(T) &&
                             SemaProfiles::isAssignmentSource(Parm))))
-                  AddBinding(K::Parameter, Loc,
-                             Parm && Roles.isMarkedParam(Parm), T, Arg, nullptr,
-                             CallLike, SemaProfiles::isValueCopySource(Parm),
-                             Parm);
+                  AddBinding(
+                      K::Parameter, Loc, Parm && Roles.isMarkedParam(Parm), T,
+                      Arg, nullptr, CallLike,
+                      SemaProfiles::isValueCopySource(Parm),
+                      /*AsRange=*/Parm && T->isReferenceType() &&
+                          SemaProfiles::isHandleType(T.getNonReferenceType()) &&
+                          Roles.roleOf(Parm) !=
+                              SemaProfiles::KnownParamRole::None,
+                      Parm);
                 AppendAliasEscapes(Arg, T, CallLike);
               });
         };
@@ -4842,7 +4926,7 @@ static void extractStdInitEvents(
           return;
         AddBinding(Kind, Init->IgnoreImplicit()->getExprLoc(),
                    F && F->hasAttr<RefToUninitAttr>(), ElemT, Init, nullptr,
-                   Init, /*EveryPath=*/false, F);
+                   Init, /*EveryPath=*/false, /*AsRange=*/false, F);
         AppendAliasEscapes(Init, ElemT, Init);
       };
       if (const RecordDecl *RD = T->getAsRecordDecl()) {
@@ -4944,7 +5028,8 @@ static void extractStdInitEvents(
             continue;
           AddBinding(K::DataMember, CI->getMemberLocation(),
                      F->hasAttr<RefToUninitAttr>(), F->getType(), CI->getInit(),
-                     nullptr, CI->getInit(), /*EveryPath=*/false, F);
+                     nullptr, CI->getInit(), /*EveryPath=*/false,
+                     /*AsRange=*/false, F);
           AppendAliasEscapes(CI->getInit(), F->getType(), CI->getInit());
           // A marked pointer member refers to what its initializer names.
           MemberStep Step{BasePath(), F};
@@ -5203,7 +5288,8 @@ static void extractStdInitEvents(
           if (V->isInitCapture()) {
             AddBinding(K::Variable, C.getLocation(),
                        V->hasAttr<RefToUninitAttr>(), V->getType(),
-                       V->getInit(), nullptr, LE, /*EveryPath=*/false, V);
+                       V->getInit(), nullptr, LE, /*EveryPath=*/false,
+                       /*AsRange=*/false, V);
             AppendAliasEscapes(V->getInit(), V->getType(), LE);
             continue;
           }
@@ -5253,7 +5339,8 @@ static void extractStdInitEvents(
             if (!V->isImplicit() || !SemaProfiles::isHandleType(V->getType()))
               AddBinding(K::Variable, V->getLocation(),
                          V->hasAttr<RefToUninitAttr>(), V->getType(), Init,
-                         nullptr, Init, /*EveryPath=*/false, V);
+                         nullptr, Init, /*EveryPath=*/false, /*AsRange=*/false,
+                         V);
             AppendAliasEscapes(Init, V->getType(), Init);
             // A declared marked pointer or reference refers to what its
             // initializer names; a __block one can be reseated by a block
@@ -5337,7 +5424,7 @@ static void extractStdInitEvents(
         }
         AddBinding(K::Return, RV->IgnoreImplicit()->getExprLoc(),
                    Target && Target->hasAttr<RefToUninitAttr>(), T, RV, nullptr,
-                   RV, /*EveryPath=*/false, Target);
+                   RV, /*EveryPath=*/false, /*AsRange=*/false, Target);
         AppendAliasEscapes(RV, T, RV);
       } else if (const auto *TE = dyn_cast<CXXThrowExpr>(St)) {
         // The thrown pointer copy-initializes the exception object, which

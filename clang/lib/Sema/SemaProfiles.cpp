@@ -1678,6 +1678,8 @@ enum class ParamShape : uint8_t {
   Pointer,
   /// A reference to an array: an array range.
   ArrayReference,
+  /// A non-union class or a reference to one: a class-type iterator or range.
+  Handle,
 };
 
 /// A row of the known-callee table (KnownCallees): what a library callee
@@ -1718,6 +1720,9 @@ struct KnownCalleeEntry {
   /// The shape a name-keyed row's role parameter must have, so a
   /// specialization whose iterator is of another shape falls outside the row.
   ParamShape Shape = ParamShape::Pointer;
+  /// The role parameter may also be a handle (ParamShape::Handle): a
+  /// class-type iterator or range.
+  bool AcceptsHandle = false;
   /// What the callee does to the storage bound to Param.
   KnownParamRole Role = KnownParamRole::None;
   /// A Construct role that applies only where default-initialization of
@@ -1771,6 +1776,12 @@ stdRow(StringRef Name, unsigned Arity, unsigned Param, KnownParamRole Role,
   E.Role = Role;
   E.EndParam = EndParam;
   E.ConstructIfDefaultInitDeterminate = ConstructIfDefaultInitDeterminate;
+  return E;
+}
+
+/// \p E, whose role parameter may also be a handle.
+static constexpr KnownCalleeEntry orHandle(KnownCalleeEntry E) {
+  E.AcceptsHandle = true;
   return E;
 }
 
@@ -1905,32 +1916,38 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
     stdRow("destroy_at", KnownCalleeEntry::AnyArity, 0,
            KnownParamRole::Destroy),
     stdRow("now_init", 1, 0, KnownParamRole::AssertUninit),
-    stdRow("uninitialized_copy", 3, 2, KnownParamRole::Construct),
-    stdRow("uninitialized_copy", 4, 3, KnownParamRole::Construct),
-    stdRow("uninitialized_copy_n", 3, 2, KnownParamRole::Construct),
-    stdRow("uninitialized_copy_n", 4, 3, KnownParamRole::Construct),
-    stdRow("uninitialized_move", 3, 2, KnownParamRole::Construct),
-    stdRow("uninitialized_move", 4, 3, KnownParamRole::Construct),
-    stdRow("uninitialized_move_n", 3, 2, KnownParamRole::Construct),
-    stdRow("uninitialized_move_n", 4, 3, KnownParamRole::Construct),
-    stdRow("uninitialized_fill", 3, 0, KnownParamRole::Construct, 1),
-    stdRow("uninitialized_fill", 4, 1, KnownParamRole::Construct, 2),
-    stdRow("uninitialized_fill_n", 3, 0, KnownParamRole::Construct),
-    stdRow("uninitialized_fill_n", 4, 1, KnownParamRole::Construct),
-    stdRow("uninitialized_value_construct", 2, 0, KnownParamRole::Construct, 1),
-    stdRow("uninitialized_value_construct", 3, 1, KnownParamRole::Construct, 2),
-    stdRow("uninitialized_value_construct_n", 2, 0, KnownParamRole::Construct),
-    stdRow("uninitialized_value_construct_n", 3, 1, KnownParamRole::Construct),
-    stdRow("uninitialized_default_construct", 2, 0, KnownParamRole::Construct,
-           1, /*ConstructIfDefaultInitDeterminate=*/true),
-    stdRow("uninitialized_default_construct", 3, 1, KnownParamRole::Construct,
-           2, /*ConstructIfDefaultInitDeterminate=*/true),
-    stdRow("uninitialized_default_construct_n", 2, 0, KnownParamRole::Construct,
-           KnownCalleeEntry::NoEndParam,
-           /*ConstructIfDefaultInitDeterminate=*/true),
-    stdRow("uninitialized_default_construct_n", 3, 1, KnownParamRole::Construct,
-           KnownCalleeEntry::NoEndParam,
-           /*ConstructIfDefaultInitDeterminate=*/true),
+    orHandle(stdRow("uninitialized_copy", 3, 2, KnownParamRole::Construct)),
+    orHandle(stdRow("uninitialized_copy", 4, 3, KnownParamRole::Construct)),
+    orHandle(stdRow("uninitialized_copy_n", 3, 2, KnownParamRole::Construct)),
+    orHandle(stdRow("uninitialized_copy_n", 4, 3, KnownParamRole::Construct)),
+    orHandle(stdRow("uninitialized_move", 3, 2, KnownParamRole::Construct)),
+    orHandle(stdRow("uninitialized_move", 4, 3, KnownParamRole::Construct)),
+    orHandle(stdRow("uninitialized_move_n", 3, 2, KnownParamRole::Construct)),
+    orHandle(stdRow("uninitialized_move_n", 4, 3, KnownParamRole::Construct)),
+    orHandle(stdRow("uninitialized_fill", 3, 0, KnownParamRole::Construct, 1)),
+    orHandle(stdRow("uninitialized_fill", 4, 1, KnownParamRole::Construct, 2)),
+    orHandle(stdRow("uninitialized_fill_n", 3, 0, KnownParamRole::Construct)),
+    orHandle(stdRow("uninitialized_fill_n", 4, 1, KnownParamRole::Construct)),
+    orHandle(stdRow("uninitialized_value_construct", 2, 0,
+                    KnownParamRole::Construct, 1)),
+    orHandle(stdRow("uninitialized_value_construct", 3, 1,
+                    KnownParamRole::Construct, 2)),
+    orHandle(stdRow("uninitialized_value_construct_n", 2, 0,
+                    KnownParamRole::Construct)),
+    orHandle(stdRow("uninitialized_value_construct_n", 3, 1,
+                    KnownParamRole::Construct)),
+    orHandle(stdRow("uninitialized_default_construct", 2, 0,
+                    KnownParamRole::Construct, 1,
+                    /*ConstructIfDefaultInitDeterminate=*/true)),
+    orHandle(stdRow("uninitialized_default_construct", 3, 1,
+                    KnownParamRole::Construct, 2,
+                    /*ConstructIfDefaultInitDeterminate=*/true)),
+    orHandle(stdRow("uninitialized_default_construct_n", 2, 0,
+                    KnownParamRole::Construct, KnownCalleeEntry::NoEndParam,
+                    /*ConstructIfDefaultInitDeterminate=*/true)),
+    orHandle(stdRow("uninitialized_default_construct_n", 3, 1,
+                    KnownParamRole::Construct, KnownCalleeEntry::NoEndParam,
+                    /*ConstructIfDefaultInitDeterminate=*/true)),
     stdRow("destroy", 2, 0, KnownParamRole::Destroy, 1),
     stdRow("destroy", 3, 1, KnownParamRole::Destroy, 2),
     stdRow("destroy_n", 2, 0, KnownParamRole::Destroy),
@@ -1947,27 +1964,35 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
     cpoRow("destroy", 2, 0, KnownParamRole::Destroy, 1),
     cpoRangeRow("destroy", 1, 0, KnownParamRole::Destroy),
     cpoRow("destroy_n", 2, 0, KnownParamRole::Destroy),
-    cpoRow("uninitialized_fill", 3, 0, KnownParamRole::Construct, 1),
-    cpoRangeRow("uninitialized_fill", 2, 0, KnownParamRole::Construct),
-    cpoRow("uninitialized_fill_n", 3, 0, KnownParamRole::Construct),
-    cpoRow("uninitialized_copy", 4, 2, KnownParamRole::Construct, 3),
-    cpoRangeRow("uninitialized_copy", 2, 1, KnownParamRole::Construct),
-    cpoRow("uninitialized_copy_n", 4, 2, KnownParamRole::Construct, 3),
-    cpoRow("uninitialized_move", 4, 2, KnownParamRole::Construct, 3),
-    cpoRangeRow("uninitialized_move", 2, 1, KnownParamRole::Construct),
-    cpoRow("uninitialized_move_n", 4, 2, KnownParamRole::Construct, 3),
-    cpoRow("uninitialized_value_construct", 2, 0, KnownParamRole::Construct, 1),
-    cpoRangeRow("uninitialized_value_construct", 1, 0,
-                KnownParamRole::Construct),
-    cpoRow("uninitialized_value_construct_n", 2, 0, KnownParamRole::Construct),
-    cpoRow("uninitialized_default_construct", 2, 0, KnownParamRole::Construct,
-           1, /*ConstructIfDefaultInitDeterminate=*/true),
-    cpoRangeRow("uninitialized_default_construct", 1, 0,
-                KnownParamRole::Construct,
-                /*ConstructIfDefaultInitDeterminate=*/true),
-    cpoRow("uninitialized_default_construct_n", 2, 0, KnownParamRole::Construct,
-           KnownCalleeEntry::NoEndParam,
-           /*ConstructIfDefaultInitDeterminate=*/true),
+    orHandle(cpoRow("uninitialized_fill", 3, 0, KnownParamRole::Construct, 1)),
+    orHandle(
+        cpoRangeRow("uninitialized_fill", 2, 0, KnownParamRole::Construct)),
+    orHandle(cpoRow("uninitialized_fill_n", 3, 0, KnownParamRole::Construct)),
+    orHandle(cpoRow("uninitialized_copy", 4, 2, KnownParamRole::Construct, 3)),
+    orHandle(
+        cpoRangeRow("uninitialized_copy", 2, 1, KnownParamRole::Construct)),
+    orHandle(
+        cpoRow("uninitialized_copy_n", 4, 2, KnownParamRole::Construct, 3)),
+    orHandle(cpoRow("uninitialized_move", 4, 2, KnownParamRole::Construct, 3)),
+    orHandle(
+        cpoRangeRow("uninitialized_move", 2, 1, KnownParamRole::Construct)),
+    orHandle(
+        cpoRow("uninitialized_move_n", 4, 2, KnownParamRole::Construct, 3)),
+    orHandle(cpoRow("uninitialized_value_construct", 2, 0,
+                    KnownParamRole::Construct, 1)),
+    orHandle(cpoRangeRow("uninitialized_value_construct", 1, 0,
+                         KnownParamRole::Construct)),
+    orHandle(cpoRow("uninitialized_value_construct_n", 2, 0,
+                    KnownParamRole::Construct)),
+    orHandle(cpoRow("uninitialized_default_construct", 2, 0,
+                    KnownParamRole::Construct, 1,
+                    /*ConstructIfDefaultInitDeterminate=*/true)),
+    orHandle(cpoRangeRow("uninitialized_default_construct", 1, 0,
+                         KnownParamRole::Construct,
+                         /*ConstructIfDefaultInitDeterminate=*/true)),
+    orHandle(cpoRow("uninitialized_default_construct_n", 2, 0,
+                    KnownParamRole::Construct, KnownCalleeEntry::NoEndParam,
+                    /*ConstructIfDefaultInitDeterminate=*/true)),
 };
 
 /// True if a parameter of type \p T has the shape \p Shape.
@@ -1977,6 +2002,10 @@ static bool hasParamShape(QualType T, ParamShape Shape) {
     return T->isPointerType();
   case ParamShape::ArrayReference:
     return T->isReferenceType() && T.getNonReferenceType()->isArrayType();
+  case ParamShape::Handle: {
+    const auto *RD = T.getNonReferenceType()->getAsCXXRecordDecl();
+    return RD && !RD->isUnion();
+  }
   }
   llvm_unreachable("unknown ParamShape");
 }
@@ -1988,9 +2017,13 @@ static bool matchesNameKeyedRow(const KnownCalleeEntry &Entry,
   unsigned NumParams = FD->getNumParams();
   if (Entry.Arity != KnownCalleeEntry::AnyArity && Entry.Arity != NumParams)
     return false;
-  return Entry.Role == KnownParamRole::None ||
-         (Entry.Param < NumParams &&
-          hasParamShape(FD->getParamDecl(Entry.Param)->getType(), Entry.Shape));
+  if (Entry.Role == KnownParamRole::None)
+    return true;
+  if (Entry.Param >= NumParams)
+    return false;
+  QualType T = FD->getParamDecl(Entry.Param)->getType();
+  return hasParamShape(T, Entry.Shape) ||
+         (Entry.AcceptsHandle && hasParamShape(T, ParamShape::Handle));
 }
 
 /// The namespace named \p Name directly inside std that encloses \p D, or
@@ -2209,6 +2242,84 @@ static bool isStdHandleConstruction(const CXXConstructorDecl *Ctor) {
          getStdHandleKind(Ctor->getParent()) != StdHandleKind::None;
 }
 
+/// The declarations named \p Name in the class \p RD, or else in its nearest
+/// bases that declare it, breadth first.
+static SmallVector<const NamedDecl *, 2>
+lookupInClassOrBases(const CXXRecordDecl *RD, DeclarationName Name) {
+  SmallVector<const CXXRecordDecl *, 4> Level{RD};
+  llvm::SmallPtrSet<const CXXRecordDecl *, 8> Seen{RD->getCanonicalDecl()};
+  while (!Level.empty()) {
+    SmallVector<const NamedDecl *, 2> Found;
+    SmallVector<const CXXRecordDecl *, 4> Next;
+    for (const CXXRecordDecl *C : Level) {
+      llvm::append_range(Found, C->lookup(Name));
+      for (const CXXBaseSpecifier &B : C->bases())
+        if (const CXXRecordDecl *BD = B.getType()->getAsCXXRecordDecl();
+            BD && BD->hasDefinition() &&
+            Seen.insert(BD->getCanonicalDecl()).second)
+          Next.push_back(BD->getDefinition());
+    }
+    if (!Found.empty())
+      return Found;
+    Level = std::move(Next);
+  }
+  return {};
+}
+
+/// The non-static member of \p RD or its bases named \p Name taking no
+/// arguments whose return type is not dependent, a member template's
+/// included; null when there is none.
+static const CXXMethodDecl *nullaryMember(const CXXRecordDecl *RD,
+                                          DeclarationName Name) {
+  for (const NamedDecl *ND : lookupInClassOrBases(RD, Name)) {
+    ND = ND->getUnderlyingDecl();
+    if (const auto *FTD = dyn_cast<FunctionTemplateDecl>(ND))
+      ND = FTD->getTemplatedDecl();
+    if (const auto *MD = dyn_cast<CXXMethodDecl>(ND);
+        MD && !MD->isStatic() && MD->getMinRequiredArguments() == 0 &&
+        !MD->getReturnType()->isDependentType())
+      return MD;
+  }
+  return nullptr;
+}
+
+/// handleValueType for the class \p RD; through its begin() only when
+/// \p ThroughBegin.
+static QualType classValueType(const CXXRecordDecl *RD, bool ThroughBegin) {
+  if (!RD || !RD->hasDefinition())
+    return QualType();
+  RD = RD->getDefinition();
+  ASTContext &Ctx = RD->getASTContext();
+  for (StringRef Name : {"element_type", "value_type"})
+    for (const NamedDecl *ND : lookupInClassOrBases(RD, &Ctx.Idents.get(Name)))
+      if (const auto *TD = dyn_cast<TypeDecl>(ND))
+        return Ctx.getTypeDeclType(TD).getUnqualifiedType();
+  if (const CXXMethodDecl *MD =
+          nullaryMember(RD, Ctx.DeclarationNames.getCXXOperatorName(OO_Star)))
+    return MD->getReturnType().getNonReferenceType().getUnqualifiedType();
+  // A range's elements are its iterator's.
+  const CXXMethodDecl *Begin =
+      ThroughBegin ? nullaryMember(RD, &Ctx.Idents.get("begin")) : nullptr;
+  if (!Begin)
+    return QualType();
+  QualType It = Begin->getReturnType().getNonReferenceType();
+  if (It->isPointerType())
+    return It->getPointeeType().getUnqualifiedType();
+  return classValueType(It->getAsCXXRecordDecl(), /*ThroughBegin=*/false);
+}
+
+QualType SemaProfiles::handleValueType(QualType T) {
+  return classValueType(T.getNonReferenceType()->getAsCXXRecordDecl(),
+                        /*ThroughBegin=*/true);
+}
+
+QualType SemaProfiles::rangeValueType(QualType T) {
+  if (T->isPointerType() ||
+      (T->isReferenceType() && T.getNonReferenceType()->isArrayType()))
+    return T->getPointeeType();
+  return handleValueType(T);
+}
+
 // Releasing storage leaves it as uninitialized as ending the object's
 // lifetime does, so the binding sites treat a release role like a destroy --
 // except for the double-destroy check: destroy_at(p); free(p); is correct,
@@ -2249,11 +2360,11 @@ SemaProfiles::getCalleeLifecycleRoles(const FunctionDecl *FD) {
   if (M.Entry->ConstructIfDefaultInitDeterminate ||
       (M.Entry->Form == isStdAllocatorTraitsConstruct &&
        FD->getNumParams() == 2 && allocatorHasOwnMember(FD, "construct"))) {
-    // The value type is what the instantiated range parameter points or
-    // refers to; an array stands for its elements.
-    QualType T = FD->getParamDecl(M.Entry->Param)->getType()->getPointeeType();
+    // The value type of the instantiated range parameter; an array stands for
+    // its elements.
+    QualType T = rangeValueType(FD->getParamDecl(M.Entry->Param)->getType());
     llvm::SmallPtrSet<const CXXRecordDecl *, 8> Visited;
-    if (T->isIncompleteType() ||
+    if (T.isNull() || T->isIncompleteType() ||
         defaultInitLeavesScalarIndeterminateImpl(
             FD->getASTContext(), T, /*HonorUninitMarkers=*/true, Visited))
       Roles.KnownRole = KnownParamRole::AssertUninit;
@@ -2365,24 +2476,6 @@ static const Expr *derivingObject(const CallExpr *CE) {
     return nullptr;
   }
   return memberCallObject(CE, MD);
-}
-
-QualType SemaProfiles::handleValueType(QualType T) {
-  const CXXRecordDecl *RD = T.getNonReferenceType()->getAsCXXRecordDecl();
-  if (!RD || !RD->hasDefinition())
-    return QualType();
-  RD = RD->getDefinition();
-  ASTContext &Ctx = RD->getASTContext();
-  for (const NamedDecl *ND : RD->lookup(&Ctx.Idents.get("value_type")))
-    if (const auto *TD = dyn_cast<TypeDecl>(ND))
-      return Ctx.getTypeDeclType(TD);
-  for (const NamedDecl *ND :
-       RD->lookup(Ctx.DeclarationNames.getCXXOperatorName(OO_Star)))
-    if (const auto *MD = dyn_cast<CXXMethodDecl>(ND->getUnderlyingDecl());
-        MD && !MD->isStatic() && MD->getNumParams() == 0 &&
-        !MD->getReturnType()->isDependentType())
-      return MD->getReturnType().getNonReferenceType().getUnqualifiedType();
-  return QualType();
 }
 
 /// True if the class \p R a member of \p RD returns by value is a handle to
@@ -3096,11 +3189,17 @@ static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
 }
 
 /// Dispatch a binding source bound as \p T to the glvalue recognizer for a
-/// reference, the handle recognizer for a handle (SemaProfiles::isHandleType),
-/// and the pointer recognizer otherwise.
+/// reference, the handle recognizer for a handle (SemaProfiles::isHandleType)
+/// or an \p AsRange source (a range a role parameter takes by reference), and
+/// the pointer recognizer otherwise.
 static UninitStorage
 classifyUninitSource(ASTContext &Ctx, const Expr *E, QualType T,
-                     UninitAccessOpts Opts = UninitBindAccess) {
+                     UninitAccessOpts Opts = UninitBindAccess,
+                     bool AsRange = false) {
+  if (AsRange)
+    return classifyHandleLeaf(
+        Ctx, {E, SemaProfiles::HandleLeaf::Mode::Range, false, Opts.Arms},
+        Opts);
   if (T->isReferenceType())
     return glvalueDenotesUninitStorage(Ctx, E, Opts);
   if (SemaProfiles::isHandleType(T))
@@ -3242,7 +3341,7 @@ void SemaProfiles::judgeDeferredInitSiteByForm(const DeferredInitSite &Site,
   case DeferredInitSite::Kind::Binding:
     judgeInitProfileBinding(Site.BindingKind, Site.Loc, Site.Flag, Site.T,
                             Site.Src, /*D=*/nullptr, Site.Subject, Body,
-                            Site.ValueCopy);
+                            Site.ValueCopy, Site.AsRange);
     return;
   case DeferredInitSite::Kind::Destroy:
     if (Site.Flag)
@@ -3402,7 +3501,7 @@ void SemaProfiles::checkInitProfileBinding(const InitializedEntity &Entity,
 void SemaProfiles::judgeInitProfileBinding(
     InitBindingKind Kind, SourceLocation Loc, bool TargetMarked, QualType T,
     const Expr *Src, const Decl *D, const NamedDecl *Subject,
-    const Decl *AfterFlowPass, bool ValueCopy) {
+    const Decl *AfterFlowPass, bool ValueCopy, bool AsRange) {
   // A RecoveryExpr is a placeholder for an initialization that already failed,
   // not a source the user wrote, so it must not drive this rule; see also
   // inRebuiltOrSynthesizedCode.
@@ -3417,7 +3516,8 @@ void SemaProfiles::judgeInitProfileBinding(
       hasFlowTrackedLeaf(Src, T, &Leaves,
                          TargetMarked ? FlowLeafUse::MarkedTarget
                          : ValueCopy  ? FlowLeafUse::ValueCopy
-                                      : FlowLeafUse::Plain)) {
+                                      : FlowLeafUse::Plain,
+                         AsRange)) {
     DeferredInitSite Site{DeferredInitSite::Kind::Binding,
                           Kind,
                           Loc,
@@ -3427,6 +3527,7 @@ void SemaProfiles::judgeInitProfileBinding(
                           Subject,
                           std::move(Leaves)};
     Site.ValueCopy = ValueCopy;
+    Site.AsRange = AsRange;
     recordDeferredInitSite(std::move(Site));
     return;
   }
@@ -3444,9 +3545,10 @@ void SemaProfiles::judgeInitProfileBinding(
           .withThisUnderConstruction(thisIsUnderConstruction(AfterFlowPass))
           .withUninitMemberTrust(ValueCopy &&
                                  trustsUninitMembers(AfterFlowPass));
-  diagnoseBindingVerdict(*this, Kind, Loc, TargetMarked, T,
-                         classifyUninitSource(getASTContext(), Src, T, Opts),
-                         Subject);
+  // A range is named as the handle it is.
+  diagnoseBindingVerdict(
+      *this, Kind, Loc, TargetMarked, AsRange ? T.getNonReferenceType() : T,
+      classifyUninitSource(getASTContext(), Src, T, Opts, AsRange), Subject);
 }
 
 bool SemaProfiles::bindsHandleByReference(InitBindingKind Kind, QualType T,
@@ -3527,7 +3629,7 @@ bool SemaProfiles::isValueCopySource(const ParmVarDecl *P) {
       Roles.isEndParam(P))
     return false;
   QualType Constructed =
-      FD->getParamDecl(*Roles.KnownParam)->getType()->getPointeeType();
+      rangeValueType(FD->getParamDecl(*Roles.KnownParam)->getType());
   QualType Arg = P->getType().getNonReferenceType();
   return !Constructed.isNull() && Arg->isRecordType() &&
          Constructed.getCanonicalType().getUnqualifiedType() ==
@@ -4249,7 +4351,7 @@ bool SemaProfiles::hasFlowTrackedGlvalueLeaf(
 
 bool SemaProfiles::hasFlowTrackedLeaf(const Expr *Src, QualType T,
                                       SmallVectorImpl<const Expr *> *Leaves,
-                                      FlowLeafUse Use) const {
+                                      FlowLeafUse Use, bool AsRange) const {
   if (!Src || T.isNull())
     return false;
   bool Any = false;
@@ -4262,12 +4364,38 @@ bool SemaProfiles::hasFlowTrackedLeaf(const Expr *Src, QualType T,
         Leaves->push_back(Leaf.E);
     });
   };
-  // A handle's tracked leaves are those of the storage its walk reaches.
-  if (isHandleType(T)) {
-    forEachHandleSourceLeaf(Src, [&](const HandleLeaf &L) {
-      if (L.M != HandleLeaf::Mode::Handle)
+  // A handle's tracked leaves are those of the storage its walk reaches; a
+  // range's storage comes first, and an untracked range's handle state is
+  // walked in turn.
+  if (isHandleType(T) || AsRange) {
+    auto Visit = [&](auto &Self, const HandleLeaf &L) -> void {
+      switch (L.M) {
+      case HandleLeaf::Mode::Handle:
+        return;
+      case HandleLeaf::Mode::PointerValue:
+      case HandleLeaf::Mode::Storage:
         Collect(L.E, L.M == HandleLeaf::Mode::PointerValue);
-    });
+        return;
+      case HandleLeaf::Mode::Range:
+        forEachTargetLeaf(L.E, [&](const ShapeLeaf &Leaf) {
+          if (isFlowTrackedLeaf(Leaf, /*AsPointerValue=*/false,
+                                SemaRef.CurContext, Use)) {
+            Any = true;
+            if (Leaves && !llvm::is_contained(*Leaves, Leaf.E))
+              Leaves->push_back(Leaf.E);
+            return;
+          }
+          forEachHandleSourceLeaf(
+              Leaf.E, [&](const HandleLeaf &Inner) { Self(Self, Inner); });
+        });
+        return;
+      }
+    };
+    if (AsRange)
+      Visit(Visit, HandleLeaf{Src, HandleLeaf::Mode::Range});
+    else
+      forEachHandleSourceLeaf(Src,
+                              [&](const HandleLeaf &L) { Visit(Visit, L); });
     return Any;
   }
   bool AsPointerValue;
@@ -4346,11 +4474,16 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
               !TargetMarked,
           InitDestroyer::Function, TargetMarked);
   } else {
-    judgeInitProfileBinding(Kind, Loc, TargetMarked, T, Src, D,
-                            /*Subject=*/nullptr, /*AfterFlowPass=*/nullptr,
-                            /*ValueCopy=*/!TargetMarked &&
-                                isValueCopySource(Parm));
-    if (!TargetMarked && bindsHandleByReference(Kind, T, Target))
+    // A role parameter taking a class-type range by reference judges the
+    // range, not the range object's storage.
+    bool AsRange = Parm && T->isReferenceType() &&
+                   isHandleType(T.getNonReferenceType()) &&
+                   Roles.roleOf(Parm) != KnownParamRole::None;
+    judgeInitProfileBinding(
+        Kind, Loc, TargetMarked, T, Src, D,
+        /*Subject=*/nullptr, /*AfterFlowPass=*/nullptr,
+        /*ValueCopy=*/!TargetMarked && isValueCopySource(Parm), AsRange);
+    if (!TargetMarked && !AsRange && bindsHandleByReference(Kind, T, Target))
       judgeInitProfileBinding(Kind, Loc, /*TargetMarked=*/false,
                               T.getNonReferenceType().getUnqualifiedType(), Src,
                               D);

@@ -977,13 +977,24 @@ refer to such a member until it is stored.  The
 treatment applies where the iterator is a pointer (``arr, arr + n``), and a
 decayed ``[[uninit]]`` array member is its whole array: in a constructor,
 ``std::uninitialized_fill(arr, arr + n, v)`` initializes the member ``arr``
-and ``std::destroy(arr, arr + n)`` destroys it; a call with a class-type
-iterator checks and initializes nothing.  The ``std::ranges`` objects of the
-same names -- ``ranges::construct_at``, ``ranges::destroy_at``,
-``ranges::destroy``, ``ranges::destroy_n``, and the ``ranges::uninitialized_*``
-family -- are treated the same way where the iterator is a pointer or the
-range is an array: ``std::ranges::uninitialized_fill(arr4, xval)`` initializes
-an ``[[uninit]]`` array ``arr4`` whole (§5.5), and the sentinel of an output
+and ``std::destroy(arr, arr + n)`` destroys it.  The ``uninitialized_*``
+family also takes a class-type iterator, a handle (see
+`Smart Pointers, Spans, and Other Handles`_): it must refer to uninitialized
+memory, so ``std::uninitialized_fill(v.begin(), v.end(), x)`` on an
+initialized ``std::vector`` is rejected, and the call initializes the storage
+the iterator refers to when the analysis tracks it whole
+(``std::span<int>(arr).begin()``), but not through an offset iterator
+(``s.begin() + 1``); the value type is the iterator's or range's
+``element_type`` or ``value_type``, else what its ``operator*`` returns, else
+(``std::ranges::subrange``) its iterator's.  The
+``std::ranges`` objects of the same names -- ``ranges::construct_at``,
+``ranges::destroy_at``, ``ranges::destroy``, ``ranges::destroy_n``, and the
+``ranges::uninitialized_*`` family -- are treated the same way where the
+iterator is a pointer or the range is an array, and the
+``ranges::uninitialized_*`` objects also where the iterator or the range is
+of class type (a range by its storage, then by what it refers to):
+``std::ranges::uninitialized_fill(arr4, xval)`` initializes an ``[[uninit]]``
+array ``arr4`` whole (§5.5), and the sentinel of an output
 range, like an end iterator, is accepted in any state.  The §4.4
 ``now_init()`` identity function is treated the same way: the parameter of a
 ``std::now_init`` with one pointer parameter is treated as marked, so its

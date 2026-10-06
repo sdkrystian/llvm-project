@@ -15,10 +15,11 @@
 // parameter must refer to uninitialized memory and is initialized by the
 // call) and std::destroy_at (the call destroys it), std::now_init's pointer
 // parameter (uninitialized, keeps its state), the std::uninitialized_*
-// output range (by name and arity), and std::destroy's and
-// std::destroy_n's first iterator, and of the std::ranges customization point
-// objects of the same names, and looks them up at each call, so the real
-// library functions are usable under enforcement.
+// output range (by name and arity; a pointer or class-type iterator, or a
+// range), and std::destroy's and std::destroy_n's first iterator, and of the
+// std::ranges customization point objects of the same names, and looks them
+// up at each call, so the real library functions are usable under
+// enforcement.
 
 //--- local.cpp
 [[profiles::enforce(std::init)]];
@@ -475,7 +476,8 @@ struct HoldsMarkedMember {
   }
 };
 
-// A class-type iterator is outside the marker: the call is inert
+// A class-type iterator is a handle the call's range must be marked as; the
+// aggregate's storage is not one the call can credit
 struct Iter {
   int *p [[ref_to_uninit]];
   bool operator!=(Iter) const;
@@ -484,7 +486,7 @@ struct Iter {
 };
 void class_iterator() {
   int arr [[uninit]] [4];
-  Iter b{arr}, e{arr + 4};
+  Iter b [[ref_to_uninit]]{arr}, e{arr + 4};
   std::uninitialized_fill(b, e, 0); // OK
   int x = arr[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
   (void)x;
@@ -599,10 +601,10 @@ int ranges_construct_destroy_at() {
   return v;
 }
 
-// A ranges CPO with a class-type iterator is inert
+// A ranges CPO takes a class-type iterator the same way
 void ranges_class_iterator() {
   int arr [[uninit]] [4];
-  Iter b{arr}, e{arr + 4};
+  Iter b [[ref_to_uninit]]{arr}, e{arr + 4};
   std::ranges::uninitialized_fill(b, e, 0); // OK
   int x = arr[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
   (void)x;

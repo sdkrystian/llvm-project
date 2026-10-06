@@ -154,6 +154,33 @@ public:
   void reset(nullptr_t = nullptr) noexcept;
 };
 
+template <class T> class vector {
+  T *_M_start, *_M_finish, *_M_end_of_storage;
+
+public:
+  using value_type = T;
+  using iterator = __gnu_cxx::__normal_iterator<T *, vector>;
+  vector() noexcept;
+  ~vector();
+  iterator begin() noexcept;
+  iterator end() noexcept;
+  T &operator[](size_t n) noexcept;
+};
+
+template <class FwdIt, class T>
+void uninitialized_fill(FwdIt first, FwdIt last, const T &x);
+template <class FwdIt> void uninitialized_value_construct(FwdIt first, FwdIt last);
+template <class FwdIt>
+void uninitialized_default_construct(FwdIt first, FwdIt last);
+namespace ranges {
+struct __uninitialized_fill_fn {
+  template <class I, class S, class T>
+  I operator()(I first, S last, const T &x) const;
+  template <class R, class T> void operator()(R &&r, const T &x) const;
+};
+inline constexpr __uninitialized_fill_fn uninitialized_fill{};
+} // namespace ranges
+
 template <class T> class weak_ptr;
 template <class T> class __shared_ptr {
   T *_M_ptr;
@@ -648,6 +675,64 @@ void for_overwrite(std::size_t n) {
   std::unique_ptr<Init> c = std::make_unique_for_overwrite<Init>();
   std::unique_ptr<Init> cm [[ref_to_uninit]] = std::make_unique_for_overwrite<Init>(); // expected-error {{handle of type 'std::unique_ptr<Init>' marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   (void)p, (void)k, (void)e, (void)s, (void)c, (void)cm;
+}
+
+// The uninitialized_* family takes a class-type iterator or range: it must
+// refer to uninitialized memory
+void fill_through_span(std::span<int> s [[ref_to_uninit]]) {
+  std::uninitialized_fill(s.begin(), s.end(), 0);
+  std::ranges::uninitialized_fill(s.begin(), s.end(), 0);
+  std::ranges::uninitialized_fill(s, 0);
+}
+void fill_initialized_range(std::vector<int> &v, std::span<int> su) {
+  std::uninitialized_fill(v.begin(), v.end(), 0); // expected-error {{handle of type '__gnu_cxx::__normal_iterator<int *, std::vector<int>>' marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  std::ranges::uninitialized_fill(su, 0); // expected-error {{handle of type 'std::span<int>' marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// The storage a transfer argument reaches whole is initialized by the call;
+// an offset iterator reaches part of it
+int fill_through_temporary() {
+  int arr [[uninit]] [4];
+  std::uninitialized_fill(std::span<int>(arr).begin(), std::span<int>(arr).end(), 0);
+  return arr[0];
+}
+int fill_offset() {
+  int arr [[uninit]] [4];
+  std::uninitialized_fill(std::span<int>(arr).begin() + 1, std::span<int>(arr).end(), 0);
+  return arr[1]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+int ranges_fill_span() {
+  int arr [[uninit]] [4];
+  std::ranges::uninitialized_fill(std::span<int>(arr), 0);
+  return arr[0];
+}
+int ranges_fill_subrange() {
+  int arr [[uninit]] [4];
+  std::ranges::uninitialized_fill(std::ranges::subrange<int *>(arr, arr + 4), 0);
+  return arr[0];
+}
+
+// A fill from a past-the-start iterator reaches part of the storage
+int fill_from_end() {
+  int arr [[uninit]] [4];
+  std::uninitialized_fill(std::span<int>(arr).end(), std::span<int>(arr).end(), 0);
+  return arr[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+int fill_from_left_offset() {
+  int arr [[uninit]] [4];
+  std::uninitialized_fill(2 + std::span<int>(arr).begin(), std::span<int>(arr).end(), 0);
+  return arr[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// default_construct takes the iterator's value type: an int range stays
+// uninitialized, so a second call takes it again
+void default_construct_iterator() {
+  int a [[uninit]] [4];
+  std::uninitialized_default_construct(std::span<int>(a).begin(), std::span<int>(a).end());
+  std::uninitialized_default_construct(std::span<int>(a).begin(), std::span<int>(a).end());
+  int b [[uninit]] [4];
+  std::uninitialized_value_construct(std::span<int>(b).begin(), std::span<int>(b).end());
+  std::uninitialized_value_construct(std::span<int>(b).begin(), std::span<int>(b).end()); // expected-error {{handle of type '__gnu_cxx::__normal_iterator<int *, std::span<int>::__iter_tag>' marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
 }
 
 //--- libcxx.cpp

@@ -466,10 +466,13 @@ public:
                               FlowLeafUse Use) const;
   /// True if any leaf of \p Src, bound as \p T for \p Use, is flow-tracked
   /// in the current context (isFlowTrackedLeaf); the tracked leaves are
-  /// appended to \p Leaves when given.
+  /// appended to \p Leaves when given. With \p AsRange, \p Src is a range a
+  /// known callee's role parameter takes by reference
+  /// (HandleLeaf::Mode::Range).
   bool hasFlowTrackedLeaf(const Expr *Src, QualType T,
                           SmallVectorImpl<const Expr *> *Leaves = nullptr,
-                          FlowLeafUse Use = FlowLeafUse::Plain) const;
+                          FlowLeafUse Use = FlowLeafUse::Plain,
+                          bool AsRange = false) const;
   /// True if any leaf of the glvalue \p G is flow-tracked in the current
   /// context: the read-through and subobject-write checks leave such an
   /// access to the CFG pass. The tracked leaves are appended to \p Leaves
@@ -748,6 +751,9 @@ public:
     InitDestroyer Destroyer = InitDestroyer::Function;
     /// Binding: the source is copied by value (isValueCopySource).
     bool ValueCopy = false;
+    /// Binding: the source is a range a role parameter takes by reference
+    /// (judgeInitProfileBinding's \p AsRange).
+    bool AsRange = false;
   };
 
   /// The body whose flow pass judges a check deferred in \p DC: the
@@ -930,9 +936,17 @@ public:
     bool transfersParam(const ParmVarDecl *P) const;
   };
   /// The value type of the handle type \p T (or a reference to one) as an
-  /// iterator or a range: its \c value_type member type, else the
-  /// non-reference type its \c operator* returns; null when it has neither.
+  /// iterator or a range, unqualified, looked up in the class and then its
+  /// bases: its \c element_type member type (std::unique_ptr<T[]>'s is
+  /// \c T), else its \c value_type, else the non-reference type its
+  /// \c operator* returns (a member template's included), else, for a range
+  /// (std::ranges::subrange), the value type of the iterator its \c begin()
+  /// returns; null when unknown.
   static QualType handleValueType(QualType T);
+  /// The value type of the range a known-callee role parameter of type \p T
+  /// begins: a pointer's pointee, the array a reference refers to, or a
+  /// handle's handleValueType; null when unknown.
+  static QualType rangeValueType(QualType T);
   /// Derive what \p FD does to the storage bound to its parameters: the
   /// lifetime attributes plus the known-callee row, looked up at the call
   /// so the library's own declarations need no annotation. Shared by the
@@ -1031,13 +1045,15 @@ private:
   /// wording names (the called method). A non-null \p AfterFlowPass judges,
   /// by form, a binding the flow pass over that body left unjudged
   /// (judgeDeferredInitSiteByForm). A \p ValueCopy (isValueCopySource) trusts
-  /// [[uninit]] data members as a read does.
+  /// [[uninit]] data members as a read does. An \p AsRange source is a range
+  /// a known callee's role parameter takes by reference, classified as a
+  /// handle range (HandleLeaf::Mode::Range) rather than as a glvalue.
   void judgeInitProfileBinding(InitBindingKind Kind, SourceLocation Loc,
                                bool TargetMarked, QualType T, const Expr *Src,
                                const Decl *D,
                                const NamedDecl *Subject = nullptr,
                                const Decl *AfterFlowPass = nullptr,
-                               bool ValueCopy = false);
+                               bool ValueCopy = false, bool AsRange = false);
 
 public:
   /// Enumerate the leaves the store target, binding source, read, or lifecycle

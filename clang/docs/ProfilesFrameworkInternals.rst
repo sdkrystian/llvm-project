@@ -878,9 +878,10 @@ one role parameter -- ``Construct`` for ``construct_at`` and the
 parameter, ``Destroy`` for ``destroy_at`` and the first iterator of
 ``std::destroy`` and ``std::destroy_n`` -- and matches only where that parameter
 of the called declaration has the row's shape (``ParamShape``), a pointer for
-every namespace-std row, so a specialization whose iterator is a class type
-falls outside it.  A range row also names the range's end iterator
-(``EndParam``; ``CalleeLifecycleRoles::isEndParam``), whose binding is
+every namespace-std row -- or, for an ``uninitialized_*`` row, also a handle
+(``KnownCalleeEntry::AcceptsHandle``) -- so a specialization whose iterator is
+of another shape falls outside it.  A range row also names the range's end
+iterator (``EndParam``; ``CalleeLifecycleRoles::isEndParam``), whose binding is
 accepted in any state and which earns no credit and no destroy.  The
 ``Destroy`` role names one parameter, so the execution-policy overloads of
 ``std::destroy`` and ``std::destroy_n`` are ordinary rows.  The rows are looked
@@ -891,7 +892,11 @@ declarations stay as written, so a module or header unit built without
 author's markers alone.  The ``Construct`` rows are bidirectional like
 ``construct_at`` (P4222R2 §4.7 rejects an initialized range).  The
 default-construct rows are ``Construct`` rows only where default-initialization
-of the called specialization's range pointee leaves nothing indeterminate
+of the called specialization's range value type (``rangeValueType``: a
+pointer's pointee, an array's element, or a class iterator's or range's
+``handleValueType``: its or its bases' ``element_type`` or ``value_type``, else
+what its ``operator*`` returns, else its ``begin()`` iterator's) leaves nothing
+indeterminate
 (``defaultInitLeavesScalarIndeterminate``, which skips ``[[uninit]]`` members)
 and ``AssertUninit`` rows otherwise: a credit there would legalize reads of the
 indeterminate scalars that default-initialization leaves.  The ``std::ranges``
@@ -902,7 +907,12 @@ row's name -- seen through an inline namespace such as libc++'s ``__cpo`` -- is
 a variable of that class, so the class's own name, which differs between
 libstdc++ and libc++, never matters.  An iterator overload's row names its
 sentinel as the end iterator, and a range overload's row matches where the
-forwarding reference binds an array (``ParamShape::ArrayReference``).
+forwarding reference binds an array (``ParamShape::ArrayReference``) or, for
+an ``uninitialized_*`` object, a class.  A class taken by such a reference is
+judged as a range (``HandleLeaf::Mode::Range``: its storage, then its handle
+state), not as a reference to the class object, and a class-type iterator as
+a handle (`Handles (std::init)`_); a credit reaches the storage of each of its
+transfer leaves that is not ``Partial``, designated by the value type.
 
 Library callees whose semantics the profile needs without an attribute are
 rows of the known-callee table (``KnownCallees`` in SemaProfiles.cpp), keyed
@@ -1364,8 +1374,9 @@ Deliberate Strictnesses
   base, unrecognized; the remedies are a ``[[ref_to_uninit]]``-returning
   wrapper or suppression.
 - The ``std::uninitialized_*`` credit reaches only what the whole-storage
-  write reaches: an element-form range (``&arr[0]``, P4222R2 §1.3) or a
-  class-type iterator earns nothing, and a marked pointer's further elements
+  write reaches: an element-form range (``&arr[0]``, P4222R2 §1.3), an offset
+  class-type iterator (``s.begin() + 1``), or one whose storage the analysis
+  does not reach earns nothing, and a marked pointer's further elements
   (``p[1]``) are never credited.  ``std::begin(arr)`` / ``std::end(arr)`` on
   an ``[[uninit]]`` array is rejected on both sides (the array binds
   ``begin``'s unmarked reference parameter, and the trusted return cannot
@@ -1496,11 +1507,12 @@ Missed Diagnostics
   escape, so it is a missed diagnostic.
 - Clang's knowledge of the standard library's lifecycle functions applies where
   the role parameter is a pointer: ``std::construct_at``, ``std::destroy_at``,
-  ``std::now_init`` with a pointer first parameter, and the
-  ``std::uninitialized_*`` family, ``std::destroy`` and ``std::destroy_n`` where
-  the iterator is a pointer, and their ``std::ranges`` objects where the
-  iterator is a pointer or the range is an array; a call with a class-type
-  iterator or range checks nothing.
+  ``std::now_init`` with a pointer first parameter, and ``std::destroy`` and
+  ``std::destroy_n`` where the iterator is a pointer, and their ``std::ranges``
+  objects where the iterator is a pointer or the range is an array; a call
+  with a class-type iterator or range checks nothing there.  The
+  ``std::uninitialized_*`` family and its ``std::ranges`` objects also take a
+  class-type iterator or range.
   A whole ``[[uninit]]`` array passed as a range is initialized or destroyed
   whatever the range's length.
 - Storage of no type -- a marked ``void *``'s referent, such as a ``malloc``
