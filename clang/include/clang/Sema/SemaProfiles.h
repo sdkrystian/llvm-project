@@ -528,6 +528,17 @@ public:
     ObjectArgument
   };
 
+  /// What ends a lifetime, as the select of the double_destroy and
+  /// destroy_uninit diagnostics.
+  enum class InitDestroyer : unsigned {
+    /// A [[now_uninit]] function or a std lifecycle row (std::destroy_at).
+    Function,
+    /// An explicit destructor call, or the one a delete-expression runs.
+    DestructorCall,
+    /// The destructor that ends an [[uninit]] local's scope.
+    ScopeExit
+  };
+
   /// std::init / ref_to_uninit: a pointer promoted through a `...` parameter
   /// binds an argument that cannot carry the marker (VariadicArgument).
   /// Called from the two C++ promotion loops, Sema::GatherArgumentsForCall
@@ -610,6 +621,8 @@ public:
     /// Binding: the entity a kind-specific wording names.
     const NamedDecl *Subject;
     SmallVector<const Expr *, 2> TrackedLeaves;
+    /// Destroy: the destroyer, as the select of the destroy diagnostics.
+    InitDestroyer Destroyer = InitDestroyer::Function;
   };
 
   /// The body whose flow pass judges a check deferred in \p DC: the
@@ -640,11 +653,20 @@ public:
   /// -- dot and arrow calls, member operators, functor operator(),
   /// operator->, and conversion operators. Explicit-object member functions
   /// initialize their object as an ordinary parameter and are checked there;
-  /// a destructor call is skipped (destruction of uninitialized storage is
-  /// the deferred destroy_at slice), as is a static call operator (no
-  /// implicit object parameter, like a static member call).
+  /// a destructor call runs the destroy rules instead
+  /// (checkInitProfileDestructorCall), and a static call operator is skipped
+  /// (no implicit object parameter, like a static member call).
   void checkInitProfileObjectArgument(const Expr *Object,
                                       const CXXMethodDecl *Method);
+
+  /// std::init / double_destroy and destroy_uninit (P4222R2 §4.6): an
+  /// explicit destructor call ends the lifetime of its object as
+  /// std::destroy_at does, whose effect it is ([specialized.destroy]).
+  /// \p Object is the pointer of an arrow call or the object glvalue of a dot
+  /// call. Called for a destructor member call from
+  /// checkInitProfileObjectArgument and for a pseudo-destructor call from
+  /// Sema::BuildCallExpr.
+  void checkInitProfileDestructorCall(const Expr *Object);
 
   /// std::init: the checks every built-in assignment hosts, from
   /// Sema::CheckAssignmentOperands beside checkAssignmentLifetime, with
@@ -755,11 +777,22 @@ private:
   /// does not contain is dropped by verifyDeferredInitSites.
   void recordDeferredInitSite(DeferredInitSite Site);
 
-  /// The form half of the destroy arm of checkInitProfileBinding: diagnose
-  /// destroy_uninit when \p Src, bound as \p T, classifies uninitialized.
-  /// \p D and \p AfterFlowPass are judgeInitProfileBinding's.
+  /// The destroy rules (P4222R2 §4.4, §4.6) for \p Src, bound as \p T and
+  /// destroyed by \p Destroyer: a source with a flow-tracked leaf is the CFG
+  /// pass's (a Destroy deferred site), any other is judged by form for
+  /// destroy_uninit when \p DestroyUninitApplies (judgeDestroyUninitByForm);
+  /// destroyed state exists only as flow state, so double_destroy is the
+  /// pass's alone. \p D is judgeInitProfileBinding's.
+  void checkInitProfileDestroy(SourceLocation Loc, QualType T, const Expr *Src,
+                               const Decl *D, bool DestroyUninitApplies,
+                               InitDestroyer Destroyer);
+
+  /// The form half of checkInitProfileDestroy: diagnose destroy_uninit when
+  /// \p Src, bound as \p T, classifies uninitialized. \p D and
+  /// \p AfterFlowPass are judgeInitProfileBinding's.
   void judgeDestroyUninitByForm(SourceLocation Loc, QualType T, const Expr *Src,
-                                const Decl *D, const Decl *AfterFlowPass);
+                                const Decl *D, const Decl *AfterFlowPass,
+                                InitDestroyer Destroyer);
 
   /// True while the std::init checks run on code that is not judged where it
   /// stands: a default argument or default member initializer rebuilt for one

@@ -818,14 +818,18 @@ follows:
        default argument or initializer and a SFINAE context are skipped
    * - ``double_destroy``, ``destroy_uninit``
      - CFG rider for flow-tracked sources, expression site otherwise
-     - the Destroy sites of ``extractStdInitEvents`` for a source with a
+     - the Destroy sites of ``extractStdInitEvents`` -- a ``[[now_uninit]]``
+       or destroy-row argument, an explicit or pseudo-destructor call's
+       object, and the operand of a ``delete`` that runs a non-trivial
+       destructor (``appendLifecycleCallEvents``) -- for a source with a
        flow-tracked leaf (``judgeDestroySite``: ``double_destroy`` on
        ``MayDestroyed``, ``destroy_uninit`` unless ``May``, a reinitializer, or
-       a marked parameter); otherwise the destroy arm of
-       ``checkInitProfileBinding`` (its Parameter kind), where
+       a marked parameter); otherwise ``checkInitProfileDestroy``, entered
+       from the destroy arm of ``checkInitProfileBinding`` (its Parameter
+       kind) and from ``checkInitProfileDestructorCall``, where
        ``classifyUninitSource`` -- run exactly as for an
        unmarked binding target -- answers ``destroy_uninit`` by form and no
-       destroyed state exists
+       destroyed state exists; a ``delete`` is not judged by form
    * - ``uninit_write``
      - CFG rider for flow-tracked targets, expression site otherwise
      - the SubobjectWrite sites of ``extractStdInitEvents`` for a target
@@ -1308,6 +1312,9 @@ Missed Diagnostics
   buffers excepted, P4222R2 §4.6).
 - A ``new`` expression whose result is not bound to anything (``new int;``)
   is not checked.
+- A ``delete`` expression is judged as a destroy only when its operand is
+  flow-tracked: through a marked pointer member or a global, ``delete p`` of
+  never-constructed storage is not ``destroy_uninit``, while ``p->~T()`` is.
 - The member-wise copies of a defaulted copy or move function and the member
   calls inside a defaulted comparison are not judged; only the binding of the
   source object at the defaulted function's use is.

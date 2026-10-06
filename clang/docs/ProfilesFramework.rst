@@ -427,10 +427,10 @@ Rule                        Diagnoses
                             recognized allocator.
 ``ref_to_uninit``           A pointer or reference binding inconsistent with its
                             ``[[ref_to_uninit]]`` marking.
-``double_destroy``          A ``[[now_uninit]]`` call on storage already
-                            destroyed on some path.
-``destroy_uninit``          A ``[[now_uninit]]`` call on storage that is
-                            (still or again) uninitialized.
+``double_destroy``          A ``[[now_uninit]]`` call or a destructor call on
+                            storage already destroyed on some path.
+``destroy_uninit``          A ``[[now_uninit]]`` call or a destructor call on
+                            storage that is (still or again) uninitialized.
 ``ctor_uninit_member``      A constructor that leaves a member or base subobject
                             uninitialized.
 ``static_runtime_init``     A non-local variable with a runtime initializer.
@@ -933,13 +933,17 @@ their execution-policy overloads for its first iterator where that is a pointer;
 the end iterator is an ordinary argument -- so the construct/destroy/construct
 cycle is legal, a second destruction is rejected, a destroy of never-constructed
 storage is rejected too, and binding the destroyed storage to an ordinary
-pointer or reference is rejected as the unmarked-direction violation.  A
-function may carry both attributes -- a reinitializer that destroys and then
-reconstructs its argument's storage -- and models destroy-then-construct: the
-storage bound to its ``[[ref_to_uninit]]`` parameters is initialized after the
-call, and calling it on already-initialized storage is exactly its purpose, so
-it is accepted.  Neither attribute can be applied to a constructor; a static
-member or free function carries it instead
+pointer or reference is rejected as the unmarked-direction violation.  An
+explicit destructor call (``p->~T()``, ``s.~T()``, and a scalar's
+pseudo-destructor call) is the same destroy -- ``std::destroy_at`` is specified
+as one ([specialized.destroy]) -- and the diagnostics name it a destructor
+call.  A function may carry both attributes -- a reinitializer that destroys
+and then reconstructs its argument's storage -- and models
+destroy-then-construct: the storage bound to its ``[[ref_to_uninit]]``
+parameters is initialized after the call, and calling it on
+already-initialized storage is exactly its purpose, so it is accepted.
+Neither attribute can be applied to a constructor; a static member or free
+function carries it instead
 (``[[now_init]] static Filler make(int *p [[ref_to_uninit]]);``).  Storage
 outside any function body is judged by its form: a destroy of a
 namespace-scope ``[[uninit]]`` object is ``destroy_uninit``.
@@ -963,10 +967,12 @@ uninitialized again when the destroy takes it.  Through an unmarked pointer the
 release changes no classification -- post-release use stays the invalidation
 profile's concern -- and only a second ``[[now_uninit]]`` destroy of the same
 storage fires ``double_destroy``.  The ``delete`` and ``delete[]`` *expressions*
-perform the same release, likewise recording no destroyed state
--- with no diagnostic on the operand --
-so ``delete q;`` and ``::operator delete(q);`` agree on everything that
-follows.  Like the allocator side, trusted ``free``/``realloc`` recognition
+perform the same release, likewise recording no destroyed state, so
+``delete q;`` and ``::operator delete(q);`` agree on everything that follows;
+when the deleted type has a non-trivial destructor, the expression first
+destroys the operand's referent like an explicit destructor call, so
+``delete p;`` of storage never constructed is ``destroy_uninit``.  Like the
+allocator side, trusted ``free``/``realloc`` recognition
 keys on Clang's builtin IDs.  Where those are absent (``-fno-builtin``,
 ``-ffreestanding``) a ``free`` or ``realloc`` recognized by name still accepts a
 pointer in any state but records no release, so a later read or destroy through

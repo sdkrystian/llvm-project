@@ -2372,7 +2372,8 @@ void SemaProfiles::judgeDeferredInitSiteByForm(const DeferredInitSite &Site,
     return;
   case DeferredInitSite::Kind::Destroy:
     if (Site.Flag)
-      judgeDestroyUninitByForm(Site.Loc, Site.T, Site.Src, /*D=*/nullptr, Body);
+      judgeDestroyUninitByForm(Site.Loc, Site.T, Site.Src, /*D=*/nullptr, Body,
+                               Site.Destroyer);
     return;
   case DeferredInitSite::Kind::ReadThrough:
     checkInitProfileReadThrough(Site.Loc, Site.Src, Site.T, Body);
@@ -2952,55 +2953,69 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
     // not a rule), and a parameter carrying [[ref_to_uninit]] per parameter
     // (the annotation spelling for an unrecognized storage-release function
     // such as _aligned_free; ProfilesFrameworkInternals.rst,
-    // "Known Gaps (std::init)"). A source with a flow-tracked leaf is the CFG
-    // pass's (its Destroy sites judge both rules against the flow state,
-    // double_destroy included: destroyed storage exists only as flow state);
-    // the rest is judged here by form. An instantiation-dependent source defers
-    // exactly like judgeInitProfileBinding's.
-    if (!Src || isa<RecoveryExpr>(Src->IgnoreParens()) ||
-        (!D && Src->isInstantiationDependent()))
-      return;
-    bool DestroyUninitApplies =
-        Destroys && !Roles.InitializesRefToUninitParams && !TargetMarked;
-    if (SmallVector<const Expr *, 2> Leaves;
-        hasFlowTrackedLeaf(Src, T, &Leaves)) {
-      // A release callee's argument is a Kill or nothing in the CFG pass,
-      // never a judgment.
-      if (Destroys)
-        recordDeferredInitSite({DeferredInitSite::Kind::Destroy, Kind, Loc,
-                                DestroyUninitApplies, T, Src,
-                                /*Subject=*/nullptr, std::move(Leaves)});
-      return;
-    }
-    if (DestroyUninitApplies)
-      judgeDestroyUninitByForm(Loc, T, Src, D, /*AfterFlowPass=*/nullptr);
+    // "Known Gaps (std::init)"). A release callee's argument is a Kill or
+    // nothing in the CFG pass, never a judgment.
+    if (Destroys)
+      checkInitProfileDestroy(
+          Loc, T, Src, D,
+          /*DestroyUninitApplies=*/!Roles.InitializesRefToUninitParams &&
+              !TargetMarked,
+          InitDestroyer::Function);
   } else {
     judgeInitProfileBinding(Kind, Loc, TargetMarked, T, Src, D);
   }
 }
 
+void SemaProfiles::checkInitProfileDestroy(SourceLocation Loc, QualType T,
+                                           const Expr *Src, const Decl *D,
+                                           bool DestroyUninitApplies,
+                                           InitDestroyer Destroyer) {
+  // An instantiation-dependent source defers exactly like
+  // judgeInitProfileBinding's; see also inRebuiltOrSynthesizedCode.
+  if (!Src || isa<RecoveryExpr>(Src->IgnoreParens()) ||
+      (!D && Src->isInstantiationDependent()) || inRebuiltOrSynthesizedCode())
+    return;
+  if (SmallVector<const Expr *, 2> Leaves;
+      hasFlowTrackedLeaf(Src, T, &Leaves)) {
+    DeferredInitSite Site{DeferredInitSite::Kind::Destroy,
+                          InitBindingKind::Parameter,
+                          Loc,
+                          DestroyUninitApplies,
+                          T,
+                          Src,
+                          /*Subject=*/nullptr,
+                          std::move(Leaves)};
+    Site.Destroyer = Destroyer;
+    recordDeferredInitSite(std::move(Site));
+    return;
+  }
+  if (DestroyUninitApplies)
+    judgeDestroyUninitByForm(Loc, T, Src, D, /*AfterFlowPass=*/nullptr,
+                             Destroyer);
+}
+
 void SemaProfiles::judgeDestroyUninitByForm(SourceLocation Loc, QualType T,
                                             const Expr *Src, const Decl *D,
-                                            const Decl *AfterFlowPass) {
+                                            const Decl *AfterFlowPass,
+                                            InitDestroyer Destroyer) {
   if (shouldEmitProfileViolation("std::init", diag::err_init_destroy_uninit,
                                  Loc, D, /*PostParse=*/AfterFlowPass) &&
       isUninitializedOrMixed(
           classifyUninitSource(getASTContext(), Src, T->isReferenceType(),
                                UninitBindAccess.withThisUnderConstruction(
                                    thisIsUnderConstruction(AfterFlowPass)))))
-    Diag(Loc, diag::err_init_destroy_uninit) << "std::init";
+    Diag(Loc, diag::err_init_destroy_uninit)
+        << "std::init" << static_cast<unsigned>(Destroyer);
 }
 
 void SemaProfiles::checkInitProfileObjectArgument(const Expr *Object,
                                                   const CXXMethodDecl *Method) {
   if (!isProfileLive("std::init") || !Object)
     return;
-  // Destroying uninitialized storage is the deferred destroy_at slice (the
-  // paper models destruction, like construct_at, as a lifetime operation);
-  // implicit scope-exit destructions never reach this funnel, so diagnosing
-  // only the explicit s.~S() spelling would be an inconsistent sliver.
-  if (isa<CXXDestructorDecl>(Method))
+  if (isa<CXXDestructorDecl>(Method)) {
+    checkInitProfileDestructorCall(Object);
     return;
+  }
   // A static call operator (C++23) has no implicit object parameter: its
   // object argument is evaluated but its value is never used, exactly like a
   // static member function named through an object -- whose call path never
@@ -3018,6 +3033,20 @@ void SemaProfiles::checkInitProfileObjectArgument(const Expr *Object,
   judgeInitProfileBinding(InitBindingKind::ObjectArgument, Object->getExprLoc(),
                           /*TargetMarked=*/false, T, Object, /*D=*/nullptr,
                           Method);
+}
+
+void SemaProfiles::checkInitProfileDestructorCall(const Expr *Object) {
+  if (!isProfileLive("std::init") || !Object)
+    return;
+  // The pointer of an arrow call, or the object glvalue of a dot call bound
+  // as a reference, as for checkInitProfileObjectArgument.
+  QualType ObjectTy = Object->getType();
+  QualType T = ObjectTy->isPointerType()
+                   ? ObjectTy
+                   : getASTContext().getLValueReferenceType(ObjectTy);
+  checkInitProfileDestroy(Object->getExprLoc(), T, Object, /*D=*/nullptr,
+                          /*DestroyUninitApplies=*/true,
+                          InitDestroyer::DestructorCall);
 }
 
 // The read-through diagnostic distinguishes indirection through a

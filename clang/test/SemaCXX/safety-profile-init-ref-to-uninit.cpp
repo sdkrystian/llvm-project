@@ -4271,10 +4271,14 @@ void test_member_call_silent_forms() {
   t.f();                  // OK: initialized object
   Callee{}.f();           // OK: a prvalue object is not uninitialized storage
   make_callee().f();      // OK: unmarked call result is trusted initialized
-  WithDtor d [[uninit]];
-  d.~WithDtor();          // OK: destruction is the deferred destroy_at slice
   StaticCall c [[uninit]];
   c(1);                   // OK: a static call operator uses no object argument
+}
+
+// An explicit destructor call destroys its object, as std::destroy_at does
+void test_destructor_call_destroys() {
+  WithDtor d [[uninit]];
+  d.~WithDtor(); // expected-error {{uninitialized storage is destroyed by a destructor call under profile 'std::init'}}
 }
 
 // A call through a pointer-to-member resolves no method at the call and

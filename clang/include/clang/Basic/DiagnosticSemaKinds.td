@@ -14528,12 +14528,13 @@ def err_init_member_call_on_uninit : ProfileRule<
   "uninitialized memory under profile '%0'",
   ProfileStdInitRefToUninit>;
 def err_init_double_destroy : ProfileRule<
-  "storage already destroyed by a '[[now_uninit]]' function is destroyed "
-  "again under profile '%0'",
+  "storage already destroyed by %select{a '[[now_uninit]]' function|"
+  "a destructor call|its scope-exit destructor}1 is destroyed again under "
+  "profile '%0'",
   ProfileStdInitDoubleDestroy>;
 def err_init_destroy_uninit : ProfileRule<
-  "uninitialized storage is destroyed by a '[[now_uninit]]' function under "
-  "profile '%0'",
+  "uninitialized storage is destroyed by %select{a '[[now_uninit]]' function|"
+  "a destructor call|its scope-exit destructor}1 under profile '%0'",
   ProfileStdInitDestroyUninit>;
 def err_init_deferred_check_unjudged : Error<
   "std::init %select{binding|destroy|read|store}0 check deferred to the flow "

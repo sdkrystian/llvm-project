@@ -816,6 +816,71 @@ int now_init_array() {
   return arr[3]; // OK
 }
 
+struct DtorPayload { int x; ~DtorPayload(); };
+
+// A read after an explicit destructor call reads destroyed storage
+int read_after_destructor_call(DtorPayload *p [[ref_to_uninit]]) {
+  std::construct_at(p);
+  p->~DtorPayload();
+  return p->x; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A second explicit destructor call is a double destruction
+void double_destructor_call(DtorPayload *p [[ref_to_uninit]]) {
+  std::construct_at(p);
+  p->~DtorPayload();
+  p->~DtorPayload(); // expected-error {{storage already destroyed by a destructor call is destroyed again under profile 'std::init'}}
+}
+
+// An explicit destructor call on never-constructed storage destroys uninitialized storage
+void destructor_call_uninitialized(DtorPayload *p [[ref_to_uninit]]) {
+  p->~DtorPayload(); // expected-error {{uninitialized storage is destroyed by a destructor call under profile 'std::init'}}
+}
+
+// Reconstruction after an explicit destructor call is accepted
+void reconstruct_after_destructor_call(DtorPayload *p [[ref_to_uninit]]) {
+  std::construct_at(p);
+  p->~DtorPayload();
+  std::construct_at(p);
+}
+
+// A read of a local after its explicit destructor call reads destroyed storage
+int read_local_after_destructor_call() {
+  Payload s [[uninit]];
+  std::construct_at(&s, 1);
+  s.~Payload();
+  return s.y; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+using Int = int;
+// A second pseudo-destructor call is a double destruction
+void double_pseudo_destructor_call(Int *p [[ref_to_uninit]]) {
+  std::construct_at(p, 1);
+  p->~Int();
+  p->~Int(); // expected-error {{storage already destroyed by a destructor call is destroyed again under profile 'std::init'}}
+}
+
+// A delete-expression runs the destructor of never-constructed storage
+void delete_uninitialized() {
+  DtorPayload *p [[ref_to_uninit]] = new DtorPayload;
+  delete p; // expected-error {{uninitialized storage is destroyed by a destructor call under profile 'std::init'}}
+}
+
+// A delete-expression after construction is accepted
+void delete_constructed() {
+  DtorPayload *p [[ref_to_uninit]] = new DtorPayload;
+  std::construct_at(p);
+  delete p;
+}
+
+// An explicit destructor call through a marked pointer member is judged by form
+struct DestroysMarkedMember {
+  DtorPayload *p [[ref_to_uninit]];
+  void reset() {
+    p->~DtorPayload(); // expected-error {{uninitialized storage is destroyed by a destructor call under profile 'std::init'}}
+  }
+};
+
 //--- sys/init_mem.h
 inline void *operator new(__SIZE_TYPE__, void *p) noexcept { return p; }
 namespace std {

@@ -6886,6 +6886,8 @@ ExprResult Sema::BuildCallExpr(Scope *Scope, Expr *Fn, SourceLocation LParenLoc,
                                ArgExprs.back()->getEndLoc()));
       }
 
+      Profiles().checkInitProfileDestructorCall(
+          cast<CXXPseudoDestructorExpr>(Fn)->getBase());
       return CallExpr::Create(Context, Fn, /*Args=*/{}, Context.VoidTy,
                               VK_PRValue, RParenLoc, CurFPFeatureOverrides());
     }

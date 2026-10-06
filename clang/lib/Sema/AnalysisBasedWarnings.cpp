@@ -2465,7 +2465,9 @@ struct BindingSite {
   bool EveryPath = false;
 };
 
-/// A [[now_uninit]] destruction site derived from a call element: the
+/// A destruction site derived from a call element -- a [[now_uninit]] or
+/// destroy-row argument, an explicit or pseudo-destructor call's object, or
+/// the operand of a delete-expression that runs a destructor: the
 /// argument's leaves (a tracked entity, judged by its flow state, or a leaf
 /// no entity tracks, classified by form), the entities the destruction
 /// affects, and whether it is exempt from destroy_uninit -- a reinitializer
@@ -2480,6 +2482,8 @@ struct DestroySite {
   SourceLocation Loc;
   bool Exempt = false;
   bool Judged = false;
+  /// What ends the lifetime, for the diagnostics' wording.
+  SemaProfiles::InitDestroyer Destroyer = SemaProfiles::InitDestroyer::Function;
   /// The argument's arms name different storage: each may have been
   /// destroyed, none definitely.
   bool Conditional = false;
@@ -2577,7 +2581,8 @@ struct PendingViolation {
   unsigned DiagID;
   SourceLocation Loc;
   /// Binding: the pointer/reference select; ReadThrough and SubobjectWrite:
-  /// the provenance select.
+  /// the provenance select; Destroy: the destroyer
+  /// (SemaProfiles::InitDestroyer).
   unsigned Select = 0;
   /// SubobjectWrite: the "not a member access" flag.
   bool Flag = false;
@@ -2677,13 +2682,14 @@ static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
     LeafState S = leafState(L, St, Storage, /*EveryPath=*/false);
     Acc = Acc ? combineLeafStates(*Acc, S) : S;
   }
+  unsigned Destroyer = static_cast<unsigned>(Site.Destroyer);
   if (AllDestroyed) {
-    Out.push_back({diag::err_init_double_destroy, Site.Loc});
+    Out.push_back({diag::err_init_double_destroy, Site.Loc, Destroyer});
     return;
   }
   if (!Site.Exempt &&
       (*Acc == LeafState::Uninitialized || *Acc == LeafState::Mixed))
-    Out.push_back({diag::err_init_destroy_uninit, Site.Loc});
+    Out.push_back({diag::err_init_destroy_uninit, Site.Loc, Destroyer});
 }
 
 /// Judge an access site against \p St: uninit_read (\p IsWrite false) or
@@ -3030,9 +3036,6 @@ static void reportFlowViolations(Sema &S,
       S.Diag(V.Loc, V.DiagID) << Name << V.Subject;
     else if (V.DiagID == diag::err_init_uninit_subobject_write)
       S.Diag(V.Loc, V.DiagID) << Name << V.Flag << V.Select;
-    else if (V.DiagID == diag::err_init_double_destroy ||
-             V.DiagID == diag::err_init_destroy_uninit)
-      S.Diag(V.Loc, V.DiagID) << Name;
     else
       S.Diag(V.Loc, V.DiagID) << Name << V.Select;
   }
@@ -3286,14 +3289,19 @@ static bool constructsOneObject(const SemaProfiles::CalleeLifecycleRoles &Roles,
 /// is replay order -- so a dual-attributed reinitializer nets to assigned. A
 /// plain callee earns nothing. The bindings judged at this call precede
 /// these effects in the block, so they see the pre-call state. A judged
-/// destroy site's flow-tracked leaves are added to \p JudgedLeaves.
+/// destroy site's flow-tracked leaves are added to \p JudgedLeaves. A
+/// non-null \p DestroyedObject -- the object of an explicit destructor call or
+/// the operand of a delete-expression that runs a destructor (a pointer, or a
+/// glvalue bound by reference) -- is destroyed first, like std::destroy_at's
+/// argument (P4222R2 §4.6).
 static void
 appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
                           const SemaProfiles::CalleeLifecycleRoles &Roles,
                           const TrackedStorage &Storage,
                           SmallVectorImpl<DefAssignEvent> &BlockEvents,
                           SmallVectorImpl<DestroySite> &DSites,
-                          llvm::SmallPtrSetImpl<const Expr *> &JudgedLeaves) {
+                          llvm::SmallPtrSetImpl<const Expr *> &JudgedLeaves,
+                          const Expr *DestroyedObject = nullptr) {
   const auto *DC = cast<DeclContext>(D);
   // Resolve the leaves of \p Arg, bound to a parameter of type \p ParamTy
   // (SemaProfiles::bindingSourceOperand decides whether they are pointer
@@ -3400,14 +3408,16 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
         Push(Idx);
     }
   };
-  // A [[now_uninit]] parameter's argument: one destroy site.
-  auto AppendDestroy = [&](const ParmVarDecl *P, const Expr *Arg) {
-    QualType PT = P->getType();
+  // The argument \p Arg, bound as \p T, destroyed by \p Destroyer: one
+  // destroy site.
+  auto AppendDestroy = [&](const Expr *Arg, QualType T, bool Exempt,
+                           SemaProfiles::InitDestroyer Destroyer) {
     SmallVector<ArgLeaf, 2> Leaves;
     DestroySite Site;
     Site.Loc = Arg->IgnoreImplicit()->getExprLoc();
-    Site.Exempt = Roles.InitializesRefToUninitParams || Roles.isMarkedParam(P);
-    Site.Judged = ResolveArg(Arg, PT, Leaves);
+    Site.Exempt = Exempt;
+    Site.Destroyer = Destroyer;
+    Site.Judged = ResolveArg(Arg, T, Leaves);
     Site.Conditional = !NameOneStorage(Leaves);
     for (const ArgLeaf &L : Leaves) {
       if (L.Tracked)
@@ -3440,13 +3450,23 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
                                    F(P, Arg);
                                });
       };
+  if (DestroyedObject) {
+    QualType OT = DestroyedObject->getType();
+    AppendDestroy(
+        DestroyedObject,
+        OT->isPointerType() ? OT : S.Context.getLValueReferenceType(OT),
+        /*Exempt=*/false, SemaProfiles::InitDestroyer::DestructorCall);
+  }
   if (Roles.DestroysPointerParams || Roles.KnownParam)
     ForEachParam([&](const ParmVarDecl *P, const Expr *Arg) {
       QualType PT = P->getType();
       if (!PT->isPointerType() && !PT->isReferenceType())
         return;
       if (Roles.destroysParam(P))
-        AppendDestroy(P, Arg);
+        AppendDestroy(Arg, PT,
+                      Roles.InitializesRefToUninitParams ||
+                          Roles.isMarkedParam(P),
+                      SemaProfiles::InitDestroyer::Function);
       else if (Roles.releasesParam(P, /*TrustedOnly=*/true))
         AppendFor(Arg, PT, DefAssignEventKind::Kill);
     });
@@ -4060,15 +4080,17 @@ static void extractStdInitEvents(
         };
     // A call of \p Callee (null when there is no declared callee) through
     // the call-like \p CallLike: its argument bindings and its lifecycle
-    // effects.
+    // effects, \p DestroyedObject's destruction included
+    // (appendLifecycleCallEvents).
     auto AppendCallEvents = [&](const Expr *CallLike,
-                                const FunctionDecl *Callee) {
+                                const FunctionDecl *Callee,
+                                const Expr *DestroyedObject = nullptr) {
       SemaProfiles::CalleeLifecycleRoles Roles =
           Callee ? SemaProfiles::getCalleeLifecycleRoles(Callee)
                  : SemaProfiles::CalleeLifecycleRoles();
       AppendArgumentBindings(CallLike, Roles);
       appendLifecycleCallEvents(S, D, CallLike, Roles, Storage, BlockEvents,
-                                DSites, JudgedLeaves);
+                                DSites, JudgedLeaves, DestroyedObject);
     };
     // The element bindings of an aggregate initializer of type \p T: each
     // pointer or reference field of a record (the bases consume the leading
@@ -4241,9 +4263,13 @@ static void extractStdInitEvents(
           }
         }
         // The implicit object parameter: a pointer for an arrow call, a
-        // reference to the object otherwise. A destructor call is the destroy
-        // rules' (SemaProfiles::checkInitProfileObjectArgument).
-        if (ObjectMethod && Object && !isa<CXXDestructorDecl>(ObjectMethod)) {
+        // reference to the object otherwise. An explicit destructor call, and
+        // a pseudo-destructor call, destroys its object instead
+        // (SemaProfiles::checkInitProfileDestructorCall).
+        const Expr *DestroyedObject = nullptr;
+        if (ObjectMethod && Object && isa<CXXDestructorDecl>(ObjectMethod)) {
+          DestroyedObject = Object;
+        } else if (ObjectMethod && Object) {
           QualType OT = Object->getType();
           QualType T =
               OT->isPointerType()
@@ -4253,7 +4279,10 @@ static void extractStdInitEvents(
                      /*TargetMarked=*/false, T, Object, ObjectMethod, CE,
                      isDefaultedComparison(ObjectMethod));
         }
-        AppendCallEvents(CE, Callee);
+        if (const auto *PDE = dyn_cast<CXXPseudoDestructorExpr>(
+                CE->getCallee()->IgnoreParens()))
+          DestroyedObject = PDE->getBase();
+        AppendCallEvents(CE, Callee, DestroyedObject);
       } else if (const auto *CCE = dyn_cast<CXXConstructExpr>(St)) {
         // A constructor call's parameter bindings, the copy of a class object
         // out of tracked storage included.
@@ -4431,7 +4460,14 @@ static void extractStdInitEvents(
                    nullptr, NE);
         AppendAliasEscapes(Init, NE->getAllocatedType(), NE);
       } else if (const auto *DE = dyn_cast<CXXDeleteExpr>(St)) {
-        // A delete-expression releases its operand's storage.
+        // A delete-expression runs the destructor of its operand's referent
+        // when that is non-trivial, then releases the operand's storage.
+        if (const auto *RD = Ctx.getBaseElementType(DE->getDestroyedType())
+                                 ->getAsCXXRecordDecl();
+            RD && RD->hasDefinition() && !RD->hasTrivialDestructor())
+          appendLifecycleCallEvents(
+              S, D, DE, SemaProfiles::CalleeLifecycleRoles(), Storage,
+              BlockEvents, DSites, JudgedLeaves, DE->getArgument());
         SmallVector<TrackedStorage::Resolution, 2> Operands;
         SemaProfiles::forEachTargetLeaf(
             DE->getArgument(), [&](const SemaProfiles::ShapeLeaf &Leaf) {
