@@ -1636,56 +1636,71 @@ static bool allocatorHasOwnMember(const FunctionDecl *FD, StringRef Name) {
 namespace {
 using KnownParamRole = SemaProfiles::KnownParamRole;
 
+/// How a row of the known-callee table (KnownCallees) is keyed.
+enum class KnownCalleeKey : uint8_t {
+  /// A Clang builtin ID: the C allocation, memory, and va_list families.
+  Builtin,
+  /// A form predicate: the operator new/delete families, which never carry a
+  /// builtin ID, and the std::allocator and std::allocator_traits members.
+  Form,
+  /// A namespace-std function name and arity: the std lifecycle functions.
+  StdName,
+};
+
+/// The shape a name-keyed row's role parameter must have in the called
+/// declaration for the row to match.
+enum class ParamShape : uint8_t {
+  /// An object pointer: a pointer iterator.
+  Pointer,
+};
+
 /// A row of the known-callee table (KnownCallees): what a library callee
-/// returns and what it does to the storage bound to one role parameter. A
-/// row is keyed by builtin ID (the C allocation, memory, and va_list families),
-/// by a form predicate (the operator new/delete families, which never carry a
-/// builtin ID, and the std::allocator and std::allocator_traits members), or by
-/// a namespace-std name and arity (the std lifecycle functions) -- the library
-/// knowledge P4222R2 §4.4 asks for, looked up at each call, so the library's
-/// declarations carry no annotation and a module built without -fprofiles reads
-/// the same. A builtin ID is absent under -fno-builtin / -ffreestanding (or on
-/// a non-matching declaration), where an allocator falls back to the trusted
-/// default and a release or initialization goes unrecognized -- a missed
-/// diagnostic or a missed relaxation, never a false positive or a false
-/// acceptance elsewhere. (getBuiltinFunctionEffects in SemaFunctionEffects.cpp
-/// groups almost exactly the allocator set for the \c allocating effect.)
+/// returns and what it does to the storage bound to one role parameter. A row
+/// is keyed by builtin ID, by a form predicate, or by a std name and arity
+/// (KnownCalleeKey) -- the library knowledge P4222R2 §4.4 asks for, looked up
+/// at each call, so the library's declarations carry no annotation and a
+/// module built without -fprofiles reads the same. A builtin ID is absent
+/// under -fno-builtin / -ffreestanding (or on a non-matching declaration),
+/// where an allocator falls back to the trusted default and a release or
+/// initialization goes unrecognized -- a missed diagnostic or a missed
+/// relaxation, never a false positive or a false acceptance elsewhere.
+/// (getBuiltinFunctionEffects in SemaFunctionEffects.cpp groups almost exactly
+/// the allocator set for the \c allocating effect.)
 struct KnownCalleeEntry {
-  /// The Arity of a row not keyed by namespace-std name.
-  static constexpr unsigned NotStdRow = ~0u;
-  /// The Arity of a std row matching any parameter count.
-  static constexpr unsigned AnyArity = ~0u - 1;
+  /// The Arity of a name-keyed row matching any parameter count.
+  static constexpr unsigned AnyArity = ~0u;
   /// The EndParam of a row whose role parameter has no end iterator.
   static constexpr unsigned NoEndParam = ~0u;
 
-  /// The Clang builtin ID this row matches; 0 for a form or std row.
+  /// What the row is keyed by.
+  KnownCalleeKey Key = KnownCalleeKey::Builtin;
+  /// The Clang builtin ID of a builtin row; 0 otherwise.
   unsigned BuiltinID = 0;
   /// The form predicate of a form row; null otherwise.
   bool (*Form)(const FunctionDecl *) = nullptr;
   /// A builtin row's library name, compared by the untrusted name-only
   /// fallback (matchKnownCallee) when the builtin ID is absent -- empty for
-  /// the __builtin_* spellings, which always keep their IDs -- or a std
-  /// row's name. A per-row literal rather than Builtin::Context::getName,
-  /// which returns std::string by value.
+  /// the __builtin_* spellings, which always keep their IDs -- or a
+  /// name-keyed row's name. A per-row literal rather than
+  /// Builtin::Context::getName, which returns std::string by value.
   StringRef Name;
-  /// A std row's parameter count, or AnyArity; NotStdRow for every other
-  /// row.
-  unsigned Arity = NotStdRow;
+  /// A name-keyed row's parameter count, or AnyArity.
+  unsigned Arity = AnyArity;
   KnownCalleeReturn Return = KnownCalleeReturn::ReturnsTrusted;
-  /// The role parameter's index; a std row matches only where that
-  /// parameter is a pointer, so a class-type iterator is outside the row.
+  /// The role parameter's index.
   unsigned Param = 0;
+  /// The shape a name-keyed row's role parameter must have, so a
+  /// specialization whose iterator is of another shape falls outside the row.
+  ParamShape Shape = ParamShape::Pointer;
   /// What the callee does to the storage bound to Param.
   KnownParamRole Role = KnownParamRole::None;
   /// A Construct role that applies only where default-initialization of
-  /// Param's pointee type leaves no scalar indeterminate
+  /// Param's value type leaves no scalar indeterminate
   /// (defaultInitLeavesScalarIndeterminate); AssertUninit elsewhere.
   bool ConstructIfDefaultInitDeterminate = false;
   /// The index of the end iterator of the range Param begins, or NoEndParam
   /// (P4222R2 §4.4 annotates both iterators).
   unsigned EndParam = NoEndParam;
-
-  bool isStdRow() const { return Arity != NotStdRow; }
 };
 } // namespace
 
@@ -1695,6 +1710,7 @@ static constexpr KnownCalleeEntry
 builtinRow(unsigned ID, KnownCalleeReturn Return, StringRef FallbackName = "",
            KnownParamRole Role = KnownParamRole::None, unsigned Param = 0) {
   KnownCalleeEntry E;
+  E.Key = KnownCalleeKey::Builtin;
   E.BuiltinID = ID;
   E.Name = FallbackName;
   E.Return = Return;
@@ -1708,6 +1724,7 @@ static constexpr KnownCalleeEntry
 formRow(bool (*Form)(const FunctionDecl *), KnownCalleeReturn Return,
         KnownParamRole Role = KnownParamRole::None, unsigned Param = 0) {
   KnownCalleeEntry E;
+  E.Key = KnownCalleeKey::Form;
   E.Form = Form;
   E.Return = Return;
   E.Role = Role;
@@ -1721,6 +1738,7 @@ stdRow(StringRef Name, unsigned Arity, unsigned Param, KnownParamRole Role,
        unsigned EndParam = KnownCalleeEntry::NoEndParam,
        bool ConstructIfDefaultInitDeterminate = false) {
   KnownCalleeEntry E;
+  E.Key = KnownCalleeKey::StdName;
   E.Name = Name;
   E.Arity = Arity;
   E.Param = Param;
@@ -1856,6 +1874,26 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
     stdRow("destroy_n", 3, 1, KnownParamRole::Destroy),
 };
 
+/// True if a parameter of type \p T has the shape \p Shape.
+static bool hasParamShape(QualType T, ParamShape Shape) {
+  switch (Shape) {
+  case ParamShape::Pointer:
+    return T->isPointerType();
+  }
+  llvm_unreachable("unknown ParamShape");
+}
+
+/// True if the name-keyed row \p Entry matches \p FD, a callee whose name
+/// matched: its arity, and the shape of its role parameter.
+static bool matchesNameKeyedRow(const KnownCalleeEntry &Entry,
+                                const FunctionDecl *FD) {
+  unsigned NumParams = FD->getNumParams();
+  return (Entry.Arity == KnownCalleeEntry::AnyArity ||
+          Entry.Arity == NumParams) &&
+         Entry.Param < NumParams &&
+         hasParamShape(FD->getParamDecl(Entry.Param)->getType(), Entry.Shape);
+}
+
 /// The table row for \p FD, if any -- the *trusted* match: the builtin ID,
 /// the form, or the namespace-std name and arity guarantee the row's
 /// semantics. Builtin rows are consulted first; no collision is possible --
@@ -1865,20 +1903,17 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
 static const KnownCalleeEntry *findKnownCallee(const FunctionDecl *FD) {
   if (unsigned ID = FD->getBuiltinID())
     for (const KnownCalleeEntry &Entry : KnownCallees)
-      if (Entry.BuiltinID == ID)
+      if (Entry.Key == KnownCalleeKey::Builtin && Entry.BuiltinID == ID)
         return &Entry;
   for (const KnownCalleeEntry &Entry : KnownCallees)
-    if (Entry.Form && Entry.Form(FD))
+    if (Entry.Key == KnownCalleeKey::Form && Entry.Form(FD))
       return &Entry;
   const IdentifierInfo *II = FD->getIdentifier();
   if (!II || !FD->isInStdNamespace())
     return nullptr;
   for (const KnownCalleeEntry &Entry : KnownCallees)
-    if (Entry.isStdRow() && Entry.Name == II->getName() &&
-        (Entry.Arity == KnownCalleeEntry::AnyArity ||
-         Entry.Arity == FD->getNumParams()) &&
-        Entry.Param < FD->getNumParams() &&
-        FD->getParamDecl(Entry.Param)->getType()->isPointerType())
+    if (Entry.Key == KnownCalleeKey::StdName && Entry.Name == II->getName() &&
+        matchesNameKeyedRow(Entry, FD))
       return &Entry;
   return nullptr;
 }
@@ -1909,7 +1944,8 @@ static KnownCalleeMatch matchKnownCallee(const FunctionDecl *FD) {
     return {};
   StringRef Name = II->getName();
   for (const KnownCalleeEntry &Entry : KnownCallees)
-    if (!Entry.isStdRow() && !Entry.Name.empty() && Entry.Name == Name)
+    if (Entry.Key == KnownCalleeKey::Builtin && !Entry.Name.empty() &&
+        Entry.Name == Name)
       return {&Entry, /*Trusted=*/false};
   return {};
 }
