@@ -1136,8 +1136,9 @@ uninitialized memory: ``s[i]``, ``s.front()``, ``*s.begin()``, ``*p``,
 ``p.get()``, and ``p->m`` behave as the same forms through a marked pointer
 do.  A member function that returns the handle itself -- by reference to its
 own class (``++it``), or by value as a handle to the same memory: its own
-class, another specialization of its class template, or a class of its value
-type (``s.subspan(1)``, ``s.begin()``) -- yields a handle in the same state,
+class, another specialization of its class template, a standard handle of its
+kind (a view's iterator), or a class of its value type (``s.subspan(1)``,
+``s.begin()``) -- yields a handle in the same state,
 and so do ``n + it``, a copy of it, and a local reference to it, while any
 other class a member returns by value (a name, a duration) is an ordinary
 result.  A call operator's result never refers to its callable object's
@@ -1163,6 +1164,57 @@ memory.  ``s.size()`` uses only the handle object, which is initialized:
 
 A conditional whose arms are a marked and an unmarked handle is rejected for
 either target (§4.9).
+
+A handle is bound like a pointer: a marked handle must refer to
+uninitialized memory and an unmarked one to initialized memory, wherever a
+handle is initialized -- a variable, a data member, a base subobject, an
+aggregate element, a call argument, ``return`` and ``throw``, a ``new``
+expression's initializer, and a by-copy lambda capture.  A reference to a
+handle cannot carry the marker for what the handle refers to (on a reference
+to a class, the marker means the class object itself is uninitialized), so a
+handle bound to an unmarked reference -- a parameter, a local, a by-reference
+capture -- is judged as an unmarked handle too: ``sinkr(s)`` with
+``void sinkr(const std::span<int> &)`` is rejected while a marked ``s`` refers
+to uninitialized memory.  A handle's own comparisons and ``+`` and ``-``, and
+the source of a copy or assignment (judged where the copy lands), are exempt.
+A copy or move of a handle, a conversion
+between handles (``std::span<const int> cs = s;``), and a handle a member
+function returns refer to what the source refers to.  Raw storage enters a
+handle only through the construction of a standard handle -- ``std::span``,
+``std::ranges::subrange``, ``std::reverse_iterator``,
+``std::move_iterator``, ``std::basic_const_iterator``, the libraries' own
+pointer iterators, ``std::unique_ptr``, and ``std::shared_ptr`` -- whose
+pointer, array, or range argument decides what the handle refers to (of a
+first and a last iterator, the first: the last bounds the range).  That
+argument is not judged against the constructor's parameter; the handle is
+judged where it lands:
+
+.. code-block:: c++
+
+   void sink(std::span<int> s);
+
+   void f() {
+     int arr [[uninit]] [4];
+     std::span<int> s(arr);                    // error: needs [[ref_to_uninit]]
+     std::span<int> t [[ref_to_uninit]](arr);  // OK
+     sink(arr);                                // error: at the argument
+     std::unique_ptr<int> p(new int);          // error (§4.7)
+     std::unique_ptr<int> q(new int(5));       // OK
+   }
+
+An owning smart pointer takes its pointer argument, never its deleter or
+allocator (the aliasing constructor of ``std::shared_ptr`` takes its pointer
+argument), and a null or default-constructed handle refers to nothing, so it
+suits either marking.  Storage that is flow-tracked counts at the binding:
+after ``memset(arr, 0, sizeof arr)`` an unmarked ``std::span<int> s(arr)`` is
+accepted.  Any other class refers to initialized memory unless its
+constructor has a parameter its author marked ``[[ref_to_uninit]]``: then
+the object refers to what that parameter takes (with
+``struct Buf { Buf(int *p [[ref_to_uninit]]); };``, ``Buf b(&u);`` needs the
+marker), and the parameter's own binding is judged as usual.  A range-for
+over a marked handle binds its elements to uninitialized memory:
+``for (int &x [[ref_to_uninit]] : s)`` is accepted, and
+``for (int x : s)`` reads uninitialized memory.
 
 
 Constructors

@@ -4404,7 +4404,7 @@ struct RejectedFiller {
 };
 void test_rejected_ctor_credit() {
   int *p [[ref_to_uninit]] = (int *)malloc(4);
-  RejectedFiller f(p);
+  RejectedFiller f [[ref_to_uninit]](p);
   int x = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
   int *q [[ref_to_uninit]] = (int *)malloc(4);
   RejectedFiller{q};

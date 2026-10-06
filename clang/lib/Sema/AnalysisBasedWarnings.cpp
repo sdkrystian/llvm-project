@@ -2676,34 +2676,34 @@ TrackedStorage::markedPointerObject(const SemaProfiles::ShapeLeaf &Leaf) const {
 }
 
 /// Per-block ordered events recovered from the CFG by the std::init dataflow
-/// engine and replayed over a FlowState in element order. Read: a value load
-/// of entity Idx (read-tracked members). Write: Idx is assigned. ReadWrite: a
+/// engine and replayed over a FlowState in element order. Read: a value load of
+/// entity Idx (read-tracked members). Write: Idx is assigned. ReadWrite: a
 /// compound assignment or built-in ++/--, a Read then a Write. MayWrite: a
-/// store whose target names Idx on one of several arms. Copy: Idx takes
-/// entity Aux's state (the tracked-copy transfer). Kill: a storage release
-/// (free, realloc, operator delete, a delete-expression) leaves Idx
-/// unassigned. Destroy: a [[now_uninit]] destruction, a destructor call, or a
-/// scope-exit destructor (DestroySites[Aux]),
-/// judged by the destroy rules; its storage is then unassigned and destroyed
-/// until stored again -- for an argument naming several storages, each may
-/// be. Reseat: the marked pointer or reference Idx refers, from here,
-/// to the storage DefAssignEvent::RT describes and, when a marked binding
-/// names an identified referent (Entity, ViaPointer), asserts it unassigned:
-/// Must and May cleared, MayUnassigned set, MayDestroyed and Esc kept. Escape:
-/// Idx may have been destroyed or released by one of several arms or an
-/// opaque callee: possibly assigned or not, and not destroyed. Reset: Idx
-/// belongs to a local whose declaration runs here, which begins a new object
-/// each time (a loop's next iteration, a backward goto): unassigned, not
-/// escaped, and not destroyed. AggregateEscape: the tracked aggregate local
+/// store whose target names Idx on one of several arms. Copy: Idx takes entity
+/// Aux's state (the tracked-copy transfer). Kill: a storage release (free,
+/// realloc, operator delete, a delete-expression) leaves Idx unassigned.
+/// Destroy: a [[now_uninit]] destruction, a destructor call, or a scope-exit
+/// destructor (DestroySites[Aux]), judged by the destroy rules; its storage is
+/// then unassigned and destroyed until stored again -- for an argument naming
+/// several storages, each may be. Reseat: the marked pointer or reference Idx
+/// refers, from here, to the storage DefAssignEvent::RT describes and, when a
+/// marked binding names an identified referent (Entity, ViaPointer), asserts it
+/// unassigned: Must and May cleared, MayUnassigned set, MayDestroyed and Esc
+/// kept. Escape: Idx may have been destroyed or released by one of several
+/// arms or an opaque callee: possibly assigned or not, and not destroyed.
+/// Reset: Idx belongs to a local whose declaration runs here, which begins a
+/// new object each time (a loop's next iteration, a backward goto): unassigned,
+/// not escaped, and not destroyed. AggregateEscape: the tracked aggregate local
 /// owning member Idx escapes as a whole (a non-benign DeclRefExpr), so reads of
 /// the member are trusted from here (the local read leniency) while its
-/// assignment state is unchanged. Binding: a pointer or reference binding whose
-/// source has a tracked leaf (BindingSites[Aux]), judged by the binding rule.
-/// ReadThrough / SubobjectWrite: a read through, or a store below, tracked
-/// storage (AccessSites[Aux]), judged by uninit_read / uninit_write. An event
-/// on a Pointee entity acts on the storage the pointer refers to at its program
-/// point (referent). Every event but a Reset and a scope-exit Destroy carries
-/// the anchor expression the diagnostic and the suppression walk use.
+/// assignment state is unchanged. Binding: a pointer, reference, or handle
+/// binding whose source has a tracked leaf (BindingSites[Aux]), judged by the
+/// binding rule. ReadThrough / SubobjectWrite: a read through, or a store
+/// below, tracked storage (AccessSites[Aux]), judged by uninit_read /
+/// uninit_write. An event on a Pointee entity acts on the storage the pointer
+/// refers to at its program point (referent). Every event but a Reset and a
+/// scope-exit Destroy carries the anchor expression the diagnostic and the
+/// suppression walk use.
 enum class DefAssignEventKind {
   Read,
   Write,
@@ -2827,6 +2827,9 @@ struct BindingSite {
   /// the source whole, so it must be initialized on every path (P4222R2 §1.3,
   /// §9.2), and is trusted below a member that is not read-tracked.
   bool EveryPath = false;
+  /// The bound type when it is a handle (SemaProfiles::isHandleType), which
+  /// the diagnostics name; null for a pointer or reference.
+  QualType HandleType;
 };
 
 /// A destruction site derived from a call element -- a [[now_uninit]] or
@@ -2962,8 +2965,8 @@ struct FlowState {
 struct PendingViolation {
   unsigned DiagID;
   SourceLocation Loc;
-  /// Binding: the pointer/reference select; ReadThrough and SubobjectWrite:
-  /// the provenance select; Destroy: the destroyer
+  /// Binding: the pointer/reference/handle select; ReadThrough and
+  /// SubobjectWrite: the provenance select; Destroy: the destroyer
   /// (SemaProfiles::InitDestroyer).
   unsigned Select = 0;
   /// SubobjectWrite: the "not a member access" flag.
@@ -2973,6 +2976,9 @@ struct PendingViolation {
   const NamedDecl *Subject = nullptr;
   /// A scope-exit destructor's variable (DestroySite::ScopeExitVar).
   const VarDecl *ScopeExitVar = nullptr;
+  /// Binding: the handle type the handle select names
+  /// (BindingSite::HandleType).
+  QualType HandleType;
 };
 
 /// The entity the event or leaf index \p Idx denotes under \p St: itself for
@@ -3088,10 +3094,15 @@ static void judgeBindingSite(const BindingSite &Site, const FlowState &St,
   LeafState Acc = State(Site.Leaves.front());
   for (const BindingLeaf &L : llvm::drop_begin(Site.Leaves))
     Acc = combineLeafStates(Acc, State(L));
+  // The shape select of the binding diagnostics: pointer, reference, handle.
+  unsigned Shape = Site.IsReference ? 1 : !Site.HandleType.isNull() ? 2 : 0;
   if (Site.TargetMarked) {
-    if (Acc == LeafState::Initialized || Acc == LeafState::Mixed)
-      Out.push_back({diag::err_init_ref_to_uninit_requires_uninit, Site.Loc,
-                     Site.IsReference ? 1u : 0u});
+    if (Acc == LeafState::Initialized || Acc == LeafState::Mixed) {
+      PendingViolation V{diag::err_init_ref_to_uninit_requires_uninit, Site.Loc,
+                         Shape};
+      V.HandleType = Site.HandleType;
+      Out.push_back(V);
+    }
     return;
   }
   if (Acc != LeafState::Uninitialized && Acc != LeafState::Mixed)
@@ -3105,7 +3116,9 @@ static void judgeBindingSite(const BindingSite &Site, const FlowState &St,
     DiagID = diag::err_init_member_call_on_uninit;
     Subject = Site.Subject;
   }
-  Out.push_back({DiagID, Site.Loc, Site.IsReference ? 1u : 0u, false, Subject});
+  PendingViolation V{DiagID, Site.Loc, Shape, false, Subject};
+  V.HandleType = Site.HandleType;
+  Out.push_back(V);
 }
 
 /// Judge a destroy site against \p St. Storage destroyed on some path and not
@@ -3590,6 +3603,8 @@ static void reportFlowViolations(Sema &S,
       S.Diag(V.Loc, V.DiagID) << Name << V.Subject;
     else if (V.DiagID == diag::err_init_uninit_subobject_write)
       S.Diag(V.Loc, V.DiagID) << Name << V.Flag << V.Select;
+    else if (!V.HandleType.isNull())
+      S.Diag(V.Loc, V.DiagID) << Name << V.Select << V.HandleType;
     else
       S.Diag(V.Loc, V.DiagID) << Name << V.Select;
     if (V.ScopeExitVar)
@@ -4234,12 +4249,12 @@ static const Expr *aggregateInitializerFor(const Expr *Init,
 /// (the read leniency for locals, ProfilesFrameworkInternals.rst,
 /// "Known Gaps (std::init)"); a tracked local's DeclStmt resets its storage
 /// (Reset), after which a tracked copy's copies each member's state. Every
-/// pointer or reference binding the body performs -- a variable or member
-/// initializer, an aggregate element, a call or constructor argument (declared,
-/// variadic, or the implicit object argument), a placement argument, an
-/// Objective-C message argument, a return, a throw, a new-expression's
-/// initializer, a pointer assignment, a lambda capture -- becomes a Binding
-/// site when a leaf of its source names tracked storage
+/// pointer, reference, or handle binding the body performs -- a variable,
+/// member, or base initializer, an aggregate element, a call or constructor
+/// argument (declared, variadic, or the implicit object argument), a placement
+/// argument, an Objective-C message argument, a return, a throw, a
+/// new-expression's initializer, a pointer assignment, a lambda capture --
+/// becomes a Binding site when a leaf of its source names tracked storage
 /// (SemaProfiles::isFlowTrackedLeaf: the parse-time funnel left exactly those
 /// to this pass), its other leaves classified by form; a binding that hands out
 /// a mutable alias of a marked pointer (`T *&` to `p`, `T **` to `&p`, a
@@ -4554,63 +4569,114 @@ static void extractStdInitEvents(
               AppendReseat(*Idx, At, ReseatTarget::Escaped);
           });
     };
-    // A pointer or reference binding of \p Src as \p T, with the parse-time
-    // funnel's kind, location, and target marking (SemaProfiles::
-    // checkInitProfileBinding): a site judged at \p At against the flow state
-    // when a leaf names tracked storage; the funnel judged every other
-    // binding at parse time. A leaf no entity tracks is classified by form.
-    auto AddBinding = [&](K Kind, SourceLocation Loc, bool TargetMarked,
-                          QualType T, const Expr *Src, const NamedDecl *Subject,
-                          const Expr *At, bool EveryPath = false) {
+    // A pointer, reference, or handle binding of \p Src as \p T, with the
+    // parse-time funnel's kind, location, and target marking
+    // (SemaProfiles::checkInitProfileBinding): a site judged at \p At against
+    // the flow state when a leaf names tracked storage; the funnel judged
+    // every other binding at parse time. A leaf no entity tracks is
+    // classified by form.
+    auto AddBindingAs = [&](K Kind, SourceLocation Loc, bool TargetMarked,
+                            QualType T, const Expr *Src,
+                            const NamedDecl *Subject, const Expr *At,
+                            bool EveryPath) {
+      bool IsHandle = SemaProfiles::isHandleType(T);
       if (!Src || T.isNull() || T->isDependentType() ||
-          (!T->isPointerType() && !T->isReferenceType()) ||
+          (!T->isPointerType() && !T->isReferenceType() && !IsHandle) ||
           isa<RecoveryExpr>(Src->IgnoreParens()))
-        return;
-      bool AsPointerValue;
-      const Expr *Operand =
-          SemaProfiles::bindingSourceOperand(Src, T, AsPointerValue);
-      if (!Operand)
         return;
       BindingSite Site{Kind,    Loc, TargetMarked, T->isReferenceType(),
                        Subject, {},  EveryPath};
+      if (IsHandle)
+        Site.HandleType = T;
       bool AnyTracked = false;
       // The derived-to-base casts above the leaves, which the leaf walk peels.
       BasePath OuterPath;
-      SemaProfiles::peelBaseCasts(Operand, OuterPath);
+      // One leaf of the source, used as a pointer value or a glvalue; a leaf
+      // no entity tracks takes \p Form's state.
       SemaProfiles::FlowLeafUse Use =
           TargetMarked ? SemaProfiles::FlowLeafUse::MarkedTarget
           : EveryPath  ? SemaProfiles::FlowLeafUse::ValueCopy
                        : SemaProfiles::FlowLeafUse::Plain;
-      SemaProfiles::forEachTargetLeaf(
-          Operand, [&](const SemaProfiles::ShapeLeaf &Leaf) {
-            BindingLeaf L;
-            if (S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC, Use)) {
-              AnyTracked = true;
-              JudgedLeaves.insert(Leaf.E);
-              TrackedStorage::Resolution R =
-                  Storage.resolveFlowLeaf(Leaf, AsPointerValue);
-              L.Entity = R.Entity;
-              L.Sub = R.Sub;
-              L.WholeLeaf = !R.Subobject;
-              // A value copy through a pointer to data member reads what the
-              // step may name.
-              if (!L.Entity && Use == SemaProfiles::FlowLeafUse::ValueCopy &&
-                  R.Opaque.first != R.Opaque.second)
-                L.Range = R.Opaque;
-              else if (!L.Entity && Use != SemaProfiles::FlowLeafUse::Plain)
-                L.Range =
-                    Storage.objectPart(Leaf, AsPointerValue, OuterPath, Use);
-            }
-            if (!L.Entity)
-              L.State = formState(S.Profiles().classifyInitBindingLeaf(
-                  Leaf, T, D, /*ValueCopy=*/EveryPath && !TargetMarked));
-            Site.Leaves.push_back(L);
-          });
+      auto AddLeaf = [&](const SemaProfiles::ShapeLeaf &Leaf,
+                         bool AsPointerValue,
+                         llvm::function_ref<LeafState()> Form) {
+        BindingLeaf L;
+        if (S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC, Use)) {
+          AnyTracked = true;
+          JudgedLeaves.insert(Leaf.E);
+          TrackedStorage::Resolution R =
+              Storage.resolveFlowLeaf(Leaf, AsPointerValue);
+          L.Entity = R.Entity;
+          L.Sub = R.Sub;
+          L.WholeLeaf = !R.Subobject;
+          // A value copy through a pointer to data member reads what the
+          // step may name.
+          if (!L.Entity && Use == SemaProfiles::FlowLeafUse::ValueCopy &&
+              R.Opaque.first != R.Opaque.second)
+            L.Range = R.Opaque;
+          else if (!L.Entity && Use != SemaProfiles::FlowLeafUse::Plain)
+            L.Range = Storage.objectPart(Leaf, AsPointerValue, OuterPath, Use);
+        }
+        if (!L.Entity)
+          L.State = Form();
+        Site.Leaves.push_back(L);
+      };
+      if (IsHandle) {
+        // A handle's state comes from the storage its walk reaches
+        // (SemaProfiles::forEachHandleSourceLeaf).
+        using Mode = SemaProfiles::HandleLeaf::Mode;
+        SemaProfiles::forEachHandleSourceLeaf(
+            Src, [&](const SemaProfiles::HandleLeaf &HL) {
+              auto FormOf = [&](const SemaProfiles::ShapeLeaf &Leaf) {
+                return formState(S.Profiles().classifyInitHandleLeaf(
+                    {Leaf.E, HL.M, HL.Partial, Leaf.Arms}, D));
+              };
+              if (HL.M == Mode::Handle) {
+                BindingLeaf L;
+                L.State = FormOf(HL.E);
+                Site.Leaves.push_back(L);
+                return;
+              }
+              SemaProfiles::forEachTargetLeaf(
+                  HL.E, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+                    AddLeaf(Leaf, HL.M == Mode::PointerValue,
+                            [&] { return FormOf(Leaf); });
+                  });
+            });
+      } else {
+        bool AsPointerValue;
+        const Expr *Operand =
+            SemaProfiles::bindingSourceOperand(Src, T, AsPointerValue);
+        if (!Operand)
+          return;
+        SemaProfiles::peelBaseCasts(Operand, OuterPath);
+        SemaProfiles::forEachTargetLeaf(
+            Operand, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+              AddLeaf(Leaf, AsPointerValue, [&] {
+                return formState(S.Profiles().classifyInitBindingLeaf(
+                    Leaf, T, D, /*ValueCopy=*/EveryPath && !TargetMarked));
+              });
+            });
+      }
       if (!AnyTracked)
         return;
       Sites.push_back(std::move(Site));
       BlockEvents.push_back(
           {DefAssignEventKind::Binding, 0, At, (unsigned)(Sites.size() - 1)});
+    };
+    // AddBindingAs, and for an unmarked reference to a handle bound to
+    // \p Target, the handle's binding too
+    // (SemaProfiles::bindsHandleByReference).
+    auto AddBinding = [&](K Kind, SourceLocation Loc, bool TargetMarked,
+                          QualType T, const Expr *Src, const NamedDecl *Subject,
+                          const Expr *At, bool EveryPath = false,
+                          const ValueDecl *Target = nullptr) {
+      AddBindingAs(Kind, Loc, TargetMarked, T, Src, Subject, At, EveryPath);
+      if (!TargetMarked && !T.isNull() && !T->isDependentType() &&
+          SemaProfiles::bindsHandleByReference(Kind, T, Target))
+        AddBindingAs(Kind, Loc, /*TargetMarked=*/false,
+                     T.getNonReferenceType().getUnqualifiedType(), Src, Subject,
+                     At, /*EveryPath=*/false);
     };
     // A read through (\p IsWrite false) or a store below tracked storage,
     // with the parse-time check's location (the glvalue for a read, the
@@ -4736,10 +4802,12 @@ static void extractStdInitEvents(
                          !(Roles.destroysParam(Parm) ||
                            Roles.releasesParam(Parm, /*TrustedOnly=*/false) ||
                            Roles.isInitializingParam(Parm) ||
-                           Roles.isEndParam(Parm)))
+                           Roles.isEndParam(Parm) ||
+                           Roles.transfersParam(Parm)))
                   AddBinding(K::Parameter, Loc,
                              Parm && Roles.isMarkedParam(Parm), T, Arg, nullptr,
-                             CallLike, SemaProfiles::isValueCopySource(Parm));
+                             CallLike, SemaProfiles::isValueCopySource(Parm),
+                             Parm);
                 AppendAliasEscapes(Arg, T, CallLike);
               });
         };
@@ -4758,9 +4826,9 @@ static void extractStdInitEvents(
                                 DSites, JudgedLeaves, DestroyedObject);
     };
     // The element bindings of an aggregate initializer of type \p T: each
-    // pointer or reference field of a record (the bases consume the leading
-    // initializers, unnamed bit-fields none) is a member binding, each
-    // element of an array, vector, or complex a bare element binding. A
+    // base and field of a record (unnamed bit-fields consume no initializer)
+    // is a member binding, each element of an array, vector, or complex a
+    // bare element binding. A
     // field's default member initializer and a value-initialized filler
     // have no written source.
     auto AppendAggregateBindings = [&](QualType T, ArrayRef<Expr *> Inits,
@@ -4771,7 +4839,7 @@ static void extractStdInitEvents(
           return;
         AddBinding(Kind, Init->IgnoreImplicit()->getExprLoc(),
                    F && F->hasAttr<RefToUninitAttr>(), ElemT, Init, nullptr,
-                   Init);
+                   Init, /*EveryPath=*/false, F);
         AppendAliasEscapes(Init, ElemT, Init);
       };
       if (const RecordDecl *RD = T->getAsRecordDecl()) {
@@ -4783,9 +4851,13 @@ static void extractStdInitEvents(
             Judge(K::DataMember, UnionField, UnionField->getType(), Inits[0]);
           return;
         }
+        // A base subobject, which cannot carry the marker, consumes each
+        // leading initializer.
         unsigned I = 0;
         if (const auto *CRD = dyn_cast<CXXRecordDecl>(RD))
-          I = CRD->getNumBases();
+          for (const CXXBaseSpecifier &Base : CRD->bases())
+            if (I < Inits.size())
+              Judge(K::DataMember, nullptr, Base.getType(), Inits[I++]);
         for (const FieldDecl *F : RD->fields()) {
           if (F->isUnnamedBitField())
             continue;
@@ -4858,13 +4930,18 @@ static void extractStdInitEvents(
             RT = ReseatTargetFor(Elem, Steps.back().Field->getType());
           AppendReseat(Idx, CI->getInit(), RT.first, RT.second);
         }
+        // A base subobject cannot carry the marker.
+        if (CI->isBaseInitializer())
+          AddBinding(K::DataMember, CI->getSourceLocation(),
+                     /*TargetMarked=*/false, QualType(CI->getBaseClass(), 0),
+                     CI->getInit(), nullptr, CI->getInit());
         if (CI->isAnyMemberInitializer()) {
           const FieldDecl *F = CI->getAnyMember();
           if (!F)
             continue;
           AddBinding(K::DataMember, CI->getMemberLocation(),
                      F->hasAttr<RefToUninitAttr>(), F->getType(), CI->getInit(),
-                     nullptr, CI->getInit());
+                     nullptr, CI->getInit(), /*EveryPath=*/false, F);
           AppendAliasEscapes(CI->getInit(), F->getType(), CI->getInit());
           // A marked pointer member refers to what its initializer names.
           MemberStep Step{BasePath(), F};
@@ -5065,8 +5142,10 @@ static void extractStdInitEvents(
         AppendCallEvents(CE, Callee, DestroyedObject);
       } else if (const auto *CCE = dyn_cast<CXXConstructExpr>(St)) {
         // A constructor call's parameter bindings, the copy of a class object
-        // out of tracked storage included.
-        AppendArgumentBindings(CCE, SemaProfiles::CalleeLifecycleRoles());
+        // out of tracked storage included; a std-table construction's transfer
+        // arguments are judged where the handle lands.
+        AppendArgumentBindings(
+            CCE, SemaProfiles::getCalleeLifecycleRoles(CCE->getConstructor()));
       } else if (const auto *BBC = dyn_cast<BuiltinBitCastExpr>(St)) {
         // __builtin_bit_cast reads its operand whole, with no
         // lvalue-to-rvalue node.
@@ -5111,7 +5190,7 @@ static void extractStdInitEvents(
           if (V->isInitCapture()) {
             AddBinding(K::Variable, C.getLocation(),
                        V->hasAttr<RefToUninitAttr>(), V->getType(),
-                       V->getInit(), nullptr, LE);
+                       V->getInit(), nullptr, LE, /*EveryPath=*/false, V);
             AppendAliasEscapes(V->getInit(), V->getType(), LE);
             continue;
           }
@@ -5154,11 +5233,14 @@ static void extractStdInitEvents(
               BlockEvents.push_back({DefAssignEventKind::Reset, Idx, nullptr});
           // The variable's own binding (a decomposition's hidden variable
           // included); the DeclStmt element follows its initializer's
-          // subexpression elements, so the judgment sees their effects.
+          // subexpression elements, so the judgment sees their effects. An
+          // implicit handle local (range-for's __begin) stands for its
+          // initializer, which the handle walk sees through.
           if (const Expr *Init = V->getInit()) {
-            AddBinding(K::Variable, V->getLocation(),
-                       V->hasAttr<RefToUninitAttr>(), V->getType(), Init,
-                       nullptr, Init);
+            if (!V->isImplicit() || !SemaProfiles::isHandleType(V->getType()))
+              AddBinding(K::Variable, V->getLocation(),
+                         V->hasAttr<RefToUninitAttr>(), V->getType(), Init,
+                         nullptr, Init, /*EveryPath=*/false, V);
             AppendAliasEscapes(Init, V->getType(), Init);
             // A declared marked pointer or reference refers to what its
             // initializer names; a __block one can be reseated by a block
@@ -5242,7 +5324,7 @@ static void extractStdInitEvents(
         }
         AddBinding(K::Return, RV->IgnoreImplicit()->getExprLoc(),
                    Target && Target->hasAttr<RefToUninitAttr>(), T, RV, nullptr,
-                   RV);
+                   RV, /*EveryPath=*/false, Target);
         AppendAliasEscapes(RV, T, RV);
       } else if (const auto *TE = dyn_cast<CXXThrowExpr>(St)) {
         // The thrown pointer copy-initializes the exception object, which

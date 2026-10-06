@@ -14504,12 +14504,12 @@ def err_init_inherited_ctor_uninit_base : ProfileRule<
   "profile '%0'",
   ProfileStdInitCtorUninitMember>;
 def err_init_ref_to_uninit_requires_uninit : ProfileRule<
-  "%select{pointer|reference}1 marked '[[ref_to_uninit]]' must refer to "
-  "uninitialized memory under profile '%0'",
+  "%select{pointer|reference|handle of type %2}1 marked '[[ref_to_uninit]]' "
+  "must refer to uninitialized memory under profile '%0'",
   ProfileStdInitRefToUninit>;
 def err_init_uninit_requires_ref_to_uninit : ProfileRule<
-  "%select{pointer|reference}1 to uninitialized memory must be marked "
-  "'[[ref_to_uninit]]' under profile '%0'",
+  "%select{pointer|reference|handle of type %2}1 to uninitialized memory must "
+  "be marked '[[ref_to_uninit]]' under profile '%0'",
   ProfileStdInitRefToUninit>;
 def err_init_uninit_read_through : ProfileRule<
   "read %select{through a '[[ref_to_uninit]]' pointer or reference|"

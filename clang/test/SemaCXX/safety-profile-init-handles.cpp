@@ -7,6 +7,10 @@
 // RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -DLEADING_ERROR -fexceptions -fcxx-exceptions -isystem %t/sys %t/test.cpp
 // -Wunreachable-code makes the main path build a fully linearized CFG.
 // RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -Wunreachable-code -fexceptions -fcxx-exceptions -isystem %t/sys %t/test.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -fexceptions -fcxx-exceptions %t/libcxx.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -DLEADING_ERROR -fexceptions -fcxx-exceptions %t/libcxx.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -Wunreachable-code -fexceptions -fcxx-exceptions %t/libcxx.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %t/libcxx.cpp
 
 // std::init: a handle -- a smart pointer, a span, an iterator -- marked
 // [[ref_to_uninit]] refers to uninitialized memory (P4222R2 §4.6, §9.3).
@@ -130,7 +134,80 @@ public:
   unique_ptr(const unique_ptr &) = delete;
   unique_ptr &operator=(const unique_ptr &) = delete;
 };
+
+template <class T> class weak_ptr;
+template <class T> class shared_ptr {
+  T *_M_ptr;
+  void *_M_refcount;
+
+public:
+  using element_type = T;
+  constexpr shared_ptr() noexcept;
+  shared_ptr(const shared_ptr &) noexcept = default;
+  template <class Y> explicit shared_ptr(Y *p);
+  template <class Y, class D> shared_ptr(Y *p, D d);
+  template <class D> shared_ptr(nullptr_t p, D d);
+  template <class Y>
+  shared_ptr(const shared_ptr<Y> &r, element_type *p) noexcept;
+  template <class Y> shared_ptr(const shared_ptr<Y> &r) noexcept;
+  shared_ptr(shared_ptr &&r) noexcept;
+  template <class Y> explicit shared_ptr(const weak_ptr<Y> &r);
+  template <class Y, class D> shared_ptr(unique_ptr<Y, D> &&r);
+  constexpr shared_ptr(nullptr_t) noexcept;
+  ~shared_ptr();
+  shared_ptr &operator=(const shared_ptr &) noexcept = default;
+  T &operator*() const noexcept;
+  T *operator->() const noexcept;
+  T *get() const noexcept;
+};
+template <class T> class weak_ptr {
+  T *_M_ptr;
+
+public:
+  weak_ptr(const shared_ptr<T> &r) noexcept;
+};
+
+template <class It> class reverse_iterator {
+protected:
+  It current;
+
+public:
+  using iterator_type = It;
+  using reference = typename iterator_traits<It>::reference;
+  constexpr reverse_iterator() noexcept;
+  explicit constexpr reverse_iterator(iterator_type x) noexcept;
+  constexpr reverse_iterator(const reverse_iterator &x) noexcept;
+  template <class U> constexpr reverse_iterator(const reverse_iterator<U> &x);
+  constexpr reference operator*() const;
+  constexpr reverse_iterator &operator++();
+};
+
+namespace ranges {
+template <class It, class Sent = It> class subrange {
+  It _M_begin;
+  Sent _M_end;
+
+public:
+  subrange() = default;
+  template <class I> constexpr subrange(I i, Sent s);
+  constexpr It begin() const;
+  constexpr Sent end() const;
+};
+template <class It, class Sent> subrange(It, Sent) -> subrange<It, Sent>;
+} // namespace ranges
+
+template <class C> class basic_string {
+  C *_M_p;
+  size_t _M_n;
+
+public:
+  basic_string(const C *s);
+  basic_string(const basic_string &);
+  ~basic_string();
+};
+using string = basic_string<char>;
 } // namespace std
+extern "C" void *memset(void *, int, std::size_t);
 
 //--- test.cpp
 // no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
@@ -238,7 +315,7 @@ int range_for(std::span<int> s [[ref_to_uninit]]) {
 // A copy of a marked span and a local reference to one refer to the same
 // memory
 int copied_span(std::span<int> s [[ref_to_uninit]]) {
-  std::span<int> &r = s;
+  std::span<int> &r = s; // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   int a = r[0]; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
   return a + std::span<int>(s)[1]; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
 }
@@ -280,4 +357,206 @@ struct Holder {
 std::span<int> uninit_span [[ref_to_uninit]] ();
 int from_call() {
   return uninit_span()[0]; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+void sink(std::span<int> s);
+void sinkr(const std::span<int> &s);
+void fill(std::span<int> s [[ref_to_uninit]]);
+
+// A handle constructed from uninitialized storage must be marked
+void span_from_array() {
+  int arr [[uninit]] [4];
+  std::span<int> s(arr); // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  std::span<int> m [[ref_to_uninit]](arr);
+  (void)s, (void)m;
+}
+
+// Storage initialized on every path makes an unmarked handle
+int span_after_memset() {
+  int arr [[uninit]] [4];
+  memset(arr, 0, sizeof arr);
+  std::span<int> s(arr);
+  return s[0];
+}
+
+// A handle argument is judged where it binds the parameter
+void span_arguments() {
+  int arr [[uninit]] [4];
+  sink(arr); // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  sink(std::span<int>(arr, 4)); // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  fill(std::span(arr));
+}
+
+// A smart pointer owning a default-initialized object (P4222R2 §4.7)
+void unique_from_new() {
+  std::unique_ptr<int> p(new int); // expected-error {{handle of type 'std::unique_ptr<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  std::unique_ptr<int> q(new int(5));
+  std::unique_ptr<int> m [[ref_to_uninit]](new int);
+  std::unique_ptr<int> i [[ref_to_uninit]](new int(5)); // expected-error {{handle of type 'std::unique_ptr<int>' marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// An owner takes the pointer, never the deleter, and the aliasing pointer;
+// a null or default construction refers to nothing
+struct Del {
+  void operator()(int *) const;
+};
+void shared_constructions(std::shared_ptr<int> other) {
+  std::shared_ptr<int> a(new int, Del{}); // expected-error {{handle of type 'std::shared_ptr<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  std::shared_ptr<int> b(new int(1), Del{});
+  int u [[uninit]];
+  std::shared_ptr<int> c(other, &u); // expected-error {{handle of type 'std::shared_ptr<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  std::shared_ptr<int> d(nullptr);
+  std::shared_ptr<int> e [[ref_to_uninit]](nullptr);
+  std::shared_ptr<int> f [[ref_to_uninit]];
+  std::shared_ptr<int> g(nullptr, Del{});
+}
+
+// Every binding of a handle is judged
+struct SpanMember {
+  std::span<int> f;
+  SpanMember(std::span<int> s [[ref_to_uninit]])
+      : f(s) {} // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+};
+struct SpanAggregate {
+  std::span<int> f;
+};
+std::span<int> site_kinds(std::span<int> s [[ref_to_uninit]], bool c) {
+  std::span<int> t = s; // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  std::span<int> m = static_cast<std::span<int> &&>(s); // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  std::span<const int> cs = s; // expected-error {{handle of type 'std::span<const int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  SpanAggregate a{s}; // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  std::span<int> e[1] = {s}; // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  auto *n = new std::span<int>(s); // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  auto l = [s] { return s.size(); }; // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  if (c)
+    throw s; // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)t, (void)m, (void)cs, (void)a, (void)e, (void)n, (void)l;
+  return s; // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+std::span<int> marked_return [[ref_to_uninit]] (std::span<int> s [[ref_to_uninit]]) {
+  return s;
+}
+
+// A conditional of a marked and an unmarked handle is Mixed (P4222R2 §4.9)
+void mixed_handles(bool c, std::span<int> sm [[ref_to_uninit]],
+                   std::span<int> su) {
+  std::span<int> x = c ? sm : su; // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  std::span<int> y [[ref_to_uninit]] = c ? sm : su; // expected-error {{handle of type 'std::span<int>' marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)x, (void)y;
+}
+
+// A class outside the table takes no raw storage: its constructor's pointer
+// parameter is an ordinary binding, and the object is initialized
+void string_from_buffer(char *buf [[ref_to_uninit]]) {
+  std::string t [[ref_to_uninit]](buf); // expected-error {{handle of type 'std::string' (aka 'basic_string<char>') marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}} \
+                                        // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// A discarded temporary handle is not judged; a handle bound to an unmarked
+// reference to a handle is judged as the handle
+void reference_bound_handles(std::span<int> s [[ref_to_uninit]]) {
+  int arr [[uninit]] [4];
+  std::span<int>(arr, 4);
+  sinkr(s); // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// A handle a temporary builds over raw storage lands in a reference to a
+// handle, a local reference, or a by-reference capture as an unmarked handle
+void rref_sink(std::span<int> &&s);
+void reference_landings(int *raw [[ref_to_uninit]],
+                        std::span<int> m [[ref_to_uninit]], std::span<int> u) {
+  int arr [[uninit]] [4];
+  sinkr(arr); // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  sinkr(std::span<int>(raw, 4)); // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  rref_sink({raw, 4}); // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  const std::span<int> &r = m; // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  auto l = [&m] { return m.size(); }; // expected-error {{capturing 'm' by reference binds a reference to uninitialized memory under profile 'std::init'}}
+  const std::span<int> &ok = u;
+  sinkr(u);
+  (void)r, (void)l, (void)ok;
+}
+
+// A base subobject cannot carry the marker
+struct SpanBase : std::span<int> {
+  SpanBase(int *p [[ref_to_uninit]])
+      : std::span<int>(p, 4) {} // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+};
+struct OwnerBase : std::unique_ptr<int> {
+  OwnerBase() : std::unique_ptr<int>(new int) {} // expected-error {{handle of type 'std::unique_ptr<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+};
+struct SpanAggBase : std::span<int> {
+  int k;
+};
+void aggregate_base(int *raw [[ref_to_uninit]]) {
+  SpanAggBase a{std::span<int>(raw, 4), 1}; // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)a;
+}
+
+// The last iterator of a (first, last) construction bounds the range
+void first_last(int *p, int *e [[ref_to_uninit]]) {
+  std::span<int> s(p, e);
+  std::ranges::subrange sr(p, e);
+  (void)s, (void)sr;
+}
+
+// An author-marked constructor parameter makes its object a handle to what
+// the parameter takes
+struct Buf {
+  Buf(int *p [[ref_to_uninit]]);
+};
+void author_marked() {
+  int u [[uninit]];
+  Buf b(&u); // expected-error {{handle of type 'Buf' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  int v [[uninit]];
+  Buf m [[ref_to_uninit]](&v);
+  (void)b, (void)m;
+}
+
+// A member of a std-table handle returning another of its kind (a
+// subrange's iterator) inherits its state
+int subrange_iterator(std::span<int> s [[ref_to_uninit]]) {
+  std::ranges::subrange<std::span<int>::iterator> sr [[ref_to_uninit]](
+      s.begin(), s.end());
+  return *sr.begin(); // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// The iterator adaptors and ranges::subrange are in the table
+void adaptors(int *p [[ref_to_uninit]]) {
+  std::reverse_iterator<int *> r(p); // expected-error {{handle of type 'std::reverse_iterator<int *>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  std::reverse_iterator<int *> m [[ref_to_uninit]](p);
+  std::ranges::subrange sr(p, p + 4); // expected-error {{handle of type 'std::ranges::subrange<int *, int *>' (aka 'subrange<int *, int *>') to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  std::ranges::subrange sm [[ref_to_uninit]](p, p + 4);
+  (void)r, (void)m, (void)sr, (void)sm;
+}
+
+//--- libcxx.cpp
+// libc++'s pointer wrapper, std::__1::__wrap_iter, is in the table.
+// no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
+[[profiles::enforce(std::init)]];
+
+#ifdef LEADING_ERROR
+int leading_unrelated_error = undeclared_identifier;
+// expected-error@-1 {{use of undeclared identifier 'undeclared_identifier'}}
+// no-profiles-error@-2 {{use of undeclared identifier 'undeclared_identifier'}}
+#endif
+namespace std {
+inline namespace __1 {
+template <class Iter> class __wrap_iter {
+  Iter __i_;
+
+public:
+  __wrap_iter() noexcept : __i_() {}
+  explicit __wrap_iter(Iter x) noexcept : __i_(x) {}
+  template <class Other> __wrap_iter(const __wrap_iter<Other> &u) noexcept;
+  decltype(*__i_) operator*() const noexcept { return *__i_; }
+};
+} // namespace __1
+} // namespace std
+
+int wrap(int *p [[ref_to_uninit]]) {
+  std::__wrap_iter<int *> w(p); // expected-error {{handle of type 'std::__wrap_iter<int *>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  std::__wrap_iter<int *> m [[ref_to_uninit]](p);
+  std::__wrap_iter<const int *> c = m; // expected-error {{handle of type 'std::__wrap_iter<const int *>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)w, (void)c;
+  return *m; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
 }

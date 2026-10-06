@@ -518,6 +518,13 @@ public:
   InitSourceState classifyInitAccessLeaf(const ShapeLeaf &Leaf,
                                          InitAccessKind Kind,
                                          const Decl *Body) const;
+  struct HandleLeaf;
+  /// Classify the leaf \p Leaf of a handle source (forEachHandleSourceLeaf)
+  /// by its form alone, taking the arms its \c Arms list, for the CFG pass's
+  /// judgment of a handle binding with tracked leaves; \p Body as for
+  /// classifyInitBindingLeaf.
+  InitSourceState classifyInitHandleLeaf(const HandleLeaf &Leaf,
+                                         const Decl *Body) const;
 
   /// True if \p P is the source parameter of a copy or move constructor or
   /// of a copy or move assignment operator (after an explicit object
@@ -585,15 +592,16 @@ public:
   /// its argument is judged where the result is used.
   static bool isShapeTransparentBuiltin(unsigned BuiltinID);
 
-  /// The construct a pointer or reference binding belongs to, selecting
-  /// which declaration can carry [[ref_to_uninit]] and which diagnostic
-  /// wording applies (see checkInitProfileBinding).
+  /// The construct a pointer, reference, or handle binding belongs to,
+  /// selecting which declaration can carry [[ref_to_uninit]] and which
+  /// diagnostic wording applies (see checkInitProfileBinding).
   enum class InitBindingKind : unsigned {
     /// A variable's initializer, an init-capture included; the target is the
     /// VarDecl.
     Variable,
     /// A data member's initializer -- NSDMI, mem-initializer, or an
-    /// aggregate's field element; the target is the FieldDecl.
+    /// aggregate's field element; the target is the FieldDecl. A base
+    /// subobject's, which cannot carry the marker, has none.
     DataMember,
     /// A call argument's parameter copy-initialization, or a default
     /// argument at its declaration; the target is the ParmVarDecl, null for
@@ -630,6 +638,18 @@ public:
     /// (checkInitProfileObjectArgument), which cannot carry the marker.
     ObjectArgument
   };
+
+  /// True if an unmarked target of type \p T bound by a \p Kind binding also
+  /// binds the handle \p T refers to, judged as an unmarked handle binding
+  /// (P4222R2 §4.6; a reference to a class cannot carry the handle's
+  /// marking): a reference to a handle (isHandleType), except the implicit
+  /// object parameter, a parameter of a comparison or of a + or - operator
+  /// (which compares or positions handles), the source of a copy or move
+  /// constructor or assignment (judged where the copy lands), and an implicit
+  /// local (range-for's __range). \p Target is the bound declaration, if
+  /// any.
+  static bool bindsHandleByReference(InitBindingKind Kind, QualType T,
+                                     const ValueDecl *Target);
 
   /// What ends a lifetime, as the select of the double_destroy and
   /// destroy_uninit diagnostics.
@@ -846,6 +866,9 @@ public:
     /// -ffreestanding leaves: the name says what the function is meant to
     /// be, but its semantics cannot be assumed.
     bool KnownTrusted = false;
+    /// The callee constructs a std-table handle from raw storage (see
+    /// ProfilesFrameworkInternals.rst, "Handles (std::init)").
+    bool HandleConstruction = false;
     /// The parameter whose storage the call may or may not destroy, an
     /// opaque callee's: the pointer of std::allocator_traits<A>::destroy when
     /// A declares its own destroy, which the traits call in place of
@@ -873,6 +896,9 @@ public:
     /// basis: a marked parameter of a [[now_init]] callee, or a trusted
     /// row's Construct or InitializeAnyState role.
     bool initializesParam(const ParmVarDecl *P) const;
+    /// True if \p P is a transfer parameter of a std-table handle
+    /// construction: its binding is judged where the handle lands, not here.
+    bool transfersParam(const ParmVarDecl *P) const;
   };
   /// The value type of the handle type \p T (or a reference to one) as an
   /// iterator or a range: its \c value_type member type, else the
@@ -940,8 +966,10 @@ private:
   /// the marker -- against the target's marking: a marked target must refer
   /// to uninitialized memory, an unmarked one must not. The one binding
   /// funnel: every host passes its \p Kind, and a kind whose construct cannot
-  /// carry the marker is judged unmarked whatever \p Target is. No-op unless
-  /// \p T is a non-dependent pointer or reference. \p D, when available,
+  /// carry the marker is judged unmarked whatever \p Target is, and an
+  /// unmarked reference to a handle also as the handle
+  /// (bindsHandleByReference). No-op unless \p T is a non-dependent pointer,
+  /// reference, or handle (isHandleType). \p D, when available,
   /// supplies the template-deferral rung: with it the rule fires on
   /// the instantiation only; without it an instantiation-dependent \p Src
   /// defers to the rebuild and a non-dependent one is judged on the pattern
@@ -1027,10 +1055,11 @@ public:
   /// hand each to \p F: peel parens, full expressions, temporaries, the
   /// no-op, constructor, derived-to-base, and user-defined conversions, and
   /// the pass-through forms; follow a copy or move construction to its
-  /// source, a member call returning the handle itself to its object, and an
-  /// implicit local or an unmarked local reference to its initializer; and
-  /// distribute every conditional into one leaf per arm. The one walk shared
-  /// by the parse-time recognizers and the CFG pass.
+  /// source, a std-table construction to its transfer arguments, a member
+  /// call returning the handle itself to its object, and an implicit local
+  /// or an unmarked local reference to its initializer; and distribute every
+  /// conditional into one leaf per arm. The one walk shared by the
+  /// parse-time recognizers and the CFG pass.
   static void
   forEachHandleSourceLeaf(const Expr *Src,
                           llvm::function_ref<void(const HandleLeaf &)> F);

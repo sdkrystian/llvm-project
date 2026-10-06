@@ -2069,6 +2069,108 @@ static KnownCalleeMatch matchKnownCallee(const FunctionDecl *FD) {
   return {};
 }
 
+namespace {
+/// What a class of the std handle table (getStdHandleKind) is.
+enum class StdHandleKind {
+  None,
+  /// A view or iterator: std::span, std::ranges::subrange, the iterator
+  /// adaptors, and the library-internal pointer wrappers.
+  View,
+  /// An owning smart pointer: std::unique_ptr, std::shared_ptr.
+  Owner
+};
+} // namespace
+
+/// The std handle table: the standard classes through whose construction raw
+/// storage enters a handle (P4222R2 §4.7, §9.3), by name and namespace --
+/// libc++'s std::__wrap_iter and libstdc++'s __gnu_cxx::__normal_iterator
+/// included.
+static StdHandleKind getStdHandleKind(const CXXRecordDecl *RD) {
+  const IdentifierInfo *II = RD ? RD->getIdentifier() : nullptr;
+  if (!II)
+    return StdHandleKind::None;
+  StringRef Name = II->getName();
+  if (RD->isInStdNamespace()) {
+    if (Name == "unique_ptr" || Name == "shared_ptr")
+      return StdHandleKind::Owner;
+    if (Name == "span" || Name == "reverse_iterator" ||
+        Name == "move_iterator" || Name == "basic_const_iterator" ||
+        Name == "__wrap_iter")
+      return StdHandleKind::View;
+    return StdHandleKind::None;
+  }
+  if (Name == "subrange")
+    return enclosingStdSubNamespace(RD, "ranges") ? StdHandleKind::View
+                                                  : StdHandleKind::None;
+  if (Name == "__normal_iterator") {
+    const auto *NS = dyn_cast<NamespaceDecl>(RD->getDeclContext());
+    return NS && NS->getIdentifier() && NS->getName() == "__gnu_cxx" &&
+                   NS->getParent()->isTranslationUnit()
+               ? StdHandleKind::View
+               : StdHandleKind::None;
+  }
+  return StdHandleKind::None;
+}
+
+/// How a transfer parameter of type \p T is classified: a pointer, or a
+/// read-only alias of one, by its value; a reference to a class, or a class,
+/// as a range; and any other reference as storage.
+static SemaProfiles::HandleLeaf::Mode handleTransferModeOf(QualType T) {
+  using Mode = SemaProfiles::HandleLeaf::Mode;
+  if (T->isPointerType() || SemaProfiles::pointerAliasKind(T) ==
+                                SemaProfiles::PointerAliasKind::ReadOnly)
+    return Mode::PointerValue;
+  if (T.getNonReferenceType()->getAsCXXRecordDecl())
+    return Mode::Range;
+  return Mode::Storage;
+}
+
+/// The mode of \p P when it is a *transfer parameter* -- one through which
+/// raw storage enters a std-table handle under construction -- or none. Of
+/// a view's constructors other than copy and move, every parameter not of
+/// integral, enumeration, floating, or std::nullptr_t type (after its
+/// reference and qualifiers). Of an owner's, the first object pointer taken
+/// by value -- never a deleter or an allocator; only the pointer of the
+/// aliasing constructor -- or, with none, each parameter whose class is an
+/// owner (a converting constructor).
+static std::optional<SemaProfiles::HandleLeaf::Mode>
+handleTransferMode(const ParmVarDecl *P) {
+  const auto *Ctor = dyn_cast<CXXConstructorDecl>(P->getDeclContext());
+  if (!Ctor || Ctor->isCopyOrMoveConstructor())
+    return std::nullopt;
+  QualType T = P->getType();
+  QualType Bare = T.getNonReferenceType().getUnqualifiedType();
+  switch (getStdHandleKind(Ctor->getParent())) {
+  case StdHandleKind::None:
+    return std::nullopt;
+  case StdHandleKind::View:
+    if (Bare->isIntegralOrEnumerationType() || Bare->isFloatingType() ||
+        Bare->isNullPtrType())
+      return std::nullopt;
+    return handleTransferModeOf(T);
+  case StdHandleKind::Owner: {
+    auto IsObjectPointer = [](const ParmVarDecl *Q) {
+      QualType QT = Q->getType();
+      return QT->isPointerType() && !QT->isFunctionPointerType();
+    };
+    const auto *It = llvm::find_if(Ctor->parameters(), IsObjectPointer);
+    if (It != Ctor->param_end())
+      return *It == P ? std::optional(handleTransferModeOf(T)) : std::nullopt;
+    if (getStdHandleKind(Bare->getAsCXXRecordDecl()) == StdHandleKind::Owner)
+      return handleTransferModeOf(T);
+    return std::nullopt;
+  }
+  }
+  llvm_unreachable("unknown StdHandleKind");
+}
+
+/// True if \p Ctor constructs a std-table handle from raw storage: a
+/// constructor of a table class other than its copy and move constructors.
+static bool isStdHandleConstruction(const CXXConstructorDecl *Ctor) {
+  return !Ctor->isCopyOrMoveConstructor() &&
+         getStdHandleKind(Ctor->getParent()) != StdHandleKind::None;
+}
+
 // Releasing storage leaves it as uninitialized as ending the object's
 // lifetime does, so the binding sites treat a release role like a destroy --
 // except for the double-destroy check: destroy_at(p); free(p); is correct,
@@ -2085,6 +2187,8 @@ SemaProfiles::getCalleeLifecycleRoles(const FunctionDecl *FD) {
   SemaProfiles::CalleeLifecycleRoles Roles;
   Roles.InitializesRefToUninitParams = FD->hasAttr<NowInitAttr>();
   Roles.DestroysPointerParams = FD->hasAttr<NowUninitAttr>();
+  if (const auto *Ctor = dyn_cast<CXXConstructorDecl>(FD))
+    Roles.HandleConstruction = isStdHandleConstruction(Ctor);
   KnownCalleeMatch M = matchKnownCallee(FD);
   if (!M.Entry || M.Entry->Role == KnownParamRole::None ||
       M.Entry->Param >= FD->getNumParams())
@@ -2164,6 +2268,11 @@ bool SemaProfiles::CalleeLifecycleRoles::initializesParam(
                           R == KnownParamRole::InitializeAnyState);
 }
 
+bool SemaProfiles::CalleeLifecycleRoles::transfersParam(
+    const ParmVarDecl *P) const {
+  return HandleConstruction && handleTransferMode(P);
+}
+
 /// The object a call to the non-static member function \p MD binds to its
 /// object parameter in \p CE -- a dot call's object, a member operator's
 /// first argument, or an explicit-object method's -- or null; an arrow call
@@ -2238,10 +2347,10 @@ QualType SemaProfiles::handleValueType(QualType T) {
 
 /// True if the class \p R a member of \p RD returns by value is a handle to
 /// what an object of \p RD refers to: \p RD itself, another specialization of
-/// its class template, or a class of its value type
-/// (SemaProfiles::handleValueType) -- `s.subspan(1)`, `s.first<2>()`,
-/// `s.begin()` -- and not any other class a member returns (a name, a
-/// duration).
+/// its class template, a std-table class of \p RD's kind (getStdHandleKind),
+/// or a class of its value type (SemaProfiles::handleValueType) --
+/// s.subspan(1), s.first<2>(), s.begin() -- and not any other class a
+/// member returns (a name, a duration).
 static bool isHandleResultOf(QualType R, const CXXRecordDecl *RD) {
   const CXXRecordDecl *RRD = R->getAsCXXRecordDecl();
   if (!RRD)
@@ -2253,6 +2362,9 @@ static bool isHandleResultOf(QualType R, const CXXRecordDecl *RD) {
     return CTSD ? CTSD->getSpecializedTemplate()->getCanonicalDecl() : nullptr;
   };
   if (const ClassTemplateDecl *T = TemplateOf(RRD); T && T == TemplateOf(RD))
+    return true;
+  if (StdHandleKind K = getStdHandleKind(RD);
+      K != StdHandleKind::None && K == getStdHandleKind(RRD))
     return true;
   ASTContext &Ctx = RD->getASTContext();
   QualType RV = SemaProfiles::handleValueType(R);
@@ -2399,12 +2511,40 @@ struct HandleSourceWalk {
       return;
     }
     if (const auto *CCE = dyn_cast<CXXConstructExpr>(E)) {
-      if (CCE->getConstructor()->isCopyOrMoveConstructor() &&
-          CCE->getNumArgs() >= 1) {
+      const CXXConstructorDecl *Ctor = CCE->getConstructor();
+      if (Ctor->isCopyOrMoveConstructor() && CCE->getNumArgs() >= 1) {
         walk(CCE->getArg(0), Partial);
         return;
       }
-      emit(E, HandleLeaf::Mode::Handle, Partial);
+      // A std-table construction's state is its transfer arguments'.
+      bool Any = false;
+      if (isStdHandleConstruction(Ctor))
+        for (unsigned I = 0,
+                      N = std::min(CCE->getNumArgs(), Ctor->getNumParams());
+             I != N; ++I) {
+          const Expr *Arg = CCE->getArg(I);
+          if (isa<CXXDefaultArgExpr>(Arg))
+            continue;
+          const ParmVarDecl *P = Ctor->getParamDecl(I);
+          std::optional<HandleLeaf::Mode> M = handleTransferMode(P);
+          if (!M)
+            continue;
+          // A pointer's value is classified through the operand a binding
+          // of it classifies (SemaProfiles::bindingSourceOperand).
+          bool AsPointerValue;
+          if (*M == HandleLeaf::Mode::PointerValue)
+            Arg = SemaProfiles::bindingSourceOperand(Arg, P->getType(),
+                                                     AsPointerValue);
+          if (!Arg)
+            continue;
+          emit(Arg, *M, Partial);
+          Any = true;
+          // A later transfer argument -- a sentinel or last iterator --
+          // bounds the range.
+          break;
+        }
+      if (!Any)
+        emit(E, HandleLeaf::Mode::Handle, Partial);
       return;
     }
     if (const auto *CE = dyn_cast<CallExpr>(E)) {
@@ -2460,23 +2600,28 @@ static UninitStorage classifyHandleSource(ASTContext &Ctx, const Expr *E,
 /// member is Uninitialized when marked and Initialized otherwise, except
 /// that a marked reference to a class is Unknown (it refers to the handle's
 /// own uninitialized storage); a call takes its marked callee's state, and
-/// is otherwise Initialized, or Unknown with no direct callee; a
-/// construction with an author-marked parameter is Uninitialized; an
-/// initializer list is Unknown; and any other glvalue -- a handle reached
-/// through storage -- is Initialized when that storage is, and Unknown
-/// otherwise.
+/// is otherwise Initialized, or Unknown with no direct callee; a std-table
+/// construction with no transfer argument is Unknown, and any other
+/// construction is Uninitialized when its constructor has an author-marked
+/// parameter; an initializer list is Unknown; and any other glvalue -- a
+/// handle reached through storage -- is Initialized when that storage is,
+/// and Unknown otherwise.
 static UninitStorage classifyHandleTerminal(ASTContext &Ctx, const Expr *E,
                                             UninitAccessOpts Opts) {
   E = E->IgnoreParenImpCasts();
   if (isa<InitListExpr, CXXParenListInitExpr, RecoveryExpr>(E))
     return UninitStorage::Unknown;
-  if (const auto *CCE = dyn_cast<CXXConstructExpr>(E))
-    return llvm::any_of(CCE->getConstructor()->parameters(),
+  if (const auto *CCE = dyn_cast<CXXConstructExpr>(E)) {
+    const CXXConstructorDecl *Ctor = CCE->getConstructor();
+    if (isStdHandleConstruction(Ctor))
+      return UninitStorage::Unknown;
+    return llvm::any_of(Ctor->parameters(),
                         [](const ParmVarDecl *P) {
                           return P->hasAttr<RefToUninitAttr>();
                         })
                ? UninitStorage::Uninitialized
                : UninitStorage::Initialized;
+  }
   if (const auto *CE = dyn_cast<CallExpr>(E)) {
     const FunctionDecl *FD = CE->getDirectCallee();
     if (!FD)
@@ -2917,25 +3062,29 @@ static bool bindingTargetCanCarryMarker(SemaProfiles::InitBindingKind Kind) {
 }
 
 /// The verdict step of the binding funnel: diagnose binding a source in
-/// \p SrcState to a target whose marking is \p TargetMarked, in \p Kind's
-/// wording. A marked target rejects an affirmatively Initialized source and
-/// an unmarked one an affirmatively Uninitialized source; a Mixed source is
-/// rejected by both (P4222R2 §4.9), and an Unknown source (pointer
+/// \p SrcState as \p T to a target whose marking is \p TargetMarked, in
+/// \p Kind's wording. A marked target rejects an affirmatively Initialized
+/// source and an unmarked one an affirmatively Uninitialized source; a Mixed
+/// source is rejected by both (P4222R2 §4.9), and an Unknown source (pointer
 /// arithmetic, an integer-to-pointer cast, a call through a function pointer)
 /// by neither. \p Subject is the entity the ByRefCapture and ObjectArgument
 /// wordings name.
 static void diagnoseBindingVerdict(SemaProfiles &SP,
                                    SemaProfiles::InitBindingKind Kind,
                                    SourceLocation Loc, bool TargetMarked,
-                                   bool IsReference, UninitStorage SrcState,
+                                   QualType T, UninitStorage SrcState,
                                    const NamedDecl *Subject) {
   using K = SemaProfiles::InitBindingKind;
   static constexpr StringRef Profile = "std::init";
+  // The shape select of the binding diagnostics: pointer, reference, handle.
+  unsigned Shape = T->isReferenceType()            ? 1
+                   : SemaProfiles::isHandleType(T) ? 2
+                                                   : 0;
   if (TargetMarked) {
     if (SrcState == UninitStorage::Initialized ||
         SrcState == UninitStorage::Mixed)
       SP.Diag(Loc, diag::err_init_ref_to_uninit_requires_uninit)
-          << Profile << (IsReference ? 1 : 0);
+          << Profile << Shape << T;
     return;
   }
   if (!isUninitializedOrMixed(SrcState))
@@ -2949,7 +3098,7 @@ static void diagnoseBindingVerdict(SemaProfiles &SP,
     return;
   default:
     SP.Diag(Loc, diag::err_init_uninit_requires_ref_to_uninit)
-        << Profile << (IsReference ? 1 : 0);
+        << Profile << Shape << T;
     return;
   }
 }
@@ -3066,6 +3215,10 @@ void SemaProfiles::checkInitProfileBinding(const InitializedEntity &Entity,
   switch (Entity.getKind()) {
   case InitializedEntity::EK_Variable: {
     const ValueDecl *Var = Entity.getDecl();
+    // An implicit handle local (range-for's __begin) stands for its
+    // initializer, which the handle walk sees through.
+    if (Var->isImplicit() && isHandleType(Entity.getType()))
+      return;
     checkInitProfileBinding(InitBindingKind::Variable, Loc, Var,
                             Entity.getType(), Src, Var);
     return;
@@ -3085,6 +3238,16 @@ void SemaProfiles::checkInitProfileBinding(const InitializedEntity &Entity,
                             Entity.getType(), Src, D);
     return;
   }
+  case InitializedEntity::EK_Base:
+    // A base subobject -- of a written base initializer or an aggregate's
+    // base element -- cannot carry the marker.
+    checkInitProfileBinding(InitBindingKind::DataMember, Loc,
+                            /*Target=*/nullptr, Entity.getType(), Src,
+                            !Entity.getParent() &&
+                                    isa<CXXConstructorDecl>(SemaRef.CurContext)
+                                ? cast<Decl>(SemaRef.CurContext)
+                                : nullptr);
+    return;
   case InitializedEntity::EK_ArrayElement:
   case InitializedEntity::EK_VectorElement:
   case InitializedEntity::EK_ComplexElement:
@@ -3134,6 +3297,12 @@ void SemaProfiles::checkInitProfileBinding(const InitializedEntity &Entity,
         judgeInitProfileBinding(InitBindingKind::ByRefCapture, Loc,
                                 /*TargetMarked=*/false, Entity.getType(), Src,
                                 D, Var);
+        if (bindsHandleByReference(InitBindingKind::ByRefCapture,
+                                   Entity.getType(), /*Target=*/nullptr))
+          judgeInitProfileBinding(
+              InitBindingKind::ByRefCapture, Loc, /*TargetMarked=*/false,
+              Entity.getType().getNonReferenceType().getUnqualifiedType(), Src,
+              D, Var);
         return;
       }
       checkInitProfileBinding(InitBindingKind::Variable, Loc,
@@ -3162,7 +3331,6 @@ void SemaProfiles::judgeInitProfileBinding(
     InitBindingKind Kind, SourceLocation Loc, bool TargetMarked, QualType T,
     const Expr *Src, const Decl *D, const NamedDecl *Subject,
     const Decl *AfterFlowPass, bool ValueCopy) {
-  bool IsReference = T->isReferenceType();
   // A RecoveryExpr is a placeholder for an initialization that already failed,
   // not a source the user wrote, so it must not drive this rule; see also
   // inRebuiltOrSynthesizedCode.
@@ -3204,9 +3372,47 @@ void SemaProfiles::judgeInitProfileBinding(
           .withThisUnderConstruction(thisIsUnderConstruction(AfterFlowPass))
           .withUninitMemberTrust(ValueCopy &&
                                  trustsUninitMembers(AfterFlowPass));
-  diagnoseBindingVerdict(*this, Kind, Loc, TargetMarked, IsReference,
+  diagnoseBindingVerdict(*this, Kind, Loc, TargetMarked, T,
                          classifyUninitSource(getASTContext(), Src, T, Opts),
                          Subject);
+}
+
+bool SemaProfiles::bindsHandleByReference(InitBindingKind Kind, QualType T,
+                                          const ValueDecl *Target) {
+  if (Kind == InitBindingKind::ObjectArgument || !T->isReferenceType() ||
+      !isHandleType(T.getNonReferenceType()))
+    return false;
+  const auto *V = dyn_cast_or_null<VarDecl>(Target);
+  if (V && V->isImplicit())
+    return false;
+  const auto *P = dyn_cast_or_null<ParmVarDecl>(V);
+  // A comparison or a + or - compares or positions its handles.
+  if (const auto *FD =
+          P ? dyn_cast<FunctionDecl>(P->getDeclContext()) : nullptr) {
+    switch (FD->getOverloadedOperator()) {
+    case OO_EqualEqual:
+    case OO_ExclaimEqual:
+    case OO_Less:
+    case OO_Greater:
+    case OO_LessEqual:
+    case OO_GreaterEqual:
+    case OO_Spaceship:
+    case OO_Plus:
+    case OO_Minus:
+      return false;
+    default:
+      break;
+    }
+  }
+  // The source of a copy or move constructor, or of an assignment, which
+  // binds where the copy lands.
+  const auto *MD = P ? dyn_cast<CXXMethodDecl>(P->getDeclContext()) : nullptr;
+  if (!MD || P->getFunctionScopeIndex() !=
+                 (MD->isExplicitObjectMemberFunction() ? 1u : 0u))
+    return true;
+  if (const auto *Ctor = dyn_cast<CXXConstructorDecl>(MD))
+    return !Ctor->isCopyOrMoveConstructor();
+  return MD->getOverloadedOperator() != OO_Equal;
 }
 
 bool SemaProfiles::isDefaultedComparison(const FunctionDecl *FD) {
@@ -3268,6 +3474,28 @@ SemaProfiles::classifyInitBindingLeaf(const ShapeLeaf &Leaf, QualType T,
           .withArms(Leaf.Arms)
           .withUninitMemberTrust(ValueCopy);
   switch (classifyUninitSource(getASTContext(), Leaf.E, T, Opts)) {
+  case UninitStorage::Initialized:
+    return InitSourceState::Initialized;
+  case UninitStorage::Uninitialized:
+    return InitSourceState::Uninitialized;
+  case UninitStorage::Unknown:
+    return InitSourceState::Unknown;
+  case UninitStorage::Mixed:
+    return InitSourceState::Mixed;
+  }
+  llvm_unreachable("unknown UninitStorage");
+}
+
+SemaProfiles::InitSourceState
+SemaProfiles::classifyInitHandleLeaf(const HandleLeaf &Leaf,
+                                     const Decl *Body) const {
+  const CXXMethodDecl *MD =
+      enclosingInstanceMethod(dyn_cast_or_null<DeclContext>(Body));
+  UninitAccessOpts Opts =
+      UninitBindAccess
+          .withThisUnderConstruction(isa_and_nonnull<CXXConstructorDecl>(MD))
+          .withArms(Leaf.Arms);
+  switch (classifyHandleLeaf(getASTContext(), Leaf, Opts)) {
   case UninitStorage::Initialized:
     return InitSourceState::Initialized;
   case UninitStorage::Uninitialized:
@@ -3953,18 +4181,29 @@ bool SemaProfiles::hasFlowTrackedLeaf(const Expr *Src, QualType T,
                                       FlowLeafUse Use) const {
   if (!Src || T.isNull())
     return false;
+  bool Any = false;
+  auto Collect = [&](const Expr *E, bool AsPointerValue) {
+    forEachTargetLeaf(E, [&](const ShapeLeaf &Leaf) {
+      if (!isFlowTrackedLeaf(Leaf, AsPointerValue, SemaRef.CurContext, Use))
+        return;
+      Any = true;
+      if (Leaves && !llvm::is_contained(*Leaves, Leaf.E))
+        Leaves->push_back(Leaf.E);
+    });
+  };
+  // A handle's tracked leaves are those of the storage its walk reaches.
+  if (isHandleType(T)) {
+    forEachHandleSourceLeaf(Src, [&](const HandleLeaf &L) {
+      if (L.M != HandleLeaf::Mode::Handle)
+        Collect(L.E, L.M == HandleLeaf::Mode::PointerValue);
+    });
+    return Any;
+  }
   bool AsPointerValue;
   Src = bindingSourceOperand(Src, T, AsPointerValue);
   if (!Src)
     return false;
-  bool Any = false;
-  forEachTargetLeaf(Src, [&](const ShapeLeaf &Leaf) {
-    if (!isFlowTrackedLeaf(Leaf, AsPointerValue, SemaRef.CurContext, Use))
-      return;
-    Any = true;
-    if (Leaves && !llvm::is_contained(*Leaves, Leaf.E))
-      Leaves->push_back(Leaf.E);
-  });
+  Collect(Src, AsPointerValue);
   return Any;
 }
 
@@ -3974,7 +4213,7 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
                                            const Expr *Src, const Decl *D) {
   // See inRebuiltOrSynthesizedCode.
   if (!isProfileLive("std::init") || T.isNull() || T->isDependentType() ||
-      (!T->isPointerType() && !T->isReferenceType()) ||
+      (!T->isPointerType() && !T->isReferenceType() && !isHandleType(T)) ||
       inRebuiltOrSynthesizedCode())
     return;
   const auto *Parm = dyn_cast_or_null<ParmVarDecl>(Target);
@@ -3993,8 +4232,10 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
       Target && bindingTargetCanCarryMarker(Kind) &&
       (Parm ? Roles.isMarkedParam(Parm) : Target->hasAttr<RefToUninitAttr>());
   // An initializing parameter or a range's end iterator accepts storage in
-  // any state.
-  if (Parm && (Roles.isInitializingParam(Parm) || Roles.isEndParam(Parm)))
+  // any state; a transfer parameter's storage is judged where the handle
+  // under construction lands.
+  if (Parm && (Roles.isInitializingParam(Parm) || Roles.isEndParam(Parm) ||
+               Roles.transfersParam(Parm)))
     return;
   bool Destroys = Parm && Roles.destroysParam(Parm);
   if (Destroys || (Parm && Roles.releasesParam(Parm, /*TrustedOnly=*/false))) {
@@ -4036,6 +4277,10 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
                             /*Subject=*/nullptr, /*AfterFlowPass=*/nullptr,
                             /*ValueCopy=*/!TargetMarked &&
                                 isValueCopySource(Parm));
+    if (!TargetMarked && bindsHandleByReference(Kind, T, Target))
+      judgeInitProfileBinding(Kind, Loc, /*TargetMarked=*/false,
+                              T.getNonReferenceType().getUnqualifiedType(), Src,
+                              D);
   }
 }
 

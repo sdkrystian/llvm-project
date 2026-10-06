@@ -810,7 +810,11 @@ follows:
        parameters (a placement argument with its allocation function's)
        through one walk,
        ``forEachArgumentBinding``, which the lifecycle arm
-       (``appendLifecycleCallEvents``) shares; ``classifyPointerGlvalue`` judges a
+       (``appendLifecycleCallEvents``) shares; a handle-typed target
+       (``isHandleType``) classifies its source through the handle walk, and
+       a std-table construction's transfer parameters
+       (``CalleeLifecycleRoles::transfersParam``) are judged where the
+       handle lands; ``classifyPointerGlvalue`` judges a
        reference-to-pointer binding by the pointer's value (a read-only
        alias) or not at all (a mutable alias); a defaulted argument is a
        Parameter binding at its declaration
@@ -932,9 +936,9 @@ the no-op, constructor, derived-to-base, and user-defined conversions, and the
 pass-through forms; it follows a copy or move construction to its source, a
 member call that returns the handle itself -- by reference to the method's
 own class or a base (``++it``), or by value as its own class, another
-specialization of its class template, or a class of its value type
-(``s.subspan(1)``, ``s.begin()``; ``handleSelfReturnObject``) -- to its
-object, and a non-member ``+`` or ``-`` returning an operand's class
+specialization of its class template, a table class of its kind, or a class
+of its value type (``s.subspan(1)``, ``s.begin()``; ``handleSelfReturnObject``)
+-- to its object, and a non-member ``+`` or ``-`` returning an operand's class
 (``n + it``) to that operand, marking the leaf ``Partial`` when the call refers
 to part of the handle (it has explicit arguments or template arguments, is
 ``++``, ``--``, ``+=``, ``-=``, or a non-member ``+`` or ``-``, or is a member
@@ -964,6 +968,46 @@ refers to apart from the handle's own parts, so every such result counts (see
 and a call operator's object is the callable (a ``std::ranges`` object):
 neither derives anything.  The object-argument rule still judges the handle
 object's own storage, so ``s.size()`` on a marked span is accepted.
+
+Raw storage enters a handle through the construction of a class in the std
+handle table (``getStdHandleKind``): a *view* -- ``std::span``,
+``std::ranges::subrange``, ``std::reverse_iterator``, ``std::move_iterator``,
+``std::basic_const_iterator``, libc++'s ``std::__wrap_iter``, and
+libstdc++'s ``__gnu_cxx::__normal_iterator`` -- or an *owner* --
+``std::unique_ptr`` and ``std::shared_ptr``.  Its *transfer parameters*
+(``CalleeLifecycleRoles::transfersParam``) are, for a view's constructors other
+than copy and move, every parameter not of integral, enumeration, floating, or
+``std::nullptr_t`` type, and for an owner's, the first object pointer taken by
+value -- so never a deleter or an allocator, and only the pointer of the
+aliasing constructor -- or, with none, a parameter whose class is an owner.
+The walk makes the first transfer argument a leaf (a later one, a last
+iterator or a sentinel, bounds the range): a pointer, or a read-only alias
+of one, by its value (``PointerValue``); a class, or a reference to one, by its
+storage and then its own handle state (``Range``); any other reference by its
+storage (``Storage``).  A table construction with no transfer argument -- a
+default, null, or ``weak_ptr`` construction -- is Unknown.
+
+The transfer arguments are judged where the handle *lands*, not at the
+construction: neither the parse-time funnel nor the CFG pass's construction arm
+binds a transfer parameter (the pass still records the mutable aliases an
+argument hands out), and every binding site admits a handle target, whose
+source the walk re-traverses down to the construction.  A base subobject is
+a binding site judged unmarked, and so is the handle an unmarked reference to
+a handle refers to (``SemaProfiles::bindsHandleByReference``), besides the
+reference's own binding of the handle object -- except the implicit object
+parameter, a comparison's or a ``+``'s or ``-``'s parameter, and the source of
+a copy or an assignment, judged where the copy lands (see
+`Known Gaps (std::init)`_).  This also covers an
+explicit temporary (``span<int>(buf, n)`` is bound where its value lands).
+Handing the outer target's marking to the constructor call instead fails for
+an explicit temporary, for a conversion built during overload resolution, and
+under TreeTransform's reuse of a construction.  A discarded temporary handle
+lands nowhere (see `Known Gaps (std::init)`_).  An implicit handle local
+(range-for's ``__begin`` and ``__end``) is not a binding of its own: the walk
+sees through it to the range, so the elements a range-for binds are judged
+instead.  An author-marked constructor parameter makes a construction a
+terminal that refers to uninitialized memory, while the parameter's own
+binding is judged as usual.
 
 
 Flow-Tracked Storage (std::init)
@@ -1179,8 +1223,12 @@ derived class.  A marked pointer's or reference's referent is checked
 against its anonymous referent's type at extraction and against the storage it
 refers to at each transfer (``DefAssignEvent::Designated``,
 ``BindingLeaf::WholeIf``), and an object a credit takes as a whole is credited
-only below the base subobject its argument converts to.  The remaining blind
-spots are listed in `Known Gaps (std::init)`_.
+only below the base subobject its argument converts to.  A handle binding
+(`Handles (std::init)`_) is the pass's when a leaf below its walk's
+``PointerValue``, ``Storage``, or ``Range`` leaves is tracked, as a pointer
+value or a glvalue; its other leaves are classified by form
+(``classifyInitHandleLeaf``).  The remaining blind spots are listed in
+`Known Gaps (std::init)`_.
 
 
 .. _profiles-init-known-gaps:
@@ -1349,6 +1397,26 @@ Deliberate Strictnesses
   returns (``s.begin() + 1``, ``s.subspan(1)``) inherits the handle's state:
   the library's members carry no marker.
   The remedies are a marked result or suppression.
+- A constructor with a ``[[ref_to_uninit]]`` parameter makes its object a
+  handle to the memory that parameter takes, so the object must be marked even
+  when the constructor initializes that memory.  The remedy is a
+  ``[[now_init]]`` static factory
+  (``[[now_init]] static Filler make(int *p [[ref_to_uninit]]);``), which
+  initializes the storage and returns an object referring to initialized
+  memory.
+- An unmarked reference to a handle is judged as the handle it refers to: no
+  marker spells a reference to a handle that refers to uninitialized memory,
+  so a marked handle whose memory is still uninitialized is rejected as a
+  ``const R &`` or forwarding-reference argument (most of ``<ranges>`` and
+  ``<algorithm>``, ``std::swap``), by a local reference, and by a
+  by-reference capture.  The remedies are passing it by value to a marked
+  parameter, or suppression.
+- A base subobject cannot carry the marker, so a class deriving from a
+  standard handle built over raw storage (``struct S : std::span<int>``) is
+  rejected at its base initializer; a marked member is the remedy.  A base
+  built from raw storage by an author-marked constructor (``D() : B(raw())``)
+  is rejected there too; the remedies are a ``[[now_init]]`` factory of the
+  base (``D() : B(B::make(raw()))``) or suppression.
 - Storage that is not flow-tracked -- the referent of a marked pointer member
   of an object other than the current one (``o.p``, ``q->p``) -- is judged by
   its form alone at every read, write, and destroy: a ``construct_at`` into
@@ -1560,3 +1628,14 @@ Missed Diagnostics
   reject a legal combination.
 - A second ``destroy_at`` of storage that is not flow-tracked (the referent
   of another object's marked pointer member) is not a double destroy.
+- A pointer passed through a non-const reference to it -- a forwarding
+  reference (``v.emplace_back(raw, 4)``,
+  ``std::make_unique<std::span<int>>(raw, 4)``) -- binds the pointer object,
+  not its value, so the handle the library builds from it is never judged.
+- A discarded temporary handle (``std::span<int>(arr, 4);``) is never judged.
+- Views and adaptors outside the std handle table -- ``std::views::*``,
+  ``std::ranges::ref_view``, ``std::mdspan``, ``std::string_view`` -- and
+  aggregates that hold a pointer refer to initialized memory as far as the
+  analysis knows: raw storage enters them only through ordinary parameter
+  bindings, and one a library function builds from a marked handle
+  (``std::views::take(s, 2)``) is trusted, so reads through it are accepted.
