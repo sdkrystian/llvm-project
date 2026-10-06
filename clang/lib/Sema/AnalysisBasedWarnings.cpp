@@ -2116,6 +2116,18 @@ struct TrackedStorage {
   /// a tracked local's DeclRefExpr -- empty otherwise.
   std::pair<unsigned, unsigned> wholeObject(const Expr *E) const;
 
+  /// The member entities below the subobject of a tracked local or by-value
+  /// parameter the leaf \p Leaf names as a whole -- the object itself, a
+  /// base subobject, or a member enclosing tracked members
+  /// (SemaProfiles::flowTrackedMemberRange), converted to a base by its own
+  /// casts and by \p OuterBases, the derived-to-base steps above the leaf;
+  /// with \p AsPointerValue, the leaf is its address. Empty for any other
+  /// leaf, and for an object whose default-initialization runs code, which
+  /// constructed it whole.
+  std::pair<unsigned, unsigned>
+  objectPart(const SemaProfiles::ShapeLeaf &Leaf, bool AsPointerValue,
+             ArrayRef<const CXXRecordDecl *> OuterBases = {}) const;
+
   /// The entities of the object range \p Range below its base subobject at
   /// the derived-to-base path \p Base -- contiguous, as the enumeration is
   /// depth-first -- or an empty range.
@@ -2197,6 +2209,40 @@ std::pair<unsigned, unsigned> TrackedStorage::wholeObject(const Expr *E) const {
       if (auto It = LocalRange.find(V); It != LocalRange.end())
         return It->second;
   return {0, 0};
+}
+
+std::pair<unsigned, unsigned>
+TrackedStorage::objectPart(const SemaProfiles::ShapeLeaf &Leaf,
+                           bool AsPointerValue,
+                           ArrayRef<const CXXRecordDecl *> OuterBases) const {
+  BasePath Above(OuterBases.begin(), OuterBases.end());
+  const Expr *E = Leaf.E;
+  if (AsPointerValue) {
+    E = SemaProfiles::addressOfOperand(SemaProfiles::ignoreTransparentCasts(
+        SemaProfiles::peelBaseCasts(E, Above, Leaf.Arms), Leaf.Arms));
+    if (!E)
+      return {0, 0};
+  }
+  E = SemaProfiles::ignoreTransparentCasts(E, Leaf.Arms);
+  const CXXRecordDecl *Named = E->getType()->getAsCXXRecordDecl();
+  if (!Named || !Named->hasDefinition() ||
+      !Named->hasTrivialDefaultConstructor())
+    return {0, 0};
+  std::optional<SemaProfiles::FlowLeafShape> Shape =
+      SemaProfiles::flowLeafShape(E, Leaf.Arms);
+  if (!Shape || Shape->IsThis || Shape->ThroughPointer)
+    return {0, 0};
+  auto [Range, RD] = objectRange(Shape->Local);
+  // The casts above the leaf convert it further toward a base.
+  SemaProfiles::FlowLeafShape Converted = *Shape;
+  Converted.LeafBases.append(Above.begin(), Above.end());
+  if (Range.first == Range.second)
+    return {0, 0};
+  std::pair<unsigned, unsigned> Part =
+      Profiles.flowTrackedMemberRange(RD, Converted);
+  if (Part.first == Part.second)
+    return {0, 0};
+  return {Range.first + Part.first, Range.first + Part.second};
 }
 
 std::pair<unsigned, unsigned>
@@ -2476,6 +2522,11 @@ static LeafState combineLeafStates(LeafState A, LeafState B) {
 struct BindingLeaf {
   std::optional<unsigned> Entity;
   LeafState State = LeafState::Unknown;
+  /// The member entities of a leaf naming a tracked aggregate, or a
+  /// subobject enclosing some of its tracked members, as a whole (the
+  /// marked-target variant of SemaProfiles::isFlowTrackedLeaf); empty
+  /// otherwise.
+  std::pair<unsigned, unsigned> Range{0, 0};
   /// A store site's whole-referent leaf of a marked pointer or reference: the
   /// store's designated type. The store is the referent's initialization when
   /// the designation covers the storage referred to there, and a subobject
@@ -2653,6 +2704,18 @@ static std::optional<unsigned> referent(unsigned Idx, const FlowState &St,
 /// state leaves it unassigned, and Unknown otherwise.
 static LeafState leafState(const BindingLeaf &L, const FlowState &St,
                            const TrackedStorage &Storage, bool EveryPath) {
+  // An object or subobject named whole is initialized when every member is,
+  // and uninitialized when none may be.
+  if (L.Range.first != L.Range.second) {
+    bool AllMust = true, AnyMay = false;
+    for (unsigned I = L.Range.first; I != L.Range.second; ++I) {
+      AllMust &= St.Must.test(I);
+      AnyMay |= St.May.test(I);
+    }
+    if (AllMust)
+      return LeafState::Initialized;
+    return AnyMay ? LeafState::Unknown : LeafState::Uninitialized;
+  }
   if (!L.Entity)
     return L.State;
   std::optional<unsigned> R = referent(*L.Entity, St, Storage);
@@ -2718,9 +2781,14 @@ static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
   bool AllDestroyed = true;
   std::optional<LeafState> Acc;
   for (const BindingLeaf &L : Site.Leaves) {
-    std::optional<unsigned> R =
-        L.Entity ? referent(*L.Entity, St, Storage) : std::nullopt;
-    AllDestroyed &= R && St.MayDestroyed.test(*R);
+    if (L.Range.first != L.Range.second) {
+      for (unsigned I = L.Range.first; I != L.Range.second; ++I)
+        AllDestroyed &= St.MayDestroyed.test(I);
+    } else {
+      std::optional<unsigned> R =
+          L.Entity ? referent(*L.Entity, St, Storage) : std::nullopt;
+      AllDestroyed &= R && St.MayDestroyed.test(*R);
+    }
     LeafState S = leafState(L, St, Storage, /*EveryPath=*/false);
     Acc = Acc ? combineLeafStates(*Acc, S) : S;
   }
@@ -3367,6 +3435,9 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
     TrackedStorage::Resolution R;
     std::pair<unsigned, unsigned> Whole{0, 0};
     bool Tracked = false;
+    /// The member entities of an object a leaf tracked for a marked
+    /// parameter names as a whole (TrackedStorage::objectPart).
+    std::pair<unsigned, unsigned> Part{0, 0};
     /// The form state of a leaf no entity tracks.
     LeafState Form = LeafState::Unknown;
   };
@@ -3374,10 +3445,12 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
   // RawExempt (TrackedStorage::resolve). A credit of an object passed as a
   // whole reaches only the entities of the base subobject its argument
   // converts to, and none when \p Designated is not that subobject's class.
+  // A [[ref_to_uninit]] parameter passes \p ForMarkedTarget
+  // (SemaProfiles::isFlowTrackedLeaf).
   auto ResolveArg = [&](const Expr *Arg, QualType ParamTy,
                         SmallVectorImpl<ArgLeaf> &Leaves,
                         QualType Designated = QualType(),
-                        bool RawExempt = false) {
+                        bool RawExempt = false, bool ForMarkedTarget = false) {
     bool AsPointerValue;
     const Expr *Operand =
         SemaProfiles::bindingSourceOperand(Arg, ParamTy, AsPointerValue);
@@ -3385,8 +3458,7 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
       return false;
     // The derived-to-base casts above the leaves, which the leaf walk peels.
     BasePath OuterPath;
-    if (!Designated.isNull())
-      SemaProfiles::peelBaseCasts(Operand, OuterPath);
+    SemaProfiles::peelBaseCasts(Operand, OuterPath);
     bool AnyTracked = false;
     SemaProfiles::forEachTargetLeaf(
         Operand, [&](const SemaProfiles::ShapeLeaf &Leaf) {
@@ -3400,7 +3472,10 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
             if (!CastPath.empty())
               L.R.Subobject = true;
           }
-          L.Tracked = S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC);
+          L.Tracked = S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC,
+                                                     ForMarkedTarget);
+          if (L.Tracked && ForMarkedTarget && !L.R.Entity)
+            L.Part = Storage.objectPart(Leaf, AsPointerValue, OuterPath);
           AnyTracked |= L.Tracked;
           if (!L.R.Entity) {
             const Expr *G =
@@ -3467,16 +3542,18 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
         Push(Idx);
     }
   };
-  // The argument \p Arg, bound as \p T, destroyed by \p Destroyer: one
-  // destroy site.
+  // The argument \p Arg, bound as \p T (to a [[ref_to_uninit]] parameter
+  // when \p Marked), destroyed by \p Destroyer: one destroy site.
   auto AppendDestroy = [&](const Expr *Arg, QualType T, bool Exempt,
-                           SemaProfiles::InitDestroyer Destroyer) {
+                           SemaProfiles::InitDestroyer Destroyer,
+                           bool Marked = false) {
     SmallVector<ArgLeaf, 2> Leaves;
     DestroySite Site;
     Site.Loc = Arg->IgnoreImplicit()->getExprLoc();
     Site.Exempt = Exempt;
     Site.Destroyer = Destroyer;
-    Site.Judged = ResolveArg(Arg, T, Leaves);
+    Site.Judged =
+        ResolveArg(Arg, T, Leaves, QualType(), /*RawExempt=*/false, Marked);
     Site.Conditional = !NameOneStorage(Leaves);
     for (const ArgLeaf &L : Leaves) {
       if (L.Tracked)
@@ -3488,6 +3565,7 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
           Site.Affected.push_back(*L.R.Entity);
       } else {
         Leaf.State = L.Form;
+        Leaf.Range = L.Part;
         for (unsigned Idx = L.Whole.first; Idx != L.Whole.second; ++Idx)
           if (!llvm::is_contained(Site.Affected, Idx))
             Site.Affected.push_back(Idx);
@@ -3522,10 +3600,10 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
       if (!PT->isPointerType() && !PT->isReferenceType())
         return;
       if (Roles.destroysParam(P))
-        AppendDestroy(Arg, PT,
-                      Roles.InitializesRefToUninitParams ||
-                          Roles.isMarkedParam(P),
-                      SemaProfiles::InitDestroyer::Function);
+        AppendDestroy(
+            Arg, PT,
+            Roles.InitializesRefToUninitParams || Roles.isMarkedParam(P),
+            SemaProfiles::InitDestroyer::Function, Roles.isMarkedParam(P));
       else if (Roles.releasesParam(P, /*TrustedOnly=*/true))
         AppendFor(Arg, PT, DefAssignEventKind::Kill);
     });
@@ -3901,6 +3979,14 @@ static void extractStdInitEvents(
                         ? ReseatTarget::ViaPointer
                         : ReseatTarget::Entity,
                     *R.Entity};
+            // A tracked aggregate named whole is no one entity: its
+            // referent is not identified.
+            else if (!R.Entity) {
+              std::pair<unsigned, unsigned> Part =
+                  Storage.objectPart(Leaf, AsPointerValue);
+              if (Part.first != Part.second)
+                RT = {ReseatTarget::Unknown, 0};
+            }
             Targets.push_back(RT);
           });
       if (Targets.empty())
@@ -4019,15 +4105,21 @@ static void extractStdInitEvents(
       BindingSite Site{Kind,    Loc, TargetMarked, T->isReferenceType(),
                        Subject, {},  EveryPath};
       bool AnyTracked = false;
+      // The derived-to-base casts above the leaves, which the leaf walk peels.
+      BasePath OuterPath;
+      SemaProfiles::peelBaseCasts(Operand, OuterPath);
       SemaProfiles::forEachTargetLeaf(
           Operand, [&](const SemaProfiles::ShapeLeaf &Leaf) {
             BindingLeaf L;
-            if (S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC)) {
+            if (S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC,
+                                               TargetMarked)) {
               AnyTracked = true;
               JudgedLeaves.insert(Leaf.E);
               TrackedStorage::Resolution R =
                   Storage.resolveFlowLeaf(Leaf, AsPointerValue);
               L.Entity = R.Entity;
+              if (!L.Entity && TargetMarked)
+                L.Range = Storage.objectPart(Leaf, AsPointerValue, OuterPath);
             }
             if (!L.Entity)
               L.State =

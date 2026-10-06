@@ -998,7 +998,18 @@ form a table (``SemaProfiles::flowTrackedMembers``), enumerated depth-first so
 the paths under any prefix are contiguous, and an object's member entities are
 that table in order; one matcher (``SemaProfiles::matchFlowTrackedMember``)
 finds the entry an lvalue's member steps start with, for both the predicate and
-the resolver.  The walk distributes each
+the resolver.  For a marked target the predicate also takes a directly named
+local or by-value parameter with tracked members as a whole, or a subobject
+enclosing some of them (``SemaProfiles::flowTrackedMemberRange``), when its
+default-initialization is trivial, and the pass classifies that leaf from the
+member entities below it and below any base its casts convert it to
+(``TrackedStorage::objectPart``, ``BindingLeaf::Range``): Initialized when
+every one is ``Must``, Uninitialized when none is ``May``, and Unknown
+otherwise.  An unmarked binding of it keeps the form's answer: a copy, an
+escape, or a placement ``new`` of the object is judged by form.  A marked
+pointer or reference bound to it gets an unidentified referent
+(``ReseatTarget::Unknown``).
+The walk distributes each
 conditional at every step of the chain, not only at the top, and records the
 arm each leaf takes (``SemaProfiles::ShapeLeaf``), which every interpreter
 follows: a walk that stopped at a nested conditional while the recognizers saw
@@ -1217,10 +1228,12 @@ Missed Diagnostics
   an untracked source, a conditional initializer whose arms name different
   storage (``c ? &u : &v``), a store whose target names several pointers or a
   marked pointer on only some of its arms (``(c ? p : q) = &u``,
-  ``(c ? p : r) = &u``), a ``__block`` pointer -- fires in neither direction
-  through the pointer, a store or ``[[now_init]]`` call through it credits
-  nothing, and a marked binding to it asserts nothing: a later ``int *w = &u``
-  stays the unmarked-direction error.
+  ``(c ? p : r) = &u``), a ``__block`` pointer, a marked pointer or reference
+  bound to a whole local with tracked members (``C *p [[ref_to_uninit]] = &c``,
+  which also escapes the local) -- fires in neither direction through the
+  pointer, a store or ``[[now_init]]`` call through it credits nothing, and a
+  marked binding to it asserts nothing: a later ``int *w = &u`` stays the
+  unmarked-direction error.
 - The identity functions are recognized by builtin ID: under
   ``-fno-builtin`` (or ``-fno-builtin-std-<name>``) and for a user-written
   identity function (``template <class T> T &&fwd(T &)``), the call is an

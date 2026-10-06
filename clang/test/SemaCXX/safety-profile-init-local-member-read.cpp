@@ -901,3 +901,115 @@ void try_local_ok() {
   int y = b.n; // OK
   (void)y;
 }
+
+// A marked binding of a tracked aggregate as a whole is judged by its members
+namespace std {
+template <class T, class... A> T *construct_at(T *p, A &&...args);
+} // namespace std
+struct Pair {
+  int x [[uninit]];
+  int y [[uninit]];
+};
+int construct_whole() {
+  Pair c;
+  std::construct_at(&c, 1, 2); // OK: no member may be assigned
+  return c.x;                  // OK
+}
+
+// construct_at initializes every member
+int construct_whole_twice() {
+  Pair c;
+  std::construct_at(&c, 1, 2);
+  std::construct_at(&c, 3, 4); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  return c.x;
+}
+
+// A by-value parameter's members are unassigned at entry
+int construct_whole_param(Pair p) {
+  std::construct_at(&p, 1, 2); // OK
+  return p.y;
+}
+
+// An aggregate with some members assigned is neither initialized nor not
+void construct_whole_partly() {
+  Pair c;
+  c.x = 1;
+  std::construct_at(&c, 1, 2); // OK
+}
+
+// An aggregate whose default-initialization runs code was constructed whole
+struct Constructed {
+  Constructed();
+};
+struct WithConstructed {
+  int n [[uninit]];
+  Constructed s;
+};
+void construct_whole_constructed() {
+  WithConstructed w;
+  std::construct_at(&w); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A conversion to a base is judged by the base subobject's members
+struct PairBase {
+  int b [[uninit]];
+};
+struct PairDerived : PairBase {
+  int d [[uninit]];
+};
+void construct_base_initialized() {
+  PairDerived c;
+  c.b = 1;
+  std::construct_at(static_cast<PairBase *>(&c)); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+void construct_base_uninitialized() {
+  PairDerived c;
+  c.d = 1;
+  std::construct_at(static_cast<PairBase *>(&c)); // OK
+}
+
+// A marked pointer to a tracked aggregate refers to no identified storage
+int marked_alias_whole() {
+  Pair c;
+  Pair *p [[ref_to_uninit]] = &c;
+  std::construct_at(&c, 1, 2);
+  return p->x; // OK
+}
+
+// An aggregate whose members are all assigned is initialized
+void bind_whole_marked_reference() {
+  Pair c;
+  Pair &r [[ref_to_uninit]] = c; // OK
+  c.x = 1;
+  c.y = 2;
+  Pair &s [[ref_to_uninit]] = c; // expected-error {{reference marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)r;
+  (void)s;
+}
+
+// A [[now_init]] call initializes every member
+[[now_init]] void fill_pair(Pair *p [[ref_to_uninit]]);
+int now_init_whole() {
+  Pair c;
+  fill_pair(&c);
+  fill_pair(&c); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  return c.y;
+}
+
+// A marked [[now_uninit]] parameter destroys every member
+[[now_uninit]] void drop_pair(Pair *p [[ref_to_uninit]]);
+void drop_whole_twice() {
+  Pair c;
+  std::construct_at(&c, 1, 2);
+  drop_pair(&c);
+  drop_pair(&c); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+}
+
+// An unmarked binding of the whole aggregate is judged by its form
+void take_pair(Pair &);
+void unmarked_whole() {
+  Pair a;
+  take_pair(a); // OK
+  Pair b = a;   // OK
+  (void)b;
+}

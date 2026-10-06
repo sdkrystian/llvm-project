@@ -811,7 +811,15 @@ capture) gives it an anonymous referent of unknown state; a
 ``operator delete``, or a ``delete`` expression acts on the referent
 (below).  A marked target is rejected when the
 storage is initialized on every path reaching the binding; an unmarked
-target is accepted when the storage is initialized on some path.  Passing
+target is accepted when the storage is initialized on some path.  A local or
+by-value parameter with tracked ``[[uninit]]`` members, bound as a whole to a
+marked target (``std::construct_at(&a, 1, 2)``), is judged by those members
+-- those of the base it is converted to, if any: it is initialized when every
+one is initialized on every path, and uninitialized when none may be; an
+unmarked binding of it is judged by its form, and so is an object whose
+default-initialization runs code (a constructor or a default member
+initializer), which constructed it.  A marked pointer or reference bound to
+it refers to no storage the analysis identifies.  Passing
 to a ``[[ref_to_uninit]]`` parameter is judged the same way and asserts
 nothing after the call.  Element
 accesses (``p[i]``, ``a[0]``) are never initialized by an element store, and

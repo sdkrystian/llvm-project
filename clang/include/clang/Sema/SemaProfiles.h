@@ -362,6 +362,13 @@ public:
   std::optional<FlowMemberMatch>
   matchFlowTrackedMember(const CXXRecordDecl *RD,
                          const FlowLeafShape &Shape) const;
+  /// The entries of \p RD's flow-tracked member table below the subobject
+  /// \p Shape names as a whole -- the object itself, a base subobject, or a
+  /// member enclosing tracked members -- as a contiguous index range; empty
+  /// when \p Shape has an element step or names no such subobject.
+  std::pair<unsigned, unsigned>
+  flowTrackedMemberRange(const CXXRecordDecl *RD,
+                         const FlowLeafShape &Shape) const;
 
   /// The type-shape half of the read-tracking guards: a non-union,
   /// non-dependent class with no user-provided constructor anywhere in the
@@ -392,17 +399,22 @@ public:
   /// directly named local or of the current object -- while a function body
   /// is being parsed (\p CurContext inside one). \p AsPointerValue says the
   /// leaf is used as a pointer value (a pointer binding, or a read-only alias
-  /// binding of a pointer) rather than as a glvalue. The parse-time checks
-  /// leave such a source to the pass; a source with no tracked leaf, or one
-  /// outside any function body, is judged at parse time without flow state.
+  /// binding of a pointer) rather than as a glvalue. With \p ForMarkedTarget
+  /// -- a binding to a [[ref_to_uninit]] target -- a directly named local or
+  /// by-value parameter with tracked members, as a whole or a subobject
+  /// enclosing some of them (flowTrackedMemberRange), is tracked too: its
+  /// state is its members'. The parse-time checks leave such a source to the
+  /// pass; a source with no tracked leaf, or one outside any function body,
+  /// is judged at parse time without flow state.
   bool isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
-                         const DeclContext *CurContext) const;
+                         const DeclContext *CurContext,
+                         bool ForMarkedTarget = false) const;
   /// True if any leaf of \p Src, bound as \p T, is flow-tracked in the
-  /// current context (isFlowTrackedLeaf); the tracked leaves are appended to
-  /// \p Leaves when given.
-  bool
-  hasFlowTrackedLeaf(const Expr *Src, QualType T,
-                     SmallVectorImpl<const Expr *> *Leaves = nullptr) const;
+  /// current context (isFlowTrackedLeaf, with \p ForMarkedTarget); the
+  /// tracked leaves are appended to \p Leaves when given.
+  bool hasFlowTrackedLeaf(const Expr *Src, QualType T,
+                          SmallVectorImpl<const Expr *> *Leaves = nullptr,
+                          bool ForMarkedTarget = false) const;
   /// True if any leaf of the glvalue \p G is flow-tracked in the current
   /// context: the read-through and subobject-write checks leave such an
   /// access to the CFG pass. The tracked leaves are appended to \p Leaves
@@ -812,14 +824,17 @@ private:
   void recordDeferredInitSite(DeferredInitSite Site);
 
   /// The destroy rules (P4222R2 §4.4, §4.6) for \p Src, bound as \p T and
-  /// destroyed by \p Destroyer: a source with a flow-tracked leaf is the CFG
-  /// pass's (a Destroy deferred site), any other is judged by form for
-  /// destroy_uninit when \p DestroyUninitApplies (judgeDestroyUninitByForm);
-  /// destroyed state exists only as flow state, so double_destroy is the
-  /// pass's alone. \p D is judgeInitProfileBinding's.
+  /// destroyed by \p Destroyer: a source with a flow-tracked leaf
+  /// (isFlowTrackedLeaf, with \p TargetMarked for a [[ref_to_uninit]]
+  /// parameter) is the CFG pass's (a Destroy deferred site), any other is
+  /// judged by form for destroy_uninit when \p DestroyUninitApplies
+  /// (judgeDestroyUninitByForm); destroyed state exists only as flow state,
+  /// so double_destroy is the pass's alone. \p D is
+  /// judgeInitProfileBinding's.
   void checkInitProfileDestroy(SourceLocation Loc, QualType T, const Expr *Src,
                                const Decl *D, bool DestroyUninitApplies,
-                               InitDestroyer Destroyer);
+                               InitDestroyer Destroyer,
+                               bool TargetMarked = false);
 
   /// The form half of checkInitProfileDestroy: diagnose destroy_uninit when
   /// \p Src, bound as \p T, classifies uninitialized. \p D and
