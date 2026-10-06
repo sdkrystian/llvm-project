@@ -1127,8 +1127,17 @@ bool SemaProfiles::diagnoseInvalidRefToUninitMarker(const Decl *D,
   if (T->isDependentType() || T->isUndeducedType())
     return false;
 
-  if (isHandleType(T))
-    return false;
+  if (isHandleType(T)) {
+    // An owning smart pointer with static or thread storage is destroyed at
+    // program or thread exit, where no destroy of its referent is judged.
+    const auto *VD = dyn_cast<VarDecl>(D);
+    if (!VD || VD->hasLocalStorage() || !isStdOwnerType(T))
+      return false;
+    if (Diagnose)
+      Diag(AttrLoc, diag::err_ref_to_uninit_attr_static_owner)
+          << (VD->getTLSKind() != VarDecl::TLS_None);
+    return true;
+  }
   if ((!T->isPointerType() && !T->isReferenceType()) ||
       T->isFunctionPointerType() || T->isFunctionReferenceType()) {
     if (Diagnose)
@@ -1948,10 +1957,10 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
     orHandle(stdRow("uninitialized_default_construct_n", 3, 1,
                     KnownParamRole::Construct, KnownCalleeEntry::NoEndParam,
                     /*ConstructIfDefaultInitDeterminate=*/true)),
-    stdRow("destroy", 2, 0, KnownParamRole::Destroy, 1),
-    stdRow("destroy", 3, 1, KnownParamRole::Destroy, 2),
-    stdRow("destroy_n", 2, 0, KnownParamRole::Destroy),
-    stdRow("destroy_n", 3, 1, KnownParamRole::Destroy),
+    orHandle(stdRow("destroy", 2, 0, KnownParamRole::Destroy, 1)),
+    orHandle(stdRow("destroy", 3, 1, KnownParamRole::Destroy, 2)),
+    orHandle(stdRow("destroy_n", 2, 0, KnownParamRole::Destroy)),
+    orHandle(stdRow("destroy_n", 3, 1, KnownParamRole::Destroy)),
     stdReturnRow("make_unique_for_overwrite",
                  KnownCalleeReturn::ReturnsDefaultInitialized),
     stdReturnRow("make_shared_for_overwrite",
@@ -1961,9 +1970,9 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
     cpoRow("construct_at", KnownCalleeEntry::AnyArity, 0,
            KnownParamRole::Construct),
     cpoRow("destroy_at", 1, 0, KnownParamRole::Destroy),
-    cpoRow("destroy", 2, 0, KnownParamRole::Destroy, 1),
-    cpoRangeRow("destroy", 1, 0, KnownParamRole::Destroy),
-    cpoRow("destroy_n", 2, 0, KnownParamRole::Destroy),
+    orHandle(cpoRow("destroy", 2, 0, KnownParamRole::Destroy, 1)),
+    orHandle(cpoRangeRow("destroy", 1, 0, KnownParamRole::Destroy)),
+    orHandle(cpoRow("destroy_n", 2, 0, KnownParamRole::Destroy)),
     orHandle(cpoRow("uninitialized_fill", 3, 0, KnownParamRole::Construct, 1)),
     orHandle(
         cpoRangeRow("uninitialized_fill", 2, 0, KnownParamRole::Construct)),
@@ -2242,6 +2251,10 @@ static bool isStdHandleConstruction(const CXXConstructorDecl *Ctor) {
          getStdHandleKind(Ctor->getParent()) != StdHandleKind::None;
 }
 
+bool SemaProfiles::isStdOwnerType(QualType T) {
+  return getStdHandleKind(T->getAsCXXRecordDecl()) == StdHandleKind::Owner;
+}
+
 bool SemaProfiles::isUniqueOwnerType(QualType T) {
   const CXXRecordDecl *RD = T->getAsCXXRecordDecl();
   return RD && RD->getIdentifier() && RD->getName() == "unique_ptr" &&
@@ -2341,7 +2354,7 @@ SemaProfiles::CalleeLifecycleRoles
 SemaProfiles::getCalleeLifecycleRoles(const FunctionDecl *FD) {
   SemaProfiles::CalleeLifecycleRoles Roles;
   Roles.InitializesRefToUninitParams = FD->hasAttr<NowInitAttr>();
-  Roles.DestroysPointerParams = FD->hasAttr<NowUninitAttr>();
+  Roles.DestroysParams = FD->hasAttr<NowUninitAttr>();
   if (const auto *Ctor = dyn_cast<CXXConstructorDecl>(FD))
     Roles.HandleTransfers = isStdHandleConstruction(Ctor);
   else if (const auto *MD = dyn_cast<CXXMethodDecl>(FD))
@@ -2408,7 +2421,8 @@ bool SemaProfiles::CalleeLifecycleRoles::destroysParam(
   if (roleOf(P) == KnownParamRole::Destroy)
     return true;
   QualType T = P->getType();
-  return DestroysPointerParams && (T->isPointerType() || T->isReferenceType());
+  return DestroysParams &&
+         (T->isPointerType() || T->isReferenceType() || isHandleType(T));
 }
 
 bool SemaProfiles::CalleeLifecycleRoles::releasesParam(const ParmVarDecl *P,
@@ -3471,7 +3485,7 @@ void SemaProfiles::judgeDeferredInitSiteByForm(const DeferredInitSite &Site,
   case DeferredInitSite::Kind::Destroy:
     if (Site.Flag)
       judgeDestroyUninitByForm(Site.Loc, Site.T, Site.Src, /*D=*/nullptr, Body,
-                               Site.Destroyer);
+                               Site.Destroyer, Site.AsRange);
     return;
   case DeferredInitSite::Kind::ReadThrough:
     checkInitProfileReadThrough(Site.Loc, Site.Src, Site.T, Body);
@@ -4618,15 +4632,20 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
                Roles.transfersParam(Parm) ||
                (isHandleType(T) && isAssignmentSource(Parm))))
     return;
+  // A role parameter taking a class-type range by reference judges the
+  // range, not the range object's storage.
+  bool AsRange = Parm && T->isReferenceType() &&
+                 isHandleType(T.getNonReferenceType()) &&
+                 Roles.roleOf(Parm) != KnownParamRole::None;
   bool Destroys = Parm && Roles.destroysParam(Parm);
   if (Destroys || (Parm && Roles.releasesParam(Parm, /*TrustedOnly=*/false))) {
-    // A [[now_uninit]] callee's pointer/reference parameter -- and a known
-    // storage-release callee's (free, realloc's pointer, replaceable
+    // A [[now_uninit]] callee's pointer, reference, or handle parameter -- and
+    // a known storage-release callee's (free, realloc's pointer, replaceable
     // global operator delete), which is [[now_uninit]]-equivalent here --
     // accepts storage in any live state instead of the marker-consistency
-    // check: the attribute declares destruction, whose operand is
-    // initialized memory for a plain destructor-like callee and *any* state
-    // for a raw-release one (free takes storage that may never have been
+    // check: the attribute declares destruction, whose operand is initialized
+    // memory for a plain destructor-like callee and *any* state for a
+    // raw-release one (free takes storage that may never have been
     // constructed), and initialized storage is precisely what a dual-attributed
     // reinitializer's destroy half exists for. Acceptance never diagnoses, so
     // it reads the union of the release bits -- an untrusted name-only free
@@ -4635,30 +4654,25 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
     // -- its destroy half is invalid on destroyed storage; construct_at is the
     // sanctioned recovery path) and storage still or again uninitialized
     // (destroy_uninit: destruction makes an object uninitialized, so a first
-    // destroy of never-constructed storage is as much an access to raw
-    // memory as a second one, "Lifetimes", p4222r2.md:922-927). Both key on
-    // the destroy role alone: a storage-release callee is exempt from both
+    // destroy of never-constructed storage is as much an access to raw memory
+    // as a second one, "Lifetimes", p4222r2.md:922-927). Both key on the
+    // destroy role alone: a storage-release callee is exempt from both
     // (destroy_at(p); free(p); is correct, and free takes never-constructed
-    // storage by contract), a reinitializer from destroy_uninit call-wide
-    // (its marked parameter positively legalizes uninitialized sources; its
-    // unmarked destroy-only parameters ride along -- a missed diagnostic,
-    // not a rule), and a parameter carrying [[ref_to_uninit]] per parameter
-    // (the annotation spelling for an unrecognized storage-release function
-    // such as _aligned_free; ProfilesFrameworkInternals.rst,
-    // "Known Gaps (std::init)"). A release callee's argument is a Kill or
-    // nothing in the CFG pass, never a judgment.
+    // storage by contract), a reinitializer from destroy_uninit call-wide (its
+    // marked parameter positively legalizes uninitialized sources; its unmarked
+    // destroy-only parameters ride along -- a missed diagnostic, not a rule),
+    // and a parameter carrying [[ref_to_uninit]] per parameter (the annotation
+    // spelling for an unrecognized storage-release function such as
+    // _aligned_free; ProfilesFrameworkInternals.rst, "Known Gaps (std::init)").
+    // A release callee's argument is a Kill or nothing in the CFG pass, never a
+    // judgment.
     if (Destroys)
       checkInitProfileDestroy(
           Loc, T, Src, D,
           /*DestroyUninitApplies=*/!Roles.InitializesRefToUninitParams &&
               !TargetMarked,
-          InitDestroyer::Function, TargetMarked);
+          InitDestroyer::Function, TargetMarked, AsRange);
   } else {
-    // A role parameter taking a class-type range by reference judges the
-    // range, not the range object's storage.
-    bool AsRange = Parm && T->isReferenceType() &&
-                   isHandleType(T.getNonReferenceType()) &&
-                   Roles.roleOf(Parm) != KnownParamRole::None;
     judgeInitProfileBinding(
         Kind, Loc, TargetMarked, T, Src, D,
         /*Subject=*/nullptr, /*AfterFlowPass=*/nullptr,
@@ -4674,7 +4688,7 @@ void SemaProfiles::checkInitProfileDestroy(SourceLocation Loc, QualType T,
                                            const Expr *Src, const Decl *D,
                                            bool DestroyUninitApplies,
                                            InitDestroyer Destroyer,
-                                           bool TargetMarked) {
+                                           bool TargetMarked, bool AsRange) {
   // An instantiation-dependent source defers exactly like
   // judgeInitProfileBinding's; see also inRebuiltOrSynthesizedCode.
   if (!Src || isa<RecoveryExpr>(Src->IgnoreParens()) ||
@@ -4682,7 +4696,8 @@ void SemaProfiles::checkInitProfileDestroy(SourceLocation Loc, QualType T,
     return;
   if (SmallVector<const Expr *, 2> Leaves; hasFlowTrackedLeaf(
           Src, T, &Leaves,
-          TargetMarked ? FlowLeafUse::MarkedTarget : FlowLeafUse::Destroy)) {
+          TargetMarked ? FlowLeafUse::MarkedTarget : FlowLeafUse::Destroy,
+          AsRange)) {
     DeferredInitSite Site{DeferredInitSite::Kind::Destroy,
                           InitBindingKind::Parameter,
                           Loc,
@@ -4692,24 +4707,27 @@ void SemaProfiles::checkInitProfileDestroy(SourceLocation Loc, QualType T,
                           /*Subject=*/nullptr,
                           std::move(Leaves)};
     Site.Destroyer = Destroyer;
+    Site.AsRange = AsRange;
     recordDeferredInitSite(std::move(Site));
     return;
   }
   if (DestroyUninitApplies)
     judgeDestroyUninitByForm(Loc, T, Src, D, /*AfterFlowPass=*/nullptr,
-                             Destroyer);
+                             Destroyer, AsRange);
 }
 
 void SemaProfiles::judgeDestroyUninitByForm(SourceLocation Loc, QualType T,
                                             const Expr *Src, const Decl *D,
                                             const Decl *AfterFlowPass,
-                                            InitDestroyer Destroyer) {
+                                            InitDestroyer Destroyer,
+                                            bool AsRange) {
   if (shouldEmitProfileViolation("std::init", diag::err_init_destroy_uninit,
                                  Loc, D, /*PostParse=*/AfterFlowPass) &&
       isUninitializedOrMixed(
           classifyUninitSource(getASTContext(), Src, T,
                                UninitBindAccess.withThisUnderConstruction(
-                                   thisIsUnderConstruction(AfterFlowPass)))))
+                                   thisIsUnderConstruction(AfterFlowPass)),
+                               AsRange)))
     Diag(Loc, diag::err_init_destroy_uninit)
         << "std::init" << static_cast<unsigned>(Destroyer);
 }

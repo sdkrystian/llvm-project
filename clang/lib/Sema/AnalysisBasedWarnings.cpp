@@ -2827,7 +2827,11 @@ enum class ReseatTarget {
   /// The same referent, from a position past its start (a handle's ++, --,
   /// +=, -=, std::advance): a credit or destroy through it reaches part of
   /// the referent (FlowState::Offset).
-  Offset
+  Offset,
+  /// Nothing: a std::unique_ptr moved from, released, reset, assigned null,
+  /// or constructed null. The referent it had stays where a move or release
+  /// handed it, and its destroys destroy nothing (FlowState::Null).
+  Null
 };
 struct DefAssignEvent {
   DefAssignEventKind Kind;
@@ -2920,17 +2924,19 @@ struct BindingSite {
 };
 
 /// A destruction site derived from a call element -- a [[now_uninit]] or
-/// destroy-row argument, an explicit or pseudo-destructor call's object, or
-/// the operand of a delete-expression that runs a destructor -- or from the
-/// scope-exit destructor of an [[uninit]] local: the argument's leaves (a
-/// tracked entity, judged by its flow state, or a leaf no entity tracks,
-/// classified by form), the entities the destruction
-/// affects, and whether it is exempt from destroy_uninit -- a reinitializer
-/// (both lifecycle attributes: destroy-then-construct on fresh storage is
-/// its purpose, and the exemption is call-wide), or a parameter that itself
-/// carries [[ref_to_uninit]] (the marker declares that the parameter takes
-/// possibly-uninitialized storage: the annotation spelling for an
-/// unrecognized storage-release function). The rules are applied only when a
+/// destroy-row argument, an explicit or pseudo-destructor call's object, or the
+/// operand of a delete-expression that runs a destructor -- or from the
+/// scope-exit destructor of an [[uninit]] local, and the destruction of a
+/// marked std::unique_ptr's referent by its scope exit, reset, reassignment, or
+/// destructor call: the argument's leaves (a tracked entity, judged by its flow
+/// state, or a leaf no entity tracks, classified by form), the entities the
+/// destruction affects, and whether it is exempt from destroy_uninit -- a
+/// reinitializer (both lifecycle attributes: destroy-then-construct on fresh
+/// storage is its purpose, and the exemption is call-wide), a parameter that
+/// itself carries [[ref_to_uninit]] (the marker declares that the parameter
+/// takes possibly-uninitialized storage: the annotation spelling for an
+/// unrecognized storage-release function), or an owner's referent of a
+/// trivially destructible or unknown type. The rules are applied only when a
 /// leaf names tracked storage (Judged), the parse-time funnel having judged
 /// every other destroy; the transfer applies either way.
 struct DestroySite {
@@ -2945,6 +2951,10 @@ struct DestroySite {
   /// The argument's arms name different storage: each may have been
   /// destroyed, none definitely.
   bool Conditional = false;
+  /// The marked std::unique_ptr whose destruction, reset, or reassignment
+  /// destroys its referent: the site is skipped while it is null
+  /// (FlowState::Null).
+  std::optional<unsigned> Owner;
   SmallVector<BindingLeaf, 2> Leaves;
   /// The entities destroyed: the whole entity each leaf names, or every
   /// entity of an object destroyed as a whole (`this`, `*this`, `&x`, `x`).
@@ -3007,6 +3017,13 @@ struct FlowState {
   /// A marked handle positioned past its referent's start on some path
   /// (ReseatTarget::Offset). Joined by union.
   llvm::BitVector Offset;
+  /// A marked std::unique_ptr null on every path (ReseatTarget::Null).
+  /// Joined by intersection.
+  llvm::BitVector Null;
+  /// A marked std::unique_ptr null on some path: its destroys are no
+  /// double_destroy, as the nulling path destroys nothing there. Joined by
+  /// union.
+  llvm::BitVector MayNull;
   /// Per entity, meaningful for a Pointee: the entity's own index when the
   /// pointer refers to an anonymous referent whose state is the entity's
   /// bits, another entity's index when it refers to that entity's storage
@@ -3021,7 +3038,8 @@ struct FlowState {
   FlowState(unsigned N, bool Top)
       : Must(N, Top), May(N, false), MayUnassigned(N, !Top), Esc(N, Top),
         MayDestroyed(N, false), EntryAsserted(N, false),
-        MembersPending(N, false), Offset(N, false), Target(N, TopTarget) {
+        MembersPending(N, false), Offset(N, false), Null(N, Top),
+        MayNull(N, false), Target(N, TopTarget) {
     if (!Top)
       for (unsigned I = 0; I != N; ++I)
         Target[I] = I;
@@ -3035,6 +3053,8 @@ struct FlowState {
     EntryAsserted |= O.EntryAsserted;
     MembersPending |= O.MembersPending;
     Offset |= O.Offset;
+    Null &= O.Null;
+    MayNull |= O.MayNull;
     for (unsigned I = 0, N = Target.size(); I != N; ++I) {
       if (Target[I] == TopTarget)
         Target[I] = O.Target[I];
@@ -3047,7 +3067,7 @@ struct FlowState {
            Esc == O.Esc && MayDestroyed == O.MayDestroyed &&
            EntryAsserted == O.EntryAsserted &&
            MembersPending == O.MembersPending && Offset == O.Offset &&
-           Target == O.Target;
+           Null == O.Null && MayNull == O.MayNull && Target == O.Target;
   }
   bool operator!=(const FlowState &O) const { return !(*this == O); }
 };
@@ -3257,6 +3277,9 @@ static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
         leafState(L, St, Storage, /*EveryPath=*/false, /*WithSubs=*/false);
     Acc = Acc ? combineLeafStates(*Acc, S) : S;
   }
+  // An owner null on some path destroys nothing on it (FlowState::MayNull).
+  if (Site.Owner && St.MayNull.test(*Site.Owner))
+    AllDestroyed = false;
   auto Push = [&](unsigned DiagID) {
     PendingViolation V{DiagID, Site.Loc, static_cast<unsigned>(Site.Destroyer)};
     V.ScopeExitVar = Site.ScopeExitVar;
@@ -3266,7 +3289,7 @@ static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
     Push(diag::err_init_double_destroy);
     return;
   }
-  if (!Site.Exempt &&
+  if (Acc && !Site.Exempt &&
       (*Acc == LeafState::Uninitialized || *Acc == LeafState::Mixed))
     Push(diag::err_init_destroy_uninit);
 }
@@ -3435,6 +3458,8 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       break;
     case DefAssignEventKind::Destroy: {
       const DestroySite &Site = DSites[Ev.Aux];
+      if (Site.Owner && St.Null.test(*Site.Owner))
+        break;
       if (Violations && Site.Judged)
         judgeDestroySite(Site, St, Storage, *Violations);
       for (unsigned A : Site.Affected) {
@@ -3490,6 +3515,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
         NewTarget = UnknownTarget;
         break;
       case ReseatTarget::Offset:
+      case ReseatTarget::Null:
         NewTarget = St.Target[Ev.Idx];
         break;
       }
@@ -3509,6 +3535,8 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       St.Offset[Ev.Idx] =
           Ev.RT == ReseatTarget::Offset ||
           (Ev.RT == ReseatTarget::ViaPointer && St.Offset.test(Ev.Aux));
+      St.Null[Ev.Idx] = Ev.RT == ReseatTarget::Null;
+      St.MayNull[Ev.Idx] = Ev.RT == ReseatTarget::Null;
       break;
     }
     case DefAssignEventKind::Escape:
@@ -4164,10 +4192,11 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
         OT->isPointerType() ? OT : S.Context.getLValueReferenceType(OT),
         /*Exempt=*/false, SemaProfiles::InitDestroyer::DestructorCall);
   }
-  if (Roles.DestroysPointerParams || Roles.KnownParam)
+  if (Roles.DestroysParams || Roles.KnownParam)
     ForEachParam([&](const ParmVarDecl *P, const Expr *Arg) {
       QualType PT = P->getType();
-      if (!PT->isPointerType() && !PT->isReferenceType())
+      if (!PT->isPointerType() && !PT->isReferenceType() &&
+          !SemaProfiles::isHandleType(PT))
         return;
       if (Roles.destroysParam(P))
         AppendDestroy(
@@ -4532,6 +4561,33 @@ static void extractStdInitEvents(
       Ev.RT = RT;
       BlockEvents.push_back(Ev);
     };
+    // The destruction of the referent of the marked std::unique_ptr \p Idx of
+    // type \p OwnerT by \p Destroyer at \p Loc (P4222R2 §4.6): destroy_uninit
+    // applies where the owned object's type has a non-trivial destructor, as
+    // for an [[uninit]] local's scope exit; double_destroy always.
+    auto AppendOwnerDestroy = [&](unsigned Idx, QualType OwnerT,
+                                  SourceLocation Loc,
+                                  SemaProfiles::InitDestroyer Destroyer,
+                                  const VarDecl *ScopeExitVar, const Expr *At) {
+      DestroySite Site;
+      Site.Loc = Loc;
+      Site.Judged = true;
+      Site.Destroyer = Destroyer;
+      Site.ScopeExitVar = ScopeExitVar;
+      QualType VT = SemaProfiles::handleValueType(OwnerT);
+      const auto *RD = VT.isNull()
+                           ? nullptr
+                           : Ctx.getBaseElementType(VT)->getAsCXXRecordDecl();
+      Site.Exempt = !RD || !RD->hasDefinition() || RD->hasTrivialDestructor();
+      Site.Owner = Idx;
+      BindingLeaf Leaf;
+      Leaf.Entity = Idx;
+      Site.Leaves.push_back(Leaf);
+      Site.Affected.push_back(Idx);
+      DSites.push_back(std::move(Site));
+      BlockEvents.push_back(
+          {DefAssignEventKind::Destroy, 0, At, (unsigned)(DSites.size() - 1)});
+    };
     // What a marked pointer, reference, or handle bound to \p Src as \p T
     // refers to, as a ReseatTarget and its Aux, through the binding judgment's
     // operand, leaf walk, and resolver (AddBinding,
@@ -4555,7 +4611,17 @@ static void extractStdInitEvents(
         using HandleLeaf = SemaProfiles::HandleLeaf;
         SmallVector<std::pair<ReseatTarget, unsigned>, 2> Targets;
         bool AnyTracked = false;
+        // Every leaf is null: a std-table construction with no transfer
+        // argument, or a null pointer.
+        bool AllNull = true;
         auto Visit = [&](auto &Self, const HandleLeaf &HL) -> void {
+          const Expr *Peeled = HL.E->IgnoreParenImpCasts();
+          AllNull &= HL.M == HandleLeaf::Mode::Handle
+                         ? isa<CXXConstructExpr>(Peeled) &&
+                               SemaProfiles::isStdOwnerType(Peeled->getType())
+                         : HL.M == HandleLeaf::Mode::PointerValue &&
+                               Peeled->isNullPointerConstant(
+                                   Ctx, Expr::NPC_ValueDependentIsNotNull);
           if (HL.M == HandleLeaf::Mode::Handle) {
             AnyTracked |= S.Profiles().isFlowTrackedHandleLeaf(HL, DC);
             TrackedStorage::Resolution R = Storage.resolveHandleLeaf(HL);
@@ -4594,6 +4660,9 @@ static void extractStdInitEvents(
         };
         SemaProfiles::forEachHandleSourceLeaf(
             Src, [&](const HandleLeaf &HL) { Visit(Visit, HL); });
+        // A null std::unique_ptr refers to nothing.
+        if (AllNull && SemaProfiles::isUniqueOwnerType(T))
+          return {ReseatTarget::Null, 0};
         if (Targets.empty())
           return Fresh;
         if (!llvm::all_equal(Targets))
@@ -4766,8 +4835,8 @@ static void extractStdInitEvents(
       // referent: the alias may reseat it. The source of a copy or a move,
       // a transfer argument, and a reference a standard library function
       // takes keep no alias -- but std::swap, std::exchange, and
-      // std::iter_swap exchange what it refers to, and std::advance offsets
-      // it.
+      // std::iter_swap exchange what it refers to, std::advance offsets it,
+      // and a std::unique_ptr moved from is null.
       bool HandleByRef = T->isReferenceType() &&
                          !T.getNonReferenceType().isConstQualified() &&
                          SemaProfiles::isHandleType(T.getNonReferenceType());
@@ -4779,16 +4848,20 @@ static void extractStdInitEvents(
         if (const auto *FD =
                 Parm ? dyn_cast<FunctionDecl>(Parm->getDeclContext())
                      : nullptr) {
-          if (SemaProfiles::isStdCallable(FD, "advance"))
+          if (SemaProfiles::isStdCallable(FD, "advance")) {
             RT = ReseatTarget::Offset;
-          else if (SemaProfiles::isCopySource(Parm) ||
-                   SemaProfiles::getCalleeLifecycleRoles(FD).transfersParam(
-                       Parm) ||
-                   (SemaProfiles::isStdLibraryFunction(FD) &&
-                    !SemaProfiles::isStdCallable(FD, "swap") &&
-                    !SemaProfiles::isStdCallable(FD, "exchange") &&
-                    !SemaProfiles::isStdCallable(FD, "iter_swap")))
+          } else if (SemaProfiles::isCopySource(Parm) ||
+                     SemaProfiles::getCalleeLifecycleRoles(FD).transfersParam(
+                         Parm)) {
+            if (!T->isRValueReferenceType())
+              return;
+            RT = ReseatTarget::Null;
+          } else if (SemaProfiles::isStdLibraryFunction(FD) &&
+                     !SemaProfiles::isStdCallable(FD, "swap") &&
+                     !SemaProfiles::isStdCallable(FD, "exchange") &&
+                     !SemaProfiles::isStdCallable(FD, "iter_swap")) {
             return;
+          }
         }
         SemaProfiles::forEachTargetLeaf(
             Src, [&](const SemaProfiles::ShapeLeaf &Leaf) {
@@ -4799,6 +4872,9 @@ static void extractStdInitEvents(
                 if (!G)
                   return;
               }
+              if (RT == ReseatTarget::Null &&
+                  !SemaProfiles::isUniqueOwnerType(G->getType()))
+                return;
               if (std::optional<unsigned> Idx =
                       Storage.markedHandleObject({G, Leaf.Arms}))
                 AppendReseat(*Idx, At, RT);
@@ -5089,6 +5165,12 @@ static void extractStdInitEvents(
               [&](const ParmVarDecl *Parm, QualType T, const Expr *Arg,
                   bool Variadic) {
                 SourceLocation Loc = Arg->IgnoreImplicit()->getExprLoc();
+                // A role parameter taking a class-type range by reference
+                // judges the range, and hands out no alias of it.
+                bool AsRange =
+                    Parm && T->isReferenceType() &&
+                    SemaProfiles::isHandleType(T.getNonReferenceType()) &&
+                    Roles.roleOf(Parm) != SemaProfiles::KnownParamRole::None;
                 if (Variadic)
                   AddBinding(K::VariadicArgument, Loc, /*TargetMarked=*/false,
                              T, Arg, nullptr, CallLike);
@@ -5100,16 +5182,12 @@ static void extractStdInitEvents(
                            Roles.transfersParam(Parm) ||
                            (SemaProfiles::isHandleType(T) &&
                             SemaProfiles::isAssignmentSource(Parm))))
-                  AddBinding(
-                      K::Parameter, Loc, Parm && Roles.isMarkedParam(Parm), T,
-                      Arg, nullptr, CallLike,
-                      SemaProfiles::isValueCopySource(Parm),
-                      /*AsRange=*/Parm && T->isReferenceType() &&
-                          SemaProfiles::isHandleType(T.getNonReferenceType()) &&
-                          Roles.roleOf(Parm) !=
-                              SemaProfiles::KnownParamRole::None,
-                      Parm);
-                AppendAliasEscapes(Arg, T, CallLike, Parm);
+                  AddBinding(K::Parameter, Loc,
+                             Parm && Roles.isMarkedParam(Parm), T, Arg, nullptr,
+                             CallLike, SemaProfiles::isValueCopySource(Parm),
+                             AsRange, Parm);
+                if (!AsRange)
+                  AppendAliasEscapes(Arg, T, CallLike, Parm);
               });
         };
     // A call of \p Callee (null when there is no declared callee) through
@@ -5181,6 +5259,18 @@ static void extractStdInitEvents(
         Judge(K::AggregateElement, nullptr, ElemT, Init);
     };
 
+    // A marked by-value std::unique_ptr parameter is destroyed when the
+    // function returns, and with it its referent (a coroutine's parameters
+    // live in its frame).
+    if (const auto *FD = dyn_cast<FunctionDecl>(D);
+        FD && B == &cfg.getExit() && FD->getBody() &&
+        !isa<CoroutineBodyStmt>(FD->getBody()))
+      for (const ParmVarDecl *P : FD->parameters())
+        if (std::optional<unsigned> Idx = Storage.markedHandleObject(P);
+            Idx && SemaProfiles::isUniqueOwnerType(P->getType()))
+          AppendOwnerDestroy(*Idx, P->getType(), FD->getBody()->getEndLoc(),
+                             SemaProfiles::InitDestroyer::ScopeExit, P,
+                             nullptr);
     for (const CFGElement &Elem : *B) {
       if (auto OptInit = Elem.getAs<CFGInitializer>()) {
         // A written member initializer binds its member at this point in
@@ -5292,6 +5382,16 @@ static void extractStdInitEvents(
         // non-trivial destructor destroys it (P4222R2 §4.6), reported where
         // the scope ends. Member and base destructors are not judged.
         const VarDecl *V = Dtor->getVarDecl();
+        // A marked std::unique_ptr's destructor destroys its referent.
+        if (std::optional<unsigned> Idx = Storage.markedHandleObject(V);
+            Idx && SemaProfiles::isUniqueOwnerType(V->getType())) {
+          const Stmt *Trigger = Dtor->getTriggerStmt();
+          AppendOwnerDestroy(*Idx, V->getType(),
+                             Trigger ? Trigger->getEndLoc() : V->getLocation(),
+                             SemaProfiles::InitDestroyer::ScopeExit, V,
+                             nullptr);
+          continue;
+        }
         // The scope exit of a read-tracked aggregate local destroys its
         // tracked whole members with non-trivial destructors.
         if (auto RIt = Storage.LocalRange.find(V);
@@ -5442,10 +5542,19 @@ static void extractStdInitEvents(
                 CE->getCallee()->IgnoreParens()))
           DestroyedObject = PDE->getBase();
         // A destructor call on a marked handle destroys the handle object,
-        // whose storage no entity tracks, not its referent.
-        if (DestroyedObject &&
-            Storage.markedHandleObject({DestroyedObject, {}}))
+        // whose storage no entity tracks -- a std::unique_ptr's destroys its
+        // referent too.
+        if (std::optional<unsigned> Idx =
+                DestroyedObject
+                    ? Storage.markedHandleObject({DestroyedObject, {}})
+                    : std::nullopt) {
+          QualType OwnerT = DestroyedObject->IgnoreParenImpCasts()->getType();
+          if (SemaProfiles::isUniqueOwnerType(OwnerT))
+            AppendOwnerDestroy(*Idx, OwnerT, CE->getExprLoc(),
+                               SemaProfiles::InitDestroyer::DestructorCall,
+                               nullptr, CE);
           DestroyedObject = nullptr;
+        }
         // A handle reseat is judged against the handle's marking
         // (SemaProfiles::checkInitProfileHandleReseat).
         const Expr *ReseatObj = nullptr, *ReseatSrc = nullptr;
@@ -5491,8 +5600,19 @@ static void extractStdInitEvents(
                                  Object->IgnoreParenImpCasts()->getType());
             const Expr *DerivingObj;
             bool Element;
+            bool IsOwner = SemaProfiles::isUniqueOwnerType(
+                Object->IgnoreParenImpCasts()->getType());
+            // A std::unique_ptr's reset or reassignment destroys its referent
+            // first.
+            if ((IsReseat || OO == OO_Equal || IsReset) && !Several && IsOwner)
+              AppendOwnerDestroy(Idx, Object->IgnoreParenImpCasts()->getType(),
+                                 CE->getExprLoc(),
+                                 SemaProfiles::InitDestroyer::OwnerReset,
+                                 nullptr, CE);
             if (IsReseat || OO == OO_Equal || (IsReset && !Written)) {
-              std::pair<ReseatTarget, unsigned> RT{ReseatTarget::Fresh, 0};
+              // An owner reset or assigned null refers to nothing.
+              std::pair<ReseatTarget, unsigned> RT{
+                  IsOwner ? ReseatTarget::Null : ReseatTarget::Fresh, 0};
               if (IsReseat)
                 RT = ReseatTargetFor(
                     ReseatSrc, ReseatObj->getType().getNonReferenceType());
@@ -5502,7 +5622,12 @@ static void extractStdInitEvents(
             } else if (OO == OO_PlusPlus || OO == OO_MinusMinus ||
                        OO == OO_PlusEqual || OO == OO_MinusEqual) {
               AppendReseat(Idx, CE, ReseatTarget::Offset);
-            } else if (!ObjectMethod->isConst() && !IsRelease &&
+            } else if (IsRelease) {
+              // release() hands the referent to its result.
+              AppendReseat(Idx, CE,
+                           Several ? ReseatTarget::Unknown
+                                   : ReseatTarget::Null);
+            } else if (!ObjectMethod->isConst() &&
                        !SemaProfiles::isHandleDerefCall(CE, DerivingObj,
                                                         Element)) {
               AppendReseat(Idx, CE, ReseatTarget::Escaped);

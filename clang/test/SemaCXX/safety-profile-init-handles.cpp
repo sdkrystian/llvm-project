@@ -180,7 +180,13 @@ void uninitialized_fill(FwdIt first, FwdIt last, const T &x);
 template <class FwdIt> void uninitialized_value_construct(FwdIt first, FwdIt last);
 template <class FwdIt>
 void uninitialized_default_construct(FwdIt first, FwdIt last);
+template <class FwdIt> void destroy(FwdIt first, FwdIt last);
 namespace ranges {
+struct __destroy_fn {
+  template <class I, class S> I operator()(I first, S last) const noexcept;
+  template <class R> void operator()(R &&r) const noexcept;
+};
+inline constexpr __destroy_fn destroy{};
 struct __uninitialized_fill_fn {
   template <class I, class S, class T>
   I operator()(I first, S last, const T &x) const;
@@ -955,6 +961,116 @@ int iterator_increment(std::span<int> s [[ref_to_uninit]]) {
   std::uninitialized_fill(s.begin(), s.end(), 0);
   std::uninitialized_fill(s.begin(), s.end(), 1); // expected-error {{handle of type '__gnu_cxx::__normal_iterator<int *, std::span<int>::__iter_tag>' marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   return *it;
+}
+
+// The destroy family takes a class-type iterator or range
+struct WD {
+  int x;
+  ~WD();
+};
+void destroy_through_span(std::span<WD> s [[ref_to_uninit]]) {
+  std::uninitialized_value_construct(s.begin(), s.end());
+  std::destroy(s.begin(), s.end());
+  std::destroy(s.begin(), s.end()); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+}
+void destroy_unconstructed(std::span<WD> s [[ref_to_uninit]],
+                           std::span<WD> t [[ref_to_uninit]]) {
+  std::destroy(s.begin(), s.end()); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+  std::ranges::destroy(t); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+}
+
+// [[now_uninit]] takes a handle parameter
+[[now_uninit]] void drop(std::span<WD> s);
+void drop_twice(std::span<WD> s [[ref_to_uninit]]) {
+  std::uninitialized_value_construct(s.begin(), s.end());
+  drop(s);
+  drop(s); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+}
+
+// A marked std::unique_ptr destroys what it owns at the end of its scope,
+// and at a reset
+void owner_scope_exit() {
+  std::unique_ptr<WD> up [[ref_to_uninit]](new WD); // expected-note {{'up' is destroyed at the end of its scope}}
+} // expected-error {{uninitialized storage is destroyed by its scope-exit destructor under profile 'std::init'}}
+void owner_constructed() {
+  std::unique_ptr<WD> up [[ref_to_uninit]](new WD);
+  std::construct_at(up.get());
+}
+void owner_reset(std::unique_ptr<WD> up [[ref_to_uninit]]) {
+  std::construct_at(up.get());
+  up.reset(new WD);
+  std::construct_at(up.get());
+}
+void owner_reset_unconstructed(std::unique_ptr<WD> up [[ref_to_uninit]]) {
+  up.reset(); // expected-error {{uninitialized storage is destroyed by its owner's reset or reassignment under profile 'std::init'}}
+}
+void owner_trivial() {
+  std::unique_ptr<int> up [[ref_to_uninit]](new int);
+}
+
+// A marked by-value std::unique_ptr parameter destroys what it owns when the
+// function returns
+void owner_parameter(std::unique_ptr<WD> up [[ref_to_uninit]]) { // expected-note {{'up' is destroyed at the end of its scope}}
+} // expected-error {{uninitialized storage is destroyed by its scope-exit destructor under profile 'std::init'}}
+void owner_parameter_constructed(std::unique_ptr<WD> up [[ref_to_uninit]]) {
+  std::construct_at(up.get());
+}
+
+// A null std::unique_ptr -- constructed null, reset, assigned null, released,
+// or moved from -- owns nothing to destroy, and a move hands what it owned to
+// the destination
+void null_owners() {
+  std::unique_ptr<WD> a [[ref_to_uninit]];
+  std::unique_ptr<WD> b [[ref_to_uninit]](nullptr);
+  std::unique_ptr<WD> c [[ref_to_uninit]](new WD);
+  std::construct_at(c.get());
+  c.reset();
+  std::unique_ptr<WD> d [[ref_to_uninit]](new WD);
+  std::construct_at(d.get());
+  d = nullptr;
+  std::unique_ptr<WD> e [[ref_to_uninit]](new WD);
+  WD *r [[ref_to_uninit]] = e.release();
+  std::unique_ptr<WD> f [[ref_to_uninit]];
+  f.reset(new WD);
+  std::construct_at(f.get());
+  (void)r;
+}
+void moved_owner_destroy() {
+  std::unique_ptr<WD> p [[ref_to_uninit]](new WD);
+  std::unique_ptr<WD> q [[ref_to_uninit]] = static_cast<std::unique_ptr<WD> &&>(p); // expected-note {{'q' is destroyed at the end of its scope}}
+} // expected-error {{uninitialized storage is destroyed by its scope-exit destructor under profile 'std::init'}}
+
+// An owner null on some path destroys nothing on that path, so its later
+// destroys are no double destruction
+void owner_null_on_one_path(bool c, int n) {
+  std::unique_ptr<WD> p [[ref_to_uninit]](new WD);
+  std::construct_at(p.get());
+  if (c)
+    p.reset();
+  std::unique_ptr<WD> q [[ref_to_uninit]](new WD);
+  std::construct_at(q.get());
+  if (c)
+    q = nullptr;
+  q.reset();
+  std::unique_ptr<WD> r [[ref_to_uninit]];
+  for (int i = 0; i < n; ++i) {
+    if (r)
+      r.reset();
+    r.reset(new WD);
+    std::construct_at(r.get());
+  }
+}
+
+// An owning smart pointer with static or thread storage duration cannot
+// carry the marker
+void static_owners() {
+  // expected-error@+2 {{'ref_to_uninit' attribute cannot be applied to an owning smart pointer with static storage duration}}
+  // no-profiles-error@+1 {{'ref_to_uninit' attribute cannot be applied to an owning smart pointer with static storage duration}}
+  static std::unique_ptr<WD> u [[ref_to_uninit]];
+  // expected-error@+2 {{'ref_to_uninit' attribute cannot be applied to an owning smart pointer with thread storage duration}}
+  // no-profiles-error@+1 {{'ref_to_uninit' attribute cannot be applied to an owning smart pointer with thread storage duration}}
+  thread_local std::shared_ptr<int> t [[ref_to_uninit]];
+  static std::span<int> s [[ref_to_uninit]];
 }
 
 //--- libcxx.cpp

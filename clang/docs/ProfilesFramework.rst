@@ -1041,10 +1041,11 @@ subobject of an ``[[uninit]]`` object, or a subobject write is rejected.  Clang
 treats ``std::destroy_at`` this way itself -- a call to a ``std::destroy_at``
 whose first parameter is of pointer type destroys that argument's storage, and
 so does a call to ``std::destroy`` or ``std::destroy_n`` (P4222R2 §4.4) or
-their execution-policy overloads for its first iterator where that is a pointer,
-and to ``std::allocator_traits<A>::destroy`` for its pointer argument unless
-``A`` declares its own ``destroy`` (as for ``construct``), a call that leaves
-the storage possibly initialized;
+their execution-policy overloads for its first iterator, a pointer or a
+class-type iterator (``std::destroy(s.begin(), s.end())`` destroys what a
+marked span refers to), and to ``std::allocator_traits<A>::destroy`` for its
+pointer argument unless ``A`` declares its own ``destroy`` (as for
+``construct``), a call that leaves the storage possibly initialized;
 the end iterator is accepted in any state, as for ``uninitialized_fill`` -- so
 the construct/destroy/construct cycle is legal, a second destruction is
 rejected, a destroy of never-constructed storage is rejected too, and binding
@@ -1139,7 +1140,7 @@ or a function's return (§4.6, §9.3).
 .. code-block:: c++
 
    void init(std::span<X> s [[ref_to_uninit]], int i1, int i2);
-   std::unique_ptr<int> p [[ref_to_uninit]];
+   void make() { std::unique_ptr<int> p [[ref_to_uninit]]; }
 
 A union, an array of handles, and a structured binding cannot carry the
 marker.  A reference to a class keeps its meaning: it refers to the class
@@ -1260,8 +1261,26 @@ hands it over, and
 any other non-const member call -- but one returning a pointer or reference
 into the referent -- or a non-const reference or pointer to the handle leaves
 it unknown, except a standard library function's other than ``std::swap``,
-``std::exchange``, and ``std::iter_swap``.  A destructor call on a handle ends
-the handle object, not its referent.
+``std::exchange``, and ``std::iter_swap``.  A destructor call on a handle other
+than a marked ``std::unique_ptr`` (below) ends the handle object, not its
+referent.
+
+A ``std::uninitialized_*`` call, ``std::destroy`` and ``std::destroy_n``, and
+their ``std::ranges`` objects take a class-type iterator or range, and a
+``[[now_uninit]]`` function's handle parameter is destroyed like its pointer
+parameters.  A marked ``std::unique_ptr`` owns its referent: its destructor at
+the end of its scope (for a by-value parameter, of the function), its
+``reset``, its reassignment, and an explicit destructor call destroy the
+referent, so the owned object must have been constructed when its type has a
+non-trivial destructor (``destroy_uninit``) and must not have been destroyed
+already (``double_destroy``); a ``std::shared_ptr``'s destruction is not
+judged.  A null ``std::unique_ptr`` -- constructed empty or from ``nullptr``,
+reset, assigned ``nullptr``, released, or moved from -- owns nothing, and its
+destruction destroys nothing (after ``if (c) u.reset();`` its destruction is
+no ``double_destroy``), while a move or ``release()`` hands what it
+owned to the destination.  An owning smart pointer with static or thread
+storage duration cannot carry the marker: its destructor runs at program or
+thread exit, where nothing is judged.
 
 Assigning a handle (``t = s``) binds it like an initialization, judged
 against the assigned-to handle's marking, and so does an owning smart

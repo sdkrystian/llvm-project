@@ -699,7 +699,9 @@ public:
     /// An explicit destructor call, or the one a delete-expression runs.
     DestructorCall,
     /// The destructor that ends an [[uninit]] local's scope.
-    ScopeExit
+    ScopeExit,
+    /// An owning smart pointer's reset or reassignment.
+    OwnerReset
   };
 
   /// std::init / ref_to_uninit: a pointer promoted through a `...` parameter
@@ -788,8 +790,8 @@ public:
     InitDestroyer Destroyer = InitDestroyer::Function;
     /// Binding: the source is copied by value (isValueCopySource).
     bool ValueCopy = false;
-    /// Binding: the source is a range a role parameter takes by reference
-    /// (judgeInitProfileBinding's \p AsRange).
+    /// Binding and Destroy: the source is a range a role parameter takes by
+    /// reference (judgeInitProfileBinding's \p AsRange).
     bool AsRange = false;
   };
 
@@ -930,8 +932,8 @@ public:
     /// [[ref_to_uninit]] parameters (P4222R2 §6.2).
     bool InitializesRefToUninitParams = false;
     /// [[now_uninit]]: the callee ends the lifetime of the storage bound
-    /// to its pointer/reference parameters (§4.4).
-    bool DestroysPointerParams = false;
+    /// to its pointer, reference, and handle parameters (P4222R2 §4.4).
+    bool DestroysParams = false;
     /// The known-callee row's role parameter, if the row has one.
     std::optional<unsigned> KnownParam;
     /// What the row does to the storage bound to KnownParam.
@@ -986,6 +988,9 @@ public:
   /// True if \p T is std::unique_ptr: an owner whose destruction, reset, or
   /// reassignment destroys the object it refers to.
   static bool isUniqueOwnerType(QualType T);
+  /// True if \p T is an owning smart pointer of the std handle table:
+  /// std::unique_ptr or std::shared_ptr.
+  static bool isStdOwnerType(QualType T);
   /// The value type of the handle type \p T (or a reference to one) as an
   /// iterator or a range, unqualified, looked up in the class and then its
   /// bases: its \c element_type member type (std::unique_ptr<T[]>'s is
@@ -1037,14 +1042,14 @@ private:
   void checkInitProfileDestroy(SourceLocation Loc, QualType T, const Expr *Src,
                                const Decl *D, bool DestroyUninitApplies,
                                InitDestroyer Destroyer,
-                               bool TargetMarked = false);
+                               bool TargetMarked = false, bool AsRange = false);
 
   /// The form half of checkInitProfileDestroy: diagnose destroy_uninit when
   /// \p Src, bound as \p T, classifies uninitialized. \p D and
   /// \p AfterFlowPass are judgeInitProfileBinding's.
   void judgeDestroyUninitByForm(SourceLocation Loc, QualType T, const Expr *Src,
                                 const Decl *D, const Decl *AfterFlowPass,
-                                InitDestroyer Destroyer);
+                                InitDestroyer Destroyer, bool AsRange = false);
 
   /// True while the std::init checks run on code that is not judged where it
   /// stands: a default argument or default member initializer rebuilt for one

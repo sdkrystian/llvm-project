@@ -7299,28 +7299,30 @@ static void handleNowUninitAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
     return;
   // D is a non-constructor function. [[now_uninit]] asserts that
   // the callee ends the lifetime of the storage bound to each of its
-  // pointer/reference parameters -- the recording P4222R2 §4.4 wishes for
-  // ("the object subjected to destroy_at() should be considered
+  // pointer, reference, and handle parameters -- the recording P4222R2 §4.4
+  // wishes for ("the object subjected to destroy_at() should be considered
   // uninitialized, but there is no way of recording that in the code") --
   // so a declaration with no such parameter would make it vacuous; reject
   // it. Unlike [[now_init]], the parameters are unmarked (they receive
   // initialized memory), so the vacuity check keys on their types: a
-  // pointer to an object or a reference. A function pointer or reference
+  // pointer to an object, a reference, or a handle (a non-union class,
+  // SemaProfiles::isHandleType). A function pointer or reference
   // denotes a function, never destroyable storage (mirroring
   // [[ref_to_uninit]]'s subject rule), and a dependent type may
   // instantiate to anything, so it passes -- if it does not become a
-  // pointer or reference, the inherited attribute goes inert (the
-  // withdrawal arms only ever key on pointer/reference bindings). Like the
+  // pointer, reference, or handle, the inherited attribute goes inert (the
+  // withdrawal arms only ever key on those bindings). Like the
   // other marker subject checks, this fires regardless of -fprofiles.
   if (llvm::none_of(cast<FunctionDecl>(D)->parameters(),
                     [](const ParmVarDecl *P) {
                       QualType T = P->getType();
                       return T->isDependentType() ||
+                             SemaProfiles::isHandleType(T) ||
                              ((T->isPointerType() || T->isReferenceType()) &&
                               !T->isFunctionPointerType() &&
                               !T->isFunctionReferenceType());
                     })) {
-    S.Diag(AL.getLoc(), diag::err_now_uninit_attr_no_pointer_parameter);
+    S.Diag(AL.getLoc(), diag::err_now_uninit_attr_no_destroyable_parameter);
     AL.setInvalid();
     return;
   }

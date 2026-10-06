@@ -1041,10 +1041,12 @@ refers to memory, such as a smart pointer, a span, or an iterator
 refers to the class object itself, as any reference does. Applying the
 attribute elsewhere is diagnosed regardless of ``-fprofiles``. A function
 pointer or reference (or a pointer-to-member) denotes a function or member,
-never uninitialized memory, so it is rejected, as are a union, an array, and a
-structured binding (whose members carry their own markers). A deduced type
-(``auto``, ``decltype(auto)``) is checked once deduced: a variable's at its
-initializer, a function's or lambda's return type at the end of its body.
+never uninitialized memory, so it is rejected, as are a union, an array, a
+structured binding (whose members carry their own markers), and an owning
+smart pointer (``std::unique_ptr``, ``std::shared_ptr``) with static or thread
+storage duration, whose destructor runs at program or thread exit. A deduced
+type (``auto``, ``decltype(auto)``) is checked once deduced: a variable's at
+its initializer, a function's or lambda's return type at the end of its body.
 
 Outside the initialization profile the attribute is otherwise silently
 accepted and has no effect, so code that uses it remains valid when compiled
@@ -1103,9 +1105,9 @@ def NowUninitDocs : Documentation {
   let Heading = "now_uninit";
   let Content = [{
 The ``[[now_uninit]]`` attribute marks a function as *ending the lifetime*
-of the storage passed to each of its pointer or reference parameters,
-leaving that storage uninitialized. It is purely informational: it has no
-effect on code generation.
+of the storage passed to each of its pointer, reference, or handle (class
+type, such as ``std::span``) parameters, leaving that storage uninitialized.
+It is purely informational: it has no effect on code generation.
 
 The attribute is the mirror of ``[[now_init]]`` and exists to support the
 initialization profile (see :doc:`ProfilesFramework`). It supplies the
@@ -1114,7 +1116,8 @@ recording P4222R2 §4.4 notes is missing ("the object subjected to
 recording that in the code"; the exact placement and spelling of the marker
 family track an open committee question). After a call to a
 ``[[now_uninit]]`` function, the profile treats the storage bound to every
-pointer or reference parameter as uninitialized again, so the object can be
+pointer, reference, or handle parameter (the memory a handle refers to) as
+uninitialized again, so the object can be
 re-initialized -- and a second destruction, or a use of the storage through
 an ordinary pointer or reference, is diagnosed:
 
@@ -1142,10 +1145,11 @@ memory, or storage that was never constructed at all (the raw-release
 shape) -- so only the double destruction above is rejected at the call
 itself.
 
-Because the attribute covers *every* pointer or reference parameter, apply
-it only to functions that end the lifetime of every such argument's
-storage. It requires at least one parameter of pointer or reference type
-(it would be vacuous otherwise), and it cannot be applied to a constructor
+Because the attribute covers *every* pointer, reference, or handle
+parameter, apply it only to functions that end the lifetime of every such
+argument's storage. It requires at least one parameter of pointer,
+reference, or class type (it would be vacuous otherwise), and it cannot be
+applied to a constructor
 (a static member or free function carries it instead); both are diagnosed
 regardless of ``-fprofiles``. A function may carry both ``[[now_uninit]]`` and
 ``[[now_init]]``: such a reinitializer models destroy-then-construct, so

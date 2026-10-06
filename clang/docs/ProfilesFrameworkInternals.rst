@@ -830,10 +830,16 @@ follows:
      - the Destroy sites of ``extractStdInitEvents`` -- a ``[[now_uninit]]``
        or destroy-row argument, an explicit or pseudo-destructor call's
        object, the operand of a ``delete`` that runs a non-trivial destructor
-       (``appendLifecycleCallEvents``), and the non-trivial scope-exit
+       (``appendLifecycleCallEvents``), the non-trivial scope-exit
        destructor of an ``[[uninit]]`` local (its ``CFGAutomaticObjDtor``,
        gated at the declaration, unless a marker rule rejects the marker) or
-       of a read-tracked aggregate local's whole member -- for a source with a
+       of a read-tracked aggregate local's whole member,
+       and the scope exit (a by-value parameter's at the function's exit),
+       ``reset``, reassignment, and destructor call of a marked
+       ``std::unique_ptr``, which destroy its referent unless the owner is
+       null (``isUniqueOwnerType``, ``FlowState::Null``) and are no
+       ``double_destroy`` while it is null on some path
+       (``FlowState::MayNull``) -- for a source with a
        flow-tracked leaf (``judgeDestroySite``: ``double_destroy`` on
        ``MayDestroyed``, ``destroy_uninit`` unless ``May``, a reinitializer, or
        a marked parameter); otherwise ``checkInitProfileDestroy``, entered
@@ -1550,16 +1556,22 @@ Missed Diagnostics
   destroy).  A direct named read of a plain ``[[uninit]]`` *local* after a
   destroy stays with the local-variable analysis, which treats the call as an
   escape, so it is a missed diagnostic.
-- Clang's knowledge of the standard library's lifecycle functions applies where
-  the role parameter is a pointer: ``std::construct_at``, ``std::destroy_at``,
-  ``std::now_init`` with a pointer first parameter, and ``std::destroy`` and
-  ``std::destroy_n`` where the iterator is a pointer, and their ``std::ranges``
-  objects where the iterator is a pointer or the range is an array; a call
-  with a class-type iterator or range checks nothing there.  The
-  ``std::uninitialized_*`` family and its ``std::ranges`` objects also take a
-  class-type iterator or range.
-  A whole ``[[uninit]]`` array passed as a range is initialized or destroyed
-  whatever the range's length.
+- Clang's knowledge of ``std::construct_at``, ``std::destroy_at``, and
+  ``std::now_init`` applies where their parameter is a pointer, and of their
+  ``std::ranges`` objects likewise; a call with a class-type argument checks
+  nothing there.  The ``std::uninitialized_*`` family, ``std::destroy``, and
+  ``std::destroy_n`` and their ``std::ranges`` objects take a pointer or a
+  class-type iterator, or an array or class-type range.  A whole
+  ``[[uninit]]`` array passed as a range is initialized or destroyed whatever
+  the range's length.
+- A ``std::shared_ptr``'s destruction is not judged (its ownership is
+  shared), nor is a ``std::unique_ptr``'s reset or reassignment through a
+  conditional naming several owners.
+- A marked ``std::unique_ptr`` null on some path is no ``double_destroy`` at
+  its reset, reassignment, destructor call, or destruction
+  (``FlowState::MayNull``): a referent another path destroyed explicitly is
+  rejected there only when it is uninitialized on every path
+  (``destroy_uninit``).
 - Storage of no type -- a marked ``void *``'s referent, such as a ``malloc``
   block -- is covered by a credit or store of any type: after
   ``std::construct_at((int *)v, 1)`` the whole block counts as initialized, so a

@@ -14453,12 +14453,15 @@ def err_ref_to_uninit_attr_invalid_type : Error<
   "classes, and functions returning them">;
 def err_ref_to_uninit_attr_structured_binding : Error<
   "'ref_to_uninit' attribute cannot be applied to a structured binding">;
+def err_ref_to_uninit_attr_static_owner : Error<
+  "'ref_to_uninit' attribute cannot be applied to an owning smart pointer "
+  "with %select{static|thread}0 storage duration">;
 def err_now_init_attr_no_marked_parameter : Error<
   "'now_init' attribute requires at least one parameter marked "
   "'[[ref_to_uninit]]'">;
-def err_now_uninit_attr_no_pointer_parameter : Error<
-  "'now_uninit' attribute requires at least one parameter of pointer or "
-  "reference type">;
+def err_now_uninit_attr_no_destroyable_parameter : Error<
+  "'now_uninit' attribute requires at least one parameter of pointer, "
+  "reference, or class type">;
 def err_lifecycle_attr_on_constructor : Error<
   "%0 attribute cannot be applied to a constructor">;
 def err_init_union_marker : ProfileRule<
@@ -14534,12 +14537,13 @@ def err_init_member_call_on_uninit : ProfileRule<
   ProfileStdInitRefToUninit>;
 def err_init_double_destroy : ProfileRule<
   "storage already destroyed by %select{a '[[now_uninit]]' function|"
-  "a destructor call|its scope-exit destructor}1 is destroyed again under "
-  "profile '%0'",
+  "a destructor call|its scope-exit destructor|its owner's reset or "
+  "reassignment}1 is destroyed again under profile '%0'",
   ProfileStdInitDoubleDestroy>;
 def err_init_destroy_uninit : ProfileRule<
   "uninitialized storage is destroyed by %select{a '[[now_uninit]]' function|"
-  "a destructor call|its scope-exit destructor}1 under profile '%0'",
+  "a destructor call|its scope-exit destructor|its owner's reset or "
+  "reassignment}1 under profile '%0'",
   ProfileStdInitDestroyUninit>;
 def err_init_deferred_check_unjudged : Error<
   "std::init %select{binding|destroy|read|store}0 check deferred to the flow "

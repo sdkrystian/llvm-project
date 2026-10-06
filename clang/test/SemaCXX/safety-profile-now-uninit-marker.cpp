@@ -4,9 +4,9 @@
 // The [[now_uninit]] marker -- the mirror of [[now_init]], supplying the
 // recording P4222R2 §4.4 notes is missing for destroy_at -- is recognized
 // regardless of -fprofiles. It applies to functions with at least one
-// parameter of pointer or reference type -- the parameters whose storage the
-// callee destroys; with no profile enforced it has no effect on those valid
-// subjects. Other placements, and a function with no pointer or reference
+// parameter of pointer, reference, or class type -- the parameters whose
+// storage the callee destroys; with no profile enforced it has no effect on
+// those valid subjects. Other placements, and a function with no such
 // parameter (a vacuous claim), are rejected regardless of -fprofiles.
 
 [[now_uninit]] void wipe(int *p);
@@ -14,6 +14,8 @@
 [[now_uninit]] void wipe_void(void *p);
 void wipe_after_name [[now_uninit]] (int *p);
 [[now_uninit]] void wipe_many(int n, int *p, bool b);
+struct Handle { int *p; };
+[[now_uninit]] void wipe_handle(Handle h);
 
 // Carrying both attributes is allowed: a reinitializer both ends and starts
 // a lifetime for its argument's storage.
@@ -53,17 +55,17 @@ struct BadField {
                         // no-profiles-error {{'now_uninit' attribute only applies to functions}}
 };
 
-[[now_uninit]] void bad_no_params(); // expected-error {{'now_uninit' attribute requires at least one parameter of pointer or reference type}} \
-                                     // no-profiles-error {{'now_uninit' attribute requires at least one parameter of pointer or reference type}}
+[[now_uninit]] void bad_no_params(); // expected-error {{'now_uninit' attribute requires at least one parameter of pointer, reference, or class type}} \
+                                     // no-profiles-error {{'now_uninit' attribute requires at least one parameter of pointer, reference, or class type}}
 
-[[now_uninit]] void bad_value_params(int v, bool b); // expected-error {{'now_uninit' attribute requires at least one parameter of pointer or reference type}} \
-                                                     // no-profiles-error {{'now_uninit' attribute requires at least one parameter of pointer or reference type}}
+[[now_uninit]] void bad_value_params(int v, bool b); // expected-error {{'now_uninit' attribute requires at least one parameter of pointer, reference, or class type}} \
+                                                     // no-profiles-error {{'now_uninit' attribute requires at least one parameter of pointer, reference, or class type}}
 
 // A function pointer denotes a function, never destroyable storage
 // (mirroring [[ref_to_uninit]]'s subject rule), so it does not satisfy the
 // vacuity check.
-[[now_uninit]] void bad_fn_ptr_param(void (*fp)()); // expected-error {{'now_uninit' attribute requires at least one parameter of pointer or reference type}} \
-                                                    // no-profiles-error {{'now_uninit' attribute requires at least one parameter of pointer or reference type}}
+[[now_uninit]] void bad_fn_ptr_param(void (*fp)()); // expected-error {{'now_uninit' attribute requires at least one parameter of pointer, reference, or class type}} \
+                                                    // no-profiles-error {{'now_uninit' attribute requires at least one parameter of pointer, reference, or class type}}
 
 // A constructor cannot carry the attribute
 struct Killer {
