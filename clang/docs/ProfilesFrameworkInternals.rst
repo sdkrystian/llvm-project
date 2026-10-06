@@ -820,8 +820,11 @@ follows:
      - CFG rider for flow-tracked sources, expression site otherwise
      - the Destroy sites of ``extractStdInitEvents`` -- a ``[[now_uninit]]``
        or destroy-row argument, an explicit or pseudo-destructor call's
-       object, and the operand of a ``delete`` that runs a non-trivial
-       destructor (``appendLifecycleCallEvents``) -- for a source with a
+       object, the operand of a ``delete`` that runs a non-trivial destructor
+       (``appendLifecycleCallEvents``), and the non-trivial scope-exit
+       destructor of an ``[[uninit]]`` local (its ``CFGAutomaticObjDtor``,
+       gated at the declaration, unless a marker rule rejects the marker) --
+       for a source with a
        flow-tracked leaf (``judgeDestroySite``: ``double_destroy`` on
        ``MayDestroyed``, ``destroy_uninit`` unless ``May``, a reinitializer, or
        a marked parameter); otherwise ``checkInitProfileDestroy``, entered
@@ -1121,6 +1124,15 @@ Deliberate Strictnesses
   callee filled the storage -- the same strictness, and the same remedies,
   as the unmarked-direction binding after such a call: ``[[now_init]]`` on
   the callee or suppression.
+- Storage destroyed whole stays destroyed until it is initialized whole:
+  constructing its elements one by one after ``std::destroy(arr, arr + 2)``
+  leaves it destroyed, so its scope-exit destructor or a second whole destroy
+  is rejected by ``double_destroy``.  The remedies are a whole-range
+  ``std::uninitialized_*`` credit or suppression.  A credit through an
+  argument naming several storages initializes none of them whole either:
+  after ``std::destroy_at(c ? &a : &b)``, ``std::construct_at(c ? &a : &b)``
+  leaves both destroyed on some path, so both scope-exit destructors are
+  rejected.
 - Member-wise initialization of a class-type referent through
   ``[[ref_to_uninit]]`` is rejected even for trivially-copyable referents
   (``ptr->x = 5``): below a member step only whole-object ``construct_at``
@@ -1344,6 +1356,14 @@ Missed Diagnostics
   strictness, never a false positive).
 - Virtual base subobjects are not checked by ``ctor_uninit_member`` (they are
   initialized by the most-derived class).
+- The scope-exit destructor of an ``[[uninit]]`` local is judged on the
+  normal paths only: the CFG has no destructor elements on exception edges,
+  so ``WD w [[uninit]]; mayThrow(); std::construct_at(&w);``, whose unwinding
+  destroys the never-constructed ``w``, is accepted.
+- The implicit destruction of members and bases at the end of a destructor
+  is not judged: an ``[[uninit]]`` member of a class type with a non-trivial
+  destructor may be destroyed although it was never constructed, which only
+  the P4222R2 §5 exposure analysis, not implemented, could tell.
 - A read of a tracked member inside another member's default initializer is
   not detected.
 - A store through an alias of a pointer object (``int *&r = p; r = &u;``,

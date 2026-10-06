@@ -172,6 +172,10 @@ public:
   /// \c ActOnUninitializedDecl.
   void checkInitProfileStaticMarker(const VarDecl *Var);
 
+  /// True if no marker rule rejects the [[uninit]] on \p Var: it has no
+  /// written initializer and its default-initialization runs no code.
+  bool isConsistentUninitMarker(const VarDecl *Var);
+
   /// std::init / static_runtime_init (paper §3): diagnose a non-local static
   /// whose initialization needs a runtime constructor. \p CheckConstInit
   /// lazily evaluates whether the initializer is constant (trivial

@@ -2974,14 +2974,15 @@ void test_now_init_array_decay_reverse() {
   now_init_fill(arr);
   now_init_fill(arr); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
 }
-// The element-address shape resolves nothing (§5.4's element ban), and a
-// file-scope [[uninit]] array is not flow-tracked: neither is initialized by
-// the call, so the unmarked binding after it keeps failing.
+// An element credit may initialize the array but does not on every path, so an unmarked binding is accepted and an element read is not
 void test_now_init_array_element_no_credit() {
   [[uninit]] int arr[8];
   now_init_fill(&arr[0]);
-  ni_sink(arr); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  ni_sink(arr); // OK
+  int v = arr[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  (void)v;
 }
+// A file-scope [[uninit]] array is not flow-tracked, so the call initializes nothing
 void test_now_init_array_static_no_credit() {
   now_init_fill(g_uninit_arr);
   int *q = g_uninit_arr; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
@@ -4275,11 +4276,11 @@ void test_member_call_silent_forms() {
   c(1);                   // OK: a static call operator uses no object argument
 }
 
-// An explicit destructor call destroys its object, as std::destroy_at does
+// An explicit destructor call destroys its object, and the scope-exit destructor destroys it again
 void test_destructor_call_destroys() {
-  WithDtor d [[uninit]];
+  WithDtor d [[uninit]]; // expected-note {{'d' is destroyed at the end of its scope}}
   d.~WithDtor(); // expected-error {{uninitialized storage is destroyed by a destructor call under profile 'std::init'}}
-}
+} // expected-error {{storage already destroyed by its scope-exit destructor is destroyed again under profile 'std::init'}}
 
 // A call through a pointer-to-member resolves no method at the call and
 // bypasses the object-argument conversion -- the pointer-to-member analog of

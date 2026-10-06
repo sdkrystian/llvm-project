@@ -14480,6 +14480,8 @@ def err_init_ctor_uninit_anon_union : ProfileRule<
   ProfileStdInitCtorUninitMember>;
 def note_init_uninit_member_here : Note<
   "member %0 declared here">;
+def note_init_scope_exit_destroy : Note<
+  "%0 is destroyed at the end of its scope">;
 def note_init_uninit_anon_union_here : Note<
   "anonymous union declared here">;
 def err_init_ctor_uninit_base : ProfileRule<

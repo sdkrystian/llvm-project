@@ -2336,7 +2336,8 @@ TrackedStorage::markedPointerObject(const SemaProfiles::ShapeLeaf &Leaf) const {
 /// store whose target names Idx on one of several arms. Copy: Idx takes
 /// entity Aux's state (the tracked-copy transfer). Kill: a storage release
 /// (free, realloc, operator delete, a delete-expression) leaves Idx
-/// unassigned. Destroy: a [[now_uninit]] destruction (DestroySites[Aux]),
+/// unassigned. Destroy: a [[now_uninit]] destruction, a destructor call, or a
+/// scope-exit destructor (DestroySites[Aux]),
 /// judged by the destroy rules; its storage is then unassigned and destroyed
 /// until stored again -- for an argument naming several storages, each may
 /// be. Reseat: the marked pointer or reference Idx refers, from here,
@@ -2355,8 +2356,8 @@ TrackedStorage::markedPointerObject(const SemaProfiles::ShapeLeaf &Leaf) const {
 /// ReadThrough / SubobjectWrite: a read through, or a store below, tracked
 /// storage (AccessSites[Aux]), judged by uninit_read / uninit_write. An event
 /// on a Pointee entity acts on the storage the pointer refers to at its program
-/// point (referent). Every event but a Reset carries the anchor expression
-/// the diagnostic and the suppression walk use.
+/// point (referent). Every event but a Reset and a scope-exit Destroy carries
+/// the anchor expression the diagnostic and the suppression walk use.
 enum class DefAssignEventKind {
   Read,
   Write,
@@ -2467,9 +2468,10 @@ struct BindingSite {
 
 /// A destruction site derived from a call element -- a [[now_uninit]] or
 /// destroy-row argument, an explicit or pseudo-destructor call's object, or
-/// the operand of a delete-expression that runs a destructor: the
-/// argument's leaves (a tracked entity, judged by its flow state, or a leaf
-/// no entity tracks, classified by form), the entities the destruction
+/// the operand of a delete-expression that runs a destructor -- or from the
+/// scope-exit destructor of an [[uninit]] local: the argument's leaves (a
+/// tracked entity, judged by its flow state, or a leaf no entity tracks,
+/// classified by form), the entities the destruction
 /// affects, and whether it is exempt from destroy_uninit -- a reinitializer
 /// (both lifecycle attributes: destroy-then-construct on fresh storage is
 /// its purpose, and the exemption is call-wide), or a parameter that itself
@@ -2484,6 +2486,9 @@ struct DestroySite {
   bool Judged = false;
   /// What ends the lifetime, for the diagnostics' wording.
   SemaProfiles::InitDestroyer Destroyer = SemaProfiles::InitDestroyer::Function;
+  /// A scope-exit destructor's variable: the suppression gate is its
+  /// declaration, and a note points there.
+  const VarDecl *ScopeExitVar = nullptr;
   /// The argument's arms name different storage: each may have been
   /// destroyed, none definitely.
   bool Conditional = false;
@@ -2589,6 +2594,8 @@ struct PendingViolation {
   /// The entity a kind-specific binding wording names; null for the generic
   /// wordings.
   const NamedDecl *Subject = nullptr;
+  /// A scope-exit destructor's variable (DestroySite::ScopeExitVar).
+  const VarDecl *ScopeExitVar = nullptr;
 };
 
 /// The entity the event or leaf index \p Idx denotes under \p St: itself for
@@ -2682,14 +2689,18 @@ static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
     LeafState S = leafState(L, St, Storage, /*EveryPath=*/false);
     Acc = Acc ? combineLeafStates(*Acc, S) : S;
   }
-  unsigned Destroyer = static_cast<unsigned>(Site.Destroyer);
+  auto Push = [&](unsigned DiagID) {
+    PendingViolation V{DiagID, Site.Loc, static_cast<unsigned>(Site.Destroyer)};
+    V.ScopeExitVar = Site.ScopeExitVar;
+    Out.push_back(V);
+  };
   if (AllDestroyed) {
-    Out.push_back({diag::err_init_double_destroy, Site.Loc, Destroyer});
+    Push(diag::err_init_double_destroy);
     return;
   }
   if (!Site.Exempt &&
       (*Acc == LeafState::Uninitialized || *Acc == LeafState::Mixed))
-    Out.push_back({diag::err_init_destroy_uninit, Site.Loc, Destroyer});
+    Push(diag::err_init_destroy_uninit);
 }
 
 /// Judge an access site against \p St: uninit_read (\p IsWrite false) or
@@ -3028,7 +3039,10 @@ static void reportFlowViolations(Sema &S,
         return S.SourceMgr.isBeforeInTranslationUnit(A.Loc, B.Loc);
       });
   for (const PendingViolation &V : Violations) {
-    if (!S.Profiles().shouldEmitProfileViolation(Name, V.DiagID, V.Loc,
+    // A scope-exit destructor is gated at its variable's declaration.
+    SourceLocation GateLoc =
+        V.ScopeExitVar ? V.ScopeExitVar->getLocation() : V.Loc;
+    if (!S.Profiles().shouldEmitProfileViolation(Name, V.DiagID, GateLoc,
                                                  /*D=*/nullptr,
                                                  /*PostParse=*/true))
       continue;
@@ -3038,6 +3052,9 @@ static void reportFlowViolations(Sema &S,
       S.Diag(V.Loc, V.DiagID) << Name << V.Flag << V.Select;
     else
       S.Diag(V.Loc, V.DiagID) << Name << V.Select;
+    if (V.ScopeExitVar)
+      S.Diag(V.ScopeExitVar->getLocation(), diag::note_init_scope_exit_destroy)
+          << V.ScopeExitVar;
   }
 }
 
@@ -3402,6 +3419,12 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
       if (L.R.Entity) {
         if (!L.R.Subobject)
           Push(*L.R.Entity);
+        // A credit of part of the storage may have initialized it, so it is
+        // no longer uninitialized on every path; a read still needs every
+        // part.
+        else if (Kind == DefAssignEventKind::Write)
+          BlockEvents.push_back(
+              {DefAssignEventKind::MayWrite, *L.R.Entity, CallLike});
         continue;
       }
       for (unsigned Idx = L.Whole.first; Idx != L.Whole.second; ++Idx)
@@ -4187,6 +4210,39 @@ static void extractStdInitEvents(
         const CXXNewExpr *NE = Alloc->getAllocatorExpr();
         if (!Ctor || BodyStmts.count(NE))
           AppendCallEvents(NE, NE->getOperatorNew());
+        continue;
+      }
+      if (auto Dtor = Elem.getAs<CFGAutomaticObjDtor>()) {
+        // The scope-exit destructor of an [[uninit]] local of a type with a
+        // non-trivial destructor destroys it (P4222R2 §4.6), reported where
+        // the scope ends. Member and base destructors are not judged.
+        const VarDecl *V = Dtor->getVarDecl();
+        auto It = Storage.LocalEntity.find(V);
+        if (It == Storage.LocalEntity.end() ||
+            Storage.Entities[It->second].K != TrackedEntity::Kind::WholeLocal)
+          continue;
+        const auto *RD =
+            Ctx.getBaseElementType(V->getType())->getAsCXXRecordDecl();
+        if (!RD || !RD->hasDefinition() || RD->hasTrivialDestructor())
+          continue;
+        // A declaration whose marker a marker rule rejects -- one with an
+        // initializer or a default-initialization that runs code --
+        // constructed the local.
+        if (!S.Profiles().isConsistentUninitMarker(V))
+          continue;
+        DestroySite Site;
+        const Stmt *Trigger = Dtor->getTriggerStmt();
+        Site.Loc = Trigger ? Trigger->getEndLoc() : V->getLocation();
+        Site.Judged = true;
+        Site.Destroyer = SemaProfiles::InitDestroyer::ScopeExit;
+        Site.ScopeExitVar = V;
+        BindingLeaf Leaf;
+        Leaf.Entity = It->second;
+        Site.Leaves.push_back(Leaf);
+        Site.Affected.push_back(It->second);
+        DSites.push_back(std::move(Site));
+        BlockEvents.push_back({DefAssignEventKind::Destroy, 0, nullptr,
+                               (unsigned)(DSites.size() - 1)});
         continue;
       }
       auto CS = Elem.getAs<CFGStmt>();

@@ -474,6 +474,118 @@ void destroy_policy_overload() {
   (void)y;
 }
 
+struct ScopedDtor { int x; ~ScopedDtor(); };
+struct ScopedTrivial { int x; };
+
+// The scope-exit destructor of a never-constructed [[uninit]] local destroys uninitialized storage
+void scope_exit_never_constructed() {
+  ScopedDtor w [[uninit]]; // expected-note {{'w' is destroyed at the end of its scope}}
+} // expected-error {{uninitialized storage is destroyed by its scope-exit destructor under profile 'std::init'}}
+
+// The scope-exit destructor after destroy_at destroys the local again
+void scope_exit_after_destroy_at() {
+  ScopedDtor w [[uninit]]; // expected-note {{'w' is destroyed at the end of its scope}}
+  std::construct_at(&w);
+  std::destroy_at(&w);
+} // expected-error {{storage already destroyed by its scope-exit destructor is destroyed again under profile 'std::init'}}
+
+// A construct_at on one path is enough for the scope-exit destructor
+void scope_exit_one_path(bool c) {
+  ScopedDtor w [[uninit]];
+  if (c)
+    std::construct_at(&w);
+}
+
+// The scope-exit destructor of a never-filled [[uninit]] array destroys uninitialized storage
+void scope_exit_array() {
+  [[uninit]] ScopedDtor arr[2]; // expected-note {{'arr' is destroyed at the end of its scope}}
+} // expected-error {{uninitialized storage is destroyed by its scope-exit destructor under profile 'std::init'}}
+
+// The scope-exit destructor after construction is accepted
+void scope_exit_constructed() {
+  ScopedDtor w [[uninit]];
+  std::construct_at(&w);
+}
+
+// An early return runs the scope-exit destructor there
+void scope_exit_early_return(bool c) {
+  ScopedDtor w [[uninit]]; // expected-note {{'w' is destroyed at the end of its scope}}
+  if (c)
+    return; // expected-error {{uninitialized storage is destroyed by its scope-exit destructor under profile 'std::init'}}
+  std::construct_at(&w);
+}
+
+// A trivially destructible [[uninit]] local is not judged at scope exit
+void scope_exit_trivial() {
+  ScopedTrivial w [[uninit]];
+}
+
+// The scope-exit destructor after a destroy_at on one path destroys the local again
+void scope_exit_after_one_path_destroy(bool c) {
+  ScopedDtor w [[uninit]]; // expected-note {{'w' is destroyed at the end of its scope}}
+  std::construct_at(&w);
+  if (c)
+    std::destroy_at(&w);
+} // expected-error {{storage already destroyed by its scope-exit destructor is destroyed again under profile 'std::init'}}
+
+// The scope-exit destructor of an array constructed element by element is accepted
+void scope_exit_array_elements() {
+  [[uninit]] ScopedDtor arr[2];
+  for (int i = 0; i != 2; ++i)
+    std::construct_at(&arr[i]);
+}
+
+// Element-wise construction after a whole destroy leaves the array destroyed,
+// so its scope-exit destructor destroys it again
+void scope_exit_array_elements_after_destroy() {
+  [[uninit]] ScopedDtor arr[2]; // expected-note {{'arr' is destroyed at the end of its scope}}
+  std::uninitialized_value_construct(arr, arr + 2);
+  std::destroy(arr, arr + 2);
+  for (int i = 0; i != 2; ++i)
+    std::construct_at(&arr[i]);
+} // expected-error {{storage already destroyed by its scope-exit destructor is destroyed again under profile 'std::init'}}
+
+// A whole-range construction after a whole destroy is accepted at scope exit
+void scope_exit_array_reconstructed_after_destroy() {
+  [[uninit]] ScopedDtor arr[2];
+  std::uninitialized_value_construct(arr, arr + 2);
+  std::destroy(arr, arr + 2);
+  std::uninitialized_value_construct(arr, arr + 2);
+}
+
+// A default constructor defaulted out of line runs no code, so the scope exit is judged
+struct ScopedOutOfLine {
+  int x [[uninit]];
+  ScopedOutOfLine();
+  ~ScopedOutOfLine();
+};
+ScopedOutOfLine::ScopedOutOfLine() = default;
+void scope_exit_out_of_line_default() {
+  ScopedOutOfLine w [[uninit]]; // expected-note {{'w' is destroyed at the end of its scope}}
+} // expected-error {{uninitialized storage is destroyed by its scope-exit destructor under profile 'std::init'}}
+void scope_exit_out_of_line_default_destroyed() {
+  ScopedOutOfLine w [[uninit]]; // expected-note {{'w' is destroyed at the end of its scope}}
+  std::construct_at(&w);
+  std::destroy_at(&w);
+} // expected-error {{storage already destroyed by its scope-exit destructor is destroyed again under profile 'std::init'}}
+
+// A marker rejected for its initializer is not judged at scope exit
+void scope_exit_marker_with_initializer() {
+  ScopedDtor w [[uninit]] = ScopedDtor{1}; // expected-error {{variable 'w' cannot be both '[[uninit]]' and have an initializer under profile 'std::init'}}
+}
+
+// A suppression on the declaration covers its scope-exit destructor
+void scope_exit_suppressed() {
+  [[profiles::suppress(std::init, rule: "destroy_uninit")]] ScopedDtor w [[uninit]];
+}
+
+// A declaration that runs a constructor is not judged at scope exit
+struct ScopedCtor { ScopedCtor(); ~ScopedCtor(); };
+void scope_exit_rejected_marker() {
+  ScopedCtor w [[uninit]]; // expected-error {{variable 'w' cannot be marked '[[uninit]]' under profile 'std::init'; default-initialization of its type 'ScopedCtor' does not leave it uninitialized}} \
+                           // expected-note {{default-initialization of 'ScopedCtor' runs a constructor}}
+}
+
 //--- referent.cpp
 // A marked local pointer or reference refers to the storage its latest
 // binding names (ProfilesFramework.rst, "Binding Pointers and References"),

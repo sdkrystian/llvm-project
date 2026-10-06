@@ -935,6 +935,11 @@ void SemaProfiles::checkInitProfileStaticMarker(const VarDecl *Var) {
   }
 }
 
+bool SemaProfiles::isConsistentUninitMarker(const VarDecl *Var) {
+  return classifyUninitMarker(*this, Var, Var->getInit()).Verdict ==
+         UninitMarkerVerdict::Consistent;
+}
+
 bool SemaProfiles::checkInitProfileStaticRuntimeInit(
     const VarDecl *Var, llvm::function_ref<bool()> CheckConstInit) {
   static constexpr StringRef Profile = "std::init";
