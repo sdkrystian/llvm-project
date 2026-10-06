@@ -846,17 +846,19 @@ follows:
 
 Two helpers are shared across the rules.  ``classifyUninitSource`` -- the
 pointer and glvalue recognizers -- classifies an expression as referring to
-initialized, uninitialized, or unknown storage purely from its syntactic
-form (the flow state of tracked storage is the CFG pass's, "Flow-Tracked
-Storage (std::init)" below); its ``UninitAccessOpts``
-presets distinguish a *binding* source (markers count everywhere), a value
-*read*, and a scalar *store* (which differ in whether the top-level
-``[[uninit]]`` marker counts and whether ``[[ref_to_uninit]]`` storage is
-trusted).  ``defaultInitLeavesScalarIndeterminate`` answers whether a type's
-default-initialization leaves an unacknowledged scalar subobject
-indeterminate, trusting user-provided default constructors -- the paper's
-trust-the-constructor principle (P4222R2 §5.1), which is also why members
-of objects initialized by a user-provided constructor are not flow-tracked.
+initialized, uninitialized, or unknown storage purely from its syntactic form
+(the flow state of tracked storage is the CFG pass's, "Flow-Tracked Storage
+(std::init)" below); its ``UninitAccessOpts`` presets distinguish a *binding*
+source (markers count everywhere), a value *read*, and a scalar *store* (which
+differ in whether the top-level ``[[uninit]]`` marker counts and whether
+``[[ref_to_uninit]]`` storage is trusted; the read and store presets also ignore
+a data member's ``[[uninit]]`` marker at every level, ``TrustUninitMembers``,
+outside a default member initializer, ``trustsUninitMembers``).
+``defaultInitLeavesScalarIndeterminate`` answers whether a type's
+default-initialization leaves an unacknowledged scalar subobject indeterminate,
+trusting user-provided default constructors -- the paper's trust-the-constructor
+principle (P4222R2 §5.1), which is also why members of objects initialized by a
+user-provided constructor are not flow-tracked.
 
 Clang itself supplies the standard library's lifecycle roles: the std lifecycle
 functions are rows of ``KnownCallees`` keyed by namespace-std name and arity
@@ -1235,7 +1237,7 @@ Deliberate Strictnesses
   constructor, its bindings, member calls, and destroys are judged from an
   uninitialized start, like a scalar member's, because the constructor's
   initialization is not visible there (the P4222R2 §5 exposure analysis is not
-  implemented); reads and stores below it are trusted there.
+  implemented).
 - Storage that is not flow-tracked -- a marked pointer member's referent --
   is judged by its form alone at every read, write, and destroy: a
   ``construct_at`` into it legalizes no later access.
@@ -1373,6 +1375,12 @@ Missed Diagnostics
   buffers excepted, P4222R2 §4.6).
 - A ``new`` expression whose result is not bound to anything (``new int;``)
   is not checked.
+- Outside the contexts whose member reads are flow-checked (a constructor
+  body, a constructor-less aggregate local or by-value parameter) and past the
+  depth and path caps of the member enumeration, a read or store of an
+  ``[[uninit]]`` member or below it is trusted: whether a
+  constructor initialized the member before the object is exposed
+  (P4222R2 §5) is not checked.
 - A ``delete`` expression is judged as a destroy only when its operand is
   flow-tracked: through a marked pointer member or a global, ``delete p`` of
   never-constructed storage is not ``destroy_uninit``, while ``p->~T()`` is.

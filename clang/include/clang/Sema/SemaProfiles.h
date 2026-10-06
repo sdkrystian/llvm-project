@@ -829,6 +829,10 @@ private:
   /// AfterFlowPass, whether that body's enclosing instance method is a
   /// constructor.
   bool thisIsUnderConstruction(const Decl *AfterFlowPass = nullptr) const;
+  /// True if a parse-time read or store trusts data member markers
+  /// (UninitAccessOpts::TrustUninitMembers): anywhere but a default member
+  /// initializer, which no flow pass judges.
+  bool trustsUninitMembers(const Decl *AfterFlowPass = nullptr) const;
 
   /// Record \p Site, deferred to the flow engine in the current context,
   /// under its analysis owner -- unless no flow pass judges it there: a

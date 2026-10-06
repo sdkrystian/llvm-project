@@ -622,6 +622,16 @@ member-wise store initializes nothing (see
      int get() { return s.x; }       // OK: trusted outside the constructor
    };
 
+Outside the contexts whose reads are checked -- another member function, an
+object reached through a pointer or reference, a global, a base whose
+user-provided constructor initializes it -- reads and stores of an
+``[[uninit]]`` member and of its subobjects are trusted (§5.1): ``p->s.x = 1``
+and ``return p->a[1];`` are accepted.  Taking its address, binding a reference
+to it, calling a member function on it, and destroying it still count the
+marker (see `Binding Pointers and References`_), and so does a read or store in
+a default member initializer (``int v = s.x;``), which runs before any
+constructor body.
+
 A member (each base-class copy of a member separately) or variable counts as
 assigned only when every path to the read assigns it (§1.3); for a member,
 exception paths are included: a call inside a ``try`` block may transfer
@@ -710,9 +720,7 @@ expression.  A class pointee's initialization is ``construct_at`` (its
 ``[[ref_to_uninit]]`` parameter accepts the pointer) or, for a scalar
 pointee, the whole ``*p`` store.  For a marked local pointer or reference the
 store is accepted once its referent is initialized on every path reaching it
-(``construct_at(p, ...)`` or a ``[[now_init]]`` call first).  A store below a
-class-type ``[[uninit]]`` member of an object no analysis tracks
-(``h.s.x = 1`` through a reference ``h``) is judged by its form and rejected.
+(``construct_at(p, ...)`` or a ``[[now_init]]`` call first).
 
 A compound assignment or increment/decrement of such a subobject also reads
 its old value, so the read diagnostic fires alongside this one.  Assigning a

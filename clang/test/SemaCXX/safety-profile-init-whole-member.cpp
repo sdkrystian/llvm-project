@@ -20,6 +20,7 @@ template <class It, class T> void uninitialized_fill(It first, It last, const T 
 template <class It> constexpr void destroy(It first, It last);
 } // namespace std
 extern "C" void *memset(void *, int, std::size_t);
+extern "C" void *malloc(std::size_t);
 
 //--- test.cpp
 // no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
@@ -332,3 +333,57 @@ struct ArrayMethods {
   int read() { return a[1]; } // OK
   void store() { a[2] = 1; }  // OK
 };
+
+// Where no analysis tracks the member, reads and stores below it are trusted
+struct Box {
+  S s [[uninit]];
+  int a [[uninit]] [4];
+};
+int through_pointer(Box *p) {
+  p->s.x = 1;              // OK
+  p->a[1] = 2;             // OK
+  return p->s.y + p->a[1]; // OK
+}
+
+struct Global {
+  S agg [[uninit]];
+};
+Global g;
+int global_read() { return g.agg.x; } // OK
+
+// A base with a user-provided constructor initializes its members
+struct UserBase {
+  S s [[uninit]];
+  UserBase();
+};
+struct DerivedFromUser : UserBase {
+  int r;
+  DerivedFromUser() : r(s.x) {} // OK
+};
+
+// A default member initializer counts the marker of the member it reads
+struct NsdmiRead {
+  S s [[uninit]];
+  int a [[uninit]] [4];
+  int v = s.x; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  int w = a[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  NsdmiRead() {}
+};
+
+// Taking the address, binding a pointer, and destroying still count the marker
+void untracked_pins(Box *p) {
+  int *px = &p->s.x;      // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  S *ps = &p->s;          // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  std::destroy_at(&p->s); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+  (void)px;
+  (void)ps;
+}
+
+// Storage reached through a marked pointer member or an allocator still counts
+struct HoldsMarked {
+  Global *q [[ref_to_uninit]];
+  int read() { return q->agg.x; } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+};
+void allocated() {
+  ((Global *)malloc(sizeof(Global)))->agg.x = 1; // expected-error {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
+}

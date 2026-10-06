@@ -1236,6 +1236,11 @@ struct UninitAccessOpts {
 
   bool DropTopLevelUninit = false;
   bool TrustRefToUninit = false;
+  /// The [[uninit]] marker of a data member does not count at any level: a
+  /// read or store below one is trusted where the CFG pass does not track it
+  /// (P4222R2 §5 exposure is not analyzed; ProfilesFrameworkInternals.rst,
+  /// "Known Gaps (std::init)").
+  bool TrustUninitMembers = false;
   PointerAlias Alias = PointerAlias::None;
   bool ThisUnderConstruction = false;
   /// The arms a classified leaf takes at its nested conditionals
@@ -1270,6 +1275,11 @@ struct UninitAccessOpts {
     O.Arms = A;
     return O;
   }
+  UninitAccessOpts withUninitMemberTrust(bool B) const {
+    UninitAccessOpts O = *this;
+    O.TrustUninitMembers = B;
+    return O;
+  }
 };
 
 SemaProfiles::PointerAliasKind SemaProfiles::pointerAliasKind(QualType T) {
@@ -1297,12 +1307,15 @@ static UninitAccessOpts::PointerAlias pointerAliasOf(QualType T) {
 }
 
 // Presets: a binding source (markers count everywhere), a value read (the
-// top-level drop applies), and a scalar store (additionally, storage reached
-// through [[ref_to_uninit]] is trusted).
+// top-level drop applies, and data member markers are trusted), and a scalar
+// store (additionally, storage reached through [[ref_to_uninit]] is trusted).
 constexpr UninitAccessOpts UninitBindAccess{};
-constexpr UninitAccessOpts UninitReadAccess{/*DropTopLevelUninit=*/true};
+constexpr UninitAccessOpts UninitReadAccess{/*DropTopLevelUninit=*/true,
+                                            /*TrustRefToUninit=*/false,
+                                            /*TrustUninitMembers=*/true};
 constexpr UninitAccessOpts UninitWriteAccess{/*DropTopLevelUninit=*/true,
-                                             /*TrustRefToUninit=*/true};
+                                             /*TrustRefToUninit=*/true,
+                                             /*TrustUninitMembers=*/true};
 
 // Combine the arms of a conditional: equal arms keep their state; Mixed
 // absorbs everything; Initialized with Uninitialized is Mixed (P4222R2 §4.9);
@@ -2239,7 +2252,9 @@ static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
   // a marked reference its referent's (§4.3) -- is the CFG pass's, which
   // judges every access with a tracked leaf instead of this recognizer.
   auto DeclDenotesUninit = [&](const ValueDecl *VD) {
-    return (!Opts.DropTopLevelUninit && VD->hasAttr<UninitAttr>()) ||
+    return (!Opts.DropTopLevelUninit && VD->hasAttr<UninitAttr>() &&
+            !(Opts.TrustUninitMembers &&
+              isa<FieldDecl, IndirectFieldDecl>(VD))) ||
            (!Opts.TrustRefToUninit && VD->getType()->isReferenceType() &&
             VD->hasAttr<RefToUninitAttr>());
   };
@@ -2417,6 +2432,11 @@ bool SemaProfiles::thisIsUnderConstruction(const Decl *AfterFlowPass) const {
   // is parsed or instantiated.
   return isa<CXXConstructorDecl, CXXRecordDecl>(
       SemaRef.getFunctionLevelDeclContext());
+}
+
+bool SemaProfiles::trustsUninitMembers(const Decl *AfterFlowPass) const {
+  return AfterFlowPass ||
+         !isa<CXXRecordDecl>(SemaRef.getFunctionLevelDeclContext());
 }
 
 const Decl *SemaProfiles::flowAnalysisOwner(const DeclContext *DC) {
@@ -3480,8 +3500,9 @@ void SemaProfiles::checkInitProfileReadThrough(SourceLocation Loc,
     return;
   if (!isUninitializedOrMixed(glvalueDenotesUninitStorage(
           getASTContext(), Glvalue,
-          UninitReadAccess.withThisUnderConstruction(
-              thisIsUnderConstruction(AfterFlowPass)))))
+          UninitReadAccess
+              .withThisUnderConstruction(thisIsUnderConstruction(AfterFlowPass))
+              .withUninitMemberTrust(trustsUninitMembers(AfterFlowPass)))))
     return;
   Diag(Loc, diag::err_init_uninit_read_through)
       << "std::init" << (isMemberChainOfUninitObject(Glvalue) ? 1 : 0);
@@ -3521,8 +3542,9 @@ void SemaProfiles::checkInitProfileSubobjectWrite(SourceLocation Loc,
     return;
   if (!isUninitializedOrMixed(glvalueDenotesUninitStorage(
           getASTContext(), LHS,
-          UninitWriteAccess.withThisUnderConstruction(
-              thisIsUnderConstruction(AfterFlowPass)))))
+          UninitWriteAccess
+              .withThisUnderConstruction(thisIsUnderConstruction(AfterFlowPass))
+              .withUninitMemberTrust(trustsUninitMembers(AfterFlowPass)))))
     return;
   // The provenance phrase: a member chain of a named [[uninit]] object
   // renders exactly as before the marked/allocator arms existed (arm 0);

@@ -66,15 +66,13 @@ void test_static_member_store() {
   s.sm = 1; // OK: static storage, not a subobject
 }
 
-// A marked *member* below the top level bans the store the same way on a
-// named object that is not flow-tracked -- a class-type member has no legal
-// piecemeal path, only whole-object initialization.
+// A store below a class-type [[uninit]] *member* is trusted where no
+// analysis tracks the member, as a store to a scalar member is: through a
+// reference, and outside a constructor on the current object.
 struct HasAgg { Pair agg [[uninit]]; };
 void test_nested_marked_member_store(HasAgg &h) {
-  h.agg.x = 1; // expected-error {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
+  h.agg.x = 1; // OK
 }
-// Outside a constructor, a store below the current object's class-type
-// [[uninit]] member is trusted like a scalar member's.
 struct SelfAgg {
   Pair agg [[uninit]];
   void set() {
@@ -92,10 +90,7 @@ void test_element_store(int i) {
   m2[1][0] = 1; // expected-error {{writing an element of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
 }
 
-// A marked array *member*'s elements are proper subobjects of the marked
-// array: outside a constructor an element store on the current object is
-// trusted like a scalar member's store, while one through an untracked object
-// is banned.
+// An element store of a marked array *member* is trusted the same way.
 struct WithArrMember {
   [[uninit]] int a[2];
   void set() {
@@ -103,7 +98,7 @@ struct WithArrMember {
   }
 };
 void test_member_array_element_store(WithArrMember &w) {
-  w.a[0] = 1; // expected-error {{writing an element of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
+  w.a[0] = 1; // OK
 }
 
 // Member assignment to a marker-retaining union is the §5.6 ban (the marker
