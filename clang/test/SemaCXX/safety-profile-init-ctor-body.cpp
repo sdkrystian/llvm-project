@@ -1200,3 +1200,19 @@ struct NestedCtorAssign {
     v = m.n; // expected-error {{member 'n' is read before initialization under profile 'std::init'}}
   }
 };
+
+// An [[uninit]] member of an anonymous struct is read-tracked in the constructor body
+struct AnonStructRead {
+  struct {
+    int q [[uninit]]; // expected-note {{member 'q' declared here}}
+  };
+  int v;
+  AnonStructRead() : v(0) { v = q; } // expected-error {{member 'q' is read before initialization under profile 'std::init'}}
+};
+struct AnonStructInit {
+  struct {
+    int q [[uninit]];
+  };
+  int v;
+  AnonStructInit() : q(1), v(0) { v = q; } // OK
+};

@@ -2859,7 +2859,32 @@ struct FlowTrackedMemberWalk {
   void walk(const CXXRecordDecl *RD, SemaProfiles::BasePath &Bases) {
     if (!InProgress.insert(RD).second)
       return;
+    walkFields(RD, Bases);
+    for (const CXXBaseSpecifier &BS : RD->bases()) {
+      if (BS.isVirtual())
+        continue;
+      const CXXRecordDecl *BRD = BS.getType()->getAsCXXRecordDecl();
+      if (!BRD || !BRD->hasDefinition() ||
+          SemaProfiles::hasUserProvidedCtor(BRD->getDefinition()))
+        continue;
+      Bases.push_back(BRD->getCanonicalDecl());
+      walk(BRD->getDefinition(), Bases);
+      Bases.pop_back();
+    }
+    InProgress.erase(RD);
+  }
+
+  /// Visit the fields of \p RD as walk does; an anonymous struct's fields
+  /// are the enclosing object's (its step is transparent), and an anonymous
+  /// union is never entered.
+  void walkFields(const RecordDecl *RD, SemaProfiles::BasePath &Bases) {
     for (const FieldDecl *F : RD->fields()) {
+      if (F->isAnonymousStructOrUnion()) {
+        if (const RecordDecl *Anon = F->getType()->getAsRecordDecl();
+            Anon && !Anon->isUnion())
+          walkFields(Anon, Bases);
+        continue;
+      }
       if (isFlowTrackedScalarMember(Ctx, F)) {
         Prefix.push_back({Bases, F});
         Visit(Prefix, /*Whole=*/false);
@@ -2876,18 +2901,6 @@ struct FlowTrackedMemberWalk {
       walk(Inner, InnerBases);
       Prefix.pop_back();
     }
-    for (const CXXBaseSpecifier &BS : RD->bases()) {
-      if (BS.isVirtual())
-        continue;
-      const CXXRecordDecl *BRD = BS.getType()->getAsCXXRecordDecl();
-      if (!BRD || !BRD->hasDefinition() ||
-          SemaProfiles::hasUserProvidedCtor(BRD->getDefinition()))
-        continue;
-      Bases.push_back(BRD->getCanonicalDecl());
-      walk(BRD->getDefinition(), Bases);
-      Bases.pop_back();
-    }
-    InProgress.erase(RD);
   }
 };
 } // namespace

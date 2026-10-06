@@ -997,9 +997,10 @@ its member path: per member step, the derived-to-base path from the step's
 object to the member's class, then the member.  A class's tracked member paths
 form a table (``SemaProfiles::flowTrackedMembers``), enumerated depth-first so
 the paths under any prefix are contiguous, and an object's member entities are
-that table in order.  The enumeration enters a *container* -- a named,
-unmarked, non-reference, non-array member with no default member initializer
-whose default constructor is not user-provided
+that table in order; an anonymous struct's step is transparent, and an
+anonymous union is never entered.  The enumeration enters a *container* -- a
+named, unmarked, non-reference, non-array member with no default member
+initializer whose default constructor is not user-provided
 (``SemaProfiles::getDefaultInitTrackableClass``) -- up to eight member steps
 deep and until 64 paths and containers are visited, so a credit, kill, or
 written initializer of a container covers the contiguous range under it.  In a
@@ -1369,10 +1370,9 @@ Missed Diagnostics
 - A call through a function pointer cannot see parameter markers on the
   pointed-to function, and a member call through a pointer-to-member bypasses
   the object-argument check.
-- Members of anonymous structs and unions, and arrays of aggregates, are not
-  flow-tracked, nor are members more than eight member steps deep or inside a
-  member subobject entered after a class's 64th tracked member or member
-  subobject.
+- Members of anonymous unions and arrays of aggregates are not flow-tracked,
+  nor are members more than eight member steps deep or inside a member
+  subobject entered after a class's 64th tracked member or member subobject.
 - ``[[uninit]]`` members of locals copied from untracked sources (a call
   result, a member other than a container, an element) are not flow-tracked: a
   copy does not inherit initialization -- it copies indeterminate bits -- but

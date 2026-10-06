@@ -340,7 +340,8 @@ public:
   /// unmarked, non-reference, non-array member with no default member
   /// initializer whose type is a trackable class (getTrackableSlotClass) --
   /// while a path has fewer than 8 steps and fewer than 64 paths were
-  /// visited.
+  /// visited. An anonymous struct's members count as the enclosing class's,
+  /// with no step of their own; an anonymous union is never entered.
   static void forEachFlowTrackedMember(
       const ASTContext &Ctx, const CXXRecordDecl *RD,
       llvm::function_ref<void(ArrayRef<MemberStep>, bool Whole)> Visit);

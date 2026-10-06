@@ -258,18 +258,19 @@ int test_sibling_incdec_not_an_escape() {
   return s.sm; // expected-error {{member 'sm' is read before initialization under profile 'std::init'}}
 }
 
-// An access to a member of an *anonymous* struct is a sibling access like
-// any other: reaching `x.a` cannot give `x.m` a value, so the tracked member
-// stays tracked (the anonymous step is peeled, not treated as an escape).
+// A member of an *anonymous* struct is tracked like a direct member, and
+// reaching it is a sibling access like any other: reaching `x.a` cannot give
+// `x.m` a value, so the tracked member stays tracked (the anonymous step is
+// peeled, not treated as an escape).
 struct Mix {
   struct {
-    int a [[uninit]];
+    int a [[uninit]]; // expected-note {{member 'a' declared here}}
   };
   int m [[uninit]]; // expected-note 2 {{member 'm' declared here}}
 };
 int test_anon_sibling_read_not_an_escape() {
   Mix x;
-  int v = x.a;
+  int v = x.a; // expected-error {{member 'a' is read before initialization under profile 'std::init'}}
   return v + x.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
 }
 int test_anon_sibling_write_not_an_escape() {
@@ -483,17 +484,16 @@ int test_static_local_untracked() {
   return a.m; // OK
 }
 
-// A member of an anonymous struct is reached through an IndirectFieldDecl
-// chain, not a direct `a.m` access, so it is not tracked -- consistent with
-// the anonymous-aggregate skips in the ctor-body pass and R5 (a known gap).
+// A member of an anonymous struct is tracked: the anonymous step is
+// transparent.
 struct HasAnon {
   struct {
-    int m [[uninit]];
+    int m [[uninit]]; // expected-note {{member 'm' declared here}}
   };
 };
-int test_anonymous_member_untracked() {
+int test_anonymous_member_tracked() {
   HasAnon a;
-  return a.m; // OK: known gap
+  return a.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
 }
 
 // An array of aggregates is not tracked (element tracking is the deferred
