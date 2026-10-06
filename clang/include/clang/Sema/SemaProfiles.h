@@ -406,6 +406,17 @@ public:
   /// \p DC -- walking out of lambda call operators and blocks -- or null.
   static const CXXMethodDecl *enclosingInstanceMethod(const DeclContext *DC);
 
+  /// What a leaf is bound to, for isFlowTrackedLeaf. For a MarkedTarget -- a
+  /// [[ref_to_uninit]] variable, parameter, or role parameter -- a directly
+  /// named local or by-value parameter with tracked members, as a whole or a
+  /// subobject enclosing some of them (flowTrackedMemberRange), is tracked
+  /// and judged by its members' state. For a ValueCopy -- the source of an
+  /// unmarked value copy (isValueCopySource) -- a subobject of such a local
+  /// enclosing tracked members is tracked and read by its members' state; in
+  /// a constructor body, so are the current object's subobjects, for a
+  /// MarkedTarget too.
+  enum class FlowLeafUse { Plain, MarkedTarget, ValueCopy };
+
   /// True if the leaf \p Leaf of a binding source names storage the
   /// std::init CFG pass flow-tracks -- an [[uninit]] local or parameter (or
   /// a subobject of one), a marked local pointer's or reference's referent
@@ -414,22 +425,25 @@ public:
   /// current object -- while a function body
   /// is being parsed (\p CurContext inside one). \p AsPointerValue says the
   /// leaf is used as a pointer value (a pointer binding, or a read-only alias
-  /// binding of a pointer) rather than as a glvalue. With \p ForMarkedTarget
-  /// -- a binding to a [[ref_to_uninit]] target -- a directly named local or
-  /// by-value parameter with tracked members, as a whole or a subobject
-  /// enclosing some of them (flowTrackedMemberRange), is tracked too: its
-  /// state is its members'. The parse-time checks leave such a source to the
-  /// pass; a source with no tracked leaf, or one outside any function body,
-  /// is judged at parse time without flow state.
+  /// binding of a pointer) rather than as a glvalue. Some leaves are
+  /// tracked only for some \p Use (FlowLeafUse). The parse-time checks leave
+  /// such a source to the pass; a source with no tracked leaf, or one outside
+  /// any function body, is judged at parse time without flow state.
   bool isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
                          const DeclContext *CurContext,
-                         bool ForMarkedTarget = false) const;
-  /// True if any leaf of \p Src, bound as \p T, is flow-tracked in the
-  /// current context (isFlowTrackedLeaf, with \p ForMarkedTarget); the
-  /// tracked leaves are appended to \p Leaves when given.
+                         FlowLeafUse Use = FlowLeafUse::Plain) const;
+  /// True if the glvalue \p E of shape \p Shape, the object of class \p RD
+  /// or a subobject of it enclosing tracked members
+  /// (flowTrackedMemberRange), is tracked whole for \p Use (FlowLeafUse).
+  bool isFlowTrackedSubobject(const CXXRecordDecl *RD, const Expr *E,
+                              const FlowLeafShape &Shape,
+                              FlowLeafUse Use) const;
+  /// True if any leaf of \p Src, bound as \p T for \p Use, is flow-tracked
+  /// in the current context (isFlowTrackedLeaf); the tracked leaves are
+  /// appended to \p Leaves when given.
   bool hasFlowTrackedLeaf(const Expr *Src, QualType T,
                           SmallVectorImpl<const Expr *> *Leaves = nullptr,
-                          bool ForMarkedTarget = false) const;
+                          FlowLeafUse Use = FlowLeafUse::Plain) const;
   /// True if any leaf of the glvalue \p G is flow-tracked in the current
   /// context: the read-through and subobject-write checks leave such an
   /// access to the CFG pass. The tracked leaves are appended to \p Leaves
@@ -462,9 +476,10 @@ public:
   /// Classify the leaf \p Leaf of a binding source bound as \p T by its form
   /// alone, for the CFG pass's judgment of a binding with tracked leaves;
   /// \p Body is the analyzed function, which decides whether `this` is under
-  /// construction.
+  /// construction, and \p ValueCopy is judgeInitProfileBinding's.
   InitSourceState classifyInitBindingLeaf(const ShapeLeaf &Leaf, QualType T,
-                                          const Decl *Body) const;
+                                          const Decl *Body,
+                                          bool ValueCopy = false) const;
   /// The access a leaf is classified for: a value read (the top-level
   /// [[uninit]] marker is the flow-based read pass's) or a scalar store (the
   /// whole named entity's store is its initialization; storage reached
@@ -477,6 +492,19 @@ public:
   InitSourceState classifyInitAccessLeaf(const ShapeLeaf &Leaf,
                                          InitAccessKind Kind,
                                          const Decl *Body) const;
+
+  /// True if \p P is the source parameter of a copy or move constructor or
+  /// of a copy or move assignment operator (after an explicit object
+  /// parameter), an operand of a defaulted comparison (isDefaultedComparison),
+  /// the source of std::bit_cast, memcpy, or memmove, or an argument of a
+  /// Construct row of the constructed class type: an unmarked one copies the
+  /// bound object's value whole, a *value copy*, which reads every subobject
+  /// (on every path, P4222R2 §1.3) and is trusted below an [[uninit]] data
+  /// member where a read of it would be.
+  static bool isValueCopySource(const ParmVarDecl *P);
+  /// True if \p FD is a defaulted comparison operator, which reads each of
+  /// its operands -- its object argument included -- as a value copy.
+  static bool isDefaultedComparison(const FunctionDecl *FD);
 
   /// The [[ref_to_uninit]] marking of the pointer object an assignment
   /// target names: true/false for a directly named marked/unmarked pointer
@@ -672,6 +700,8 @@ public:
     SmallVector<const Expr *, 2> TrackedLeaves;
     /// Destroy: the destroyer, as the select of the destroy diagnostics.
     InitDestroyer Destroyer = InitDestroyer::Function;
+    /// Binding: the source is copied by value (isValueCopySource).
+    bool ValueCopy = false;
   };
 
   /// The body whose flow pass judges a check deferred in \p DC: the
@@ -909,12 +939,14 @@ private:
   /// verdict in \p Kind's wording. \p Subject is the entity a kind-specific
   /// wording names (the called method). A non-null \p AfterFlowPass judges,
   /// by form, a binding the flow pass over that body left unjudged
-  /// (judgeDeferredInitSiteByForm).
+  /// (judgeDeferredInitSiteByForm). A \p ValueCopy (isValueCopySource) trusts
+  /// [[uninit]] data members as a read does.
   void judgeInitProfileBinding(InitBindingKind Kind, SourceLocation Loc,
                                bool TargetMarked, QualType T, const Expr *Src,
                                const Decl *D,
                                const NamedDecl *Subject = nullptr,
-                               const Decl *AfterFlowPass = nullptr);
+                               const Decl *AfterFlowPass = nullptr,
+                               bool ValueCopy = false);
 
 public:
   /// Enumerate the leaves the store target, binding source, read, or lifecycle

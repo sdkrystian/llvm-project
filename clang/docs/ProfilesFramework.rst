@@ -658,7 +658,9 @@ nothing -- the same strict policy).  For a *local* variable the analyses instead
 treat any escape as an assignment (see :ref:`profiles-init-known-gaps`).  A
 local copied or moved from a tracked local (``Agg b = a;``,
 ``Agg b = std::move(a);``) is tracked too: the copy's members start in the
-source's per-member state at the copy point.  A by-value *parameter* of such a
+source's per-member state at the copy point; a member of class type is
+copy-constructed from the source's, which must then be initialized on every
+path, and starts initialized.  A by-value *parameter* of such a
 class that declares no default argument is likewise a copy, of the caller's
 argument, so its marked members are tracked from an unassigned start: a read
 before a local assignment (or an escape of the parameter) is rejected even if
@@ -793,9 +795,11 @@ the marker first, if the flow is intended), and the implicit object argument of
 a member call (including a ``__declspec(property)`` access's accessor call and
 ``co_await``'s awaiter calls) -- so calling a member function on an object
 recognized as uninitialized storage is rejected, and so is copying a class
-object out of one.  A structured binding names the member or element it
-decomposes, marker included, so after ``auto [a, b] = s;`` a use of ``b`` is
-judged by the marking of the field it names.  For the copy, the escape is the
+object out of one; a copy out of an ``[[uninit]]`` member reads it, so it is
+trusted where its reads are (see `Reads of Uninitialized Objects`_).  A
+structured binding names the member or element it decomposes, marker included,
+so after ``auto [a, b] = s;`` a use of ``b`` is judged by the marking of the
+field it names.  For the copy, the escape is the
 paper's own (§7.2): declare the copy constructor's parameter
 ``[[ref_to_uninit]]``.  Positions that cannot carry the marker -- a variadic
 argument, a parameter of a function called through a function pointer or a

@@ -2479,7 +2479,8 @@ void SemaProfiles::judgeDeferredInitSiteByForm(const DeferredInitSite &Site,
   switch (Site.K) {
   case DeferredInitSite::Kind::Binding:
     judgeInitProfileBinding(Site.BindingKind, Site.Loc, Site.Flag, Site.T,
-                            Site.Src, /*D=*/nullptr, Site.Subject, Body);
+                            Site.Src, /*D=*/nullptr, Site.Subject, Body,
+                            Site.ValueCopy);
     return;
   case DeferredInitSite::Kind::Destroy:
     if (Site.Flag)
@@ -2616,12 +2617,10 @@ void SemaProfiles::checkInitProfileBinding(const InitializedEntity &Entity,
   }
 }
 
-void SemaProfiles::judgeInitProfileBinding(InitBindingKind Kind,
-                                           SourceLocation Loc,
-                                           bool TargetMarked, QualType T,
-                                           const Expr *Src, const Decl *D,
-                                           const NamedDecl *Subject,
-                                           const Decl *AfterFlowPass) {
+void SemaProfiles::judgeInitProfileBinding(
+    InitBindingKind Kind, SourceLocation Loc, bool TargetMarked, QualType T,
+    const Expr *Src, const Decl *D, const NamedDecl *Subject,
+    const Decl *AfterFlowPass, bool ValueCopy) {
   bool IsReference = T->isReferenceType();
   // A RecoveryExpr is a placeholder for an initialization that already failed,
   // not a source the user wrote, so it must not drive this rule; see also
@@ -2633,9 +2632,21 @@ void SemaProfiles::judgeInitProfileBinding(InitBindingKind Kind,
   // program point, on each instantiation's own CFG (see
   // ProfilesFrameworkInternals.rst, "Flow-Tracked Storage").
   if (SmallVector<const Expr *, 2> Leaves;
-      !AfterFlowPass && hasFlowTrackedLeaf(Src, T, &Leaves, TargetMarked)) {
-    recordDeferredInitSite({DeferredInitSite::Kind::Binding, Kind, Loc,
-                            TargetMarked, T, Src, Subject, std::move(Leaves)});
+      !AfterFlowPass &&
+      hasFlowTrackedLeaf(Src, T, &Leaves,
+                         TargetMarked ? FlowLeafUse::MarkedTarget
+                         : ValueCopy  ? FlowLeafUse::ValueCopy
+                                      : FlowLeafUse::Plain)) {
+    DeferredInitSite Site{DeferredInitSite::Kind::Binding,
+                          Kind,
+                          Loc,
+                          TargetMarked,
+                          T,
+                          Src,
+                          Subject,
+                          std::move(Leaves)};
+    Site.ValueCopy = ValueCopy;
+    recordDeferredInitSite(std::move(Site));
     return;
   }
   // The expression-check template policy (ProfilesFrameworkInternals.rst,
@@ -2649,21 +2660,72 @@ void SemaProfiles::judgeInitProfileBinding(InitBindingKind Kind,
     return;
   UninitAccessOpts Opts =
       UninitBindAccess.withAlias(pointerAliasOf(T))
-          .withThisUnderConstruction(thisIsUnderConstruction(AfterFlowPass));
+          .withThisUnderConstruction(thisIsUnderConstruction(AfterFlowPass))
+          .withUninitMemberTrust(ValueCopy &&
+                                 trustsUninitMembers(AfterFlowPass));
   diagnoseBindingVerdict(
       *this, Kind, Loc, TargetMarked, IsReference,
       classifyUninitSource(getASTContext(), Src, IsReference, Opts), Subject);
 }
 
+bool SemaProfiles::isDefaultedComparison(const FunctionDecl *FD) {
+  return FD && FD->isDefaulted() && FD->getOverloadedOperator() != OO_None &&
+         FD->getOverloadedOperator() != OO_Equal;
+}
+
+bool SemaProfiles::isValueCopySource(const ParmVarDecl *P) {
+  const auto *FD = P ? dyn_cast<FunctionDecl>(P->getDeclContext()) : nullptr;
+  if (!FD)
+    return false;
+  if (isDefaultedComparison(FD))
+    return true;
+  unsigned Index = P->getFunctionScopeIndex();
+  if (const auto *MD = dyn_cast<CXXMethodDecl>(FD);
+      MD && Index == (MD->isExplicitObjectMemberFunction() ? 1u : 0u)) {
+    if (const auto *Ctor = dyn_cast<CXXConstructorDecl>(MD))
+      return Ctor->isCopyOrMoveConstructor();
+    if (MD->isCopyAssignmentOperator() || MD->isMoveAssignmentOperator())
+      return true;
+  }
+  if (FD->isInStdNamespace() && FD->getIdentifier() &&
+      FD->getName() == "bit_cast")
+    return Index == 0;
+  switch (FD->getBuiltinID()) {
+  case Builtin::BImemcpy:
+  case Builtin::BI__builtin_memcpy:
+  case Builtin::BI__builtin___memcpy_chk:
+  case Builtin::BImemmove:
+  case Builtin::BI__builtin_memmove:
+  case Builtin::BI__builtin___memmove_chk:
+    return Index == 1;
+  default:
+    break;
+  }
+  // A Construct row's argument of the constructed class type is copied into
+  // the constructed object.
+  CalleeLifecycleRoles Roles = getCalleeLifecycleRoles(FD);
+  if (Roles.KnownRole != KnownParamRole::Construct || !Roles.KnownParam ||
+      *Roles.KnownParam == Index || *Roles.KnownParam >= FD->getNumParams() ||
+      Roles.isEndParam(P))
+    return false;
+  QualType Constructed =
+      FD->getParamDecl(*Roles.KnownParam)->getType()->getPointeeType();
+  QualType Arg = P->getType().getNonReferenceType();
+  return !Constructed.isNull() && Arg->isRecordType() &&
+         Constructed.getCanonicalType().getUnqualifiedType() ==
+             Arg.getCanonicalType().getUnqualifiedType();
+}
+
 SemaProfiles::InitSourceState
 SemaProfiles::classifyInitBindingLeaf(const ShapeLeaf &Leaf, QualType T,
-                                      const Decl *Body) const {
+                                      const Decl *Body, bool ValueCopy) const {
   const CXXMethodDecl *MD =
       enclosingInstanceMethod(dyn_cast_or_null<DeclContext>(Body));
   UninitAccessOpts Opts =
       UninitBindAccess.withAlias(pointerAliasOf(T))
           .withThisUnderConstruction(isa_and_nonnull<CXXConstructorDecl>(MD))
-          .withArms(Leaf.Arms);
+          .withArms(Leaf.Arms)
+          .withUninitMemberTrust(ValueCopy);
   switch (classifyUninitSource(getASTContext(), Leaf.E, T->isReferenceType(),
                                Opts)) {
   case UninitStorage::Initialized:
@@ -3089,20 +3151,18 @@ SemaProfiles::enclosingInstanceMethod(const DeclContext *DC) {
 
 bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
                                      const DeclContext *CurContext,
-                                     bool ForMarkedTarget) const {
+                                     FlowLeafUse Use) const {
   if (!insideFunctionBody(CurContext))
     return false;
   const Expr *E = ignoreTransparentCasts(Leaf.E, Leaf.Arms);
   if (AsPointerValue) {
     if (const Expr *Op = addressOfOperand(E))
       return isFlowTrackedLeaf(ShapeLeaf(Op, Leaf.Arms),
-                               /*AsPointerValue=*/false, CurContext,
-                               ForMarkedTarget);
+                               /*AsPointerValue=*/false, CurContext, Use);
     // A decayed array is the array it decays from.
     if (E->getType()->isArrayType())
       return isFlowTrackedLeaf(ShapeLeaf(E, Leaf.Arms),
-                               /*AsPointerValue=*/false, CurContext,
-                               ForMarkedTarget);
+                               /*AsPointerValue=*/false, CurContext, Use);
     // The value of a marked pointer.
     const auto *VD = dyn_cast_or_null<VarDecl>(getDirectlyNamedDecl(E));
     return VD && VD->hasLocalStorage() && VD->getType()->isPointerType() &&
@@ -3118,19 +3178,13 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
     if (matchFlowTrackedMember(MD->getParent(), *Shape))
       return true;
     // In a constructor body, a subobject enclosing tracked members, as for a
-    // local; see the local arm below.
+    // local.
     const auto *Ctor =
         dyn_cast_or_null<CXXConstructorDecl>(flowAnalysisOwner(CurContext));
-    if (!ForMarkedTarget || Shape->Subscript || !Ctor ||
-        Ctor->isDelegatingConstructor() || Ctor->getParent()->isUnion())
+    if (!Ctor || Ctor->isDelegatingConstructor() ||
+        Ctor->getParent()->isUnion())
       return false;
-    const CXXRecordDecl *Named = E->getType()->getAsCXXRecordDecl();
-    if (!Named || !Named->hasDefinition() ||
-        !Named->hasTrivialDefaultConstructor())
-      return false;
-    std::pair<unsigned, unsigned> Range = flowTrackedMemberRange(
-        MD->getParent(), Shape->Members, Shape->LeafBases);
-    return Range.first != Range.second;
+    return isFlowTrackedSubobject(MD->getParent(), E, *Shape, Use);
   }
   const VarDecl *V = Shape->Local;
   if (!V->hasLocalStorage())
@@ -3153,15 +3207,40 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
     return false;
   if (matchFlowTrackedMember(RD, *Shape))
     return true;
-  if (!ForMarkedTarget || Shape->Subscript)
+  return isFlowTrackedSubobject(RD, E, *Shape, Use);
+}
+
+bool SemaProfiles::isFlowTrackedSubobject(const CXXRecordDecl *RD,
+                                          const Expr *E,
+                                          const FlowLeafShape &Shape,
+                                          FlowLeafUse Use) const {
+  if (Shape.Subscript)
     return false;
-  // An object whose default-initialization runs code was constructed whole.
-  const CXXRecordDecl *Named = E->getType()->getAsCXXRecordDecl();
-  if (!Named || !Named->hasDefinition() ||
-      !Named->hasTrivialDefaultConstructor())
+  // A value copy through a pointer to data member reads every tracked member
+  // the step may name: at any depth on the current object, as the last step
+  // on a local.
+  auto Opaque = llvm::find_if(Shape.Members,
+                              [](const MemberStep &S) { return !S.Field; });
+  if (Opaque != Shape.Members.end()) {
+    if (Use != FlowLeafUse::ValueCopy ||
+        (!Shape.IsThis && Opaque + 1 != Shape.Members.end()))
+      return false;
+    std::pair<unsigned, unsigned> Range = flowTrackedMemberRange(
+        RD, ArrayRef(Shape.Members.begin(), Opaque), Opaque->Bases);
+    return Range.first != Range.second;
+  }
+  if (Use == FlowLeafUse::MarkedTarget) {
+    // An object whose default-initialization runs code was constructed
+    // whole.
+    const CXXRecordDecl *Named = E->getType()->getAsCXXRecordDecl();
+    if (!Named || !Named->hasDefinition() ||
+        !Named->hasTrivialDefaultConstructor())
+      return false;
+  } else if (Use != FlowLeafUse::ValueCopy || Shape.Members.empty()) {
     return false;
+  }
   std::pair<unsigned, unsigned> Range =
-      flowTrackedMemberRange(RD, Shape->Members, Shape->LeafBases);
+      flowTrackedMemberRange(RD, Shape.Members, Shape.LeafBases);
   return Range.first != Range.second;
 }
 
@@ -3198,7 +3277,7 @@ bool SemaProfiles::hasFlowTrackedGlvalueLeaf(
 
 bool SemaProfiles::hasFlowTrackedLeaf(const Expr *Src, QualType T,
                                       SmallVectorImpl<const Expr *> *Leaves,
-                                      bool ForMarkedTarget) const {
+                                      FlowLeafUse Use) const {
   if (!Src || T.isNull())
     return false;
   bool AsPointerValue;
@@ -3207,8 +3286,7 @@ bool SemaProfiles::hasFlowTrackedLeaf(const Expr *Src, QualType T,
     return false;
   bool Any = false;
   forEachTargetLeaf(Src, [&](const ShapeLeaf &Leaf) {
-    if (!isFlowTrackedLeaf(Leaf, AsPointerValue, SemaRef.CurContext,
-                           ForMarkedTarget))
+    if (!isFlowTrackedLeaf(Leaf, AsPointerValue, SemaRef.CurContext, Use))
       return;
     Any = true;
     if (Leaves && !llvm::is_contained(*Leaves, Leaf.E))
@@ -3281,7 +3359,10 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
               !TargetMarked,
           InitDestroyer::Function, TargetMarked);
   } else {
-    judgeInitProfileBinding(Kind, Loc, TargetMarked, T, Src, D);
+    judgeInitProfileBinding(Kind, Loc, TargetMarked, T, Src, D,
+                            /*Subject=*/nullptr, /*AfterFlowPass=*/nullptr,
+                            /*ValueCopy=*/!TargetMarked &&
+                                isValueCopySource(Parm));
   }
 }
 
@@ -3295,8 +3376,9 @@ void SemaProfiles::checkInitProfileDestroy(SourceLocation Loc, QualType T,
   if (!Src || isa<RecoveryExpr>(Src->IgnoreParens()) ||
       (!D && Src->isInstantiationDependent()) || inRebuiltOrSynthesizedCode())
     return;
-  if (SmallVector<const Expr *, 2> Leaves;
-      hasFlowTrackedLeaf(Src, T, &Leaves, TargetMarked)) {
+  if (SmallVector<const Expr *, 2> Leaves; hasFlowTrackedLeaf(
+          Src, T, &Leaves,
+          TargetMarked ? FlowLeafUse::MarkedTarget : FlowLeafUse::Plain)) {
     DeferredInitSite Site{DeferredInitSite::Kind::Destroy,
                           InitBindingKind::Parameter,
                           Loc,

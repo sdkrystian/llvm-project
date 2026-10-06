@@ -1040,6 +1040,19 @@ int nested_write_one_branch(bool c) {
   return o.m.n; // expected-error {{member 'n' is read before initialization under profile 'std::init'}}
 }
 
+// A copy of a member subobject reads its tracked members on every path
+int nested_copy_before_write() {
+  Out o;
+  Mid c = o.m; // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  return c.n;
+}
+int nested_copy_after_write() {
+  Out o;
+  o.m.n = 1;
+  Mid c = o.m; // OK
+  return c.n;
+}
+
 // A member subobject whose class has a converting constructor is tracked
 struct MidConverting {
   int n [[uninit]]; // expected-note {{member 'n' declared here}}

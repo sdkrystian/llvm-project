@@ -241,6 +241,22 @@ void local_scope_exit_escaped_after_destroy() {
   take_dtor_holder(&h); // OK
 }
 
+// A copy of a local copy-constructs its class-type member: the source member
+// must be initialized on every path, and the copy's member is alive
+void local_copy_destroyed_member() {
+  DtorHolder h;
+  std::construct_at(&h.m);
+  std::destroy_at(&h.m);
+  DtorHolder h2 = h; // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  std::construct_at(&h.m);
+}
+void local_copy_constructed_member() {
+  DtorHolder h;
+  std::construct_at(&h.m);
+  DtorHolder h2 = h; // OK
+  std::construct_at(&h2.m); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
 // A member whose class has a converting constructor is tracked as a whole object
 struct Converting {
   int x;
@@ -257,7 +273,8 @@ int local_converting_read() {
   return h.c.x; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
 }
 
-// A copy carries the member's state
+// A copy copy-constructs the member from the source's, which must be
+// initialized on every path
 int local_copy_constructed() {
   Holder h;
   std::construct_at(&h.inner, 1, 2);
@@ -267,8 +284,8 @@ int local_copy_constructed() {
 
 int local_copy_unconstructed() {
   Holder h;
-  Holder c = h;
-  return c.inner.x; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  Holder c = h; // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  return c.inner.x; // OK
 }
 
 // A by-value parameter's member starts uninitialized
@@ -386,4 +403,48 @@ struct HoldsMarked {
 };
 void allocated() {
   ((Global *)malloc(sizeof(Global)))->agg.x = 1; // expected-error {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
+}
+
+// A copy of the member reads it, and is trusted where a read of it is
+void take(S);
+S copy_through_pointer(Box *h, S &t) {
+  S c = h->s; // OK
+  t = h->s;   // OK
+  take(h->s); // OK
+  return h->s; // OK
+}
+
+struct CopiesInMethod {
+  S s [[uninit]];
+  CopiesInMethod();
+  S get() {
+    S t = s; // OK
+    return t;
+  }
+};
+
+// A copy in a default member initializer counts the marker
+struct NsdmiCopy {
+  S s [[uninit]];
+  S c = s; // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  NsdmiCopy() {}
+};
+
+// A copy through a pointer to data member in a constructor reads every tracked member
+struct CopiesThroughMemberPointer {
+  S s [[uninit]];
+  S t;
+  CopiesThroughMemberPointer(S CopiesThroughMemberPointer::*pm) : t{1, 2} {
+    S c = this->*pm; // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+    (void)c;
+  }
+};
+
+// A reference binding still counts the marker, and a copy of an [[uninit]] local is judged by its flow
+void copy_pins(Box *h) {
+  const S &r = h->s; // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  S u [[uninit]];
+  S t = u; // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)r;
+  (void)t;
 }

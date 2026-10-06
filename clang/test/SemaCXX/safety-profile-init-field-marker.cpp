@@ -346,9 +346,9 @@ bool compare_defaulted(DefaultedCompared &a, DefaultedCompared &b) {
   return a == b;
 }
 
-// A user-written copy constructor's mem-initializer is judged
+// A user-written copy constructor's mem-initializer copies the member, trusted like a read of it
 struct UserCopiedHolder {
   DefaultedPair s [[uninit]];
   UserCopiedHolder();
-  UserCopiedHolder(const UserCopiedHolder &o) : s(o.s) {} // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  UserCopiedHolder(const UserCopiedHolder &o) : s(o.s) {} // OK
 };

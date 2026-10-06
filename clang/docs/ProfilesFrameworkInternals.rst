@@ -1012,7 +1012,8 @@ enters a *container* -- a named, unmarked, non-reference, non-array member with
 no default member initializer whose default constructor is not user-provided
 (``SemaProfiles::getDefaultInitTrackableClass``) -- up to eight member steps
 deep and until 64 paths and containers are visited, so a credit, kill, or
-written initializer of a container covers the contiguous range under it.
+written initializer of a container covers the contiguous range under it, and a
+value copy of it (``FlowLeafUse::ValueCopy``) reads the range on every path.
 In a constructor body the current object's containers are tracked whole like a
 local's.
 One matcher (``SemaProfiles::matchFlowTrackedMember``) finds the entry an
@@ -1051,8 +1052,10 @@ follows: ``double_destroy`` fires on ``MayDestroyed``, a marked-target binding
 on ``Must``; an unmarked-target binding and ``destroy_uninit`` are suppressed
 by ``May``; a read through a marker or of a subobject of an ``[[uninit]]``
 object, a subobject write, and the unmarked binding of a value copy's source
-(``isWholeCopySource``; ``BindingSite::EveryPath``: a whole copy reads every
-subobject) fire on ``MayUnassigned`` without ``Must``: every
+(``isValueCopySource``; ``BindingSite::EveryPath``: a whole copy reads every
+subobject, so it is trusted below a member whose reads are, and by form it
+ignores data member markers as a read does) fire on ``MayUnassigned`` without
+``Must``: every
 path must initialize the storage (P4222R2 §1.3, §9.2), and a path that does
 not know its state does not count against the read, just as an unidentified
 referent fires in neither direction.  A destroy or release whose arms name

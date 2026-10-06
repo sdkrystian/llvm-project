@@ -2130,12 +2130,15 @@ struct TrackedStorage {
   /// (SemaProfiles::flowTrackedMemberRange), converted to a base by its own
   /// casts and by \p OuterBases, the derived-to-base steps above the leaf --
   /// or, in a constructor body, of the current object; with
-  /// \p AsPointerValue, the leaf is its address. Empty for any other leaf,
-  /// and for an object whose default-initialization runs code, which
-  /// constructed it whole.
+  /// \p AsPointerValue, the leaf is its address. Empty for any other leaf
+  /// (SemaProfiles::isFlowTrackedSubobject for \p Use): for a MarkedTarget,
+  /// an object whose default-initialization runs code was constructed whole;
+  /// a ValueCopy names a member.
   std::pair<unsigned, unsigned>
   objectPart(const SemaProfiles::ShapeLeaf &Leaf, bool AsPointerValue,
-             ArrayRef<const CXXRecordDecl *> OuterBases = {}) const;
+             ArrayRef<const CXXRecordDecl *> OuterBases = {},
+             SemaProfiles::FlowLeafUse Use =
+                 SemaProfiles::FlowLeafUse::MarkedTarget) const;
 
   /// The entities of the object with entity range \p Range and class \p RD
   /// below its subobject reached through \p Prefix and then \p Bases
@@ -2233,7 +2236,8 @@ TrackedStorage::wholeObject(const Expr *E, ArrayRef<const Expr *> Arms,
 std::pair<unsigned, unsigned>
 TrackedStorage::objectPart(const SemaProfiles::ShapeLeaf &Leaf,
                            bool AsPointerValue,
-                           ArrayRef<const CXXRecordDecl *> OuterBases) const {
+                           ArrayRef<const CXXRecordDecl *> OuterBases,
+                           SemaProfiles::FlowLeafUse Use) const {
   BasePath Above(OuterBases.begin(), OuterBases.end());
   const Expr *E = Leaf.E;
   if (AsPointerValue) {
@@ -2243,13 +2247,16 @@ TrackedStorage::objectPart(const SemaProfiles::ShapeLeaf &Leaf,
       return {0, 0};
   }
   E = SemaProfiles::ignoreTransparentCasts(E, Leaf.Arms);
-  const CXXRecordDecl *Named = E->getType()->getAsCXXRecordDecl();
-  if (!Named || !Named->hasDefinition() ||
-      !Named->hasTrivialDefaultConstructor())
-    return {0, 0};
+  if (Use == SemaProfiles::FlowLeafUse::MarkedTarget) {
+    const CXXRecordDecl *Named = E->getType()->getAsCXXRecordDecl();
+    if (!Named || !Named->hasDefinition() ||
+        !Named->hasTrivialDefaultConstructor())
+      return {0, 0};
+  }
   std::optional<SemaProfiles::FlowLeafShape> Shape =
       SemaProfiles::flowLeafShape(E, Leaf.Arms);
-  if (!Shape || Shape->Subscript)
+  if (!Shape || Shape->Subscript ||
+      (Use == SemaProfiles::FlowLeafUse::ValueCopy && Shape->Members.empty()))
     return {0, 0};
   BasePath Bases(Shape->LeafBases);
   Bases.append(Above.begin(), Above.end());
@@ -2574,9 +2581,10 @@ struct BindingSite {
   /// captured variable).
   const NamedDecl *Subject = nullptr;
   SmallVector<BindingLeaf, 2> Leaves;
-  /// The unmarked source parameter of a copy or move constructor or
-  /// assignment operator: the copy reads the source whole, so it must be
-  /// initialized on every path (P4222R2 §1.3, §9.2).
+  /// The source parameter of a copy or move constructor or assignment
+  /// operator (SemaProfiles::isValueCopySource): an unmarked one's copy reads
+  /// the source whole, so it must be initialized on every path (P4222R2 §1.3,
+  /// §9.2), and is trusted below a member that is not read-tracked.
   bool EveryPath = false;
 };
 
@@ -2774,9 +2782,18 @@ static void judgeBindingSite(const BindingSite &Site, const FlowState &St,
   if (Site.Leaves.empty())
     return;
   bool EveryPath = Site.EveryPath && !Site.TargetMarked;
-  LeafState Acc = leafState(Site.Leaves.front(), St, Storage, EveryPath);
+  // A value copy of a member's storage is trusted where its reads are.
+  auto State = [&](const BindingLeaf &L) {
+    if (EveryPath && L.Entity) {
+      const TrackedEntity &Ent = Storage.Entities[*L.Entity];
+      if (Ent.field() && !Ent.TrackReads)
+        return LeafState::Initialized;
+    }
+    return leafState(L, St, Storage, EveryPath);
+  };
+  LeafState Acc = State(Site.Leaves.front());
   for (const BindingLeaf &L : llvm::drop_begin(Site.Leaves))
-    Acc = combineLeafStates(Acc, leafState(L, St, Storage, EveryPath));
+    Acc = combineLeafStates(Acc, State(L));
   if (Site.TargetMarked) {
     if (Acc == LeafState::Initialized || Acc == LeafState::Mixed)
       Out.push_back({diag::err_init_ref_to_uninit_requires_uninit, Site.Loc,
@@ -3336,62 +3353,6 @@ static void forEachArgumentBinding(
   }
 }
 
-/// True if \p FD is a defaulted comparison operator, which reads each of
-/// its operands -- its object argument included -- whole.
-static bool isDefaultedComparison(const FunctionDecl *FD) {
-  return FD && FD->isDefaulted() && FD->getOverloadedOperator() != OO_None &&
-         FD->getOverloadedOperator() != OO_Equal;
-}
-
-/// True if \p P is the source parameter of a copy or move constructor or of
-/// a copy or move assignment operator (after an explicit object parameter),
-/// an operand of a defaulted comparison, the source of std::bit_cast, memcpy,
-/// or memmove, or an argument of a Construct row of the constructed class
-/// type, whose call reads the argument whole.
-static bool isWholeCopySource(const ParmVarDecl *P) {
-  const auto *FD = P ? dyn_cast<FunctionDecl>(P->getDeclContext()) : nullptr;
-  if (!FD)
-    return false;
-  if (isDefaultedComparison(FD))
-    return true;
-  unsigned Index = P->getFunctionScopeIndex();
-  if (const auto *MD = dyn_cast<CXXMethodDecl>(FD);
-      MD && Index == (MD->isExplicitObjectMemberFunction() ? 1u : 0u)) {
-    if (const auto *Ctor = dyn_cast<CXXConstructorDecl>(MD))
-      return Ctor->isCopyOrMoveConstructor();
-    if (MD->isCopyAssignmentOperator() || MD->isMoveAssignmentOperator())
-      return true;
-  }
-  if (FD->isInStdNamespace() && FD->getIdentifier() &&
-      FD->getName() == "bit_cast")
-    return Index == 0;
-  switch (FD->getBuiltinID()) {
-  case Builtin::BImemcpy:
-  case Builtin::BI__builtin_memcpy:
-  case Builtin::BI__builtin___memcpy_chk:
-  case Builtin::BImemmove:
-  case Builtin::BI__builtin_memmove:
-  case Builtin::BI__builtin___memmove_chk:
-    return Index == 1;
-  default:
-    break;
-  }
-  // A Construct row's argument of the constructed class type is copied into
-  // the constructed object.
-  SemaProfiles::CalleeLifecycleRoles Roles =
-      SemaProfiles::getCalleeLifecycleRoles(FD);
-  if (Roles.KnownRole != SemaProfiles::KnownParamRole::Construct ||
-      !Roles.KnownParam || *Roles.KnownParam == Index ||
-      *Roles.KnownParam >= FD->getNumParams())
-    return false;
-  QualType Constructed =
-      FD->getParamDecl(*Roles.KnownParam)->getType()->getPointeeType();
-  QualType Arg = P->getType().getNonReferenceType();
-  return !Constructed.isNull() && Arg->isRecordType() &&
-         Constructed.getCanonicalType().getUnqualifiedType() ==
-             Arg.getCanonicalType().getUnqualifiedType();
-}
-
 /// The part of \p Whole, the entity range of the object \p G a credit's
 /// argument leaf \p Leaf names as a whole, that a credit designated as
 /// \p Designated reaches: the entities below the base subobject the
@@ -3498,12 +3459,13 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
   // RawExempt (TrackedStorage::resolve). A credit of an object passed as a
   // whole reaches only the entities of the base subobject its argument
   // converts to, and none when \p Designated is not that subobject's class.
-  // A [[ref_to_uninit]] parameter passes \p ForMarkedTarget
-  // (SemaProfiles::isFlowTrackedLeaf).
+  // \p Use is the parameter's (SemaProfiles::isFlowTrackedLeaf).
   auto ResolveArg = [&](const Expr *Arg, QualType ParamTy,
                         SmallVectorImpl<ArgLeaf> &Leaves,
                         QualType Designated = QualType(),
-                        bool RawExempt = false, bool ForMarkedTarget = false) {
+                        bool RawExempt = false,
+                        SemaProfiles::FlowLeafUse Use =
+                            SemaProfiles::FlowLeafUse::Plain) {
     bool AsPointerValue;
     const Expr *Operand =
         SemaProfiles::bindingSourceOperand(Arg, ParamTy, AsPointerValue);
@@ -3525,9 +3487,10 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
             if (!CastPath.empty())
               L.R.Subobject = true;
           }
-          L.Tracked = S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC,
-                                                     ForMarkedTarget);
-          if (L.Tracked && ForMarkedTarget && !L.R.Entity)
+          L.Tracked =
+              S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC, Use);
+          if (L.Tracked && Use == SemaProfiles::FlowLeafUse::MarkedTarget &&
+              !L.R.Entity)
             L.Part = Storage.objectPart(Leaf, AsPointerValue, OuterPath);
           AnyTracked |= L.Tracked;
           if (!L.R.Entity) {
@@ -3605,8 +3568,9 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
     Site.Loc = Arg->IgnoreImplicit()->getExprLoc();
     Site.Exempt = Exempt;
     Site.Destroyer = Destroyer;
-    Site.Judged =
-        ResolveArg(Arg, T, Leaves, QualType(), /*RawExempt=*/false, Marked);
+    Site.Judged = ResolveArg(Arg, T, Leaves, QualType(), /*RawExempt=*/false,
+                             Marked ? SemaProfiles::FlowLeafUse::MarkedTarget
+                                    : SemaProfiles::FlowLeafUse::Plain);
     Site.Conditional = !NameOneStorage(Leaves);
     for (const ArgLeaf &L : Leaves) {
       if (L.Tracked)
@@ -4161,22 +4125,31 @@ static void extractStdInitEvents(
       // The derived-to-base casts above the leaves, which the leaf walk peels.
       BasePath OuterPath;
       SemaProfiles::peelBaseCasts(Operand, OuterPath);
+      SemaProfiles::FlowLeafUse Use =
+          TargetMarked ? SemaProfiles::FlowLeafUse::MarkedTarget
+          : EveryPath  ? SemaProfiles::FlowLeafUse::ValueCopy
+                       : SemaProfiles::FlowLeafUse::Plain;
       SemaProfiles::forEachTargetLeaf(
           Operand, [&](const SemaProfiles::ShapeLeaf &Leaf) {
             BindingLeaf L;
-            if (S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC,
-                                               TargetMarked)) {
+            if (S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC, Use)) {
               AnyTracked = true;
               JudgedLeaves.insert(Leaf.E);
               TrackedStorage::Resolution R =
                   Storage.resolveFlowLeaf(Leaf, AsPointerValue);
               L.Entity = R.Entity;
-              if (!L.Entity && TargetMarked)
-                L.Range = Storage.objectPart(Leaf, AsPointerValue, OuterPath);
+              // A value copy through a pointer to data member reads what the
+              // step may name.
+              if (!L.Entity && Use == SemaProfiles::FlowLeafUse::ValueCopy &&
+                  R.Opaque.first != R.Opaque.second)
+                L.Range = R.Opaque;
+              else if (!L.Entity && Use != SemaProfiles::FlowLeafUse::Plain)
+                L.Range =
+                    Storage.objectPart(Leaf, AsPointerValue, OuterPath, Use);
             }
             if (!L.Entity)
-              L.State =
-                  formState(S.Profiles().classifyInitBindingLeaf(Leaf, T, D));
+              L.State = formState(S.Profiles().classifyInitBindingLeaf(
+                  Leaf, T, D, /*ValueCopy=*/EveryPath && !TargetMarked));
             Site.Leaves.push_back(L);
           });
       if (!AnyTracked)
@@ -4286,7 +4259,7 @@ static void extractStdInitEvents(
                            Roles.isEndParam(Parm)))
                   AddBinding(K::Parameter, Loc,
                              Parm && Roles.isMarkedParam(Parm), T, Arg, nullptr,
-                             CallLike, isWholeCopySource(Parm));
+                             CallLike, SemaProfiles::isValueCopySource(Parm));
                 AppendAliasEscapes(Arg, T, CallLike);
               });
         };
@@ -4555,7 +4528,7 @@ static void extractStdInitEvents(
                   : Ctx.getLValueReferenceType(OT.getNonReferenceType());
           AddBinding(K::ObjectArgument, Object->IgnoreImplicit()->getExprLoc(),
                      /*TargetMarked=*/false, T, Object, ObjectMethod, CE,
-                     isDefaultedComparison(ObjectMethod));
+                     SemaProfiles::isDefaultedComparison(ObjectMethod));
         }
         if (const auto *PDE = dyn_cast<CXXPseudoDestructorExpr>(
                 CE->getCallee()->IgnoreParens()))
@@ -4684,8 +4657,31 @@ static void extractStdInitEvents(
             BasePath &First = SrcSteps.front().Bases;
             First.insert(First.begin(), CopyIt->second.Path.begin(),
                          CopyIt->second.Path.end());
-            if (std::optional<unsigned> SrcIdx =
-                    Storage.find(CopyIt->second.Src, SrcSteps))
+            std::optional<unsigned> SrcIdx =
+                Storage.find(CopyIt->second.Src, SrcSteps);
+            // A member of class type tracked whole is copy-constructed: its
+            // source is a value copy's, and the copy is a live object.
+            if (SrcIdx && Storage.Entities[Idx].Whole &&
+                Ctx.getBaseElementType(Storage.Entities[Idx].Type)
+                    ->isRecordType()) {
+              BasePath Unused;
+              BindingSite Site{K::Variable,
+                               getLocalCopySourceRef(V, Unused)->getExprLoc(),
+                               /*TargetMarked=*/false,
+                               /*IsReference=*/true,
+                               nullptr,
+                               {},
+                               /*EveryPath=*/true};
+              BindingLeaf L;
+              L.Entity = *SrcIdx;
+              Site.Leaves.push_back(L);
+              Sites.push_back(std::move(Site));
+              BlockEvents.push_back({DefAssignEventKind::Binding, 0,
+                                     V->getInit(),
+                                     (unsigned)(Sites.size() - 1)});
+              BlockEvents.push_back(
+                  {DefAssignEventKind::Write, Idx, V->getInit()});
+            } else if (SrcIdx)
               BlockEvents.push_back(
                   {DefAssignEventKind::Copy, Idx, V->getInit(), *SrcIdx});
             else
