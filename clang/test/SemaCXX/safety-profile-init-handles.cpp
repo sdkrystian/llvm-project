@@ -170,8 +170,21 @@ template <class T, size_t N> struct array {
   constexpr const_iterator cbegin() const noexcept;
   constexpr const_iterator cend() const noexcept;
   constexpr T *data() noexcept;
+  constexpr size_t size() const noexcept;
   constexpr T &operator[](size_t n) noexcept;
 };
+
+template <class C> constexpr auto begin(C &c) -> decltype(c.begin());
+template <class C> constexpr auto end(C &c) -> decltype(c.end());
+template <class T, size_t N> constexpr T *begin(T (&a)[N]) noexcept;
+template <class T, size_t N> constexpr T *end(T (&a)[N]) noexcept;
+template <class C> constexpr auto data(C &c) -> decltype(c.data());
+template <class C> constexpr auto size(const C &c) -> decltype(c.size());
+template <class T, size_t N> constexpr size_t size(const T (&a)[N]) noexcept;
+template <class It> constexpr It next(It it, ptrdiff_t n = 1);
+template <class T> constexpr T *to_address(T *p) noexcept;
+template <class P>
+constexpr auto to_address(const P &p) noexcept -> decltype(p.operator->());
 
 template <class T> class vector {
   T *_M_start, *_M_finish, *_M_end_of_storage;
@@ -206,6 +219,16 @@ struct __uninitialized_fill_fn {
   template <class R, class T> void operator()(R &&r, const T &x) const;
 };
 inline constexpr __uninitialized_fill_fn uninitialized_fill{};
+struct __begin_fn {
+  template <class R> constexpr auto operator()(R &&r) const -> decltype(r.begin());
+  template <class T, size_t N> constexpr T *operator()(T (&a)[N]) const noexcept;
+};
+inline constexpr __begin_fn begin{};
+struct __size_fn {
+  template <class R> constexpr auto operator()(R &&r) const -> decltype(r.size());
+  template <class T, size_t N> constexpr size_t operator()(T (&a)[N]) const noexcept;
+};
+inline constexpr __size_fn size{};
 } // namespace ranges
 
 template <class T> class weak_ptr;
@@ -1126,6 +1149,95 @@ int array_unfilled() {
   int *p = a.data(); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   (void)p;
   return a[0]; // expected-error {{calling member function 'operator[]' binds its implicit object parameter to uninitialized memory under profile 'std::init'}}
+}
+
+// std::begin, std::data, and their kin derive from their argument, which
+// they do not bind; std::size inspects its argument in any state
+int derive_from_span(std::span<int> s [[ref_to_uninit]]) {
+  std::uninitialized_fill(std::begin(s), std::end(s), 0);
+  return *s.data();
+}
+int derive_offset(std::span<int> s [[ref_to_uninit]]) {
+  std::uninitialized_fill(std::next(std::begin(s)), std::end(s), 0);
+  return s[0]; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+int derive_array_data() {
+  std::array<int, 4> a [[uninit]];
+  int *p [[ref_to_uninit]] = std::data(a);
+  std::size_t n = std::size(a);
+  std::uninitialized_fill(p, p + 4, 0);
+  return a[0] + (int)n;
+}
+int derive_c_array() {
+  int b [[uninit]] [4];
+  int *p = std::begin(b); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)p;
+  return (int)std::size(b);
+}
+void derive_to_address(std::unique_ptr<int> up [[ref_to_uninit]]) {
+  int *p = std::to_address(up); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)p;
+}
+
+// A read through std::begin or std::to_address reaches what they derive from
+int derive_reads(int *p [[ref_to_uninit]], std::span<int> s [[ref_to_uninit]]) {
+  int arr [[uninit]] [4];
+  std::uninitialized_fill(arr, arr + 4, 0);
+  std::uninitialized_fill(p, p + 4, 0);
+  std::uninitialized_fill(s.begin(), s.end(), 0);
+  return *std::begin(arr) + std::begin(arr)[1] + *std::to_address(p) +
+         *std::begin(s) + *std::data(s);
+}
+
+// The std::ranges access objects derive from, or inspect, their argument as
+// their std twins do
+int ranges_access(std::span<int> s [[ref_to_uninit]]) {
+  int a [[uninit]] [4];
+  std::size_t n = std::ranges::size(a);
+  int k = *std::ranges::begin(s); // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  std::uninitialized_fill(std::ranges::begin(a), std::ranges::begin(a) + 4, 0);
+  return k + a[0] + (int)n;
+}
+
+// A local reference whose initializer reaches itself is followed once
+int self_referential(std::vector<int> &v) {
+  // expected-warning@+2 {{reference 'r' is not yet bound to a value when used within its own initialization}}
+  // no-profiles-warning@+1 {{reference 'r' is not yet bound to a value when used within its own initialization}}
+  std::vector<int>::iterator &&r = std::next(r);
+  std::vector<int>::iterator x = r;
+  return *x;
+}
+
+// A chain of references, each over two derivations of the previous one, is
+// walked once per reference
+void derive_chain(std::vector<int> &v, bool c) {
+  auto &&r0 = v.begin();
+  auto &&r1 = c ? std::next(r0) : std::next(r0, 2);
+  auto &&r2 = c ? std::next(r1) : std::next(r1, 2);
+  auto &&r3 = c ? std::next(r2) : std::next(r2, 2);
+  auto &&r4 = c ? std::next(r3) : std::next(r3, 2);
+  auto &&r5 = c ? std::next(r4) : std::next(r4, 2);
+  auto &&r6 = c ? std::next(r5) : std::next(r5, 2);
+  auto &&r7 = c ? std::next(r6) : std::next(r6, 2);
+  auto &&r8 = c ? std::next(r7) : std::next(r7, 2);
+  auto &&r9 = c ? std::next(r8) : std::next(r8, 2);
+  auto &&r10 = c ? std::next(r9) : std::next(r9, 2);
+  auto &&r11 = c ? std::next(r10) : std::next(r10, 2);
+  auto &&r12 = c ? std::next(r11) : std::next(r11, 2);
+  auto &&r13 = c ? std::next(r12) : std::next(r12, 2);
+  auto &&r14 = c ? std::next(r13) : std::next(r13, 2);
+  auto &&r15 = c ? std::next(r14) : std::next(r14, 2);
+  auto &&r16 = c ? std::next(r15) : std::next(r15, 2);
+  auto &&r17 = c ? std::next(r16) : std::next(r16, 2);
+  auto &&r18 = c ? std::next(r17) : std::next(r17, 2);
+  auto &&r19 = c ? std::next(r18) : std::next(r18, 2);
+  auto &&r20 = c ? std::next(r19) : std::next(r19, 2);
+  auto &&r21 = c ? std::next(r20) : std::next(r20, 2);
+  auto &&r22 = c ? std::next(r21) : std::next(r21, 2);
+  auto &&r23 = c ? std::next(r22) : std::next(r22, 2);
+  auto &&r24 = c ? std::next(r23) : std::next(r23, 2);
+  std::vector<int>::iterator x = r24;
+  (void)x;
 }
 
 //--- libcxx.cpp

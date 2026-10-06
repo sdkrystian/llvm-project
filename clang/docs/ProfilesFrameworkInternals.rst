@@ -926,7 +926,20 @@ by builtin ID, by form for the ``operator new`` / ``operator delete`` families,
 or by the name of a namespace-std function or ``std::ranges`` object and its
 arity (``KnownCalleeKey``), with a name-only *untrusted* fallback where the ID
 is absent; the roles reach the funnels and the CFG pass through
-``getCalleeLifecycleRoles``.  A row may describe only what the callee returns:
+``getCalleeLifecycleRoles``.  A ``Derive`` row (``std::begin``,
+``std::cbegin``, ``std::data``, ``std::to_address``, ``std::rbegin``,
+``std::crbegin``, and, offsetting their argument, ``std::end``, ``std::cend``,
+``std::rend``, ``std::crend``, ``std::next``, ``std::prev``, and the
+``std::ranges`` access objects of the same names, ``cdata`` included) and an
+``AnyState`` row (``std::size``, ``std::ssize``, ``std::empty``,
+``std::distance``, and their ``std::ranges`` objects) bind no argument
+(``SemaProfiles::bindsNoArgument``, as the identity functions bind none); a
+``Derive`` call's result is classified as its argument
+(``SemaProfiles::derivedArgument``, after a ``std::ranges`` object's own) --
+an array as it decays, a pointer by its value, a class as a range -- by the
+recognizers, the handle walk, the shape walk (an offsetting row as an element
+step), the predicate, and the resolver.  A row may describe only what the
+callee returns:
 the ``std::*_for_overwrite`` factories return a handle to a default-initialized
 object (``ReturnsDefaultInitialized``), which the handle recognizer classifies
 from the factory's first template argument as the new-expression arm
@@ -969,7 +982,9 @@ to part of the handle (it has explicit arguments or template arguments, is
 named for a position past the start or a part: ``end``, ``cend``, ``rend``,
 ``crend``, ``first``, ``last``, ``subspan``, ``next``, ``prev``, ``advance``),
 and an implicit local (range-for's ``__range`` and ``__begin``) or an
-unmarked local reference to its initializer; and it distributes a conditional
+unmarked local reference to its initializer, followed once per outermost
+walk, the walks its ``Range`` leaves start included (``HandleWalkMemo``),
+so a self-referential initializer ends; and it distributes a conditional
 into one leaf per arm, combined as the recognizers combine arms, so a marked
 and an unmarked arm are Mixed (P4222R2 §4.9).  A terminal classifies by its
 form: a named variable, parameter, or member is uninitialized when marked; a
@@ -1430,21 +1445,17 @@ Deliberate Strictnesses
   wrapper or suppression.
 - The ``std::uninitialized_*`` credit reaches only what the whole-storage
   write reaches: an element-form range (``&arr[0]``, P4222R2 §1.3) or an
-  offset class-type iterator (``s.begin() + 1``) earns nothing, and a marked
-  pointer's further elements (``p[1]``) are never credited.
+  offset class-type iterator (``s.begin() + 1``, ``std::next(s.begin())``)
+  earns nothing, and a marked pointer's further elements (``p[1]``) are never
+  credited.  ``std::fill`` assigns rather than initializes: into a
+  still-uninitialized ``[[uninit]]`` array it is rejected like any unmarked
+  binding (``std::uninitialized_fill`` and ``memset`` initialize).
 - A marked handle's referent is one object, as a marked pointer's is, and an
   element through the handle (``s[i]``, ``s.front()``) is judged by its form,
   as ``p[i]`` is: a read of one is rejected even after the whole range is
   filled -- ``*s.data()`` or an unmarked copy of the handle reads it -- and an
   element store or ``std::construct_at(&s[i])`` initializes nothing, so a fill
-  of the whole range is the way to initialize it.  ``std::begin(arr)`` /
-  ``std::end(arr)`` on an ``[[uninit]]`` array is rejected on both sides (the
-  array binds ``begin``'s unmarked reference parameter, and the trusted return
-  cannot feed a marked range), so ``arr, arr + n`` and the ``std::ranges``
-  range overloads are the spellings that work.  ``std::fill`` assigns rather
-  than initializes: into a still-uninitialized ``[[uninit]]`` array it is
-  rejected like any unmarked binding (``std::uninitialized_fill`` and
-  ``memset`` initialize).
+  of the whole range is the way to initialize it.
 - A reference to a marked handle that a lambda or block reaches by capture
   (``const auto &r = s; [&] { return *r.data(); }``) is judged by its form
   there, as the marked handle: the referent's state is the enclosing

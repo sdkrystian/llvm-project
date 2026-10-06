@@ -1273,6 +1273,9 @@ struct UninitAccessOpts {
   /// (SemaProfiles::ShapeLeaf); a conditional with no listed arm combines
   /// both.
   ArrayRef<const Expr *> Arms;
+  /// The locals the outermost handle classification has followed
+  /// (classifyHandleSource), shared by the classifications it nests.
+  SemaProfiles::HandleWalkMemo *HandleMemo = nullptr;
 
   // Copy-then-mutate, so each helper names only the field it changes and
   // adding a field cannot silently drop out of a positional rebuild.
@@ -1304,6 +1307,11 @@ struct UninitAccessOpts {
   UninitAccessOpts withUninitMemberTrust(bool B) const {
     UninitAccessOpts O = *this;
     O.TrustUninitMembers = B;
+    return O;
+  }
+  UninitAccessOpts withHandleMemo(SemaProfiles::HandleWalkMemo *M) const {
+    UninitAccessOpts O = *this;
+    O.HandleMemo = M;
     return O;
   }
 };
@@ -1689,6 +1697,8 @@ enum class ParamShape : uint8_t {
   ArrayReference,
   /// A non-union class or a reference to one: a class-type iterator or range.
   Handle,
+  /// Any type: a row whose role takes no storage of a particular shape.
+  Any,
 };
 
 /// A row of the known-callee table (KnownCallees): what a library callee
@@ -1741,6 +1751,8 @@ struct KnownCalleeEntry {
   /// The index of the end iterator of the range Param begins, or NoEndParam
   /// (P4222R2 §4.4 annotates both iterators).
   unsigned EndParam = NoEndParam;
+  /// A Derive row whose result is past its argument's start (std::end).
+  bool DeriveOffsets = false;
 };
 } // namespace
 
@@ -1788,6 +1800,18 @@ stdRow(StringRef Name, unsigned Arity, unsigned Param, KnownParamRole Role,
   return E;
 }
 
+/// A row keyed by namespace-std name and arity whose role -- Derive (offset
+/// by the call when \p Offsets) or AnyState -- takes its argument of any
+/// shape.
+static constexpr KnownCalleeEntry stdAnyShapeRow(StringRef Name, unsigned Arity,
+                                                 KnownParamRole Role,
+                                                 bool Offsets = false) {
+  KnownCalleeEntry E = stdRow(Name, Arity, 0, Role);
+  E.Shape = ParamShape::Any;
+  E.DeriveOffsets = Offsets;
+  return E;
+}
+
 /// \p E, whose role parameter may also be a handle.
 static constexpr KnownCalleeEntry orHandle(KnownCalleeEntry E) {
   E.AcceptsHandle = true;
@@ -1815,6 +1839,17 @@ cpoRow(StringRef Name, unsigned Arity, unsigned Param, KnownParamRole Role,
   KnownCalleeEntry E = stdRow(Name, Arity, Param, Role, EndParam,
                               ConstructIfDefaultInitDeterminate);
   E.Key = KnownCalleeKey::RangesCPO;
+  return E;
+}
+
+/// A RangesCPO row whose role -- Derive (offset by the call when \p Offsets)
+/// or AnyState -- takes its argument of any shape.
+static constexpr KnownCalleeEntry cpoAnyShapeRow(StringRef Name, unsigned Arity,
+                                                 KnownParamRole Role,
+                                                 bool Offsets = false) {
+  KnownCalleeEntry E = cpoRow(Name, Arity, 0, Role);
+  E.Shape = ParamShape::Any;
+  E.DeriveOffsets = Offsets;
   return E;
 }
 
@@ -1961,12 +1996,43 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
     orHandle(stdRow("destroy", 3, 1, KnownParamRole::Destroy, 2)),
     orHandle(stdRow("destroy_n", 2, 0, KnownParamRole::Destroy)),
     orHandle(stdRow("destroy_n", 3, 1, KnownParamRole::Destroy)),
+    stdAnyShapeRow("begin", 1, KnownParamRole::Derive),
+    stdAnyShapeRow("cbegin", 1, KnownParamRole::Derive),
+    stdAnyShapeRow("data", 1, KnownParamRole::Derive),
+    stdAnyShapeRow("to_address", 1, KnownParamRole::Derive),
+    stdAnyShapeRow("end", 1, KnownParamRole::Derive, /*Offsets=*/true),
+    stdAnyShapeRow("cend", 1, KnownParamRole::Derive, /*Offsets=*/true),
+    stdAnyShapeRow("next", 2, KnownParamRole::Derive, /*Offsets=*/true),
+    stdAnyShapeRow("prev", 2, KnownParamRole::Derive, /*Offsets=*/true),
+    stdAnyShapeRow("rbegin", 1, KnownParamRole::Derive),
+    stdAnyShapeRow("crbegin", 1, KnownParamRole::Derive),
+    stdAnyShapeRow("rend", 1, KnownParamRole::Derive, /*Offsets=*/true),
+    stdAnyShapeRow("crend", 1, KnownParamRole::Derive, /*Offsets=*/true),
+    stdAnyShapeRow("size", 1, KnownParamRole::AnyState),
+    stdAnyShapeRow("ssize", 1, KnownParamRole::AnyState),
+    stdAnyShapeRow("empty", 1, KnownParamRole::AnyState),
+    stdAnyShapeRow("distance", 2, KnownParamRole::AnyState),
     stdReturnRow("make_unique_for_overwrite",
                  KnownCalleeReturn::ReturnsDefaultInitialized),
     stdReturnRow("make_shared_for_overwrite",
                  KnownCalleeReturn::ReturnsDefaultInitialized),
     stdReturnRow("allocate_shared_for_overwrite",
                  KnownCalleeReturn::ReturnsDefaultInitialized),
+    cpoAnyShapeRow("begin", 1, KnownParamRole::Derive),
+    cpoAnyShapeRow("cbegin", 1, KnownParamRole::Derive),
+    cpoAnyShapeRow("data", 1, KnownParamRole::Derive),
+    cpoAnyShapeRow("cdata", 1, KnownParamRole::Derive),
+    cpoAnyShapeRow("rbegin", 1, KnownParamRole::Derive),
+    cpoAnyShapeRow("crbegin", 1, KnownParamRole::Derive),
+    cpoAnyShapeRow("end", 1, KnownParamRole::Derive, /*Offsets=*/true),
+    cpoAnyShapeRow("cend", 1, KnownParamRole::Derive, /*Offsets=*/true),
+    cpoAnyShapeRow("rend", 1, KnownParamRole::Derive, /*Offsets=*/true),
+    cpoAnyShapeRow("crend", 1, KnownParamRole::Derive, /*Offsets=*/true),
+    cpoAnyShapeRow("size", 1, KnownParamRole::AnyState),
+    cpoAnyShapeRow("ssize", 1, KnownParamRole::AnyState),
+    cpoAnyShapeRow("empty", 1, KnownParamRole::AnyState),
+    cpoAnyShapeRow("distance", 1, KnownParamRole::AnyState),
+    cpoAnyShapeRow("distance", 2, KnownParamRole::AnyState),
     cpoRow("construct_at", KnownCalleeEntry::AnyArity, 0,
            KnownParamRole::Construct),
     cpoRow("destroy_at", 1, 0, KnownParamRole::Destroy),
@@ -2015,6 +2081,8 @@ static bool hasParamShape(QualType T, ParamShape Shape) {
     const auto *RD = T.getNonReferenceType()->getAsCXXRecordDecl();
     return RD && !RD->isUnion();
   }
+  case ParamShape::Any:
+    return true;
   }
   llvm_unreachable("unknown ParamShape");
 }
@@ -2337,6 +2405,31 @@ QualType SemaProfiles::rangeValueType(QualType T) {
       (T->isReferenceType() && T.getNonReferenceType()->isArrayType()))
     return T->getPointeeType();
   return handleValueType(T);
+}
+
+bool SemaProfiles::bindsNoArgument(const FunctionDecl *FD) {
+  if (unsigned ID = FD->getBuiltinID(); ID && isShapeTransparentBuiltin(ID))
+    return true;
+  const KnownCalleeEntry *Entry = findKnownCallee(FD);
+  return Entry && (Entry->Role == KnownParamRole::Derive ||
+                   Entry->Role == KnownParamRole::AnyState);
+}
+
+const Expr *SemaProfiles::derivedArgument(const CallExpr *CE, bool &Partial) {
+  const FunctionDecl *FD = CE->getDirectCallee();
+  const KnownCalleeEntry *Entry = FD ? findKnownCallee(FD) : nullptr;
+  if (!Entry || Entry->Role != KnownParamRole::Derive)
+    return nullptr;
+  // A std::ranges object's call takes the object as its first argument.
+  const auto *MD = dyn_cast<CXXMethodDecl>(FD);
+  unsigned Arg = isa<CXXOperatorCallExpr>(CE) && MD &&
+                         !MD->isExplicitObjectMemberFunction()
+                     ? 1
+                     : 0;
+  if (CE->getNumArgs() <= Arg)
+    return nullptr;
+  Partial = Entry->DeriveOffsets;
+  return CE->getArg(Arg);
 }
 
 // Releasing storage leaves it as uninitialized as ending the object's
@@ -2671,9 +2764,8 @@ struct HandleSourceWalk {
   using HandleLeaf = SemaProfiles::HandleLeaf;
   llvm::function_ref<void(const HandleLeaf &)> F;
   SmallVector<const Expr *, 4> Arms;
-  /// The locals whose initializers the walk follows, so a self-referential
-  /// initializer ends it.
-  llvm::SmallPtrSet<const VarDecl *, 4> Followed;
+  /// The locals whose initializers the walk follows.
+  SemaProfiles::HandleWalkMemo &Followed;
 
   void emit(const Expr *E, HandleLeaf::Mode M, bool Partial) {
     F(HandleLeaf{E, M, Partial, Arms});
@@ -2733,6 +2825,13 @@ struct HandleSourceWalk {
       return;
     }
     if (const auto *CE = dyn_cast<CallExpr>(E)) {
+      // A Derive call with a class argument refers to what that range does.
+      bool DerivePartial = false;
+      if (const Expr *Arg = SemaProfiles::derivedArgument(CE, DerivePartial);
+          Arg && SemaProfiles::isHandleType(Arg->getType())) {
+        emit(Arg, HandleLeaf::Mode::Range, Partial || DerivePartial);
+        return;
+      }
       // A std::array's begin or data designates its element storage, or,
       // called through a pointer, the pointer's.
       bool PastStart = false;
@@ -2759,13 +2858,13 @@ struct HandleSourceWalk {
         return;
       }
       // An implicit local (range-for's __range and __begin) or an unmarked
-      // local reference stands for its initializer.
+      // local reference stands for its initializer, followed once.
       if (const auto *V = dyn_cast<VarDecl>(DRE->getDecl());
           V && V->hasLocalStorage() && !isa<ParmVarDecl>(V) && V->getInit() &&
           (V->isImplicit() || (V->getType()->isReferenceType() &&
-                               !V->hasAttr<RefToUninitAttr>())) &&
-          Followed.insert(V).second) {
-        walk(V->getInit(), Partial);
+                               !V->hasAttr<RefToUninitAttr>()))) {
+        if (Followed.insert(V, Partial))
+          walk(V->getInit(), Partial);
         return;
       }
     }
@@ -2775,17 +2874,28 @@ struct HandleSourceWalk {
 } // namespace
 
 void SemaProfiles::forEachHandleSourceLeaf(
-    const Expr *Src, llvm::function_ref<void(const HandleLeaf &)> F) {
+    const Expr *Src, llvm::function_ref<void(const HandleLeaf &)> F,
+    HandleWalkMemo *Memo) {
   if (!Src)
     return;
-  HandleSourceWalk Walk{F, {}, {}};
+  HandleWalkMemo Own;
+  HandleSourceWalk Walk{F, {}, Memo ? *Memo : Own};
   Walk.walk(Src, /*Partial=*/false);
 }
 
+/// True if \p RD is a std::array specialization.
+static bool isStdArrayClass(const CXXRecordDecl *RD) {
+  return RD && RD->getIdentifier() && RD->getName() == "array" &&
+         RD->isInStdNamespace();
+}
+
+/// True if \p T is a std::array specialization.
+static bool isStdArrayType(QualType T) {
+  return isStdArrayClass(T->getAsCXXRecordDecl());
+}
+
 bool SemaProfiles::isStdArrayAddressMember(const CXXMethodDecl *MD) {
-  const CXXRecordDecl *RD = MD->getParent();
-  if (!MD->getIdentifier() || !RD->getIdentifier() ||
-      RD->getName() != "array" || !RD->isInStdNamespace())
+  if (!MD->getIdentifier() || !isStdArrayClass(MD->getParent()))
     return false;
   return llvm::is_contained(
       ArrayRef<StringRef>{"begin", "end", "cbegin", "cend", "data"},
@@ -2806,9 +2916,7 @@ const Expr *SemaProfiles::stdArrayAddressObject(const Expr *E,
 }
 
 bool SemaProfiles::isStdArrayElementMember(const CXXMethodDecl *MD) {
-  const CXXRecordDecl *RD = MD->getParent();
-  if (!RD->getIdentifier() || RD->getName() != "array" ||
-      !RD->isInStdNamespace())
+  if (!isStdArrayClass(MD->getParent()))
     return false;
   if (MD->getOverloadedOperator() == OO_Subscript)
     return true;
@@ -2864,8 +2972,15 @@ const DeclRefExpr *SemaProfiles::handleChainBase(const Expr *E,
       continue;
     }
     if (const auto *CE = dyn_cast<CallExpr>(E)) {
+      // A Derive call (std::begin(s)) stands for its argument; an offsetting
+      // one (std::end(s)) is past the start.
       bool StepPartial = false, StepPastStart = false;
-      E = handleSelfReturnObject(CE, StepPartial, &StepPastStart);
+      if (const Expr *Arg = derivedArgument(CE, StepPartial)) {
+        E = Arg;
+        StepPastStart = StepPartial;
+      } else {
+        E = handleSelfReturnObject(CE, StepPartial, &StepPastStart);
+      }
       Partial |= StepPartial;
       if (PastStart)
         *PastStart |= StepPastStart;
@@ -3017,14 +3132,19 @@ static UninitStorage classifyHandleLeaf(ASTContext &Ctx,
 
 static UninitStorage classifyHandleSource(ASTContext &Ctx, const Expr *E,
                                           UninitAccessOpts Opts) {
+  SemaProfiles::HandleWalkMemo Own;
+  SemaProfiles::HandleWalkMemo *Memo = Opts.HandleMemo ? Opts.HandleMemo : &Own;
   UninitAccessOpts LeafOpts =
-      UninitBindAccess.withThisUnderConstruction(Opts.ThisUnderConstruction);
+      UninitBindAccess.withThisUnderConstruction(Opts.ThisUnderConstruction)
+          .withHandleMemo(Memo);
   std::optional<UninitStorage> Acc;
   SemaProfiles::forEachHandleSourceLeaf(
-      E, [&](const SemaProfiles::HandleLeaf &L) {
+      E,
+      [&](const SemaProfiles::HandleLeaf &L) {
         UninitStorage S = classifyHandleLeaf(Ctx, L, LeafOpts);
         Acc = Acc ? combineArms(*Acc, S) : S;
-      });
+      },
+      Memo);
   return Acc.value_or(UninitStorage::Unknown);
 }
 
@@ -3071,6 +3191,21 @@ static UninitStorage classifyRefToUninitCallee(ASTContext &Ctx,
     }
   }
   if (!RefersToUninit) {
+    // A Derive call refers to what its argument does: an array as it
+    // decays, a pointer by its value, a class as a range.
+    bool Partial = false;
+    if (const Expr *Arg = SemaProfiles::derivedArgument(CE, Partial)) {
+      QualType AT = Arg->getType();
+      if (AT->isArrayType())
+        return glvalueDenotesUninitStorage(Ctx, Arg,
+                                           Opts.withoutTopLevelDrop());
+      if (AT->isPointerType())
+        return pointerRefersToUninitStorage(Ctx, Arg, Opts);
+      if (SemaProfiles::isHandleType(AT))
+        return classifyHandleLeaf(
+            Ctx, {Arg, SemaProfiles::HandleLeaf::Mode::Range, Partial}, Opts);
+      return UninitStorage::Unknown;
+    }
     // A std::array's begin or data points into its element storage, as a
     // decayed array does -- through a pointer, into the pointer's.
     bool PastStart = false;
@@ -3950,11 +4085,7 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
   // std-table handle built over it -- its referent as *p does, and storage
   // is reached at an element; an element call or a handle past its
   // referent's start names an element, and a prefix (first(n)) the referent.
-  auto StepThroughHandle = [&](const Expr *Call) {
-    const Expr *Obj;
-    bool Element;
-    if (!isHandleDerefCall(Call, Obj, Element))
-      return false;
+  auto StepThroughHandleObject = [&](const Expr *Obj, bool Element) {
     bool Partial = false, PastStart = false;
     const DeclRefExpr *Base = handleChainBase(Obj, Arms, Partial, &PastStart);
     if (!Base)
@@ -3969,6 +4100,12 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
     Cur = Base;
     return true;
   };
+  auto StepThroughHandle = [&](const Expr *Call) {
+    const Expr *Obj;
+    bool Element;
+    return isHandleDerefCall(Call, Obj, Element) &&
+           StepThroughHandleObject(Obj, Element);
+  };
   // Step through a std::array's begin or data on an object to the array,
   // at an element, as through a decayed array.
   auto StepThroughArray = [&](const Expr *Call) {
@@ -3981,20 +4118,55 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
     Cur = peelBaseCasts(Arr, Bases(), Arms);
     return true;
   };
+  // Step through the pointer value Cur: a std::array's begin or data, or a
+  // Derive call (std::begin, std::data, std::next) on an array, continues the
+  // chain at an element (true); a Derive call on a pointer stands for the
+  // pointer, on a handle for the handle's referent, and an offsetting one
+  // names an element; any other pointer reaches its storage through the
+  // pointer, which ends the chain.
+  auto StepPointerValue = [&]() {
+    while (true) {
+      if (StepThroughArray(Cur))
+        return true;
+      bool Partial = false;
+      const auto *CE = dyn_cast<CallExpr>(Cur);
+      const Expr *Arg = CE ? derivedArgument(CE, Partial) : nullptr;
+      if (!Arg)
+        break;
+      if (Partial) {
+        S.Subscript = true;
+        NamedBelowElement = LeafFirst.size();
+      }
+      QualType AT = Arg->getType();
+      if (AT->isPointerType()) {
+        Cur = peelBaseCasts(Arg, Bases(), Arms);
+        continue;
+      }
+      if (AT->isArrayType() || isStdArrayType(AT)) {
+        S.Subscript = true;
+        NamedBelowElement = LeafFirst.size();
+        Cur = peelBaseCasts(Arg, Bases(), Arms);
+        return true;
+      }
+      S.ThroughPointer = true;
+      if (isHandleType(AT))
+        StepThroughHandleObject(Arg, /*Element=*/false);
+      return false;
+    }
+    S.ThroughPointer = true;
+    StepThroughHandle(Cur);
+    return false;
+  };
   // Step to the pointer operand of a * or ->: an address-of step's operand
-  // continues the chain (true); any other pointer reaches its storage
-  // through the pointer, which ends it.
+  // continues the chain (true), and so may the pointer's value
+  // (StepPointerValue).
   auto StepThroughPointer = [&](const Expr *Ptr) {
     Cur = peelBaseCasts(Ptr, Bases(), Arms);
     if (const Expr *Op = addressOfOperand(Cur)) {
       Cur = peelBaseCasts(Op, Bases(), Arms);
       return true;
     }
-    if (StepThroughArray(Cur))
-      return true;
-    S.ThroughPointer = true;
-    StepThroughHandle(Cur);
-    return false;
+    return StepPointerValue();
   };
   while (true) {
     if (const auto *ME = dyn_cast<MemberExpr>(Cur)) {
@@ -4029,10 +4201,8 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
       // p[i] indexes the pointer's value; arr[i] the array glvalue its
       // peeled decay leaves behind.
       if (Cur->getType()->isPointerType()) {
-        if (StepThroughArray(Cur))
+        if (StepPointerValue())
           continue;
-        S.ThroughPointer = true;
-        StepThroughHandle(Cur);
         break;
       }
       continue;
@@ -4464,6 +4634,24 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
       return isFlowTrackedLeaf(ShapeLeaf(Arr, Leaf.Arms),
                                Arr->getType()->isPointerType(), CurContext,
                                Use);
+    // A Derive call: its argument, an array or a range as storage, a
+    // pointer as a value, or a range's handle state.
+    if (const auto *CE = dyn_cast<CallExpr>(E)) {
+      bool Partial;
+      if (const Expr *Arg = derivedArgument(CE, Partial)) {
+        QualType AT = Arg->getType();
+        if (AT->isPointerType())
+          return isFlowTrackedLeaf(ShapeLeaf(Arg, Leaf.Arms),
+                                   /*AsPointerValue=*/true, CurContext, Use);
+        if (isFlowTrackedLeaf(ShapeLeaf(Arg, Leaf.Arms),
+                              /*AsPointerValue=*/false, CurContext, Use))
+          return true;
+        bool ChainPartial = false;
+        const DeclRefExpr *Base = handleChainBase(Arg, Leaf.Arms, ChainPartial);
+        return Base &&
+               isFlowTrackedHandleVar(dyn_cast<VarDecl>(Base->getDecl()));
+      }
+    }
     // A pointer a tracked handle's member returns to its whole referent
     // (up.get(), s.data()) or through a prefix of it (s.first(n).data());
     // an element's, or one past the referent's start, is never tracked.
@@ -4634,6 +4822,7 @@ bool SemaProfiles::hasFlowTrackedLeaf(const Expr *Src, QualType T,
   // range's storage comes first, and an untracked range's handle state is
   // walked in turn.
   if (isHandleType(T) || AsRange) {
+    HandleWalkMemo Memo;
     auto Visit = [&](auto &Self, const HandleLeaf &L) -> void {
       switch (L.M) {
       case HandleLeaf::Mode::Handle:
@@ -4657,7 +4846,8 @@ bool SemaProfiles::hasFlowTrackedLeaf(const Expr *Src, QualType T,
             return;
           }
           forEachHandleSourceLeaf(
-              Leaf.E, [&](const HandleLeaf &Inner) { Self(Self, Inner); });
+              Leaf.E, [&](const HandleLeaf &Inner) { Self(Self, Inner); },
+              &Memo);
         });
         return;
       }
@@ -4665,8 +4855,8 @@ bool SemaProfiles::hasFlowTrackedLeaf(const Expr *Src, QualType T,
     if (AsRange)
       Visit(Visit, HandleLeaf{Src, HandleLeaf::Mode::Range});
     else
-      forEachHandleSourceLeaf(Src,
-                              [&](const HandleLeaf &L) { Visit(Visit, L); });
+      forEachHandleSourceLeaf(
+          Src, [&](const HandleLeaf &L) { Visit(Visit, L); }, &Memo);
     return Any;
   }
   bool AsPointerValue;
@@ -4690,10 +4880,11 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
   const auto *Callee =
       Parm ? dyn_cast<FunctionDecl>(Parm->getDeclContext()) : nullptr;
   // A builtin that never evaluates its arguments binds nothing, nor does a
-  // call the checks see through (isShapeTransparentBuiltin).
+  // call the checks see through (bindsNoArgument).
   if (unsigned ID = Callee ? Callee->getBuiltinID() : 0;
-      ID && (getASTContext().BuiltinInfo.isUnevaluated(ID) ||
-             isShapeTransparentBuiltin(ID)))
+      ID && getASTContext().BuiltinInfo.isUnevaluated(ID))
+    return;
+  if (Callee && bindsNoArgument(Callee))
     return;
   // The callee's lifecycle roles (see CalleeLifecycleRoles).
   CalleeLifecycleRoles Roles =
@@ -5261,6 +5452,8 @@ static const Expr *shapeChainOperand(const Expr *E) {
     bool PastStart;
     if (const Expr *Arr = SemaProfiles::stdArrayAddressObject(CE, PastStart))
       return Arr;
+    if (const Expr *Arg = SemaProfiles::derivedArgument(CE, PastStart))
+      return Arg;
     const Expr *Obj;
     bool Element;
     if (SemaProfiles::isHandleDerefCall(CE, Obj, Element))

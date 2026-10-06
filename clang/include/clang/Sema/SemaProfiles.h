@@ -932,6 +932,14 @@ public:
     /// The call releases the storage, which may never have been constructed
     /// (free, realloc's pointer, replaceable global operator delete).
     Release,
+    /// The call's result refers to what its argument does (std::begin,
+    /// std::data, std::to_address; std::end and std::next offset it): the
+    /// argument binds nothing, and the result classifies as the argument
+    /// (derivedArgument).
+    Derive,
+    /// The call only inspects its arguments (std::size, std::distance),
+    /// which bind nothing.
+    AnyState,
   };
 
   /// What a direct callee does to the storage bound to its parameters: its
@@ -1018,6 +1026,14 @@ public:
   /// begins: a pointer's pointee, the array a reference refers to, or a
   /// handle's handleValueType; null when unknown.
   static QualType rangeValueType(QualType T);
+  /// True if a call of \p FD binds none of its arguments: a builtin the
+  /// checks see through (isShapeTransparentBuiltin), or a known callee whose
+  /// role is Derive or AnyState.
+  static bool bindsNoArgument(const FunctionDecl *FD);
+  /// The argument the result of the Derive call \p CE classifies as -- a
+  /// std::ranges object's, after the object -- or null; \p Partial is set
+  /// when the call offsets it (std::end, std::next).
+  static const Expr *derivedArgument(const CallExpr *CE, bool &Partial);
   /// Derive what \p FD does to the storage bound to its parameters: the
   /// lifetime attributes plus the known-callee row, looked up at the call
   /// so the library's own declarations need no annotation. Shared by the
@@ -1161,24 +1177,37 @@ public:
     const Expr *E;
     Mode M;
     /// The walk reached \c E through a call that refers to part of the handle
-    /// (handleSelfReturnObject in SemaProfiles.cpp): the handle refers to
-    /// part of \c E's memory.
+    /// (handleSelfReturnObject in SemaProfiles.cpp) or an offsetting Derive
+    /// call (derivedArgument): the handle refers to part of \c E's memory.
     bool Partial = false;
     ArrayRef<const Expr *> Arms;
   };
 
+  /// The locals handle walks follow to their initializers, each once whole
+  /// and once offset: one is shared by an outermost walk and the walks its
+  /// \c Range leaves start, so a self-referential or repeated initializer is
+  /// walked once (forEachHandleSourceLeaf).
+  struct HandleWalkMemo {
+    llvm::SmallPtrSet<const VarDecl *, 4> Whole, Offset;
+    /// True if \p V, reached \p Partial or not, was not followed yet.
+    bool insert(const VarDecl *V, bool Partial) {
+      return (Partial ? Offset : Whole).insert(V).second;
+    }
+  };
   /// Enumerate the leaves the state of the handle \p Src comes from, and
   /// hand each to \p F: peel parens, full expressions, temporaries, the
   /// no-op, constructor, derived-to-base, and user-defined conversions, and
   /// the pass-through forms; follow a copy or move construction to its
   /// source, a std-table construction to its transfer arguments, a member
   /// call returning the handle itself to its object, and an implicit local
-  /// or an unmarked local reference to its initializer; and distribute every
-  /// conditional into one leaf per arm. The one walk shared by the
-  /// parse-time recognizers and the CFG pass.
+  /// or an unmarked local reference to its initializer -- one \p Memo
+  /// already followed contributes no leaf; and distribute every conditional
+  /// into one leaf per arm. The one walk shared by the parse-time recognizers
+  /// and the CFG pass.
   static void
   forEachHandleSourceLeaf(const Expr *Src,
-                          llvm::function_ref<void(const HandleLeaf &)> F);
+                          llvm::function_ref<void(const HandleLeaf &)> F,
+                          HandleWalkMemo *Memo = nullptr);
 
   /// std::init / pointer_marker + union_marker (paper §4.1, §5.6): diagnose
   /// [[uninit]] placed on a pointer, a union variable, or a union member.

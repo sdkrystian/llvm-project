@@ -627,11 +627,12 @@ struct RangesFilledMember {
   }
 };
 
-// std::begin on an [[uninit]] array is rejected on both sides
-void begin_end() {
+// std::begin and std::end of an [[uninit]] array derive from it, so the call
+// initializes the array whole
+int begin_end() {
   int a [[uninit]] [3];
-  std::uninitialized_fill(std::begin(a), std::end(a), 0); // expected-error 2 {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}} \
-                                                          // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  std::uninitialized_fill(std::begin(a), std::end(a), 0);
+  return a[0];
 }
 
 // A global-namespace uninitialized_fill is not annotated

@@ -2687,6 +2687,35 @@ TrackedStorage::resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
     R.Subobject = !covers(Designated, *CurrentObjectRoot, RawExempt);
     return R;
   }
+  // A Derive call: its argument, as an array or range's storage, a pointer's
+  // value, or a range's handle referent; a subobject when it offsets.
+  if (const auto *CE = dyn_cast<CallExpr>(E)) {
+    bool Partial = false;
+    if (const Expr *Arg = SemaProfiles::derivedArgument(CE, Partial)) {
+      QualType AT = Arg->getType();
+      if (AT->isPointerType()) {
+        R = resolveFlowLeaf({Arg, Leaf.Arms}, /*AsPointerValue=*/true,
+                            Designated, RawExempt);
+      } else {
+        R = resolve({Arg, Leaf.Arms}, Designated, RawExempt);
+        bool ChainPartial = false;
+        if (!R.Entity && SemaProfiles::isHandleType(AT))
+          if (const DeclRefExpr *Base =
+                  SemaProfiles::handleChainBase(Arg, Leaf.Arms, ChainPartial))
+            if (std::optional<unsigned> Idx =
+                    markedHandleObject(dyn_cast<VarDecl>(Base->getDecl()))) {
+              R.Entity = Idx;
+              R.Subobject =
+                  ChainPartial || !covers(Designated, *Idx, RawExempt);
+            }
+      }
+      if (R.Entity && Partial) {
+        R.Subobject = true;
+        R.Sub = SubKey();
+      }
+      return R;
+    }
+  }
   // A std::array's begin or data: the array it points into -- through a
   // pointer, the pointer's referent -- a subobject from its end.
   bool PastStart;
@@ -3830,7 +3859,7 @@ static void forEachArgumentBinding(
     const FunctionDecl *Callee = CE->getDirectCallee();
     unsigned ID = Callee ? Callee->getBuiltinID() : 0;
     // A call the checks see through binds nothing.
-    if (ID && SemaProfiles::isShapeTransparentBuiltin(ID))
+    if (Callee && SemaProfiles::bindsNoArgument(Callee))
       return;
     if (ID && Ctx.BuiltinInfo.hasCustomTypechecking(ID)) {
       if (ID == Builtin::BI__builtin_operator_new ||
@@ -4051,6 +4080,7 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
     // walk reaches.
     if (SemaProfiles::isHandleType(ParamTy.getNonReferenceType())) {
       using HandleLeaf = SemaProfiles::HandleLeaf;
+      SemaProfiles::HandleWalkMemo Memo;
       auto Visit = [&](auto &Self, const HandleLeaf &HL) -> void {
         auto FormOf = [&](const SemaProfiles::ShapeLeaf &Leaf) {
           return formState(S.Profiles().classifyInitHandleLeaf(
@@ -4079,7 +4109,13 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
                 Leaves.pop_back();
                 SemaProfiles::forEachHandleSourceLeaf(
                     Leaf.E,
-                    [&](const HandleLeaf &Inner) { Self(Self, Inner); });
+                    [&](const HandleLeaf &Inner) {
+                      // An offset range offsets what it refers to.
+                      Self(Self,
+                           HandleLeaf{Inner.E, Inner.M,
+                                      Inner.Partial || HL.Partial, Inner.Arms});
+                    },
+                    &Memo);
               }
             });
       };
@@ -4087,7 +4123,7 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
         Visit(Visit, HandleLeaf{Arg, HandleLeaf::Mode::Range});
       else
         SemaProfiles::forEachHandleSourceLeaf(
-            Arg, [&](const HandleLeaf &HL) { Visit(Visit, HL); });
+            Arg, [&](const HandleLeaf &HL) { Visit(Visit, HL); }, &Memo);
       return AnyTracked;
     }
     bool AsPointerValue;
@@ -4638,6 +4674,7 @@ static void extractStdInitEvents(
         // Every leaf is null: a std-table construction with no transfer
         // argument, or a null pointer.
         bool AllNull = true;
+        SemaProfiles::HandleWalkMemo Memo;
         auto Visit = [&](auto &Self, const HandleLeaf &HL) -> void {
           const Expr *Peeled = HL.E->IgnoreParenImpCasts();
           AllNull &= HL.M == HandleLeaf::Mode::Handle
@@ -4665,7 +4702,13 @@ static void extractStdInitEvents(
                 if (HL.M == HandleLeaf::Mode::Range && !R.Entity) {
                   SemaProfiles::forEachHandleSourceLeaf(
                       Leaf.E,
-                      [&](const HandleLeaf &Inner) { Self(Self, Inner); });
+                      [&](const HandleLeaf &Inner) {
+                        // An offset range offsets what it refers to.
+                        Self(Self, HandleLeaf{Inner.E, Inner.M,
+                                              Inner.Partial || HL.Partial,
+                                              Inner.Arms});
+                      },
+                      &Memo);
                   return;
                 }
                 bool DecayedArray =
@@ -4683,7 +4726,7 @@ static void extractStdInitEvents(
               });
         };
         SemaProfiles::forEachHandleSourceLeaf(
-            Src, [&](const HandleLeaf &HL) { Visit(Visit, HL); });
+            Src, [&](const HandleLeaf &HL) { Visit(Visit, HL); }, &Memo);
         // A null std::unique_ptr refers to nothing.
         if (AllNull && SemaProfiles::isUniqueOwnerType(T))
           return {ReseatTarget::Null, 0};
@@ -4984,6 +5027,7 @@ static void extractStdInitEvents(
         // (SemaProfiles::forEachHandleSourceLeaf); a range's from its own
         // storage, else from the storage its walk reaches.
         using HandleLeaf = SemaProfiles::HandleLeaf;
+        SemaProfiles::HandleWalkMemo Memo;
         auto Visit = [&](auto &Self, const HandleLeaf &HL) -> void {
           auto FormOf = [&](const SemaProfiles::ShapeLeaf &Leaf,
                             HandleLeaf::Mode M) {
@@ -5026,14 +5070,20 @@ static void extractStdInitEvents(
                 }
                 SemaProfiles::forEachHandleSourceLeaf(
                     Leaf.E,
-                    [&](const HandleLeaf &Inner) { Self(Self, Inner); });
+                    [&](const HandleLeaf &Inner) {
+                      // An offset range offsets what it refers to.
+                      Self(Self,
+                           HandleLeaf{Inner.E, Inner.M,
+                                      Inner.Partial || HL.Partial, Inner.Arms});
+                    },
+                    &Memo);
               });
         };
         if (AsRange)
           Visit(Visit, HandleLeaf{Src, HandleLeaf::Mode::Range});
         else
           SemaProfiles::forEachHandleSourceLeaf(
-              Src, [&](const HandleLeaf &HL) { Visit(Visit, HL); });
+              Src, [&](const HandleLeaf &HL) { Visit(Visit, HL); }, &Memo);
       } else {
         bool AsPointerValue;
         const Expr *Operand =

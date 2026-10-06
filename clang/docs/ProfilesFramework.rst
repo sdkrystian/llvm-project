@@ -752,7 +752,12 @@ marked function, a call to a known allocator (``malloc``, ``aligned_alloc``,
 do the handles ``std::make_unique_for_overwrite``,
 ``std::make_shared_for_overwrite``, and ``std::allocate_shared_for_overwrite``
 return where default-initialization of their object leaves a scalar
-indeterminate (see `Smart Pointers, Spans, and Other Handles`_),
+indeterminate (see `Smart Pointers, Spans, and Other Handles`_), what
+``std::begin``, ``std::end``, ``std::data``, ``std::to_address``,
+``std::next``, ``std::prev``, ``std::rbegin``, and ``std::rend`` and the
+``std::ranges`` access objects of the same names return refers to what their
+argument does (which they do not bind, as ``std::size``, ``std::ssize``,
+``std::empty``, ``std::distance``, and their ``std::ranges`` objects do not),
 ``calloc`` zero-initialized memory, and ``realloc`` is unclassified; §4.3 --
 trusted recognition keys on Clang's builtin IDs, and where those are absent,
 under ``-fno-builtin`` or ``-ffreestanding``, a name-recognized allocator is
