@@ -2827,16 +2827,32 @@ static bool isFlowTrackedScalarMember(const ASTContext &Ctx,
   return !Ctx.getBaseElementType(T)->isStdByteType();
 }
 
+/// The class of \p F when it is a container the flow-tracked member walk
+/// enters (SemaProfiles::forEachFlowTrackedMember); null otherwise.
+static const CXXRecordDecl *flowTrackedContainerClass(const FieldDecl *F) {
+  if (!F->getDeclName() || F->hasAttr<UninitAttr>() ||
+      F->hasInClassInitializer() || F->getType()->isArrayType())
+    return nullptr;
+  return SemaProfiles::getDefaultInitTrackableClass(F->getType());
+}
+
 namespace {
 /// The depth-first walk of SemaProfiles::forEachFlowTrackedMember.
 struct FlowTrackedMemberWalk {
   using MemberStep = SemaProfiles::MemberStep;
+  /// The most member steps a path has.
+  static constexpr unsigned MaxDepth = 8;
+  /// The paths visited and containers entered after which no further
+  /// container is entered.
+  static constexpr unsigned MaxPaths = 64;
   const ASTContext &Ctx;
   llvm::function_ref<void(ArrayRef<MemberStep>, bool)> Visit;
   /// The steps to the object being walked.
   SemaProfiles::MemberPath Prefix;
   /// The records on the walk's stack.
   llvm::SmallPtrSet<const CXXRecordDecl *, 8> InProgress;
+  /// The paths visited and containers entered so far.
+  unsigned Paths = 0;
 
   /// Visit the members of the object of class \p RD reached through
   /// \p Prefix and the derived-to-base path \p Bases.
@@ -2844,10 +2860,20 @@ struct FlowTrackedMemberWalk {
     if (!InProgress.insert(RD).second)
       return;
     for (const FieldDecl *F : RD->fields()) {
-      if (!isFlowTrackedScalarMember(Ctx, F))
+      if (isFlowTrackedScalarMember(Ctx, F)) {
+        Prefix.push_back({Bases, F});
+        Visit(Prefix, /*Whole=*/false);
+        ++Paths;
+        Prefix.pop_back();
         continue;
+      }
+      const CXXRecordDecl *Inner = flowTrackedContainerClass(F);
+      if (!Inner || Prefix.size() + 1 >= MaxDepth || Paths >= MaxPaths)
+        continue;
+      ++Paths;
       Prefix.push_back({Bases, F});
-      Visit(Prefix, /*Whole=*/false);
+      SemaProfiles::BasePath InnerBases;
+      walk(Inner, InnerBases);
       Prefix.pop_back();
     }
     for (const CXXBaseSpecifier &BS : RD->bases()) {
@@ -2911,13 +2937,9 @@ SemaProfiles::matchFlowTrackedMember(const CXXRecordDecl *RD,
   return std::nullopt;
 }
 
-std::pair<unsigned, unsigned>
-SemaProfiles::flowTrackedMemberRange(const CXXRecordDecl *RD,
-                                     const FlowLeafShape &Shape) const {
-  if (Shape.Subscript)
-    return {0, 0};
-  ArrayRef<MemberStep> Prefix = Shape.Members;
-  ArrayRef<const CXXRecordDecl *> LeafBases = Shape.LeafBases;
+std::pair<unsigned, unsigned> SemaProfiles::flowTrackedMemberRange(
+    const CXXRecordDecl *RD, ArrayRef<MemberStep> Prefix,
+    ArrayRef<const CXXRecordDecl *> LeafBases) const {
   ArrayRef<FlowTrackedMember> Table = flowTrackedMembers(RD);
   std::optional<unsigned> First;
   unsigned Last = 0;
@@ -2945,6 +2967,19 @@ const CXXRecordDecl *SemaProfiles::getTrackableSlotClass(QualType T) {
     return nullptr;
   RD = RD->getDefinition();
   if (RD->isUnion() || RD->isDependentType() || hasUserProvidedCtor(RD))
+    return nullptr;
+  return RD;
+}
+
+const CXXRecordDecl *SemaProfiles::getDefaultInitTrackableClass(QualType T) {
+  if (T->isReferenceType() || T->isDependentType())
+    return nullptr;
+  const CXXRecordDecl *RD = T->getAsCXXRecordDecl();
+  if (!RD || !RD->hasDefinition())
+    return nullptr;
+  RD = RD->getDefinition();
+  if (RD->isUnion() || RD->isDependentType() ||
+      RD->hasUserProvidedDefaultConstructor())
     return nullptr;
   return RD;
 }
@@ -3023,7 +3058,24 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
     return false;
   if (Shape->IsThis) {
     const CXXMethodDecl *MD = enclosingInstanceMethod(CurContext);
-    return MD && matchFlowTrackedMember(MD->getParent(), *Shape);
+    if (!MD)
+      return false;
+    if (matchFlowTrackedMember(MD->getParent(), *Shape))
+      return true;
+    // In a constructor body, a subobject enclosing tracked members, as for a
+    // local; see the local arm below.
+    const auto *Ctor =
+        dyn_cast_or_null<CXXConstructorDecl>(flowAnalysisOwner(CurContext));
+    if (!ForMarkedTarget || Shape->Subscript || !Ctor ||
+        Ctor->isDelegatingConstructor() || Ctor->getParent()->isUnion())
+      return false;
+    const CXXRecordDecl *Named = E->getType()->getAsCXXRecordDecl();
+    if (!Named || !Named->hasDefinition() ||
+        !Named->hasTrivialDefaultConstructor())
+      return false;
+    std::pair<unsigned, unsigned> Range = flowTrackedMemberRange(
+        MD->getParent(), Shape->Members, Shape->LeafBases);
+    return Range.first != Range.second;
   }
   const VarDecl *V = Shape->Local;
   if (!V->hasLocalStorage())
@@ -3046,14 +3098,15 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
     return false;
   if (matchFlowTrackedMember(RD, *Shape))
     return true;
-  if (!ForMarkedTarget)
+  if (!ForMarkedTarget || Shape->Subscript)
     return false;
   // An object whose default-initialization runs code was constructed whole.
   const CXXRecordDecl *Named = E->getType()->getAsCXXRecordDecl();
   if (!Named || !Named->hasDefinition() ||
       !Named->hasTrivialDefaultConstructor())
     return false;
-  std::pair<unsigned, unsigned> Range = flowTrackedMemberRange(RD, *Shape);
+  std::pair<unsigned, unsigned> Range =
+      flowTrackedMemberRange(RD, Shape->Members, Shape->LeafBases);
   return Range.first != Range.second;
 }
 

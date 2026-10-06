@@ -336,7 +336,11 @@ public:
   /// without a user-provided constructor -- so the paths under any prefix
   /// are contiguous. Tracked are the [[uninit]] built-in scalar (arithmetic
   /// or enum) members with no default member initializer, std::byte
-  /// excepted (P4222R2 §4.6).
+  /// excepted (P4222R2 §4.6). The walk enters a container -- a named,
+  /// unmarked, non-reference, non-array member with no default member
+  /// initializer whose type is a trackable class (getTrackableSlotClass) --
+  /// while a path has fewer than 8 steps and fewer than 64 paths were
+  /// visited.
   static void forEachFlowTrackedMember(
       const ASTContext &Ctx, const CXXRecordDecl *RD,
       llvm::function_ref<void(ArrayRef<MemberStep>, bool Whole)> Visit);
@@ -363,18 +367,25 @@ public:
   matchFlowTrackedMember(const CXXRecordDecl *RD,
                          const FlowLeafShape &Shape) const;
   /// The entries of \p RD's flow-tracked member table below the subobject
-  /// \p Shape names as a whole -- the object itself, a base subobject, or a
-  /// member enclosing tracked members -- as a contiguous index range; empty
-  /// when \p Shape has an element step or names no such subobject.
+  /// reached through the member steps \p Prefix and then the derived-to-base
+  /// path \p Bases -- the object itself, a base subobject, or a member
+  /// enclosing tracked members -- as a contiguous index range; empty when
+  /// none is.
   std::pair<unsigned, unsigned>
-  flowTrackedMemberRange(const CXXRecordDecl *RD,
-                         const FlowLeafShape &Shape) const;
+  flowTrackedMemberRange(const CXXRecordDecl *RD, ArrayRef<MemberStep> Prefix,
+                         ArrayRef<const CXXRecordDecl *> Bases) const;
 
   /// The type-shape half of the read-tracking guards: a non-union,
   /// non-dependent class with no user-provided constructor anywhere in the
   /// contributing subtree. A reference type aliases an object also reachable
   /// other ways and never qualifies.
   static const CXXRecordDecl *getTrackableSlotClass(QualType T);
+  /// The class of \p T when default-initializing an object of it runs no
+  /// user-provided constructor of it: a non-union, non-dependent class whose
+  /// default constructor is not user-provided, whatever other constructors it
+  /// declares. The flow analysis enters a member of such a class as a
+  /// container.
+  static const CXXRecordDecl *getDefaultInitTrackableClass(QualType T);
   /// The declaration-shape half of the read-tracking guards for a local:
   /// \p V is a non-parameter local, not itself [[uninit]]-marked, of a
   /// trackable class. How its declaration initializes the members is the

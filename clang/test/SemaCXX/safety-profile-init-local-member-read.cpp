@@ -1013,3 +1013,190 @@ void unmarked_whole() {
   Pair b = a;   // OK
   (void)b;
 }
+
+// An [[uninit]] member of a member subobject is tracked like a direct member
+struct Mid {
+  int n [[uninit]]; // expected-note 5 {{member 'n' declared here}}
+};
+struct Out {
+  Mid m;
+  int k = 0;
+};
+int nested_read_before_write() {
+  Out o;
+  return o.m.n; // expected-error {{member 'n' is read before initialization under profile 'std::init'}}
+}
+
+int nested_write_then_read() {
+  Out o;
+  o.m.n = 1;
+  return o.m.n; // OK
+}
+
+int nested_write_one_branch(bool c) {
+  Out o;
+  if (c)
+    o.m.n = 1;
+  return o.m.n; // expected-error {{member 'n' is read before initialization under profile 'std::init'}}
+}
+
+// A member subobject whose class has a converting constructor is tracked
+struct MidConverting {
+  int n [[uninit]]; // expected-note {{member 'n' declared here}}
+  MidConverting() = default;
+  MidConverting(int v) : n(v) {}
+};
+struct OutConverting {
+  MidConverting m;
+  int k = 0;
+};
+int nested_converting_read() {
+  OutConverting o;
+  return o.m.n; // expected-error {{member 'n' is read before initialization under profile 'std::init'}}
+}
+
+// A wide tree of member subobjects is walked in bounded time
+struct Wide0 { int x = 0; };
+struct Wide1 { Wide0 f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11; };
+struct Wide2 { Wide1 f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11; };
+struct Wide3 { Wide2 f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11; };
+struct Wide4 { Wide3 f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11; };
+struct Wide5 { Wide4 f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11; };
+struct Wide6 { Wide5 f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11; };
+struct Wide7 { Wide6 f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11; };
+struct Wide8 { Wide7 f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11; };
+int wide_walk() {
+  Wide8 o;
+  return o.f0.f0.f0.f0.f0.f0.f0.f0.x;
+}
+
+// A constructor-less base of a member subobject is tracked
+struct NestedBase {
+  int q [[uninit]]; // expected-note {{member 'q' declared here}}
+};
+struct NestedDerived : NestedBase {
+  int z = 0;
+};
+struct OutDerived {
+  NestedDerived m;
+};
+int nested_base_read() {
+  OutDerived o;
+  return o.m.q; // expected-error {{member 'q' is read before initialization under profile 'std::init'}}
+}
+
+int nested_base_write_then_read() {
+  OutDerived o;
+  o.m.q = 1;
+  return o.m.q; // OK
+}
+
+// Initializing the member subobject whole initializes the members in it
+[[now_init]] void fill_mid(Mid *p [[ref_to_uninit]]);
+extern "C" void *memset(void *, int, __SIZE_TYPE__);
+int nested_now_init() {
+  Out o;
+  fill_mid(&o.m);
+  return o.m.n; // OK
+}
+
+int nested_construct_at() {
+  Out o;
+  std::construct_at(&o.m);
+  std::construct_at(&o.m); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  return o.m.n;            // OK
+}
+
+int nested_memset() {
+  Out o;
+  memset(&o.m, 0, sizeof o.m);
+  return o.m.n; // OK
+}
+
+// Destroying the member subobject leaves the members in it uninitialized
+int nested_destroy() {
+  Out o;
+  o.m.n = 1;
+  destroy_at(&o.m);
+  return o.m.n; // expected-error {{member 'n' is read before initialization under profile 'std::init'}}
+}
+
+// A copy carries the state of the members in a member subobject
+int nested_copy_assigned() {
+  Out o;
+  o.m.n = 1;
+  Out b = o;
+  return b.m.n; // OK
+}
+
+int nested_copy_unassigned() {
+  Out o;
+  Out b = o;
+  return b.m.n; // expected-error {{member 'n' is read before initialization under profile 'std::init'}}
+}
+
+// A by-value parameter's nested member starts unassigned
+int nested_param(Out p) {
+  return p.m.n; // expected-error {{member 'n' is read before initialization under profile 'std::init'}}
+}
+
+// A member subobject with an initializer, a user-provided constructor, an array type, or a union type is not entered
+struct OutInit {
+  Mid m = {};
+};
+int nested_untracked_initializer() {
+  OutInit o;
+  return o.m.n; // OK
+}
+
+struct UserMid {
+  int n [[uninit]];
+  UserMid();
+};
+struct OutUser {
+  UserMid m;
+};
+int nested_untracked_user_ctor() {
+  OutUser o;
+  return o.m.n; // OK
+}
+
+struct OutArray {
+  Mid arr[2];
+};
+int nested_untracked_array() {
+  OutArray o;
+  return o.arr[0].n; // OK
+}
+
+union MidUnion {
+  Mid m;
+  float f;
+};
+struct OutUnion {
+  MidUnion u;
+};
+int nested_untracked_union(OutUnion o) {
+  return o.u.m.n; // OK
+}
+
+// The enumeration stops entering member subobjects after 64 tracked members
+struct Cap0 {
+  int n [[uninit]]; // expected-note {{member 'n' declared here}}
+};
+struct Cap1 { Cap0 a, b; };
+struct Cap2 { Cap1 a, b; };
+struct Cap3 { Cap2 a, b; };
+struct Cap4 { Cap3 a, b; };
+struct Cap5 { Cap4 a, b; };
+struct Cap6 { Cap5 a, b; };
+struct Cap7 { Cap6 a, b; };
+int nested_first_path() {
+  Cap7 x;
+  return x.a.a.a.a.a.a.a.n; // expected-error {{member 'n' is read before initialization under profile 'std::init'}}
+}
+
+int nested_past_cap() {
+  Cap7 x;
+  return x.b.b.b.b.b.b.b.n; // OK
+}

@@ -913,7 +913,8 @@ definite-assignment engine in AnalysisBasedWarnings.cpp: the ``ExtraPass``
 of the ``std::init`` ``CFGProfiles`` row harvests the body's flow-tracked
 entities (``TrackedEntity``: ``[[uninit]]`` locals, the referents of marked
 local pointers and references, and marked scalar members of locals and of
-the current object), extracts one event stream from a CFG of its own
+the current object, also inside member subobjects), extracts one event stream
+from a CFG of its own
 (exception edges, fully linearized), runs a forward dataflow over five bit
 vectors per entity -- ``Must`` (assigned on every path), ``May`` (assigned
 on some path), ``MayUnassigned`` (unassigned on some path that knows the
@@ -996,7 +997,14 @@ its member path: per member step, the derived-to-base path from the step's
 object to the member's class, then the member.  A class's tracked member paths
 form a table (``SemaProfiles::flowTrackedMembers``), enumerated depth-first so
 the paths under any prefix are contiguous, and an object's member entities are
-that table in order; one matcher (``SemaProfiles::matchFlowTrackedMember``)
+that table in order.  The enumeration enters a *container* -- a named,
+unmarked, non-reference, non-array member with no default member initializer
+whose default constructor is not user-provided
+(``SemaProfiles::getDefaultInitTrackableClass``) -- up to eight member steps
+deep and until 64 paths and containers are visited, so a credit, kill, or
+written initializer of a container covers the contiguous range under it.  In a
+constructor body the current object's containers are tracked whole like a
+local's.  One matcher (``SemaProfiles::matchFlowTrackedMember``)
 finds the entry an lvalue's member steps start with, for both the predicate and
 the resolver.  For a marked target the predicate also takes a directly named
 local or by-value parameter with tracked members as a whole, or a subobject
@@ -1209,6 +1217,11 @@ Deliberate Strictnesses
   narrower type, initialize nothing: the storage is one entity, so even the
   constructed base's own members stay uninitialized for a later read.  The
   remedies are a credit of the whole object or suppression.
+- Assigning a member subobject whole (``m = Mid{1}`` in a constructor body)
+  initializes none of the tracked members inside it: a class assignment is a
+  member call, never an initialization (P4222R2 §4.6, §6).  Its written
+  mem-initializer, ``std::construct_at(&m)``, a ``[[now_init]]`` call, or
+  ``memset`` initializes them.
 - Storage that is not flow-tracked -- a class-type or array ``[[uninit]]``
   member, a marked pointer member's referent -- is judged by its form alone
   at every read, write, and destroy: a ``construct_at`` into it legalizes no
@@ -1357,11 +1370,13 @@ Missed Diagnostics
   pointed-to function, and a member call through a pointer-to-member bypasses
   the object-argument check.
 - Members of anonymous structs and unions, and arrays of aggregates, are not
-  flow-tracked.
+  flow-tracked, nor are members more than eight member steps deep or inside a
+  member subobject entered after a class's 64th tracked member or member
+  subobject.
 - ``[[uninit]]`` members of locals copied from untracked sources (a call
-  result, a member, an element) are not flow-tracked: a copy does not
-  inherit initialization -- it copies indeterminate bits -- but the
-  source's per-member state is unknown, so reads of such members are
+  result, a member other than a container, an element) are not flow-tracked: a
+  copy does not inherit initialization -- it copies indeterminate bits -- but
+  the source's per-member state is unknown, so reads of such members are
   trusted (a missed diagnostic, never a false positive).  Copies of tracked
   locals and by-value parameters *are* tracked (see "Reads of Uninitialized
   Objects" in :doc:`ProfilesFramework`).

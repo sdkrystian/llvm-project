@@ -1142,3 +1142,61 @@ struct MultiDeclarator {
     int v = *u; // OK
   }
 };
+
+// An [[uninit]] member of a member subobject is read-tracked in the constructor body
+struct NestedMid {
+  int n [[uninit]]; // expected-note 2 {{member 'n' declared here}}
+};
+struct NestedCtorRead {
+  NestedMid m;
+  int v;
+  NestedCtorRead() : v(0) { v = m.n; } // expected-error {{member 'n' is read before initialization under profile 'std::init'}}
+};
+struct NestedCtorWrite {
+  NestedMid m;
+  int v;
+  NestedCtorWrite() : v(0) {
+    m.n = 1;
+    v = m.n; // OK
+  }
+};
+
+// A written initializer of the member subobject initializes the members in it
+struct NestedCtorInit {
+  NestedMid m;
+  int v;
+  NestedCtorInit() : m(), v(m.n) {} // OK
+};
+
+// A member subobject constructed twice is a double construction
+namespace std {
+template <class T, class... A> T *construct_at(T *p, A &&...args);
+} // namespace std
+struct NestedCtorConstructTwice {
+  NestedMid m;
+  int v = 0;
+  NestedCtorConstructTwice() {
+    std::construct_at(&m); // OK
+    std::construct_at(&m); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  }
+};
+
+// A member subobject whose members are assigned is constructed again by construct_at
+struct NestedCtorConstructAfterWrite {
+  NestedMid m;
+  int v = 0;
+  NestedCtorConstructAfterWrite() {
+    m.n = 1;
+    std::construct_at(&m); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  }
+};
+
+// Assigning the member subobject whole initializes nothing
+struct NestedCtorAssign {
+  NestedMid m;
+  int v;
+  NestedCtorAssign() : v(0) {
+    m = NestedMid{1};
+    v = m.n; // expected-error {{member 'n' is read before initialization under profile 'std::init'}}
+  }
+};

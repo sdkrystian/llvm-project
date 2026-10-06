@@ -548,7 +548,12 @@ Reads of Uninitialized Objects
 An uninitialized object must not be read (rule ``uninit_read``).  Local flow
 analysis verifies reads of uninitialized locals, of ``[[uninit]]`` members
 within the defining constructor's body, and of ``[[uninit]]`` members of
-constructor-less aggregate locals; reads through ``[[ref_to_uninit]]``
+constructor-less aggregate locals -- also inside a member subobject
+(``o.m.n``, ``this->m.n``) that has no default member initializer and whose
+class has no user-provided default constructor, so that ``m``'s written
+initializer,
+``std::construct_at(&o.m)``, a ``[[now_init]]`` call, or ``memset`` of it
+initializes ``n``; reads through ``[[ref_to_uninit]]``
 pointers and references and reads of subobjects of ``[[uninit]]`` objects
 (copying an ``[[uninit]]`` array -- a by-copy capture ``[arr]``,
 ``auto [a, b] = arr;`` -- reads each element, and copying a whole class
@@ -787,7 +792,8 @@ mem-initializer, or default member initializer it is unclassified.
 The recognizer's answer is refined by *flow-tracked storage*: an
 ``[[uninit]]`` local, the referent of a ``[[ref_to_uninit]]`` local pointer
 or reference (parameters included), and an ``[[uninit]]`` scalar member of a
-directly named local or of the current object.  A marked pointer's or
+directly named local or of the current object, directly or inside a member
+subobject.  A marked pointer's or
 reference's referent is, at each point, the storage its latest binding
 names: after ``int *p [[ref_to_uninit]] = &u;`` the local ``u``, after
 ``p = q`` whatever ``q`` refers to there, after ``p = &a.m`` that member.

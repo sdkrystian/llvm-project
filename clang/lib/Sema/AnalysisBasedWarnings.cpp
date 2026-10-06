@@ -1847,10 +1847,11 @@ using MemberPath = SemaProfiles::MemberPath;
 
 /// One flow-tracked std::init storage entity of the analyzed body: an
 /// [[uninit]] scalar member of the current object or of a directly named
-/// local or by-value parameter, an [[uninit]] local or parameter as a whole,
-/// or the referent of a [[ref_to_uninit]] local pointer or reference
-/// (parameters included), which the dataflow identifies per program point
-/// (FlowState::Target).
+/// local or by-value parameter (directly or inside a member subobject;
+/// SemaProfiles::forEachFlowTrackedMember), an [[uninit]] local or parameter
+/// as a whole, or the referent of a [[ref_to_uninit]] local pointer or
+/// reference (parameters included), which the dataflow identifies per program
+/// point (FlowState::Target).
 struct TrackedEntity {
   enum class Kind { CurrentObjectMember, LocalMember, WholeLocal, Pointee };
   Kind K;
@@ -2068,13 +2069,14 @@ struct TrackedStorage {
     std::pair<unsigned, unsigned> Opaque{0, 0};
   };
   /// Resolve the glvalue \p E through SemaProfiles::flowLeafShape: a tracked
-  /// member of the current object (this->m, m, (*this).m) or of a directly
-  /// named tracked local (V.m), an [[uninit]] local or a subobject of it (u,
-  /// u.x, arr[i]), or a marked local pointer's or reference's referent or a
-  /// subobject of it (*p, p->m, r, r.m; never an element, P4222R2 §5.4). A
-  /// sub-access below a named class or array member of a tracked aggregate
-  /// (x.in.v, x.arr[0]) names no entity and is benign or an escape by that
-  /// member's type. The one resolver behind every event arm, so a leaf
+  /// member of the current object (this->m, m, (*this).m, this->c.m) or of a
+  /// directly named tracked local (V.m, V.c.m, through containers), an
+  /// [[uninit]] local or a subobject of it (u, u.x, arr[i]), or a marked local
+  /// pointer's or reference's referent or a subobject of it (*p, p->m, r, r.m;
+  /// never an element, P4222R2 §5.4). A sub-access below another named class
+  /// or array member of a tracked aggregate (x.in.v, x.arr[0]) names no
+  /// entity and is benign or an escape by that member's type. The one
+  /// resolver behind every event arm, so a leaf
   /// affects flow state exactly as SemaProfiles::isFlowTrackedLeaf says it
   /// is tracked. A credit, store, or access passes its \p Designated type
   /// (and \p RawExempt; see designationCovers): a whole entity reached
@@ -2112,28 +2114,36 @@ struct TrackedStorage {
   std::optional<unsigned>
   markedPointerObject(const SemaProfiles::ShapeLeaf &Leaf) const;
 
-  /// The range of the object \p E names as a whole -- `this` / `*this`, or
-  /// a tracked local's DeclRefExpr -- empty otherwise.
-  std::pair<unsigned, unsigned> wholeObject(const Expr *E) const;
+  /// The member entities below the subobject \p E names as a whole --
+  /// \c this or \c *this, a tracked local, or a member of either enclosing
+  /// tracked members -- and then below its base subobject at the
+  /// derived-to-base path \p Bases, taking the arms listed in \p Arms; empty
+  /// otherwise.
+  std::pair<unsigned, unsigned>
+  wholeObject(const Expr *E, ArrayRef<const Expr *> Arms = {},
+              ArrayRef<const CXXRecordDecl *> Bases = {}) const;
 
   /// The member entities below the subobject of a tracked local or by-value
   /// parameter the leaf \p Leaf names as a whole -- the object itself, a
   /// base subobject, or a member enclosing tracked members
   /// (SemaProfiles::flowTrackedMemberRange), converted to a base by its own
-  /// casts and by \p OuterBases, the derived-to-base steps above the leaf;
-  /// with \p AsPointerValue, the leaf is its address. Empty for any other
-  /// leaf, and for an object whose default-initialization runs code, which
+  /// casts and by \p OuterBases, the derived-to-base steps above the leaf --
+  /// or, in a constructor body, of the current object; with
+  /// \p AsPointerValue, the leaf is its address. Empty for any other leaf,
+  /// and for an object whose default-initialization runs code, which
   /// constructed it whole.
   std::pair<unsigned, unsigned>
   objectPart(const SemaProfiles::ShapeLeaf &Leaf, bool AsPointerValue,
              ArrayRef<const CXXRecordDecl *> OuterBases = {}) const;
 
-  /// The entities of the object range \p Range below its base subobject at
-  /// the derived-to-base path \p Base -- contiguous, as the enumeration is
-  /// depth-first -- or an empty range.
+  /// The entities of the object with entity range \p Range and class \p RD
+  /// below its subobject reached through \p Prefix and then \p Bases
+  /// (SemaProfiles::flowTrackedMemberRange) -- contiguous, as the
+  /// enumeration is depth-first -- or an empty range.
   std::pair<unsigned, unsigned>
-  belowBase(std::pair<unsigned, unsigned> Range,
-            ArrayRef<const CXXRecordDecl *> Base) const;
+  partRange(std::pair<unsigned, unsigned> Range, const CXXRecordDecl *RD,
+            ArrayRef<MemberStep> Prefix,
+            ArrayRef<const CXXRecordDecl *> Bases) const;
 };
 
 std::pair<unsigned, unsigned> TrackedStorage::addObject(const VarDecl *Base,
@@ -2200,15 +2210,23 @@ std::optional<unsigned> TrackedStorage::find(const VarDecl *Base,
   return std::nullopt;
 }
 
-std::pair<unsigned, unsigned> TrackedStorage::wholeObject(const Expr *E) const {
-  E = SemaProfiles::ignoreTransparentCasts(E);
+std::pair<unsigned, unsigned>
+TrackedStorage::wholeObject(const Expr *E, ArrayRef<const Expr *> Arms,
+                            ArrayRef<const CXXRecordDecl *> Bases) const {
+  E = SemaProfiles::ignoreTransparentCasts(E, Arms);
   if (isCurrentObjectBase(E))
-    return CurrentObjectRange;
-  if (const auto *DRE = dyn_cast<DeclRefExpr>(E))
-    if (const auto *V = dyn_cast<VarDecl>(DRE->getDecl()))
-      if (auto It = LocalRange.find(V); It != LocalRange.end())
-        return It->second;
-  return {0, 0};
+    return partRange(CurrentObjectRange, CurrentObjectClass, {}, Bases);
+  std::optional<SemaProfiles::FlowLeafShape> Shape =
+      SemaProfiles::flowLeafShape(E, Arms);
+  if (!Shape || Shape->Subscript)
+    return {0, 0};
+  if (Shape->IsThis)
+    return partRange(CurrentObjectRange, CurrentObjectClass, Shape->Members,
+                     Bases);
+  if (Shape->ThroughPointer)
+    return {0, 0};
+  auto [Range, RD] = objectRange(Shape->Local);
+  return partRange(Range, RD, Shape->Members, Bases);
 }
 
 std::pair<unsigned, unsigned>
@@ -2230,34 +2248,37 @@ TrackedStorage::objectPart(const SemaProfiles::ShapeLeaf &Leaf,
     return {0, 0};
   std::optional<SemaProfiles::FlowLeafShape> Shape =
       SemaProfiles::flowLeafShape(E, Leaf.Arms);
-  if (!Shape || Shape->IsThis || Shape->ThroughPointer)
+  if (!Shape || Shape->Subscript)
+    return {0, 0};
+  BasePath Bases(Shape->LeafBases);
+  Bases.append(Above.begin(), Above.end());
+  if (Shape->IsThis) {
+    // A constructor reads the current object's members from the unassigned
+    // entry state.
+    if (Shape->Members.empty() ||
+        CurrentObjectRange.first == CurrentObjectRange.second ||
+        !Entities[CurrentObjectRange.first].TrackReads)
+      return {0, 0};
+    return partRange(CurrentObjectRange, CurrentObjectClass, Shape->Members,
+                     Bases);
+  }
+  if (Shape->ThroughPointer)
     return {0, 0};
   auto [Range, RD] = objectRange(Shape->Local);
-  // The casts above the leaf convert it further toward a base.
-  SemaProfiles::FlowLeafShape Converted = *Shape;
-  Converted.LeafBases.append(Above.begin(), Above.end());
-  if (Range.first == Range.second)
-    return {0, 0};
-  std::pair<unsigned, unsigned> Part =
-      Profiles.flowTrackedMemberRange(RD, Converted);
-  if (Part.first == Part.second)
-    return {0, 0};
-  return {Range.first + Part.first, Range.first + Part.second};
+  return partRange(Range, RD, Shape->Members, Bases);
 }
 
 std::pair<unsigned, unsigned>
-TrackedStorage::belowBase(std::pair<unsigned, unsigned> Range,
-                          ArrayRef<const CXXRecordDecl *> Base) const {
-  std::optional<unsigned> First, Last;
-  for (unsigned I = Range.first; I != Range.second; ++I) {
-    ArrayRef<const CXXRecordDecl *> Path = Entities[I].Steps.front().Bases;
-    if (Path.size() < Base.size() || Path.take_front(Base.size()) != Base)
-      continue;
-    if (!First)
-      First = I;
-    Last = I;
-  }
-  return First ? std::pair{*First, *Last + 1} : std::pair{0u, 0u};
+TrackedStorage::partRange(std::pair<unsigned, unsigned> Range,
+                          const CXXRecordDecl *RD, ArrayRef<MemberStep> Prefix,
+                          ArrayRef<const CXXRecordDecl *> Bases) const {
+  if (Range.first == Range.second)
+    return {0, 0};
+  std::pair<unsigned, unsigned> Part =
+      Profiles.flowTrackedMemberRange(RD, Prefix, Bases);
+  if (Part.first == Part.second)
+    return {0, 0};
+  return {Range.first + Part.first, Range.first + Part.second};
 }
 
 TrackedStorage::Resolution
@@ -2292,17 +2313,29 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
                   DesignatesPart(Idx);
     return true;
   };
+  // The first pointer-to-data-member step, if any.
+  ArrayRef<MemberStep> Steps = Shape->Members;
+  unsigned OpaqueStep =
+      llvm::find_if(Steps, [](const MemberStep &S) { return !S.Field; }) -
+      Steps.begin();
+  // The members a step through a pointer to data member may access on the
+  // object with entity range \p Range and class \p RD: every tracked member
+  // below the object it applies to -- for a last step only, unless
+  // \p AnyDepth.
+  auto OpaqueRange = [&](std::pair<unsigned, unsigned> Range,
+                         const CXXRecordDecl *RD, bool AnyDepth = false) {
+    if (!AnyDepth && (OpaqueStep + 1 != Steps.size() || Shape->Subscript))
+      return std::pair{0u, 0u};
+    return partRange(Range, RD, Steps.take_front(OpaqueStep),
+                     Steps[OpaqueStep].Bases);
+  };
   if (Shape->IsThis) {
-    if (Shape->Members.empty())
-      return {};
-    const MemberStep &Top = Shape->Members.front();
-    // An access at any depth below a step through a pointer to data member
-    // may reach any member below the object it applies to.
-    if (!Top.Field) {
-      R.Opaque = belowBase(CurrentObjectRange, Top.Bases);
+    if (Steps.empty() || ResolveMember(CurrentObjectRange, CurrentObjectClass))
       return R;
-    }
-    ResolveMember(CurrentObjectRange, CurrentObjectClass);
+    // An access at any depth below the step may reach any of them.
+    if (OpaqueStep != Steps.size())
+      R.Opaque = OpaqueRange(CurrentObjectRange, CurrentObjectClass,
+                             /*AnyDepth=*/true);
     return R;
   }
   const VarDecl *V = Shape->Local;
@@ -2333,30 +2366,32 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
   }
   // V.m: a member of a tracked aggregate local, or a consuming access of one.
   auto [Range, RD] = objectRange(V);
-  if (Range.first == Range.second || Shape->Members.empty())
+  if (Range.first == Range.second || Steps.empty())
     return {};
   R.LocalBase = Shape->LocalRef;
-  // The member directly on the object.
-  const MemberStep &Top = Shape->Members.front();
-  if (!Top.Field) {
-    // x.*pm: any member, modeled by its reads; below it, a pointer-to-member
-    // step's type is unknown here, so the access escapes the object.
-    if (Shape->Members.size() == 1 && !Shape->Subscript) {
-      R.Opaque = belowBase(Range, Top.Bases);
-      R.Benign = true;
-    }
-    return R;
-  }
   if (ResolveMember(Range, RD)) {
     R.Benign = true;
     return R;
   }
+  // x.*pm, x.m.*pm: any member below the object it applies to, modeled by its
+  // reads; below such a step, its type is unknown here, so the access escapes
+  // the object.
+  if (OpaqueStep != Steps.size()) {
+    std::pair<unsigned, unsigned> Opaque = OpaqueRange(Range, RD);
+    if (OpaqueStep == 0 || Opaque.first != Opaque.second) {
+      R.Opaque = Opaque;
+      R.Benign = OpaqueStep + 1 == Steps.size() && !Shape->Subscript;
+      return R;
+    }
+  }
+  // The member directly on the object.
+  const MemberStep &Top = Steps.front();
   // An untracked sibling consumes the base without exposing the object
   // only when it cannot itself reach a tracked member: a pointer or
   // reference member may denote one, and a class or array member may hold
   // such a value.
   QualType FT = Top.Field->getType();
-  if (Shape->Members.size() == 1 && !Shape->Subscript) {
+  if (Steps.size() == 1 && !Shape->Subscript) {
     R.Benign = FT->isIntegralOrEnumerationType() || FT->isFloatingType();
     return R;
   }
@@ -2705,15 +2740,21 @@ static std::optional<unsigned> referent(unsigned Idx, const FlowState &St,
 static LeafState leafState(const BindingLeaf &L, const FlowState &St,
                            const TrackedStorage &Storage, bool EveryPath) {
   // An object or subobject named whole is initialized when every member is,
-  // and uninitialized when none may be.
+  // and uninitialized when none may be -- for \p EveryPath, a value copy,
+  // when a read-tracked member may be unassigned.
   if (L.Range.first != L.Range.second) {
-    bool AllMust = true, AnyMay = false;
+    bool AllMust = true, AnyMay = false, AnyUnassigned = false;
     for (unsigned I = L.Range.first; I != L.Range.second; ++I) {
-      AllMust &= St.Must.test(I);
+      bool Must =
+          St.Must.test(I) || (EveryPath && !Storage.Entities[I].TrackReads);
+      AllMust &= Must;
       AnyMay |= St.May.test(I);
+      AnyUnassigned |= !Must && St.MayUnassigned.test(I);
     }
     if (AllMust)
       return LeafState::Initialized;
+    if (EveryPath)
+      return AnyUnassigned ? LeafState::Uninitialized : LeafState::Unknown;
     return AnyMay ? LeafState::Unknown : LeafState::Uninitialized;
   }
   if (!L.Entity)
@@ -3342,7 +3383,7 @@ static bool isWholeCopySource(const ParmVarDecl *P) {
 /// The part of \p Whole, the entity range of the object \p G a credit's
 /// argument leaf \p Leaf names as a whole, that a credit designated as
 /// \p Designated reaches: the entities below the base subobject the
-/// argument's derived-to-base casts convert to (TrackedStorage::belowBase;
+/// argument's derived-to-base casts convert to (TrackedStorage::wholeObject;
 /// \p OuterPath holds the casts above the leaf, which follow the leaf's own)
 /// when \p Designated covers that subobject's class (designationCovers), and
 /// none otherwise.
@@ -3366,7 +3407,7 @@ designatedWholeRange(const TrackedStorage &Storage,
     Class = Storage.Ctx.getCanonicalTagType(CastPath.back());
   if (!designationCovers(Storage.Ctx, Designated, Class, RawExempt))
     return {0, 0};
-  return Storage.belowBase(Whole, CastPath);
+  return Storage.wholeObject(G, Leaf.Arms, CastPath);
 }
 
 /// True if \p P is the Construct role parameter of a known-callee row whose
@@ -3483,7 +3524,7 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
             if (const Expr *Op = SemaProfiles::addressOfOperand(G);
                 AsPointerValue && Op)
               G = SemaProfiles::ignoreTransparentCasts(Op, Leaf.Arms);
-            L.Whole = Storage.wholeObject(G);
+            L.Whole = Storage.wholeObject(G, Leaf.Arms);
             if (!Designated.isNull())
               L.Whole = designatedWholeRange(Storage, Leaf, AsPointerValue, G,
                                              L.Whole, OuterPath, Designated,
