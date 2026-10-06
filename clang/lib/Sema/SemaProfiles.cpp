@@ -2083,15 +2083,16 @@ enum class StdHandleKind {
 
 /// The std handle table: the standard classes through whose construction raw
 /// storage enters a handle (P4222R2 §4.7, §9.3), by name and namespace --
-/// libc++'s std::__wrap_iter and libstdc++'s __gnu_cxx::__normal_iterator
-/// included.
+/// libc++'s std::__wrap_iter, libstdc++'s __gnu_cxx::__normal_iterator, and
+/// libstdc++'s std::__shared_ptr, the base that declares std::shared_ptr's
+/// reset, included.
 static StdHandleKind getStdHandleKind(const CXXRecordDecl *RD) {
   const IdentifierInfo *II = RD ? RD->getIdentifier() : nullptr;
   if (!II)
     return StdHandleKind::None;
   StringRef Name = II->getName();
   if (RD->isInStdNamespace()) {
-    if (Name == "unique_ptr" || Name == "shared_ptr")
+    if (Name == "unique_ptr" || Name == "shared_ptr" || Name == "__shared_ptr")
       return StdHandleKind::Owner;
     if (Name == "span" || Name == "reverse_iterator" ||
         Name == "move_iterator" || Name == "basic_const_iterator" ||
@@ -2125,8 +2126,15 @@ static SemaProfiles::HandleLeaf::Mode handleTransferModeOf(QualType T) {
   return Mode::Storage;
 }
 
+/// True if \p MD is the reset of a std-table owner.
+static bool isStdOwnerReset(const CXXMethodDecl *MD) {
+  return MD->getIdentifier() && MD->getName() == "reset" &&
+         getStdHandleKind(MD->getParent()) == StdHandleKind::Owner;
+}
+
 /// The mode of \p P when it is a *transfer parameter* -- one through which
-/// raw storage enters a std-table handle under construction -- or none. Of
+/// raw storage enters a std-table handle under construction, or an owner by
+/// its reset (its pointer parameter) -- or none. Of
 /// a view's constructors other than copy and move, every parameter not of
 /// integral, enumeration, floating, or std::nullptr_t type (after its
 /// reference and qualifiers). Of an owner's, the first object pointer taken
@@ -2135,10 +2143,17 @@ static SemaProfiles::HandleLeaf::Mode handleTransferModeOf(QualType T) {
 /// owner (a converting constructor).
 static std::optional<SemaProfiles::HandleLeaf::Mode>
 handleTransferMode(const ParmVarDecl *P) {
+  QualType T = P->getType();
+  // An owner's reset takes its first parameter, a pointer.
+  if (const auto *MD = dyn_cast<CXXMethodDecl>(P->getDeclContext());
+      MD && isStdOwnerReset(MD))
+    return P->getFunctionScopeIndex() == 0 && T->isPointerType() &&
+                   !T->isFunctionPointerType()
+               ? std::optional(SemaProfiles::HandleLeaf::Mode::PointerValue)
+               : std::nullopt;
   const auto *Ctor = dyn_cast<CXXConstructorDecl>(P->getDeclContext());
   if (!Ctor || Ctor->isCopyOrMoveConstructor())
     return std::nullopt;
-  QualType T = P->getType();
   QualType Bare = T.getNonReferenceType().getUnqualifiedType();
   switch (getStdHandleKind(Ctor->getParent())) {
   case StdHandleKind::None:
@@ -2188,7 +2203,9 @@ SemaProfiles::getCalleeLifecycleRoles(const FunctionDecl *FD) {
   Roles.InitializesRefToUninitParams = FD->hasAttr<NowInitAttr>();
   Roles.DestroysPointerParams = FD->hasAttr<NowUninitAttr>();
   if (const auto *Ctor = dyn_cast<CXXConstructorDecl>(FD))
-    Roles.HandleConstruction = isStdHandleConstruction(Ctor);
+    Roles.HandleTransfers = isStdHandleConstruction(Ctor);
+  else if (const auto *MD = dyn_cast<CXXMethodDecl>(FD))
+    Roles.HandleTransfers = isStdOwnerReset(MD);
   KnownCalleeMatch M = matchKnownCallee(FD);
   if (!M.Entry || M.Entry->Role == KnownParamRole::None ||
       M.Entry->Param >= FD->getNumParams())
@@ -2270,7 +2287,7 @@ bool SemaProfiles::CalleeLifecycleRoles::initializesParam(
 
 bool SemaProfiles::CalleeLifecycleRoles::transfersParam(
     const ParmVarDecl *P) const {
-  return HandleConstruction && handleTransferMode(P);
+  return HandleTransfers && handleTransferMode(P);
 }
 
 /// The object a call to the non-static member function \p MD binds to its
@@ -2508,6 +2525,11 @@ struct HandleSourceWalk {
         walk(Arm, Partial);
         Arms.pop_back();
       }
+      return;
+    }
+    // A pointer an owner's reset takes is its new state.
+    if (E->getType()->isPointerType()) {
+      emit(E, HandleLeaf::Mode::PointerValue, Partial);
       return;
     }
     if (const auto *CCE = dyn_cast<CXXConstructExpr>(E)) {
@@ -3406,13 +3428,12 @@ bool SemaProfiles::bindsHandleByReference(InitBindingKind Kind, QualType T,
   }
   // The source of a copy or move constructor, or of an assignment, which
   // binds where the copy lands.
-  const auto *MD = P ? dyn_cast<CXXMethodDecl>(P->getDeclContext()) : nullptr;
-  if (!MD || P->getFunctionScopeIndex() !=
-                 (MD->isExplicitObjectMemberFunction() ? 1u : 0u))
-    return true;
-  if (const auto *Ctor = dyn_cast<CXXConstructorDecl>(MD))
-    return !Ctor->isCopyOrMoveConstructor();
-  return MD->getOverloadedOperator() != OO_Equal;
+  if (isAssignmentSource(P))
+    return false;
+  const auto *Ctor =
+      P ? dyn_cast<CXXConstructorDecl>(P->getDeclContext()) : nullptr;
+  return !Ctor || P->getFunctionScopeIndex() != 0 ||
+         !Ctor->isCopyOrMoveConstructor();
 }
 
 bool SemaProfiles::isDefaultedComparison(const FunctionDecl *FD) {
@@ -4233,9 +4254,11 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
       (Parm ? Roles.isMarkedParam(Parm) : Target->hasAttr<RefToUninitAttr>());
   // An initializing parameter or a range's end iterator accepts storage in
   // any state; a transfer parameter's storage is judged where the handle
-  // under construction lands.
+  // under construction lands, and a handle an assignment takes by value
+  // where it is assigned (checkInitProfileHandleReseat).
   if (Parm && (Roles.isInitializingParam(Parm) || Roles.isEndParam(Parm) ||
-               Roles.transfersParam(Parm)))
+               Roles.transfersParam(Parm) ||
+               (isHandleType(T) && isAssignmentSource(Parm))))
     return;
   bool Destroys = Parm && Roles.destroysParam(Parm);
   if (Destroys || (Parm && Roles.releasesParam(Parm, /*TrustedOnly=*/false))) {
@@ -4642,6 +4665,81 @@ void SemaProfiles::checkInitProfileIncDec(Expr *Operand, SourceLocation OpLoc) {
   checkInitProfileReadThrough(Operand->getExprLoc(), Operand,
                               Operand->getType());
   checkInitProfileSubobjectWrite(OpLoc, Operand);
+}
+
+bool SemaProfiles::getHandleReseat(const CallExpr *CE, const Expr *&Obj,
+                                   const Expr *&Src, SourceLocation &Loc) {
+  const auto *MD = dyn_cast_or_null<CXXMethodDecl>(CE->getDirectCallee());
+  if (!MD || MD->getParent()->isUnion())
+    return false;
+  if (const auto *OCE = dyn_cast<CXXOperatorCallExpr>(CE)) {
+    if (OCE->getOperator() != OO_Equal || MD->getNumParams() != 1 ||
+        MD->isStatic() || MD->isExplicitObjectMemberFunction() ||
+        OCE->getNumArgs() != 2 ||
+        !OCE->getArg(1)->getType()->getAsCXXRecordDecl())
+      return false;
+    Obj = OCE->getArg(0)->IgnoreParenImpCasts();
+    Src = OCE->getArg(1);
+    Loc = OCE->getOperatorLoc();
+    return true;
+  }
+  // An operator= called by name, or an owner's reset with a written argument.
+  const auto *MCE = dyn_cast<CXXMemberCallExpr>(CE);
+  if (!MCE || CE->getNumArgs() == 0 || isa<CXXDefaultArgExpr>(CE->getArg(0)))
+    return false;
+  if (MD->getOverloadedOperator() == OO_Equal
+          ? MD->getNumParams() != 1 || MD->isStatic() ||
+                MD->isExplicitObjectMemberFunction() ||
+                !CE->getArg(0)->getType()->getAsCXXRecordDecl()
+          : !isStdOwnerReset(MD))
+    return false;
+  // The object as written, before its conversion to the class declaring
+  // reset (libstdc++'s std::__shared_ptr), or the pointer an arrow call
+  // reaches it through.
+  Obj = MCE->getImplicitObjectArgument()->IgnoreParenImpCasts();
+  Src = CE->getArg(0);
+  Loc = Src->IgnoreImplicit()->getExprLoc();
+  return true;
+}
+
+std::optional<bool> SemaProfiles::resolveHandleReseatMarking(const Expr *Obj) {
+  std::optional<bool> Marked;
+  bool Disagree = false;
+  forEachTargetLeaf(Obj, [&](const ShapeLeaf &Leaf) {
+    const ValueDecl *VD = getDirectlyNamedDecl(Leaf.E);
+    bool M = VD && !VD->getType()->isReferenceType() &&
+             !VD->getType()->isPointerType() && VD->hasAttr<RefToUninitAttr>();
+    Disagree |= Marked && *Marked != M;
+    Marked = M;
+  });
+  if (Disagree)
+    return std::nullopt;
+  return Marked.value_or(false);
+}
+
+QualType SemaProfiles::handleReseatType(const Expr *Obj) {
+  QualType T = Obj->getType();
+  return T->isPointerType() ? T->getPointeeType() : T.getNonReferenceType();
+}
+
+bool SemaProfiles::isAssignmentSource(const ParmVarDecl *P) {
+  const auto *MD = P ? dyn_cast<CXXMethodDecl>(P->getDeclContext()) : nullptr;
+  return MD && MD->getOverloadedOperator() == OO_Equal && !MD->isStatic() &&
+         P->getFunctionScopeIndex() ==
+             (MD->isExplicitObjectMemberFunction() ? 1u : 0u);
+}
+
+void SemaProfiles::checkInitProfileHandleReseat(const FunctionDecl *FD,
+                                                const CallExpr *CE) {
+  if (!isProfileLive("std::init"))
+    return;
+  const Expr *Obj, *Src;
+  SourceLocation Loc;
+  if (!getHandleReseat(CE, Obj, Src, Loc) || Obj->isInstantiationDependent())
+    return;
+  if (std::optional<bool> Marked = resolveHandleReseatMarking(Obj))
+    judgeInitProfileBinding(InitBindingKind::PointerAssignment, Loc, *Marked,
+                            handleReseatType(Obj), Src, /*D=*/nullptr);
 }
 
 /// The operand of the member, element, indirection, or address-of step

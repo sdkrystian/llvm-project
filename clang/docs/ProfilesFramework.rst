@@ -1216,6 +1216,17 @@ over a marked handle binds its elements to uninitialized memory:
 ``for (int &x [[ref_to_uninit]] : s)`` is accepted, and
 ``for (int x : s)`` reads uninitialized memory.
 
+Assigning a handle (``t = s``) binds it like an initialization, judged
+against the assigned-to handle's marking, and so does an owning smart
+pointer's ``reset(p)``, whose pointer is judged there: ``u.reset(new int)``
+needs a marked ``u``, while ``u.reset(new int(5))`` needs an unmarked one.
+Assigning ``nullptr`` and ``reset()`` refer to nothing.  An assignment called
+by name (``t.operator=(s)``) is one too, and a copy-and-swap ``operator=``
+taking the handle by value is judged once, at the assignment.  A handle
+assigned or reset through a reference or a pointer, or as an element
+(``r = s`` with ``std::span<int> &r``, ``p->reset(new int)``, ``v[0] = s``),
+cannot carry the marker, so it is judged as an unmarked handle.
+
 
 Constructors
 ------------

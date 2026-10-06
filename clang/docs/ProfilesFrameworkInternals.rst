@@ -814,7 +814,11 @@ follows:
        (``isHandleType``) classifies its source through the handle walk, and
        a std-table construction's transfer parameters
        (``CalleeLifecycleRoles::transfersParam``) are judged where the
-       handle lands; ``classifyPointerGlvalue`` judges a
+       handle lands, and a handle reseat -- an ``operator=`` or an owner's
+       ``reset`` -- is a PointerAssignment binding
+       (``checkInitProfileHandleReseat``, from
+       ``Sema::CreateOverloadedBinOp`` and ``Sema::CheckFunctionCall``);
+       ``classifyPointerGlvalue`` judges a
        reference-to-pointer binding by the pointer's value (a read-only
        alias) or not at all (a mutable alias); a defaulted argument is a
        Parameter binding at its declaration
@@ -1008,6 +1012,19 @@ sees through it to the range, so the elements a range-for binds are judged
 instead.  An author-marked constructor parameter makes a construction a
 terminal that refers to uninitialized memory, while the parameter's own
 binding is judged as usual.
+
+A handle is reseated by a one-parameter ``operator=`` whose source is a class
+object, as an operator or called by name, and an owner also by ``reset`` with
+a written argument (``SemaProfiles::getHandleReseat``), arrow calls included:
+the source -- for ``reset``, its pointer, a transfer parameter -- binds the
+handle like a pointer assignment, judged against the marking
+``resolveHandleReseatMarking`` reads off the handle object.  A handle reached
+through a reference, a pointer, or an element names no declaration that can
+carry the marker, so it is unmarked; only arms of disagreeing marking leave
+the reseat unjudged.  A handle an ``operator=`` takes by value (copy-and-swap)
+binds where it is assigned, not as a parameter (``isAssignmentSource``).
+Libstdc++ declares ``std::shared_ptr``'s ``reset`` in its base
+``std::__shared_ptr``, which the table lists as an owner for that reason.
 
 
 Flow-Tracked Storage (std::init)

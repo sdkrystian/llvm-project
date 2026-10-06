@@ -4783,7 +4783,8 @@ static void extractStdInitEvents(
     // The argument bindings of the call-like \p CallLike
     // (forEachArgumentBinding) of a callee with \p Roles: a VariadicArgument
     // binding per variadic argument, a Parameter binding per declared
-    // parameter other than an initializing one or a range's end iterator --
+    // parameter other than an initializing one, a range's end iterator, a
+    // transfer parameter, or a handle an assignment takes by value --
     // none for a [[now_uninit]] or storage-release callee, whose parameters
     // run the destroy rules instead -- and the mutable aliases each argument
     // hands out.
@@ -4803,7 +4804,9 @@ static void extractStdInitEvents(
                            Roles.releasesParam(Parm, /*TrustedOnly=*/false) ||
                            Roles.isInitializingParam(Parm) ||
                            Roles.isEndParam(Parm) ||
-                           Roles.transfersParam(Parm)))
+                           Roles.transfersParam(Parm) ||
+                           (SemaProfiles::isHandleType(T) &&
+                            SemaProfiles::isAssignmentSource(Parm))))
                   AddBinding(K::Parameter, Loc,
                              Parm && Roles.isMarkedParam(Parm), T, Arg, nullptr,
                              CallLike, SemaProfiles::isValueCopySource(Parm),
@@ -5139,6 +5142,16 @@ static void extractStdInitEvents(
         if (const auto *PDE = dyn_cast<CXXPseudoDestructorExpr>(
                 CE->getCallee()->IgnoreParens()))
           DestroyedObject = PDE->getBase();
+        // A handle reseat is judged against the handle's marking
+        // (SemaProfiles::checkInitProfileHandleReseat).
+        const Expr *ReseatObj = nullptr, *ReseatSrc = nullptr;
+        SourceLocation ReseatLoc;
+        if (SemaProfiles::getHandleReseat(CE, ReseatObj, ReseatSrc, ReseatLoc))
+          if (std::optional<bool> Marked =
+                  SemaProfiles::resolveHandleReseatMarking(ReseatObj))
+            AddBinding(K::PointerAssignment, ReseatLoc, *Marked,
+                       SemaProfiles::handleReseatType(ReseatObj), ReseatSrc,
+                       nullptr, CE);
         AppendCallEvents(CE, Callee, DestroyedObject);
       } else if (const auto *CCE = dyn_cast<CXXConstructExpr>(St)) {
         // A constructor call's parameter bindings, the copy of a class object

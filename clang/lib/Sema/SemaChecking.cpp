@@ -74,6 +74,7 @@
 #include "clang/Sema/SemaObjC.h"
 #include "clang/Sema/SemaOpenCL.h"
 #include "clang/Sema/SemaPPC.h"
+#include "clang/Sema/SemaProfiles.h"
 #include "clang/Sema/SemaRISCV.h"
 #include "clang/Sema/SemaSPIRV.h"
 #include "clang/Sema/SemaSYCL.h"
@@ -4787,6 +4788,8 @@ bool Sema::CheckFunctionCall(FunctionDecl *FDecl, CallExpr *TheCall,
   checkCall(FDecl, Proto, ImplicitThis, llvm::ArrayRef(Args, NumArgs),
             IsMemberFunction, TheCall->getRParenLoc(),
             TheCall->getCallee()->getSourceRange(), CallType);
+
+  Profiles().checkInitProfileHandleReseat(FDecl, TheCall);
 
   IdentifierInfo *FnInfo = FDecl->getIdentifier();
   // None of the checks below are needed for functions that don't have

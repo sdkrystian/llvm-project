@@ -15781,6 +15781,7 @@ ExprResult Sema::CreateOverloadedBinOp(SourceLocation OpLoc,
           checkAssignmentLifetime(
               *this, AssignedEntity{Args[0], dyn_cast<CXXMethodDecl>(FnDecl)},
               Args[1]);
+          Profiles().checkInitProfileHandleReseat(FnDecl, TheCall);
         }
         if (ImplicitThis) {
           QualType ThisType = Context.getPointerType(ImplicitThis->getType());

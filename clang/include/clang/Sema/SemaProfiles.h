@@ -539,13 +539,13 @@ public:
   /// its operands -- its object argument included -- as a value copy.
   static bool isDefaultedComparison(const FunctionDecl *FD);
 
-  /// The [[ref_to_uninit]] marking of the pointer object an assignment
-  /// target names: true/false for a directly named marked/unmarked pointer
+  /// The [[ref_to_uninit]] marking of the pointer or handle object an
+  /// assignment target names: true/false for a directly named marked/unmarked
   /// declaration, std::nullopt when the marking is unknown -- a reference to
-  /// a pointer aliases an object whose marking it cannot carry, any other
-  /// lvalue (*pp, arr[i]) names no declaration at all, and a conditional's
-  /// arms may disagree -- where neither direction of the binding check is
-  /// sound (P4222R2 §4.3). Peels transparent casts and walks the
+  /// a pointer or handle aliases an object whose marking it cannot carry, any
+  /// other lvalue (*pp, arr[i]) names no declaration at all, and a
+  /// conditional's arms may disagree -- where neither direction of the binding
+  /// check is sound (P4222R2 §4.3). Peels transparent casts and walks the
   /// pass-through target shapes.
   static std::optional<bool> resolveAssignTargetMarking(const Expr *E);
 
@@ -645,9 +645,9 @@ public:
   /// marking): a reference to a handle (isHandleType), except the implicit
   /// object parameter, a parameter of a comparison or of a + or - operator
   /// (which compares or positions handles), the source of a copy or move
-  /// constructor or assignment (judged where the copy lands), and an implicit
-  /// local (range-for's __range). \p Target is the bound declaration, if
-  /// any.
+  /// constructor or of an assignment (isAssignmentSource; judged where the
+  /// copy lands), and an implicit local (range-for's __range). \p Target is
+  /// the bound declaration, if any.
   static bool bindsHandleByReference(InitBindingKind Kind, QualType T,
                                      const ValueDecl *Target);
 
@@ -811,6 +811,34 @@ public:
   /// Sema::CreateBuiltinUnaryOp's increment/decrement arm.
   void checkInitProfileIncDec(Expr *Operand, SourceLocation OpLoc);
 
+  /// If \p CE reseats a handle -- a one-parameter member operator= of a
+  /// non-union class whose source is a class object, as an operator or
+  /// called by name, or an owner's reset with a written argument -- set
+  /// \p Obj to the handle, or to the pointer an arrow call reaches it
+  /// through, \p Src to what it takes, and \p Loc to where the reseat is
+  /// judged (the operator, or the argument), and return true.
+  static bool getHandleReseat(const CallExpr *CE, const Expr *&Obj,
+                              const Expr *&Src, SourceLocation &Loc);
+  /// The [[ref_to_uninit]] marking of the handle a reseat's \p Obj
+  /// (getHandleReseat) names: a directly named handle's own, and unmarked for
+  /// a handle reached through a reference, a pointer, or an lvalue naming no
+  /// declaration, none of which can carry the handle's marking
+  /// (bindsHandleByReference); std::nullopt when a conditional's arms
+  /// disagree.
+  static std::optional<bool> resolveHandleReseatMarking(const Expr *Obj);
+  /// The type of the handle a reseat's \p Obj (getHandleReseat) names.
+  static QualType handleReseatType(const Expr *Obj);
+  /// True if \p P is the source parameter of a member operator=, which binds
+  /// where it is assigned (checkInitProfileHandleReseat).
+  static bool isAssignmentSource(const ParmVarDecl *P);
+
+  /// std::init / ref_to_uninit: a handle reseat (getHandleReseat) binds the
+  /// handle to its source, judged against the handle's marking
+  /// (resolveAssignTargetMarking) like a pointer assignment. Called with the
+  /// call \p CE of \p FD from Sema::CreateOverloadedBinOp for an operator=,
+  /// beside checkAssignmentLifetime, and from Sema::CheckFunctionCall.
+  void checkInitProfileHandleReseat(const FunctionDecl *FD, const CallExpr *CE);
+
   /// What a known callee does to the storage bound to its role parameter
   /// (KnownCallees in SemaProfiles.cpp; see ProfilesFrameworkInternals.rst,
   /// "The std::init Implementation Map").
@@ -866,9 +894,9 @@ public:
     /// -ffreestanding leaves: the name says what the function is meant to
     /// be, but its semantics cannot be assumed.
     bool KnownTrusted = false;
-    /// The callee constructs a std-table handle from raw storage (see
-    /// ProfilesFrameworkInternals.rst, "Handles (std::init)").
-    bool HandleConstruction = false;
+    /// The callee constructs or resets a std-table handle from raw storage
+    /// (see ProfilesFrameworkInternals.rst, "Handles (std::init)").
+    bool HandleTransfers = false;
     /// The parameter whose storage the call may or may not destroy, an
     /// opaque callee's: the pointer of std::allocator_traits<A>::destroy when
     /// A declares its own destroy, which the traits call in place of
@@ -896,8 +924,9 @@ public:
     /// basis: a marked parameter of a [[now_init]] callee, or a trusted
     /// row's Construct or InitializeAnyState role.
     bool initializesParam(const ParmVarDecl *P) const;
-    /// True if \p P is a transfer parameter of a std-table handle
-    /// construction: its binding is judged where the handle lands, not here.
+    /// True if \p P is a transfer parameter of a std-table handle's
+    /// construction or of an owner's reset: its binding is judged where the
+    /// handle lands, or at the reset, not here.
     bool transfersParam(const ParmVarDecl *P) const;
   };
   /// The value type of the handle type \p T (or a reference to one) as an

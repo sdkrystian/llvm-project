@@ -136,10 +136,16 @@ public:
 };
 
 template <class T> class weak_ptr;
-template <class T> class shared_ptr {
+template <class T> class __shared_ptr {
   T *_M_ptr;
   void *_M_refcount;
 
+public:
+  T *get() const noexcept;
+  void reset() noexcept;
+  template <class Y> void reset(Y *p);
+};
+template <class T> class shared_ptr : public __shared_ptr<T> {
 public:
   using element_type = T;
   constexpr shared_ptr() noexcept;
@@ -158,7 +164,6 @@ public:
   shared_ptr &operator=(const shared_ptr &) noexcept = default;
   T &operator*() const noexcept;
   T *operator->() const noexcept;
-  T *get() const noexcept;
 };
 template <class T> class weak_ptr {
   T *_M_ptr;
@@ -527,6 +532,63 @@ void adaptors(int *p [[ref_to_uninit]]) {
   std::ranges::subrange sr(p, p + 4); // expected-error {{handle of type 'std::ranges::subrange<int *, int *>' (aka 'subrange<int *, int *>') to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   std::ranges::subrange sm [[ref_to_uninit]](p, p + 4);
   (void)r, (void)m, (void)sr, (void)sm;
+}
+
+// Assigning a handle is judged against the assigned-to handle's marking
+void span_assignment(std::span<int> sm [[ref_to_uninit]],
+                     std::span<int> sm2 [[ref_to_uninit]], std::span<int> su) {
+  su = sm; // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  sm = su; // expected-error {{handle of type 'std::span<int>' marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  sm = static_cast<std::span<int> &&>(sm2);
+}
+void owner_assignment(std::unique_ptr<int> up [[ref_to_uninit]],
+                      std::unique_ptr<int> up2 [[ref_to_uninit]]) {
+  up = nullptr;
+  up = static_cast<std::unique_ptr<int> &&>(up2);
+}
+
+// An owner's reset judges its pointer against the owner's marking
+void owner_reset(std::unique_ptr<int> m [[ref_to_uninit]],
+                 std::unique_ptr<int> u, std::shared_ptr<int> s) {
+  m.reset(new int);
+  m.reset(new int(1)); // expected-error {{handle of type 'std::unique_ptr<int>' marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  u.reset(new int); // expected-error {{handle of type 'std::unique_ptr<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  u.reset(new int(1));
+  u.reset();
+  s.reset(new int); // expected-error {{handle of type 'std::shared_ptr<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// Storage tracked by flow counts at the assignment
+void assign_after_fill() {
+  int arr [[uninit]] [4];
+  std::span<int> s;
+  s = std::span<int>(arr); // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  memset(arr, 0, sizeof arr);
+  s = std::span<int>(arr);
+}
+
+// A handle assigned or reset through a reference, a pointer, or an element
+// cannot carry the marker
+void alias_assignment(std::span<int> sm [[ref_to_uninit]], std::span<int> &r,
+                      std::unique_ptr<int> *pu, std::span<int> *arr) {
+  r = sm; // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  pu->reset(new int); // expected-error {{handle of type 'std::unique_ptr<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  pu->reset(new int(1));
+  arr[0] = sm; // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// An assignment called by name reseats like the operator; a handle an
+// assignment takes by value binds where it is assigned
+struct SwapBuf {
+  SwapBuf(int *p [[ref_to_uninit]]);
+  SwapBuf(const SwapBuf &);
+  SwapBuf &operator=(SwapBuf o);
+};
+void named_and_by_value(std::span<int> sm [[ref_to_uninit]], std::span<int> su,
+                        int *p [[ref_to_uninit]], int *q [[ref_to_uninit]]) {
+  su.operator=(sm); // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  SwapBuf a [[ref_to_uninit]](p), b [[ref_to_uninit]](q);
+  a = b;
 }
 
 //--- libcxx.cpp
