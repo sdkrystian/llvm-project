@@ -1566,6 +1566,59 @@ static bool isStdAllocatorTraitsDeallocate(const FunctionDecl *FD) {
          FD->getParamDecl(1)->getType()->isPointerType();
 }
 
+/// std::allocator_traits<A>::construct(A &, T *, Args &&...), the
+/// allocator-aware construct_at ([allocator.traits.members]p5); a fancy
+/// pointer is a class and falls outside.
+static bool isStdAllocatorTraitsConstruct(const FunctionDecl *FD) {
+  return isStdClassMember(FD, "allocator_traits", "construct") &&
+         FD->getNumParams() >= 2 &&
+         FD->getParamDecl(1)->getType()->isPointerType();
+}
+
+/// std::allocator_traits<A>::destroy(A &, T *), the allocator-aware
+/// destroy_at ([allocator.traits.members]p6).
+static bool isStdAllocatorTraitsDestroy(const FunctionDecl *FD) {
+  return isStdClassMember(FD, "allocator_traits", "destroy") &&
+         FD->getNumParams() == 2 &&
+         FD->getParamDecl(1)->getType()->isPointerType();
+}
+
+/// True if the allocator a member \p FD of std::allocator_traits<A> serves,
+/// or one of its bases, declares a member named \p Name outside namespace std:
+/// the traits call it in place of construct_at or destroy_at
+/// ([allocator.traits.members]p5, p6), and it may do anything.
+static bool allocatorHasOwnMember(const FunctionDecl *FD, StringRef Name) {
+  const auto *Traits = dyn_cast<ClassTemplateSpecializationDecl>(
+      cast<CXXMethodDecl>(FD)->getParent());
+  if (!Traits || Traits->getTemplateArgs().size() == 0 ||
+      Traits->getTemplateArgs()[0].getKind() != TemplateArgument::Type)
+    return false;
+  const CXXRecordDecl *Alloc =
+      Traits->getTemplateArgs()[0].getAsType()->getAsCXXRecordDecl();
+  IdentifierInfo &II = FD->getASTContext().Idents.get(Name);
+  auto InStd = [](const Decl *D) {
+    for (const DeclContext *DC = D->getDeclContext(); DC; DC = DC->getParent())
+      if (DC->isStdNamespace())
+        return true;
+    return false;
+  };
+  SmallVector<const CXXRecordDecl *, 4> Worklist;
+  llvm::SmallPtrSet<const CXXRecordDecl *, 4> Seen;
+  if (Alloc)
+    Worklist.push_back(Alloc);
+  while (!Worklist.empty()) {
+    const CXXRecordDecl *RD = Worklist.pop_back_val()->getDefinition();
+    if (!RD || !Seen.insert(RD).second)
+      continue;
+    if (!InStd(RD) && !RD->lookup(&II).empty())
+      return true;
+    for (const CXXBaseSpecifier &B : RD->bases())
+      if (const CXXRecordDecl *Base = B.getType()->getAsCXXRecordDecl())
+        Worklist.push_back(Base);
+  }
+  return false;
+}
+
 namespace {
 using KnownParamRole = SemaProfiles::KnownParamRole;
 
@@ -1748,6 +1801,10 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
             KnownParamRole::Release),
     formRow(isStdAllocatorTraitsDeallocate, KnownCalleeReturn::ReturnsTrusted,
             KnownParamRole::Release, 1),
+    formRow(isStdAllocatorTraitsConstruct, KnownCalleeReturn::ReturnsTrusted,
+            KnownParamRole::Construct, 1),
+    formRow(isStdAllocatorTraitsDestroy, KnownCalleeReturn::ReturnsTrusted,
+            KnownParamRole::Destroy, 1),
     stdRow("construct_at", KnownCalleeEntry::AnyArity, 0,
            KnownParamRole::Construct),
     stdRow("destroy_at", KnownCalleeEntry::AnyArity, 0,
@@ -1863,12 +1920,22 @@ SemaProfiles::getCalleeLifecycleRoles(const FunctionDecl *FD) {
   if (!M.Entry || M.Entry->Role == KnownParamRole::None ||
       M.Entry->Param >= FD->getNumParams())
     return Roles;
+  // An allocator's own destroy may do anything.
+  if (M.Entry->Form == isStdAllocatorTraitsDestroy &&
+      allocatorHasOwnMember(FD, "destroy")) {
+    Roles.OpaqueParam = M.Entry->Param;
+    return Roles;
+  }
   Roles.KnownParam = M.Entry->Param;
   Roles.KnownRole = M.Entry->Role;
   Roles.KnownTrusted = M.Trusted;
   if (M.Entry->EndParam < FD->getNumParams())
     Roles.EndParam = M.Entry->EndParam;
-  if (M.Entry->ConstructIfDefaultInitDeterminate) {
+  // An allocator's own construct with no constructor arguments may
+  // default-initialize, as uninitialized_default_construct does.
+  if (M.Entry->ConstructIfDefaultInitDeterminate ||
+      (M.Entry->Form == isStdAllocatorTraitsConstruct &&
+       FD->getNumParams() == 2 && allocatorHasOwnMember(FD, "construct"))) {
     // The value type is the pointee of the instantiated range parameter.
     QualType T = FD->getParamDecl(M.Entry->Param)->getType()->getPointeeType();
     llvm::SmallPtrSet<const CXXRecordDecl *, 8> Visited;

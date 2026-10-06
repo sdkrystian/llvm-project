@@ -50,10 +50,17 @@ template <class T> struct allocator {
   T *allocate(__SIZE_TYPE__ n);
   void deallocate(T *p, __SIZE_TYPE__ n);
 };
-template <class A> struct allocator_traits;
+template <class A> struct allocator_traits {
+  template <class U, class... Args>
+  static void construct(A &a, U *p, Args &&...args);
+  template <class U> static void destroy(A &a, U *p);
+};
 template <class T> struct allocator_traits<allocator<T>> {
   static T *allocate(allocator<T> &a, __SIZE_TYPE__ n);
   static void deallocate(allocator<T> &a, T *p, __SIZE_TYPE__ n);
+  template <class U, class... Args>
+  static void construct(allocator<T> &a, U *p, Args &&...args);
+  template <class U> static void destroy(allocator<T> &a, U *p);
 };
 template <class T> T *addressof(T &r) noexcept;
 namespace ranges {
@@ -517,6 +524,82 @@ void fill_first_iterator_only() {
   int x = a[0]; // OK
   int y = b[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
   (void)x; (void)y;
+}
+
+struct TraitsPair { int x; int y; };
+using PairTraits = std::allocator_traits<std::allocator<TraitsPair>>;
+
+// allocator_traits::construct initializes and ::destroy destroys like construct_at and destroy_at
+int traits_construct_destroy(std::allocator<TraitsPair> &a) {
+  TraitsPair *p [[ref_to_uninit]] = PairTraits::allocate(a, 1);
+  PairTraits::construct(a, p, 1, 2);
+  int r = p->x; // OK
+  PairTraits::destroy(a, p);
+  PairTraits::deallocate(a, p, 1);
+  return r;
+}
+
+// A second allocator_traits::construct is a double construction
+void traits_double_construct(std::allocator<TraitsPair> &a) {
+  TraitsPair *p [[ref_to_uninit]] = PairTraits::allocate(a, 1);
+  PairTraits::construct(a, p, 1, 2);
+  PairTraits::construct(a, p, 3, 4); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// allocator_traits::destroy of never-constructed storage destroys uninitialized storage
+void traits_destroy_uninitialized(std::allocator<TraitsPair> &a) {
+  TraitsPair *p [[ref_to_uninit]] = PairTraits::allocate(a, 1);
+  PairTraits::destroy(a, p); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+}
+
+struct OwnAlloc {
+  template <class U> void construct(U *p);
+  template <class U, class... Args> void construct(U *p, Args &&...args);
+  template <class U> void destroy(U *p);
+};
+struct DerivedOwnAlloc : OwnAlloc {};
+struct Determinate { int x = 0; };
+using OwnTraits = std::allocator_traits<OwnAlloc>;
+
+// An allocator's own construct with no arguments default-initializes
+int traits_own_construct_default(OwnAlloc &a, int *p [[ref_to_uninit]]) {
+  OwnTraits::construct(a, p);
+  return *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// An allocator's own construct inherited from a base default-initializes
+int traits_base_construct_default(DerivedOwnAlloc &a, int *p [[ref_to_uninit]]) {
+  std::allocator_traits<DerivedOwnAlloc>::construct(a, p);
+  return *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// An allocator's own construct with no arguments initializes a type default-initialization initializes
+int traits_own_construct_determinate(OwnAlloc &a, Determinate *p [[ref_to_uninit]]) {
+  std::allocator_traits<OwnAlloc>::construct(a, p);
+  return p->x; // OK
+}
+
+// An allocator's own construct with arguments initializes
+int traits_own_construct_arguments(OwnAlloc &a, int *p [[ref_to_uninit]]) {
+  OwnTraits::construct(a, p, 1);
+  return *p; // OK
+}
+
+// An allocator's own destroy is not a destroy
+void traits_own_destroy(OwnAlloc &a, int *p [[ref_to_uninit]]) {
+  OwnTraits::construct(a, p, 1);
+  OwnTraits::destroy(a, p);
+  OwnTraits::destroy(a, p); // OK
+}
+
+// An allocator's own destroy leaves the storage possibly initialized: a read
+// is rejected, a reconstruction is accepted
+int traits_own_destroy_reconstruct(OwnAlloc &a, int *p [[ref_to_uninit]]) {
+  OwnTraits::construct(a, p, 1);
+  OwnTraits::destroy(a, p);
+  int r = *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  OwnTraits::construct(a, p, 2);
+  return r + *p; // OK
 }
 
 struct ScopedDtor { int x; ~ScopedDtor(); };

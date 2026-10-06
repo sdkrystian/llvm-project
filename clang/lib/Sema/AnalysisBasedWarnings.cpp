@@ -2344,8 +2344,8 @@ TrackedStorage::markedPointerObject(const SemaProfiles::ShapeLeaf &Leaf) const {
 /// to the storage DefAssignEvent::RT describes and, when a marked binding
 /// names an identified referent (Entity, ViaPointer), asserts it unassigned:
 /// Must and May cleared, MayUnassigned set, MayDestroyed and Esc kept. Escape:
-/// Idx may have been destroyed or released on one of several arms, so it is
-/// possibly assigned, possibly unassigned, and not destroyed. Reset: Idx
+/// Idx may have been destroyed or released by one of several arms or an
+/// opaque callee: possibly assigned or not, and not destroyed. Reset: Idx
 /// belongs to a local whose declaration runs here, which begins a new object
 /// each time (a loop's next iteration, a backward goto): unassigned, not
 /// escaped, and not destroyed. AggregateEscape: the tracked aggregate local
@@ -3303,7 +3303,9 @@ static bool constructsOneObject(const SemaProfiles::CalleeLifecycleRoles &Roles,
 /// state and takes storage in any state. An argument whose arms name several
 /// storages escapes each (the chosen arm is unknown, so each may have been
 /// destroyed). Destroys and kills are appended before writes -- append order
-/// is replay order -- so a dual-attributed reinitializer nets to assigned. A
+/// is replay order -- so a dual-attributed reinitializer nets to assigned. An
+/// allocator's own destroy (CalleeLifecycleRoles::OpaqueParam) escapes the
+/// storage of its argument as an argument naming several storages does. A
 /// plain callee earns nothing. The bindings judged at this call precede
 /// these effects in the block, so they see the pre-call state. A judged
 /// destroy site's flow-tracked leaves are added to \p JudgedLeaves. A
@@ -3492,6 +3494,11 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
                       SemaProfiles::InitDestroyer::Function);
       else if (Roles.releasesParam(P, /*TrustedOnly=*/true))
         AppendFor(Arg, PT, DefAssignEventKind::Kill);
+    });
+  if (Roles.OpaqueParam)
+    ForEachParam([&](const ParmVarDecl *P, const Expr *Arg) {
+      if (P->getFunctionScopeIndex() == *Roles.OpaqueParam)
+        AppendFor(Arg, P->getType(), DefAssignEventKind::Escape);
     });
   // A credit designates the parameter's pointee or referenced type; a
   // [[now_init]] or initializing parameter claims raw bytes

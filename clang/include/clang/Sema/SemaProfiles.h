@@ -741,6 +741,11 @@ public:
     /// -ffreestanding leaves: the name says what the function is meant to
     /// be, but its semantics cannot be assumed.
     bool KnownTrusted = false;
+    /// The parameter whose storage the call may or may not destroy, an
+    /// opaque callee's: the pointer of std::allocator_traits<A>::destroy when
+    /// A declares its own destroy, which the traits call in place of
+    /// destroy_at. The storage is possibly initialized afterwards.
+    std::optional<unsigned> OpaqueParam;
 
     /// The row role of \p P, a parameter of the callee.
     KnownParamRole roleOf(const ParmVarDecl *P) const;

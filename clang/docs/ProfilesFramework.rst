@@ -869,8 +869,14 @@ parameter is of pointer type is checked and credited as if the function were
 declared ``[[now_init]]`` with that parameter marked, so the real ``<memory>``
 declaration -- included textually or imported from a module or header unit,
 whatever options built it -- checks the lifecycle *start* with no user
-declaration.  The ``std::uninitialized_*`` family (P4222R2 §4.7, §6) is
-treated the same way on the parameter that receives the output range:
+declaration; so is ``std::allocator_traits<A>::construct``, the allocator-aware
+``construct_at``, on its pointer argument -- except that when ``A`` or a base
+of it declares its own ``construct`` outside namespace ``std``, a call with no
+constructor arguments is credited like ``uninitialized_default_construct``
+(below), as the allocator may default-initialize.  The
+``std::uninitialized_*`` family (P4222R2 §4.7, §6) is treated the same way on
+the parameter that receives
+the output range:
 ``uninitialized_fill``, ``uninitialized_copy``, ``uninitialized_move``, and
 ``uninitialized_value_construct``, each with its ``_n`` form and its
 execution-policy overload, so the range must refer to uninitialized memory -- an
@@ -933,7 +939,10 @@ subobject of an ``[[uninit]]`` object, or a subobject write is rejected.  Clang
 treats ``std::destroy_at`` this way itself -- a call to a ``std::destroy_at``
 whose first parameter is of pointer type destroys that argument's storage, and
 so does a call to ``std::destroy`` or ``std::destroy_n`` (P4222R2 §4.4) or
-their execution-policy overloads for its first iterator where that is a pointer;
+their execution-policy overloads for its first iterator where that is a pointer,
+and to ``std::allocator_traits<A>::destroy`` for its pointer argument unless
+``A`` declares its own ``destroy`` (as for ``construct``), a call that leaves
+the storage possibly initialized;
 the end iterator is accepted in any state, as for ``uninitialized_fill`` -- so
 the construct/destroy/construct cycle is legal, a second destruction is
 rejected, a destroy of never-constructed storage is rejected too, and binding
