@@ -296,3 +296,59 @@ struct SuppressedFieldMarker {
 struct [[profiles::suppress(std::init)]] SuppressedClassFieldMarker {
   RunsCtor s [[uninit]]; // OK: suppressed by the class-level attribute
 };
+
+// A defaulted function's synthesized body is not judged; its source's binding is, at the use
+struct DefaultedPair {
+  int x;
+  int y;
+  bool operator==(const DefaultedPair &) const;
+};
+struct DefaultedHolder {
+  DefaultedPair s [[uninit]];
+  DefaultedHolder();
+};
+struct DefaultedArrayHolder {
+  int a [[uninit]] [4];
+  DefaultedArrayHolder();
+};
+struct DefaultedCompared {
+  DefaultedPair s [[uninit]];
+  DefaultedCompared();
+  bool operator==(const DefaultedCompared &) const = default;
+};
+
+// Implicit copy and move of a class-type [[uninit]] member
+DefaultedHolder copy_holder(DefaultedHolder &h) { return h; }
+DefaultedHolder move_holder(DefaultedHolder &h) {
+  return static_cast<DefaultedHolder &&>(h);
+}
+void copy_assign_holder(DefaultedHolder &a, DefaultedHolder &b) { a = b; }
+void move_assign_holder(DefaultedHolder &a, DefaultedHolder &b) {
+  a = static_cast<DefaultedHolder &&>(b);
+}
+
+// Implicit copy and move of an [[uninit]] array member
+DefaultedArrayHolder copy_array_holder(DefaultedArrayHolder &h) { return h; }
+DefaultedArrayHolder move_array_holder(DefaultedArrayHolder &h) {
+  return static_cast<DefaultedArrayHolder &&>(h);
+}
+void copy_assign_array_holder(DefaultedArrayHolder &a,
+                              DefaultedArrayHolder &b) {
+  a = b;
+}
+void move_assign_array_holder(DefaultedArrayHolder &a,
+                              DefaultedArrayHolder &b) {
+  a = static_cast<DefaultedArrayHolder &&>(b);
+}
+
+// A defaulted equality operator
+bool compare_defaulted(DefaultedCompared &a, DefaultedCompared &b) {
+  return a == b;
+}
+
+// A user-written copy constructor's mem-initializer is judged
+struct UserCopiedHolder {
+  DefaultedPair s [[uninit]];
+  UserCopiedHolder();
+  UserCopiedHolder(const UserCopiedHolder &o) : s(o.s) {} // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+};

@@ -971,18 +971,22 @@ the funnels, so the CFG derivation stays authoritative and the invariant checked
 is that recorded sites are a subset of judged ones.  No site is recorded where
 no flow pass judges it -- an evaluation context other than a
 potentially-evaluated one, a discarded statement, an immediate function context,
-a dependent context (each instantiation records its own), a defaulted function's
-synthesized body -- and the record of a body whose pass does not run is dropped
-(``Sema::PopFunctionScopeInfo``), as is that of a body with an error that is not
-a profile violation, whose recovery can discard the recorded expressions.  One
-walk enumerates the leaves of a shape (``SemaProfiles::forEachTargetLeaf``) and
-one chain resolver interprets each (``SemaProfiles::flowLeafShape``, shared by
-``TrackedStorage::resolve`` and the predicate), so no binding falls between the
-two.  The walk distributes each conditional at every step of the chain, not only
-at the top, and records the arm each leaf takes (``SemaProfiles::ShapeLeaf``),
-which every interpreter follows: a walk that stopped at a nested conditional
-while the recognizers saw through it would send tracked storage to the
-marker-only form judgment.  The standard identity functions (``std::move``,
+a dependent context (each instantiation records its own) -- and the record of a
+body whose pass does not run is dropped (``Sema::PopFunctionScopeInfo``), as is
+that of a body with an error that is not a profile violation, whose recovery can
+discard the recorded expressions.  A defaulted function's synthesized body is
+judged by neither side: it has no tokens of its own, so the parse-time checks
+skip it as they skip a rebuilt default argument or initializer
+(``SemaProfiles::inRebuiltOrSynthesizedCode``), and its flow pass never runs.
+One walk enumerates the leaves of a shape
+(``SemaProfiles::forEachTargetLeaf``) and one chain resolver interprets each
+(``SemaProfiles::flowLeafShape``, shared by ``TrackedStorage::resolve`` and the
+predicate), so no binding falls between the two.  The walk distributes each
+conditional at every step of the chain, not only at the top, and records the
+arm each leaf takes (``SemaProfiles::ShapeLeaf``), which every interpreter
+follows: a walk that stopped at a nested conditional while the recognizers saw
+through it would send tracked storage to the marker-only form judgment.  The
+standard identity functions (``std::move``,
 ``std::forward``, ``std::forward_like``, ``std::move_if_noexcept``,
 ``std::as_const``) are a step of that walk, recognized by builtin ID
 (``SemaProfiles::isShapeTransparentBuiltin``), and a call to one binds nothing:
@@ -1277,6 +1281,9 @@ Missed Diagnostics
   buffers excepted, P4222R2 §4.6).
 - A ``new`` expression whose result is not bound to anything (``new int;``)
   is not checked.
+- The member-wise copies of a defaulted copy or move function and the member
+  calls inside a defaulted comparison are not judged; only the binding of the
+  source object at the defaulted function's use is.
 - A call through a function pointer cannot see parameter markers on the
   pointed-to function, and a member call through a pointer-to-member bypasses
   the object-argument check.

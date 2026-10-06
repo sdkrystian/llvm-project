@@ -536,9 +536,9 @@ public:
   /// InitBindingKind, its target, and its deferral anchor. A braced or
   /// parenthesized list initializing an object is left to the sequences its
   /// elements perform (a reference list-initializes from its lone element); a
-  /// SFINAE context, a rebuild of a default argument or initializer, an
-  /// implicit member initialization, and an entity kind whose binding can
-  /// carry no marker and names no construct of its own are skipped.
+  /// SFINAE context, code inRebuiltOrSynthesizedCode, an implicit member
+  /// initialization, and an entity kind whose binding can carry no marker and
+  /// names no construct of its own are skipped.
   void checkInitProfileBinding(const InitializedEntity &Entity,
                                const InitializationKind &Kind,
                                const Expr *Init);
@@ -744,9 +744,8 @@ private:
   /// under its analysis owner -- unless no flow pass judges it there: a
   /// dependent context (the instantiation records what it rebuilds), an
   /// evaluation context other than a potentially-evaluated one, a discarded
-  /// statement, an immediate function context, or a defaulted function's
-  /// synthesized body. A recorded site the CFG does not contain is dropped by
-  /// verifyDeferredInitSites.
+  /// statement, or an immediate function context. A recorded site the CFG
+  /// does not contain is dropped by verifyDeferredInitSites.
   void recordDeferredInitSite(DeferredInitSite Site);
 
   /// The form half of the destroy arm of checkInitProfileBinding: diagnose
@@ -755,11 +754,14 @@ private:
   void judgeDestroyUninitByForm(SourceLocation Loc, QualType T, const Expr *Src,
                                 const Decl *D, const Decl *AfterFlowPass);
 
-  /// True while a default argument or default member initializer is rebuilt
-  /// for one of its uses -- in an aggregate initialization, or for an
-  /// immediate invocation or source-location builtin inside it: the std::init
-  /// checks judged it where it was written.
-  bool rebuildingDefaultArgOrInit() const;
+  /// True while the std::init checks run on code that is not judged where it
+  /// stands: a default argument or default member initializer rebuilt for one
+  /// of its uses (in an aggregate initialization, or for an immediate
+  /// invocation or source-location builtin inside it), which was judged where
+  /// it was written; and a defaulted function's synthesized body, which has no
+  /// tokens of its own -- only the binding of its source object is judged, at
+  /// the defaulted function's use.
+  bool inRebuiltOrSynthesizedCode() const;
 
   /// std::init / ref_to_uninit (P4222R2 §4.2-§4.3): judge binding \p Src as
   /// \p T to \p Target -- null for a construct with no declaration to carry

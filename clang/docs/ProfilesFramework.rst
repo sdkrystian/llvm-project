@@ -1043,7 +1043,10 @@ constructor of its own.  The in-class form (``S() = default;`` in the
 class body) takes a different route: it is not user-provided, so the class
 is not trusted and each indeterminate use draws ``uninit_decl`` at the
 variable instead.  A defaulted *copy* or *move* constructor initializes
-every member from its source and is never flagged.  When such a defaulted
+every member from its source and is never flagged, and no rule judges the
+synthesized body of any defaulted function -- a copy or move constructor or
+assignment operator, or a defaulted comparison: only the binding of its
+source object is judged, where the function is used.  When such a defaulted
 definition is trivial -- it initializes nothing at all -- ``[[uninit]]``
 on a variable of the type is accepted once the ``= default`` definition
 has been parsed (see :ref:`profiles-init-known-gaps` for the ordering caveat).

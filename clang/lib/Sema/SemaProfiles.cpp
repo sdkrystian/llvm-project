@@ -2289,10 +2289,14 @@ static void diagnoseBindingVerdict(SemaProfiles &SP,
   }
 }
 
-bool SemaProfiles::rebuildingDefaultArgOrInit() const {
-  return SemaRef.needsRebuildOfDefaultArgOrInit() ||
-         SemaRef.currentEvaluationContext()
-             .DelayedDefaultInitializationContext.has_value();
+bool SemaProfiles::inRebuiltOrSynthesizedCode() const {
+  if (SemaRef.needsRebuildOfDefaultArgOrInit() ||
+      SemaRef.currentEvaluationContext()
+          .DelayedDefaultInitializationContext.has_value())
+    return true;
+  const auto *FD =
+      dyn_cast_or_null<FunctionDecl>(flowAnalysisOwner(SemaRef.CurContext));
+  return FD && FD->isDefaulted();
 }
 
 bool SemaProfiles::thisIsUnderConstruction(const Decl *AfterFlowPass) const {
@@ -2322,9 +2326,7 @@ void SemaProfiles::recordDeferredInitSite(DeferredInitSite Site) {
       SemaRef.isSFINAEContext() || SemaRef.CurContext->isDependentContext())
     return;
   const Decl *Owner = flowAnalysisOwner(SemaRef.CurContext);
-  // A defaulted function's synthesized body is never analyzed.
-  if (!Owner ||
-      (isa<FunctionDecl>(Owner) && cast<FunctionDecl>(Owner)->isDefaulted()))
+  if (!Owner)
     return;
   DeferredInitSites[Owner].push_back(std::move(Site));
 }
@@ -2381,9 +2383,8 @@ void SemaProfiles::checkInitProfileBinding(const InitializedEntity &Entity,
   if (isa<InitListExpr, CXXParenListInitExpr>(Init) &&
       !Entity.getType()->isReferenceType())
     return;
-  // A SFINAE trap is not a use, and a default argument or initializer
-  // rebuilt for a nested use was judged where it was written.
-  if (SemaRef.isSFINAEContext() || rebuildingDefaultArgOrInit())
+  // A SFINAE trap is not a use; see also inRebuiltOrSynthesizedCode.
+  if (SemaRef.isSFINAEContext() || inRebuiltOrSynthesizedCode())
     return;
   if (Entity.isImplicitMemberInitializer())
     return;
@@ -2493,10 +2494,10 @@ void SemaProfiles::judgeInitProfileBinding(InitBindingKind Kind,
                                            const Decl *AfterFlowPass) {
   bool IsReference = T->isReferenceType();
   // A RecoveryExpr is a placeholder for an initialization that already failed,
-  // not a source the user wrote, so it must not drive this rule. A rebuilt
-  // default argument or initializer was judged where it was written.
+  // not a source the user wrote, so it must not drive this rule; see also
+  // inRebuiltOrSynthesizedCode.
   if (!Src || isa<RecoveryExpr>(Src->IgnoreParens()) ||
-      (!AfterFlowPass && rebuildingDefaultArgOrInit()))
+      (!AfterFlowPass && inRebuiltOrSynthesizedCode()))
     return;
   // A source with a flow-tracked leaf is the CFG pass's: judged at its
   // program point, on each instantiation's own CFG (see
@@ -2872,9 +2873,10 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
                                            SourceLocation Loc,
                                            const ValueDecl *Target, QualType T,
                                            const Expr *Src, const Decl *D) {
+  // See inRebuiltOrSynthesizedCode.
   if (!isProfileLive("std::init") || T.isNull() || T->isDependentType() ||
       (!T->isPointerType() && !T->isReferenceType()) ||
-      rebuildingDefaultArgOrInit())
+      inRebuiltOrSynthesizedCode())
     return;
   const auto *Parm = dyn_cast_or_null<ParmVarDecl>(Target);
   const auto *Callee =
@@ -3080,10 +3082,10 @@ void SemaProfiles::checkInitProfileReadThrough(SourceLocation Loc,
   if (!isProfileLive("std::init"))
     return;
   // A RecoveryExpr is a placeholder for an expression that already failed, not
-  // a read the user wrote, so it must not drive this rule. A rebuilt default
-  // argument or initializer was judged where it was written.
+  // a read the user wrote, so it must not drive this rule; see also
+  // inRebuiltOrSynthesizedCode.
   if (!Glvalue || isa<RecoveryExpr>(Glvalue->IgnoreParens()) ||
-      (!AfterFlowPass && rebuildingDefaultArgOrInit()))
+      (!AfterFlowPass && inRebuiltOrSynthesizedCode()))
     return;
   // The expression-check template policy (ProfilesFrameworkInternals.rst,
   // "Check Sites").
@@ -3123,10 +3125,10 @@ void SemaProfiles::checkInitProfileSubobjectWrite(SourceLocation Loc,
   if (!isProfileLive("std::init"))
     return;
   // A RecoveryExpr is a placeholder for an expression that already failed, not
-  // a store the user wrote, so it must not drive this rule. A rebuilt default
-  // argument or initializer was judged where it was written.
+  // a store the user wrote, so it must not drive this rule; see also
+  // inRebuiltOrSynthesizedCode.
   if (!LHS || isa<RecoveryExpr>(LHS->IgnoreParens()) ||
-      (!AfterFlowPass && rebuildingDefaultArgOrInit()))
+      (!AfterFlowPass && inRebuiltOrSynthesizedCode()))
     return;
   // The expression-check template policy (ProfilesFrameworkInternals.rst,
   // "Check Sites").
