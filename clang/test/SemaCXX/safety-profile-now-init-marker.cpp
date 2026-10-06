@@ -16,6 +16,8 @@ int g;
 void fill_after_name [[now_init]] (int *p [[ref_to_uninit]]);
 [[now_init]] void fill_many(int n, int *p [[ref_to_uninit]], int *q);
 [[now_init]] int *fill_and_return(int *p [[ref_to_uninit]]);
+struct Handle { int *p; };
+[[now_init]] void fill_handle(Handle h [[ref_to_uninit]]);
 
 struct S {
   [[now_init]] void fill_member(int *p [[ref_to_uninit]]);
@@ -81,9 +83,9 @@ struct BadField {
 // The [[ref_to_uninit]] on a non-pointer parameter is itself rejected and
 // dropped, leaving the function with no marked parameter: the vacuity error
 // fires alongside.
-[[now_init]] void bad_dropped_marker(int v [[ref_to_uninit]]); // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
+[[now_init]] void bad_dropped_marker(int v [[ref_to_uninit]]); // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
                                                                // expected-error {{'now_init' attribute requires at least one parameter marked '[[ref_to_uninit]]'}} \
-                                                               // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
+                                                               // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
                                                                // no-profiles-error {{'now_init' attribute requires at least one parameter marked '[[ref_to_uninit]]'}}
 
 // A constructor cannot carry the attribute

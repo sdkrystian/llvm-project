@@ -1098,9 +1098,24 @@ bool SemaProfiles::diagnoseInvalidUninitMarker(const Decl *D,
   return false;
 }
 
+bool SemaProfiles::isHandleType(QualType T) {
+  if (T.isNull() || T->isDependentType() || T->isReferenceType())
+    return false;
+  const CXXRecordDecl *RD = T->getAsCXXRecordDecl();
+  return RD && !RD->isUnion();
+}
+
 bool SemaProfiles::diagnoseInvalidRefToUninitMarker(const Decl *D,
                                                     SourceLocation AttrLoc,
                                                     bool Diagnose) {
+  // A structured binding names the members it decomposes, which carry their
+  // own markers, whatever its type.
+  if (isa<DecompositionDecl>(D)) {
+    if (Diagnose)
+      Diag(AttrLoc, diag::err_ref_to_uninit_attr_structured_binding);
+    return true;
+  }
+
   QualType T;
   if (const auto *FD = dyn_cast<FunctionDecl>(D))
     T = FD->getReturnType();
@@ -1112,6 +1127,8 @@ bool SemaProfiles::diagnoseInvalidRefToUninitMarker(const Decl *D,
   if (T->isDependentType() || T->isUndeducedType())
     return false;
 
+  if (isHandleType(T))
+    return false;
   if ((!T->isPointerType() && !T->isReferenceType()) ||
       T->isFunctionPointerType() || T->isFunctionReferenceType()) {
     if (Diagnose)

@@ -2,9 +2,10 @@
 // RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 %s
 
 // The [[ref_to_uninit]] marker is recognized regardless of -fprofiles. It
-// applies to pointers, references, and pointer/reference-returning functions;
-// with no profile enforced it has no effect on those valid subjects. Other
-// placements are rejected regardless of -fprofiles.
+// applies to pointers, references, objects of non-union class type (handles),
+// and functions returning them; with no profile enforced it has no effect on
+// those valid subjects. Other placements are rejected regardless of
+// -fprofiles.
 
 int g;
 
@@ -22,18 +23,18 @@ struct S {
   int *m [[ref_to_uninit]];
 };
 
-int bad_scalar [[ref_to_uninit]]; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
-                                  // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+int bad_scalar [[ref_to_uninit]]; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
+                                  // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}}
 
-[[ref_to_uninit]] int bad_array[3]; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
-                                    // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+[[ref_to_uninit]] int bad_array[3]; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
+                                    // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}}
 
-[[ref_to_uninit]] void bad_return(); // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
-                                     // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+[[ref_to_uninit]] void bad_return(); // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
+                                     // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}}
 
 struct BadMember {
-  int m [[ref_to_uninit]]; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
-                           // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+  int m [[ref_to_uninit]]; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
+                           // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}}
 };
 
 // A function pointer or reference (or a function returning one) denotes a
@@ -41,30 +42,30 @@ struct BadMember {
 // and is rejected -- like a pointer-to-member, which is not a pointer type.
 void some_fn();
 
-void (*bad_fn_ptr [[ref_to_uninit]])(); // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
-                                        // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+void (*bad_fn_ptr [[ref_to_uninit]])(); // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
+                                        // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}}
 
-void (&bad_fn_ref [[ref_to_uninit]])() = some_fn; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
-                                                  // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+void (&bad_fn_ref [[ref_to_uninit]])() = some_fn; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
+                                                  // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}}
 
-[[ref_to_uninit]] void (*bad_ret_fn_ptr())(); // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
-                                              // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+[[ref_to_uninit]] void (*bad_ret_fn_ptr())(); // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
+                                              // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}}
 
 struct C { void mf(); };
-void (C::*bad_mem_fn_ptr [[ref_to_uninit]])(); // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
-                                               // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+void (C::*bad_mem_fn_ptr [[ref_to_uninit]])(); // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
+                                               // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}}
 
 struct BadFnPtrMember {
-  void (*m [[ref_to_uninit]])(); // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
-                                 // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+  void (*m [[ref_to_uninit]])(); // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
+                                 // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}}
 };
 
 // A dependent subject is not validated on the template pattern; the check
 // runs at instantiation, once the substituted type is known, and the marker
 // is dropped when it is invalid there.
 template <typename T> struct DependentMember {
-  T m [[ref_to_uninit]]; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
-                         // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+  T m [[ref_to_uninit]]; // expected-error 2 {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
+                         // no-profiles-error 2 {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}}
 };
 template struct DependentMember<int *>;
 template struct DependentMember<int>; // expected-note {{in instantiation of template class 'DependentMember<int>' requested here}} \
@@ -79,15 +80,15 @@ template <typename T> void dependent_param(T p [[ref_to_uninit]]) {}
 template void dependent_param<int *>(int *);
 template void dependent_param<int>(int);
 
-template <typename T> [[ref_to_uninit]] T dependent_return() { return T{}; } // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
-                                                                             // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+template <typename T> [[ref_to_uninit]] T dependent_return() { return T{}; } // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
+                                                                             // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}}
 template int *dependent_return<int *>();
 template int dependent_return<int>(); // expected-note {{in instantiation of function template specialization 'dependent_return<int>' requested here}} \
                                       // no-profiles-note {{in instantiation of function template specialization 'dependent_return<int>' requested here}}
 
 template <typename T> void dependent_local() {
-  T v [[ref_to_uninit]]; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
-                         // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+  T v [[ref_to_uninit]]; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
+                         // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}}
 }
 template void dependent_local<int *>();
 template void dependent_local<int>(); // expected-note {{in instantiation of function template specialization 'dependent_local<int>' requested here}} \
@@ -99,13 +100,13 @@ auto *deduced_star [[ref_to_uninit]] = &g;
 decltype(auto) deduced_ref [[ref_to_uninit]] = (g);
 
 // A deduced non-pointer type is rejected once deduced
-auto deduced_int [[ref_to_uninit]] = 1; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
-                                        // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+auto deduced_int [[ref_to_uninit]] = 1; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
+                                        // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}}
 
 // A deduced local of a template is validated per instantiation
 template <typename T> void deduced_local() {
-  auto v [[ref_to_uninit]] = T{}; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
-                                  // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+  auto v [[ref_to_uninit]] = T{}; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
+                                  // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}}
 }
 template void deduced_local<int *>();
 template void deduced_local<int>(); // expected-note {{in instantiation of function template specialization 'deduced_local<int>' requested here}} \
@@ -125,18 +126,18 @@ decltype(auto) deduced_ref_ret [[ref_to_uninit]] () { return (g); }
 auto deduced_lambda = [] [[ref_to_uninit]] () { return &g; };
 
 // A deduced non-pointer return type is rejected at the end of the body
-auto deduced_int_ret [[ref_to_uninit]] () { return 1; } // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
-                                                        // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
-auto deduced_void_ret [[ref_to_uninit]] () {} // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
-                                              // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
-auto deduced_int_lambda = [] [[ref_to_uninit]] () { return 1; }; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
-                                                                 // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+auto deduced_int_ret [[ref_to_uninit]] () { return 1; } // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
+                                                        // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}}
+auto deduced_void_ret [[ref_to_uninit]] () {} // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
+                                              // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}}
+auto deduced_int_lambda = [] [[ref_to_uninit]] () { return 1; }; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
+                                                                 // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}}
 
 // A marker on a forward declaration is validated at the definition
 auto deduced_fwd [[ref_to_uninit]] ();
 auto deduced_fwd () { return &g; }
-auto deduced_fwd_bad [[ref_to_uninit]] (); // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
-                                           // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+auto deduced_fwd_bad [[ref_to_uninit]] (); // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
+                                           // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}}
 auto deduced_fwd_bad () { return 1; }
 
 // A generic lambda's deduced return type is validated per instantiation
@@ -146,8 +147,49 @@ void call_deduced_generic_lambda() {
 }
 
 // A function template's deduced return type is validated per instantiation
-template <typename T> auto deduced_tmpl_ret [[ref_to_uninit]] () { return T{}; } // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}} \
-                                                                                // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, and functions returning them}}
+template <typename T> auto deduced_tmpl_ret [[ref_to_uninit]] () { return T{}; } // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
+                                                                                // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}}
 int *deduced_tmpl_ptr = deduced_tmpl_ret<int *>();
 int deduced_tmpl_int = deduced_tmpl_ret<int>(); // expected-note {{in instantiation of function template specialization 'deduced_tmpl_ret<int>' requested here}} \
                                                 // no-profiles-note {{in instantiation of function template specialization 'deduced_tmpl_ret<int>' requested here}}
+
+// A non-union class object is a handle and carries the marker
+struct Handle { int *p; int *get() const; };
+struct Incomplete;
+union Union { int *p; int i; };
+enum Enum { E0 };
+
+Handle handle_var [[ref_to_uninit]];
+extern Incomplete incomplete_var [[ref_to_uninit]];
+void handle_param(Handle h [[ref_to_uninit]]);
+Handle handle_return [[ref_to_uninit]] ();
+[[ref_to_uninit]] Handle handle_return_prefix();
+Handle &handle_ref [[ref_to_uninit]] = handle_var;
+struct HandleMember {
+  Handle m [[ref_to_uninit]];
+};
+template struct DependentMember<Handle>;
+template void dependent_param<Handle>(Handle);
+auto deduced_handle [[ref_to_uninit]] = Handle{};
+auto deduced_handle_ret [[ref_to_uninit]] () { return Handle{}; }
+
+// A union, an enumeration, and an array of handles are rejected
+Union union_var [[ref_to_uninit]]; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
+                                   // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}}
+Enum enum_var [[ref_to_uninit]]; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
+                                 // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}}
+[[ref_to_uninit]] Handle handle_array[2]; // expected-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}} \
+                                          // no-profiles-error {{'ref_to_uninit' attribute only applies to pointers, references, non-union classes, and functions returning them}}
+template struct DependentMember<Union>; // expected-note {{in instantiation of template class 'DependentMember<Union>' requested here}} \
+                                        // no-profiles-note {{in instantiation of template class 'DependentMember<Union>' requested here}}
+
+// A structured binding is rejected whatever its type
+struct Pair { int *a; int *b; };
+void structured_binding(Pair pr) {
+  [[ref_to_uninit]] auto [a, b] = pr; // expected-error {{'ref_to_uninit' attribute cannot be applied to a structured binding}} \
+                                      // no-profiles-error {{'ref_to_uninit' attribute cannot be applied to a structured binding}}
+}
+template <typename T> void dependent_structured_binding(T t) {
+  [[ref_to_uninit]] auto [a, b] = t; // expected-error {{'ref_to_uninit' attribute cannot be applied to a structured binding}} \
+                                     // no-profiles-error {{'ref_to_uninit' attribute cannot be applied to a structured binding}}
+}

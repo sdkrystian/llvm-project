@@ -3833,6 +3833,9 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
                         bool RawExempt = false,
                         SemaProfiles::FlowLeafUse Use =
                             SemaProfiles::FlowLeafUse::Plain) {
+    // A handle argument names no tracked storage.
+    if (SemaProfiles::isHandleType(ParamTy))
+      return false;
     bool AsPointerValue;
     const Expr *Operand =
         SemaProfiles::bindingSourceOperand(Arg, ParamTy, AsPointerValue);
@@ -5377,7 +5380,7 @@ static bool isCurrentObjectLifecycleUse(Sema &S, const Stmt *St) {
   forEachArgumentBinding(
       S.Context, CE,
       [&](const ParmVarDecl *P, QualType, const Expr *Arg, bool Variadic) {
-        Found |= P && !Variadic &&
+        Found |= P && !Variadic && !SemaProfiles::isHandleType(P->getType()) &&
                  (Roles.isMarkedParam(P) || Roles.initializesParam(P) ||
                   Roles.destroysParam(P) ||
                   Roles.releasesParam(P, /*TrustedOnly=*/false)) &&

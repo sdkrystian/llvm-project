@@ -381,7 +381,9 @@ Following the paper:
 - An object marked ``[[uninit]]`` must be assigned before it is read, which
   is verified with simple, local flow analysis (§1.3).
 - A pointer or reference to uninitialized memory must be marked with the
-  ``[[ref_to_uninit]]`` attribute, and reads through it are rejected.
+  ``[[ref_to_uninit]]`` attribute, and reads through it are rejected; a
+  *handle* -- a smart pointer, a span, an iterator -- can carry the marker
+  too (§4.6, §9.3).
 - Non-local objects must be initialized at compile time (§3).
 - Implicit initialization counts: a default constructor or the
   zero-initialization of statics initializes an object, and a class with a
@@ -407,8 +409,10 @@ or after a parameter list -- are rejected: neither
 compiles.  A marker on a declaration whose type is deduced
 (``auto p [[ref_to_uninit]] = ...;``, ``auto f [[ref_to_uninit]] () { ... }``)
 is validated against the deduced type: a variable's at its initializer, a
-function's or lambda's return type at the end of its body.  The markers'
-exact placement and spelling track an open committee question (P4222R2 §4.7).
+function's or lambda's return type at the end of its body.  A structured
+binding cannot carry ``[[ref_to_uninit]]``, whatever its type: the members it
+names carry their own markers.  The markers' exact placement and spelling
+track an open committee question (P4222R2 §4.7).
 
 Each rule has a name, so it can be suppressed individually with
 ``[[profiles::suppress(std::init, rule: "name")]]`` (see `Suppressing
@@ -1107,6 +1111,24 @@ destination accepts storage in any state and is initialized by the call, so
 idiom (a ``va_list`` with neither an initializer nor the marker is
 ``uninit_decl``), while ``va_copy``'s source and ``va_end``'s operand are
 ordinary unmarked parameters, so an uninitialized ``va_list`` is rejected there.
+
+
+Smart Pointers, Spans, and Other Handles
+----------------------------------------
+
+An object of class type that refers to memory -- a smart pointer, a span, an
+iterator -- is a *handle*, and any non-union class may carry
+``[[ref_to_uninit]]`` like a pointer: a variable, a parameter, a data member,
+or a function's return (§4.6, §9.3).
+
+.. code-block:: c++
+
+   void init(std::span<X> s [[ref_to_uninit]], int i1, int i2);
+   std::unique_ptr<int> p [[ref_to_uninit]];
+
+A union, an array of handles, and a structured binding cannot carry the
+marker.  A reference to a class keeps its meaning: it refers to the class
+object itself.
 
 
 Constructors

@@ -999,11 +999,19 @@ public:
   /// undeduced type defers to checkDeducedMarkers.
   void checkInitProfileMarkerPlacement(const Decl *D);
 
+  /// True if \p T is a *handle* type: a non-dependent, non-reference class
+  /// type other than a union, complete or not -- an object that refers to
+  /// memory and may carry [[ref_to_uninit]] (a smart pointer, a span, an
+  /// iterator; P4222R2 §4.6, §9.3).
+  static bool isHandleType(QualType T);
+
   /// [[ref_to_uninit]] is only meaningful on a pointer or reference to an
-  /// object (for a function, its return type). Returns true when \p D's type
-  /// is invalid for the marker, diagnosing err_ref_to_uninit_attr_invalid_type
-  /// at \p AttrLoc unless \p Diagnose is false. A dependent type returns
-  /// false: validation defers to the instantiation re-check in
+  /// object, or on a handle (isHandleType) -- for a function, its return
+  /// type. Returns true when \p D is a structured binding
+  /// (err_ref_to_uninit_attr_structured_binding) or its type is invalid for
+  /// the marker (err_ref_to_uninit_attr_invalid_type), diagnosing at
+  /// \p AttrLoc unless \p Diagnose is false. A dependent type returns false:
+  /// validation defers to the instantiation re-check in
   /// Sema::InstantiateAttrs, which drops the marker when the substituted type
   /// is invalid -- silently in a SFINAE context (\p Diagnose false there), so
   /// the marker can never affect overload resolution; a dropped marker is

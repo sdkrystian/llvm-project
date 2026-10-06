@@ -880,7 +880,7 @@ void Sema::InstantiateAttrs(const MultiLevelTemplateArgumentList &TemplateArgs,
     // (declaration substitution during deduction) the invalid marker is
     // dropped silently: the marker must not affect overload resolution, and a
     // dropped marker is inert -- the ref_to_uninit rule never consults a
-    // marker on a non-pointer/reference entity.
+    // marker on an entity that is not a pointer, a reference, or a handle.
     if (isa<RefToUninitAttr>(TmplAttr) &&
         Profiles().diagnoseInvalidRefToUninitMarker(
             New, TmplAttr->getLocation(), /*Diagnose=*/!isSFINAEContext()))

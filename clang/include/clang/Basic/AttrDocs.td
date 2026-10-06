@@ -1020,9 +1020,9 @@ def RefToUninitDocs : Documentation {
   let Category = DocCatVariable;
   let Heading = "ref_to_uninit";
   let Content = [{
-The ``[[ref_to_uninit]]`` attribute marks a pointer, reference, or
-pointer-returning function as referring to *uninitialized* memory. It is
-purely informational: it has no effect on code generation.
+The ``[[ref_to_uninit]]`` attribute marks a pointer, reference, handle, or
+function returning one as referring to *uninitialized* memory. It is purely
+informational: it has no effect on code generation.
 
 The attribute exists to support the initialization profile (see
 :doc:`ProfilesFramework`). That profile bans forming an ordinary pointer or
@@ -1035,12 +1035,16 @@ only be bound to initialized memory.
 
 The attribute applies to a variable, non-static data member, function
 parameter, or function (for its return value) whose type is a pointer or
-reference to an object; applying it elsewhere is diagnosed regardless of
-``-fprofiles``. A function pointer or reference (or a pointer-to-member)
-denotes a function or member, never uninitialized memory, so it is rejected.
-A deduced type (``auto``, ``decltype(auto)``) is checked once deduced: a
-variable's at its initializer, a function's or lambda's return type at the
-end of its body.
+reference to an object, or a *handle*: an object of non-union class type that
+refers to memory, such as a smart pointer, a span, or an iterator
+(``void init(std::span<X> s [[ref_to_uninit]]);``). A reference to a class
+refers to the class object itself, as any reference does. Applying the
+attribute elsewhere is diagnosed regardless of ``-fprofiles``. A function
+pointer or reference (or a pointer-to-member) denotes a function or member,
+never uninitialized memory, so it is rejected, as are a union, an array, and a
+structured binding (whose members carry their own markers). A deduced type
+(``auto``, ``decltype(auto)``) is checked once deduced: a variable's at its
+initializer, a function's or lambda's return type at the end of its body.
 
 Outside the initialization profile the attribute is otherwise silently
 accepted and has no effect, so code that uses it remains valid when compiled

@@ -7258,14 +7258,9 @@ static void handleUninitAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
 
 static void handleRefToUninitAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   // The SubjectList restricts D to a variable, non-static data member, or
-  // function. "Refers to uninitialized memory" is only meaningful for a
-  // pointer or reference to an object (for a function, its return value), so
-  // reject any other type. A function pointer or reference denotes a function,
-  // never uninitialized storage, so the marker could never be satisfied; reject
-  // it too (like a pointer-to-member, which is not a pointer type here). Like
-  // the [[uninit]] subject checks, this is not profile policy and so fires
-  // regardless of -fprofiles. A dependent or undeduced subject defers; see
-  // SemaProfiles::diagnoseInvalidRefToUninitMarker.
+  // function; the subject's type -- a pointer or reference to an object, or a
+  // handle -- and the structured-binding ban are checked by
+  // SemaProfiles::diagnoseInvalidRefToUninitMarker, regardless of -fprofiles.
   if (S.Profiles().diagnoseInvalidRefToUninitMarker(D, AL.getLoc())) {
     AL.setInvalid();
     return;
