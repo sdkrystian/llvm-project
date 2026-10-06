@@ -748,7 +748,11 @@ value or dereference of a marked pointer or reference, pointer and reference
 casts of those and the standard identity functions applied to them, a call to a
 marked function, a call to a known allocator (``malloc``, ``aligned_alloc``,
 ``alloca``, raw ``::operator new``, ``std::allocator<T>::allocate``, and
-``std::allocator_traits<A>::allocate`` calls return uninitialized memory,
+``std::allocator_traits<A>::allocate`` calls return uninitialized memory, so
+do the handles ``std::make_unique_for_overwrite``,
+``std::make_shared_for_overwrite``, and ``std::allocate_shared_for_overwrite``
+return where default-initialization of their object leaves a scalar
+indeterminate (see `Smart Pointers, Spans, and Other Handles`_),
 ``calloc`` zero-initialized memory, and ``realloc`` is unclassified; §4.3 --
 trusted recognition keys on Clang's builtin IDs, and where those are absent,
 under ``-fno-builtin`` or ``-ffreestanding``, a name-recognized allocator is
@@ -1202,10 +1206,15 @@ judged where it lands:
      std::unique_ptr<int> q(new int(5));       // OK
    }
 
-An owning smart pointer takes its pointer argument, never its deleter or
-allocator (the aliasing constructor of ``std::shared_ptr`` takes its pointer
-argument), and a null or default-constructed handle refers to nothing, so it
-suits either marking.  Storage that is flow-tracked counts at the binding:
+The factories ``std::make_unique_for_overwrite``,
+``std::make_shared_for_overwrite``, and ``std::allocate_shared_for_overwrite``
+return a handle to a default-initialized object, so
+``auto p = std::make_unique_for_overwrite<int>();`` needs the marker, while
+``std::make_unique_for_overwrite<std::string>()`` does not.  An owning smart
+pointer takes its pointer argument, never its deleter or allocator (the
+aliasing constructor of ``std::shared_ptr`` takes its pointer argument), and a
+null or default-constructed handle refers to nothing, so it suits either
+marking.  Storage that is flow-tracked counts at the binding:
 after ``memset(arr, 0, sizeof arr)`` an unmarked ``std::span<int> s(arr)`` is
 accepted.  Any other class refers to initialized memory unless its
 constructor has a parameter its author marked ``[[ref_to_uninit]]``: then

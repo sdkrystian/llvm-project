@@ -1540,6 +1540,11 @@ enum class KnownCalleeReturn {
   /// Returns what an unmarked direct callee returns: trusted as initialized
   /// (a release callee's void return, a std lifecycle function's result).
   ReturnsTrusted,
+  /// Returns a handle owning a default-initialized object of the type of
+  /// the callee's first template argument (std::make_unique_for_overwrite):
+  /// uninitialized where that default-initialization leaves a scalar
+  /// indeterminate.
+  ReturnsDefaultInitialized,
 };
 
 // True for a direct declaration of replaceable global operator new /
@@ -1769,6 +1774,17 @@ stdRow(StringRef Name, unsigned Arity, unsigned Param, KnownParamRole Role,
   return E;
 }
 
+/// A row keyed by namespace-std name alone, of any arity, describing only
+/// what the callee returns.
+static constexpr KnownCalleeEntry stdReturnRow(StringRef Name,
+                                               KnownCalleeReturn Return) {
+  KnownCalleeEntry E;
+  E.Key = KnownCalleeKey::StdName;
+  E.Name = Name;
+  E.Return = Return;
+  return E;
+}
+
 /// A row keyed by the name of a std::ranges customization point object and
 /// the arity of its call operator, for the overload taking a pointer
 /// iterator.
@@ -1919,6 +1935,12 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
     stdRow("destroy", 3, 1, KnownParamRole::Destroy, 2),
     stdRow("destroy_n", 2, 0, KnownParamRole::Destroy),
     stdRow("destroy_n", 3, 1, KnownParamRole::Destroy),
+    stdReturnRow("make_unique_for_overwrite",
+                 KnownCalleeReturn::ReturnsDefaultInitialized),
+    stdReturnRow("make_shared_for_overwrite",
+                 KnownCalleeReturn::ReturnsDefaultInitialized),
+    stdReturnRow("allocate_shared_for_overwrite",
+                 KnownCalleeReturn::ReturnsDefaultInitialized),
     cpoRow("construct_at", KnownCalleeEntry::AnyArity, 0,
            KnownParamRole::Construct),
     cpoRow("destroy_at", 1, 0, KnownParamRole::Destroy),
@@ -1960,14 +1982,15 @@ static bool hasParamShape(QualType T, ParamShape Shape) {
 }
 
 /// True if the name-keyed row \p Entry matches \p FD, a callee whose name
-/// matched: its arity, and the shape of its role parameter.
+/// matched: its arity, and the shape of its role parameter if it has one.
 static bool matchesNameKeyedRow(const KnownCalleeEntry &Entry,
                                 const FunctionDecl *FD) {
   unsigned NumParams = FD->getNumParams();
-  return (Entry.Arity == KnownCalleeEntry::AnyArity ||
-          Entry.Arity == NumParams) &&
-         Entry.Param < NumParams &&
-         hasParamShape(FD->getParamDecl(Entry.Param)->getType(), Entry.Shape);
+  if (Entry.Arity != KnownCalleeEntry::AnyArity && Entry.Arity != NumParams)
+    return false;
+  return Entry.Role == KnownParamRole::None ||
+         (Entry.Param < NumParams &&
+          hasParamShape(FD->getParamDecl(Entry.Param)->getType(), Entry.Shape));
 }
 
 /// The namespace named \p Name directly inside std that encloses \p D, or
@@ -2618,11 +2641,32 @@ pointerRefersToUninitStorage(ASTContext &Ctx, const Expr *E,
 static UninitStorage classifyHandleSource(ASTContext &Ctx, const Expr *E,
                                           UninitAccessOpts Opts);
 
+/// The state of what a ReturnsDefaultInitialized callee \p FD returns: the
+/// default-initialization of its first template argument's base element
+/// type, [[uninit]] members counted (pointerRefersToUninitStorage's
+/// new-expression arm); Unknown for a dependent or incomplete type.
+static UninitStorage classifyDefaultInitializedResult(ASTContext &Ctx,
+                                                      const FunctionDecl *FD) {
+  const TemplateArgumentList *Args = FD->getTemplateSpecializationArgs();
+  if (!Args || Args->size() == 0 ||
+      Args->get(0).getKind() != TemplateArgument::Type)
+    return UninitStorage::Unknown;
+  QualType T = Ctx.getBaseElementType(Args->get(0).getAsType());
+  if (T->isDependentType() || T->isIncompleteType())
+    return UninitStorage::Unknown;
+  llvm::SmallPtrSet<const CXXRecordDecl *, 8> Visited;
+  return defaultInitLeavesScalarIndeterminateImpl(
+             Ctx, T, /*HonorUninitMarkers=*/false, Visited)
+             ? UninitStorage::Uninitialized
+             : UninitStorage::Initialized;
+}
+
 /// Classify a terminal of the handle walk: a named variable, parameter, or
 /// member is Uninitialized when marked and Initialized otherwise, except
 /// that a marked reference to a class is Unknown (it refers to the handle's
-/// own uninitialized storage); a call takes its marked callee's state, and
-/// is otherwise Initialized, or Unknown with no direct callee; a std-table
+/// own uninitialized storage); a call takes its marked callee's state, then
+/// its known-callee row's (classifyDefaultInitializedResult), and is
+/// otherwise Initialized, or Unknown with no direct callee; a std-table
 /// construction with no transfer argument is Unknown, and any other
 /// construction is Uninitialized when its constructor has an author-marked
 /// parameter; an initializer list is Unknown; and any other glvalue -- a
@@ -2648,8 +2692,12 @@ static UninitStorage classifyHandleTerminal(ASTContext &Ctx, const Expr *E,
     const FunctionDecl *FD = CE->getDirectCallee();
     if (!FD)
       return UninitStorage::Unknown;
-    return FD->hasAttr<RefToUninitAttr>() ? UninitStorage::Uninitialized
-                                          : UninitStorage::Initialized;
+    if (FD->hasAttr<RefToUninitAttr>())
+      return UninitStorage::Uninitialized;
+    if (const KnownCalleeEntry *Entry = findKnownCallee(FD);
+        Entry && Entry->Return == KnownCalleeReturn::ReturnsDefaultInitialized)
+      return classifyDefaultInitializedResult(Ctx, FD);
+    return UninitStorage::Initialized;
   }
   if (const ValueDecl *VD = SemaProfiles::getDirectlyNamedDecl(E);
       VD && isa<VarDecl, FieldDecl, IndirectFieldDecl>(VD)) {
@@ -2738,6 +2786,8 @@ static UninitStorage classifyRefToUninitCallee(ASTContext &Ctx,
       case KnownCalleeReturn::ReturnsUnknown:
         return UninitStorage::Unknown;
       case KnownCalleeReturn::ReturnsTrusted:
+      // A handle result reaches neither recognizer (classifyHandleTerminal).
+      case KnownCalleeReturn::ReturnsDefaultInitialized:
         break;
       }
     }

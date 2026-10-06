@@ -11,6 +11,11 @@
 // RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -DLEADING_ERROR -fexceptions -fcxx-exceptions %t/libcxx.cpp
 // RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -Wunreachable-code -fexceptions -fcxx-exceptions %t/libcxx.cpp
 // RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %t/libcxx.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -fexceptions -fcxx-exceptions -isystem %t/sys %t/overwrite.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -DLEADING_ERROR -fexceptions -fcxx-exceptions -isystem %t/sys %t/overwrite.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -Wunreachable-code -fexceptions -fcxx-exceptions -isystem %t/sys %t/overwrite.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -isystem %t/sys %t/overwrite.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected,strict -fprofiles -fprofiles-verify-deferred-checks -fno-profiles-exempt-system-headers -std=c++23 -isystem %t/sys %t/overwrite.cpp
 
 // std::init: a handle -- a smart pointer, a span, an iterator -- marked
 // [[ref_to_uninit]] refers to uninitialized memory (P4222R2 §4.6, §9.3).
@@ -134,6 +139,20 @@ public:
   unique_ptr(const unique_ptr &) = delete;
   unique_ptr &operator=(const unique_ptr &) = delete;
 };
+template <class T, class D> class unique_ptr<T[], D> {
+  T *_M_p;
+
+public:
+  using pointer = T *;
+  constexpr unique_ptr() noexcept;
+  template <class U> explicit unique_ptr(U p) noexcept;
+  unique_ptr(unique_ptr &&) = default;
+  ~unique_ptr() noexcept;
+  T &operator[](size_t i) const;
+  pointer get() const noexcept;
+  template <class U> void reset(U p) noexcept;
+  void reset(nullptr_t = nullptr) noexcept;
+};
 
 template <class T> class weak_ptr;
 template <class T> class __shared_ptr {
@@ -214,10 +233,32 @@ using string = basic_string<char>;
 } // namespace std
 extern "C" void *memset(void *, int, std::size_t);
 
+//--- sys/std_overwrite.h
+// libstdc++'s *_for_overwrite factories.
+#include <std_handles.h>
+namespace std {
+template <class T> struct _MakeUniq {
+  using __single_object = unique_ptr<T>;
+};
+template <class T> struct _MakeUniq<T[]> {
+  using __array = unique_ptr<T[]>;
+  using __element = T;
+};
+template <class T>
+typename _MakeUniq<T>::__single_object make_unique_for_overwrite() {
+  return unique_ptr<T>(new T);
+}
+template <class T>
+typename _MakeUniq<T>::__array make_unique_for_overwrite(size_t n) {
+  return unique_ptr<T>(new typename _MakeUniq<T>::__element[n]);
+}
+template <class T> shared_ptr<T> make_shared_for_overwrite();
+} // namespace std
+
 //--- test.cpp
 // no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
 [[profiles::enforce(std::init)]];
-#include <std_handles.h>
+#include <std_overwrite.h>
 
 #ifdef LEADING_ERROR
 int leading_unrelated_error = undeclared_identifier;
@@ -591,6 +632,24 @@ void named_and_by_value(std::span<int> sm [[ref_to_uninit]], std::span<int> su,
   a = b;
 }
 
+// The *_for_overwrite factories return a handle to a default-initialized
+// object (P4222R2 §4.7)
+struct Init {
+  int v = 0;
+};
+void for_overwrite(std::size_t n) {
+  std::unique_ptr<int> p = std::make_unique_for_overwrite<int>(); // expected-error {{handle of type 'std::unique_ptr<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  std::unique_ptr<int> m [[ref_to_uninit]] = std::make_unique_for_overwrite<int>();
+  int k = *m; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  std::unique_ptr<int[]> a [[ref_to_uninit]] =
+      std::make_unique_for_overwrite<int[]>(n);
+  int e = a[0]; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  std::shared_ptr<int> s = std::make_shared_for_overwrite<int>(); // expected-error {{handle of type 'std::shared_ptr<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  std::unique_ptr<Init> c = std::make_unique_for_overwrite<Init>();
+  std::unique_ptr<Init> cm [[ref_to_uninit]] = std::make_unique_for_overwrite<Init>(); // expected-error {{handle of type 'std::unique_ptr<Init>' marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)p, (void)k, (void)e, (void)s, (void)c, (void)cm;
+}
+
 //--- libcxx.cpp
 // libc++'s pointer wrapper, std::__1::__wrap_iter, is in the table.
 // no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
@@ -621,4 +680,25 @@ int wrap(int *p [[ref_to_uninit]]) {
   std::__wrap_iter<const int *> c = m; // expected-error {{handle of type 'std::__wrap_iter<const int *>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   (void)w, (void)c;
   return *m; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+//--- overwrite.cpp
+// A factory's call is classified by its row; its definition is judged as
+// written, so it returns an uninitialized handle unmarked.
+// no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
+[[profiles::enforce(std::init)]];
+#include <std_overwrite.h>
+
+#ifdef LEADING_ERROR
+int leading_unrelated_error = undeclared_identifier;
+// expected-error@-1 {{use of undeclared identifier 'undeclared_identifier'}}
+// no-profiles-error@-2 {{use of undeclared identifier 'undeclared_identifier'}}
+#endif
+// strict-error@std_overwrite.h:* {{to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+// strict-error@std_overwrite.h:* {{to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+
+int factory(std::size_t n) {
+  std::unique_ptr<int> p [[ref_to_uninit]] = std::make_unique_for_overwrite<int>(); // strict-note {{in instantiation of function template specialization 'std::make_unique_for_overwrite<int>' requested here}}
+  std::unique_ptr<int[]> a [[ref_to_uninit]] = std::make_unique_for_overwrite<int[]>(n); // strict-note {{in instantiation of function template specialization 'std::make_unique_for_overwrite<int[]>' requested here}}
+  return *p + a[0]; // expected-error 2 {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
 }

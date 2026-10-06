@@ -910,7 +910,11 @@ by builtin ID, by form for the ``operator new`` / ``operator delete`` families,
 or by the name of a namespace-std function or ``std::ranges`` object and its
 arity (``KnownCalleeKey``), with a name-only *untrusted* fallback where the ID
 is absent; the roles reach the funnels and the CFG pass through
-``getCalleeLifecycleRoles``.  A row names its *role parameter*, the one
+``getCalleeLifecycleRoles``.  A row may describe only what the callee returns:
+the ``std::*_for_overwrite`` factories return a handle to a default-initialized
+object (``ReturnsDefaultInitialized``), which the handle recognizer classifies
+from the factory's first template argument as the new-expression arm
+classifies ``new T``.  A row names its *role parameter*, the one
 parameter the call acts on, and what the call does to the storage bound to it
 (``KnownParamRole``); the roles are per parameter, so the callee's other
 arguments are ordinary bindings.  A row's *initializing parameter* is a role
@@ -1522,10 +1526,7 @@ Missed Diagnostics
   storage.
 - ``va_end`` ends nothing: a ``va_arg`` or a second ``va_end`` after it is
   accepted.
-- ``make_unique_for_overwrite``, ``make_shared_for_overwrite``, and
-  ``allocate_shared_for_overwrite`` return smart pointers, which cannot carry
-  the marker; a read through one is accepted (P4222R2 §4.7).
-  ``allocate_at_least`` returns a class and is unrecognized.
+- ``allocate_at_least`` returns a class and is unrecognized.
 - A function body that contains an Objective-C ``@finally`` or an SEH
   ``__finally`` anywhere has no CFG (``CFGBuilder`` models neither), so none of
   its flow-based checks run: reads of ``[[uninit]]`` locals and of tracked
