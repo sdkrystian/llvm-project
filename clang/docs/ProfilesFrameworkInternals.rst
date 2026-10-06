@@ -1197,10 +1197,12 @@ the form's answer: a copy, an escape, or a placement ``new`` of the object is
 judged by form.  A marked pointer or reference bound to it gets an
 unidentified referent (``ReseatTarget::Unknown``).
 The walk distributes each
-conditional at every step of the chain, not only at the top, and records the
-arm each leaf takes (``SemaProfiles::ShapeLeaf``), which every interpreter
-follows: a walk that stopped at a nested conditional while the recognizers saw
-through it would send tracked storage to the marker-only form judgment.  The
+conditional at every step of the chain, not only at the top -- also behind an
+implicit handle local or an unmarked local reference to a handle -- and
+records the arm each leaf takes (``SemaProfiles::ShapeLeaf``), which every
+interpreter follows: a walk that stopped at a nested conditional while the
+recognizers saw through it would send tracked storage to the marker-only form
+judgment.  The
 standard identity functions (``std::move``,
 ``std::forward``, ``std::forward_like``, ``std::move_if_noexcept``,
 ``std::as_const``) are a step of that walk, recognized by builtin ID
@@ -1257,8 +1259,42 @@ refers to at each transfer (``DefAssignEvent::Designated``,
 only below the base subobject its argument converts to.  A handle binding
 (`Handles (std::init)`_) is the pass's when a leaf below its walk's
 ``PointerValue``, ``Storage``, or ``Range`` leaves is tracked, as a pointer
-value or a glvalue; its other leaves are classified by form
-(``classifyInitHandleLeaf``).  The remaining blind spots are listed in
+value or a glvalue, or a ``Handle`` leaf names a tracked handle; its other
+leaves are classified by form (``classifyInitHandleLeaf``).  A marked local
+handle (``SemaProfiles::isFlowTrackedHandleVar``) is a ``Pointee`` entity like
+a marked pointer, its referent of the handle's value type
+(``SemaProfiles::handleValueType``).  A member call deriving a pointer or
+reference from it (``SemaProfiles::isHandleDerefCall``) is the chain's
+through-pointer step (``FlowLeafShape::ThroughHandle``, which
+``SemaProfiles::handleChainBase`` takes down to the variable through
+self-returning calls, copies, a std-table construction's first transfer
+argument -- a handle built over a marked pointer reaches the pointer's
+referent, over storage an element of it -- and implicit locals and unmarked
+local references not reached by capture), shared by the predicate and the
+resolver as every other step is: ``*up``, ``up->m``, ``*it``, ``up.get()``,
+and ``s.data()`` name the referent whole, also through a prefix
+(``s.first(2)``; a credit through it is partial, and a destroy through it is
+judged against the referent but records nothing, so a second destroy or a
+read after it is missed), and ``s[i]``,
+``front()``, ``back()``, an accessor with arguments, or a handle past its
+referent's start an element,
+which, as a marked pointer's element (P4222R2 §5.4), is never tracked and is
+judged by its form.  A handle's initializer, assignment, or ``reset`` with an
+argument reseats it to what its source's walk names (a tracked handle's
+referent, or storage a transfer leaf names whole); a ``reset()`` or an
+assignment of a non-class gives it an anonymous referent; ``++``, ``--``,
+``+=``, ``-=``, and ``std::advance`` keep it but mark it offset
+(``FlowState::Offset``), so a credit or destroy through it is partial; and
+any other non-const member call -- but one deriving a pointer or reference,
+and ``release()`` -- or a non-const reference or pointer bound to it escapes
+it, except the source of a copy or move, a transfer argument, and a standard
+library function's reference parameter other than ``std::swap``'s,
+``std::exchange``'s, and ``std::iter_swap``'s.  A member call on a conditional
+naming several handles leaves each referent unidentified, and a destructor
+call on a handle ends the handle object only.  An implicit local hands out no
+alias.  A
+credit through a handle argument reaches the referent of a ``Handle`` leaf that
+is not ``Partial``.  The remaining blind spots are listed in
 `Known Gaps (std::init)`_.
 
 
@@ -1374,17 +1410,26 @@ Deliberate Strictnesses
   base, unrecognized; the remedies are a ``[[ref_to_uninit]]``-returning
   wrapper or suppression.
 - The ``std::uninitialized_*`` credit reaches only what the whole-storage
-  write reaches: an element-form range (``&arr[0]``, P4222R2 §1.3), an offset
-  class-type iterator (``s.begin() + 1``), or one whose storage the analysis
-  does not reach earns nothing, and a marked pointer's further elements
-  (``p[1]``) are never credited.  ``std::begin(arr)`` / ``std::end(arr)`` on
-  an ``[[uninit]]`` array is rejected on both sides (the array binds
-  ``begin``'s unmarked reference parameter, and the trusted return cannot
-  feed a marked range), so ``arr, arr + n`` and the ``std::ranges`` range
-  overloads are the spellings that work.  ``std::fill`` assigns rather than
-  initializes: into a still-uninitialized ``[[uninit]]`` array it is rejected
-  like any unmarked binding (``std::uninitialized_fill`` and ``memset``
-  initialize).
+  write reaches: an element-form range (``&arr[0]``, P4222R2 §1.3) or an
+  offset class-type iterator (``s.begin() + 1``) earns nothing, and a marked
+  pointer's further elements (``p[1]``) are never credited.
+- A marked handle's referent is one object, as a marked pointer's is, and an
+  element through the handle (``s[i]``, ``s.front()``) is judged by its form,
+  as ``p[i]`` is: a read of one is rejected even after the whole range is
+  filled -- ``*s.data()`` or an unmarked copy of the handle reads it -- and an
+  element store or ``std::construct_at(&s[i])`` initializes nothing, so a fill
+  of the whole range is the way to initialize it.  ``std::begin(arr)`` /
+  ``std::end(arr)`` on an ``[[uninit]]`` array is rejected on both sides (the
+  array binds ``begin``'s unmarked reference parameter, and the trusted return
+  cannot feed a marked range), so ``arr, arr + n`` and the ``std::ranges``
+  range overloads are the spellings that work.  ``std::fill`` assigns rather
+  than initializes: into a still-uninitialized ``[[uninit]]`` array it is
+  rejected like any unmarked binding (``std::uninitialized_fill`` and
+  ``memset`` initialize).
+- A reference to a marked handle that a lambda or block reaches by capture
+  (``const auto &r = s; [&] { return *r.data(); }``) is judged by its form
+  there, as the marked handle: the referent's state is the enclosing
+  function's.
 - ``__builtin_operator_delete`` binds its operand with no parameter
   declaration in sight, so the storage-release relaxation cannot recognize
   it: passing ``[[ref_to_uninit]]`` storage keeps the unmarked-direction

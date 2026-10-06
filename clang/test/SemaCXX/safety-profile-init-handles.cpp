@@ -41,6 +41,8 @@ template <class T> struct iterator_traits<T *> {
 };
 template <class T, class... A> constexpr T *construct_at(T *p, A &&...args);
 template <class T> constexpr void destroy_at(T *p);
+template <class T> constexpr void swap(T &a, T &b) noexcept;
+template <class It, class Dist> constexpr void advance(It &it, Dist n);
 } // namespace std
 
 namespace __gnu_cxx {
@@ -105,6 +107,9 @@ public:
   constexpr span<element_type> subspan(size_type offset,
                                        size_type count = dynamic_extent) const
       noexcept;
+  template <size_t Count>
+  constexpr span<element_type, Count> first() const noexcept;
+  constexpr span<element_type> first(size_type count) const noexcept;
 };
 template <class T, size_t N> span(T (&)[N]) -> span<T, N>;
 template <class T, class End> span(T *, End) -> span<T>;
@@ -133,6 +138,7 @@ public:
   pointer operator->() const noexcept;
   pointer get() const noexcept;
   deleter_type &get_deleter() noexcept;
+  const deleter_type &get_deleter() const noexcept;
   explicit operator bool() const noexcept;
   pointer release() noexcept;
   void reset(pointer p = pointer()) noexcept;
@@ -165,6 +171,8 @@ public:
   iterator begin() noexcept;
   iterator end() noexcept;
   T &operator[](size_t n) noexcept;
+  void push_back(const T &v);
+  void push_back(T &&v);
 };
 
 template <class FwdIt, class T>
@@ -370,7 +378,7 @@ int mixed_spans(bool c, std::span<int> sm [[ref_to_uninit]],
 
 // Every reference a member of a marked handle returns is presumed
 // uninitialized, the deleter's included
-void deleter(std::unique_ptr<int> up [[ref_to_uninit]]) {
+void deleter(const std::unique_ptr<int> up [[ref_to_uninit]]) {
   auto &d = up.get_deleter(); // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   (void)d;
 }
@@ -388,7 +396,7 @@ int range_for(std::span<int> s [[ref_to_uninit]]) {
 // A copy of a marked span and a local reference to one refer to the same
 // memory
 int copied_span(std::span<int> s [[ref_to_uninit]]) {
-  std::span<int> &r = s; // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  const std::span<int> &r = s; // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   int a = r[0]; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
   return a + std::span<int>(s)[1]; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
 }
@@ -679,10 +687,12 @@ void for_overwrite(std::size_t n) {
 
 // The uninitialized_* family takes a class-type iterator or range: it must
 // refer to uninitialized memory
-void fill_through_span(std::span<int> s [[ref_to_uninit]]) {
+void fill_through_span(std::span<int> s [[ref_to_uninit]],
+                       std::span<int> t [[ref_to_uninit]],
+                       std::span<int> u [[ref_to_uninit]]) {
   std::uninitialized_fill(s.begin(), s.end(), 0);
-  std::ranges::uninitialized_fill(s.begin(), s.end(), 0);
-  std::ranges::uninitialized_fill(s, 0);
+  std::ranges::uninitialized_fill(t.begin(), t.end(), 0);
+  std::ranges::uninitialized_fill(u, 0);
 }
 void fill_initialized_range(std::vector<int> &v, std::span<int> su) {
   std::uninitialized_fill(v.begin(), v.end(), 0); // expected-error {{handle of type '__gnu_cxx::__normal_iterator<int *, std::vector<int>>' marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
@@ -733,6 +743,218 @@ void default_construct_iterator() {
   int b [[uninit]] [4];
   std::uninitialized_value_construct(std::span<int>(b).begin(), std::span<int>(b).end());
   std::uninitialized_value_construct(std::span<int>(b).begin(), std::span<int>(b).end()); // expected-error {{handle of type '__gnu_cxx::__normal_iterator<int *, std::span<int>::__iter_tag>' marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// The referent of a marked local handle is flow-tracked: a credit through
+// it initializes the referent
+int construct_through_get(std::unique_ptr<int> up [[ref_to_uninit]]) {
+  std::construct_at(up.get(), 5);
+  return *up;
+}
+int fill_then_read(std::span<int> s [[ref_to_uninit]]) {
+  int a = *s.data(); // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  std::uninitialized_fill(s.begin(), s.end(), 0);
+  std::span<int> t = s;
+  return a + *s.begin() + t[1];
+}
+
+// An element through a marked handle is judged by its form, as through a
+// marked pointer: a read is rejected in any state, and a store is trusted
+int element_form(std::span<int> s [[ref_to_uninit]]) {
+  std::uninitialized_fill(s.begin(), s.end(), 0);
+  s[1] = 5;
+  return s[0] + s.front(); // expected-error 2 {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A prefix of a marked handle starts at its referent, so a read through it
+// reads the referent; a handle past the start reaches an element
+int prefix_read(std::span<int> s [[ref_to_uninit]]) {
+  std::uninitialized_fill(s.begin(), s.end(), 0);
+  int a = *s.first(2).data() + *s.first<2>().data() + *s.subspan(0, 2).data();
+  for (int x : s.first(2))
+    a += x;
+  return a + *s.subspan(1).data(); // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+int prefix_read_unfilled(std::span<int> s [[ref_to_uninit]]) {
+  return *s.first(2).data(); // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A pointer through a prefix of a marked handle is bound as s.data() is; one
+// through a handle past the start is an element's
+void prefix_binding(std::span<int> s [[ref_to_uninit]]) {
+  int *u = s.first(2).data(); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  std::uninitialized_fill(s.begin(), s.end(), 0);
+  int *p = s.first(2).data(), *q = s.first<2>().data();
+  int *r = s.subspan(0, 2).data();
+  int *e = s.subspan(1).data(); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// A credit through a prefix's pointer initializes part of the referent
+int prefix_credit(std::span<int> s [[ref_to_uninit]]) {
+  std::construct_at(s.first(2).data(), 1);
+  int *p = s.data();
+  return *p + *s.data(); // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A local reference to a conditional of marked handles reads the chosen arm's
+// referent
+int reference_to_conditional(std::span<int> s [[ref_to_uninit]],
+                             std::span<int> t [[ref_to_uninit]], bool c) {
+  std::uninitialized_fill(s.begin(), s.end(), 0);
+  const std::span<int> &r = c ? s : t; // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  int a = *r.data(); // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  std::uninitialized_fill(t.begin(), t.end(), 0);
+  return a + *r.data(); // OK
+}
+
+// The storage a marked handle is built over is its referent
+int span_over_array() {
+  int arr [[uninit]] [4];
+  std::span<int> s [[ref_to_uninit]](arr);
+  memset(arr, 0, sizeof arr);
+  return *s.data();
+}
+
+// An initializer, an assignment, and a reset reseat the handle
+int reassign(std::span<int> s [[ref_to_uninit]],
+             std::span<int> t [[ref_to_uninit]]) {
+  std::span<int> c [[ref_to_uninit]] = s;
+  std::uninitialized_fill(c.begin(), c.end(), 0);
+  int a = *s.data();
+  c = t;
+  int b = *c.data(); // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  return a + b;
+}
+int reset_owner(std::unique_ptr<int> up [[ref_to_uninit]]) {
+  std::construct_at(up.get(), 1);
+  up.reset(new int);
+  return *up; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A non-const reference to the handle leaves its referent unknown
+void take_span(std::span<int> &s);
+int escaped(bool c, std::span<int> s [[ref_to_uninit]]) {
+  if (c)
+    std::uninitialized_fill(s.begin(), s.end(), 0);
+  take_span(s);
+  return *s.data();
+}
+
+// A range-for after a fill reads initialized elements
+int range_for_after_fill(std::span<int> s [[ref_to_uninit]]) {
+  std::uninitialized_fill(s.begin(), s.end(), 0);
+  int k = 0;
+  for (int x : s)
+    k += x;
+  return k;
+}
+
+// A move or a release hands the referent over: it lands judged, and the
+// source keeps no alias
+int moved_owner(std::unique_ptr<int> p [[ref_to_uninit]]) {
+  std::unique_ptr<int> q = static_cast<std::unique_ptr<int> &&>(p); // expected-error {{handle of type 'std::unique_ptr<int>' to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  return *q;
+}
+int released_owner() {
+  std::unique_ptr<int> p [[ref_to_uninit]](new int);
+  int *r = p.release(); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  return *r;
+}
+
+// A non-const member deriving a pointer keeps the referent
+struct Owner {
+  int *ptr();
+};
+int nonconst_deref(Owner o [[ref_to_uninit]]) {
+  int *q = o.ptr(); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  return *q;
+}
+
+// A standard library function's reference to a handle keeps no alias of it,
+// but std::swap exchanges what it refers to
+int library_reference(bool c, std::span<int> s [[ref_to_uninit]],
+                      std::vector<std::span<int>> &v) {
+  if (c)
+    std::uninitialized_fill(s.begin(), s.end(), 0);
+  v.push_back(static_cast<std::span<int> &&>(s));
+  return *s.data(); // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+int swapped(bool c, std::span<int> s [[ref_to_uninit]],
+            std::span<int> t [[ref_to_uninit]]) {
+  if (c)
+    std::uninitialized_fill(s.begin(), s.end(), 0);
+  std::uninitialized_fill(t.begin(), t.end(), 0);
+  std::swap(s, t);
+  return *s.data();
+}
+
+// An iterator incremented or advanced reaches part of its referent
+int offset_fill(std::span<int> s [[ref_to_uninit]],
+                std::span<int> t [[ref_to_uninit]]) {
+  auto it [[ref_to_uninit]] = s.begin();
+  ++it;
+  std::uninitialized_fill(it, s.end(), 0);
+  auto jt [[ref_to_uninit]] = t.begin();
+  std::advance(jt, 1);
+  std::uninitialized_fill(jt, t.end(), 0);
+  return *s.data() + *t.data(); // expected-error 2 {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A handle built over a pointer reaches the pointer's referent, and a
+// range-for over a conditional reaches each arm's
+int span_over_pointer(int *p [[ref_to_uninit]]) {
+  std::uninitialized_fill(p, p + 4, 0);
+  int t = 0;
+  for (int &x : std::span<int>(p, 4))
+    t += x;
+  int arr [[uninit]] [4];
+  memset(arr, 0, sizeof arr);
+  for (int &x : std::span<int>(arr))
+    t += x;
+  return t;
+}
+int range_for_conditional(bool c, std::span<int> s1 [[ref_to_uninit]],
+                          std::span<int> s2 [[ref_to_uninit]]) {
+  std::uninitialized_fill(s1.begin(), s1.end(), 0);
+  std::uninitialized_fill(s2.begin(), s2.end(), 0);
+  int t = 0;
+  for (int &x : c ? s1 : s2)
+    t += x;
+  return t;
+}
+
+// A reference to a handle reached by capture is judged by its form
+int captured_reference(std::span<int> s [[ref_to_uninit]]) {
+  std::uninitialized_fill(s.begin(), s.end(), 0);
+  const std::span<int> &cr = s;
+  return [&] { return *cr.data(); }(); // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A destructor call on a handle ends the handle object, not its referent
+int handle_destructor_call(int *raw [[ref_to_uninit]]) {
+  std::span<int> s [[ref_to_uninit]](raw, 4);
+  std::uninitialized_fill(s.begin(), s.end(), 0);
+  s.~span();
+  return *raw;
+}
+
+// An assignment to one of several handles leaves each referent unidentified
+void conditional_reseat(bool c, int *r [[ref_to_uninit]],
+                        std::span<int> s1 [[ref_to_uninit]],
+                        std::span<int> s2 [[ref_to_uninit]]) {
+  std::uninitialized_fill(s1.begin(), s1.end(), 0);
+  (c ? s1 : s2) = std::span<int>(r, 4);
+  std::uninitialized_fill(s1.begin(), s1.end(), 0);
+}
+
+// An incremented iterator keeps its referent; a second fill through the
+// handle is a double initialization
+int iterator_increment(std::span<int> s [[ref_to_uninit]]) {
+  auto it [[ref_to_uninit]] = s.begin();
+  ++it;
+  std::uninitialized_fill(s.begin(), s.end(), 0);
+  std::uninitialized_fill(s.begin(), s.end(), 1); // expected-error {{handle of type '__gnu_cxx::__normal_iterator<int *, std::span<int>::__iter_tag>' marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  return *it;
 }
 
 //--- libcxx.cpp

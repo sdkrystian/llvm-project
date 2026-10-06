@@ -263,6 +263,8 @@ public:
         : E(E), Arms(Arms) {}
   };
 
+  struct HandleLeaf;
+
   /// Peel what ignoreTransparentCasts peels from \p E, taking the arms
   /// listed in \p Arms, and prepend the derived-to-base steps its casts take
   /// to \p Path in object-to-member order; returns the operand reached.
@@ -319,6 +321,14 @@ public:
     /// object to that pointer; \c Members are then the steps below its
     /// referent. Empty otherwise.
     MemberPath PointerMembers;
+    /// The chain reaches its storage through a member call that derives a
+    /// pointer or reference from a handle (\c *up, \c up->m, \c s[i];
+    /// isHandleDerefCall) whose chain bottoms out at a handle variable
+    /// (handleChainBase): \c Local is that variable, \c ThroughPointer is
+    /// set, and an element call or an offset handle sets \c Subscript. A
+    /// chain bottoming out at a pointer sets \c ThroughPointer alone, and one
+    /// at storage \c Subscript alone.
+    bool ThroughHandle = false;
   };
   /// The shape of the glvalue \p E, taking the arms listed in \p Arms, or
   /// none when its chain bottoms out at anything but a directly named local,
@@ -423,6 +433,29 @@ public:
   /// a member are judged by flow state for every such object.
   static const CXXRecordDecl *flowTrackedAggregateClass(const VarDecl *V);
 
+  /// True if \p V is a handle variable whose referent the flow analysis
+  /// tracks: a local or parameter of handle type (isHandleType) marked
+  /// [[ref_to_uninit]].
+  static bool isFlowTrackedHandleVar(const VarDecl *V);
+  /// The variable a handle chain \p E bottoms out at -- stepping through
+  /// member calls that return the handle itself, copies, a std-table
+  /// construction to its first transfer argument (a pointer's value, or
+  /// storage), and implicit locals and unmarked local references not reached
+  /// by capture, and taking the arms listed in \p Arms -- or null;
+  /// \p Partial is set when a step refers to part of the handle, and
+  /// \p PastStart, if non-null, when a step positions it past its referent's
+  /// start (every such step but a prefix: first(n), subspan(0, n)).
+  static const DeclRefExpr *handleChainBase(const Expr *E,
+                                            ArrayRef<const Expr *> Arms,
+                                            bool &Partial,
+                                            bool *PastStart = nullptr);
+  /// True if \p E is a member call that derives a pointer or reference from
+  /// a handle, its object (\p Obj): \p Element is false for \c operator*,
+  /// \c operator->, and a member with no argument returning a pointer
+  /// (\c get(), \c data()), which designate the whole referent, and true for
+  /// any other (\c s[i], \c front()), which designates an element.
+  static bool isHandleDerefCall(const Expr *E, const Expr *&Obj, bool &Element);
+
   /// The non-lambda instance member function whose object `this` denotes in
   /// \p DC -- walking out of lambda call operators and blocks -- or null.
   static const CXXMethodDecl *enclosingInstanceMethod(const DeclContext *DC);
@@ -473,6 +506,11 @@ public:
                           SmallVectorImpl<const Expr *> *Leaves = nullptr,
                           FlowLeafUse Use = FlowLeafUse::Plain,
                           bool AsRange = false) const;
+  /// True if the leaf \p L of a handle source names a handle whose referent
+  /// the flow analysis tracks (isFlowTrackedHandleVar) while a function body
+  /// is being parsed (\p CurContext inside one).
+  bool isFlowTrackedHandleLeaf(const HandleLeaf &L,
+                               const DeclContext *CurContext) const;
   /// True if any leaf of the glvalue \p G is flow-tracked in the current
   /// context: the read-through and subobject-write checks leave such an
   /// access to the CFG pass. The tracked leaves are appended to \p Leaves
@@ -521,7 +559,6 @@ public:
   InitSourceState classifyInitAccessLeaf(const ShapeLeaf &Leaf,
                                          InitAccessKind Kind,
                                          const Decl *Body) const;
-  struct HandleLeaf;
   /// Classify the leaf \p Leaf of a handle source (forEachHandleSourceLeaf)
   /// by its form alone, taking the arms its \c Arms list, for the CFG pass's
   /// judgment of a handle binding with tracked leaves; \p Body as for
@@ -646,11 +683,11 @@ public:
   /// binds the handle \p T refers to, judged as an unmarked handle binding
   /// (P4222R2 §4.6; a reference to a class cannot carry the handle's
   /// marking): a reference to a handle (isHandleType), except the implicit
-  /// object parameter, a parameter of a comparison or of a + or - operator
-  /// (which compares or positions handles), the source of a copy or move
-  /// constructor or of an assignment (isAssignmentSource; judged where the
-  /// copy lands), and an implicit local (range-for's __range). \p Target is
-  /// the bound declaration, if any.
+  /// object parameter, a parameter of a comparison, of a + or - operator, or
+  /// of std::advance (which compare or position handles), the source of a
+  /// copy or move (isCopySource; judged where the copy lands), and an
+  /// implicit local (range-for's __range). \p Target is the bound
+  /// declaration, if any.
   static bool bindsHandleByReference(InitBindingKind Kind, QualType T,
                                      const ValueDecl *Target);
 
@@ -837,6 +874,17 @@ public:
   /// True if \p P is the source parameter of a member operator=, which binds
   /// where it is assigned (checkInitProfileHandleReseat).
   static bool isAssignmentSource(const ParmVarDecl *P);
+  /// True if \p P is the source of a copy or move constructor or of an
+  /// assignment (isAssignmentSource): the object it binds is copied or moved
+  /// from, and no alias of it outlives the call.
+  static bool isCopySource(const ParmVarDecl *P);
+  /// True if \p FD is a standard library function: declared in namespace std
+  /// or a namespace below it, a member included.
+  static bool isStdLibraryFunction(const FunctionDecl *FD);
+  /// True if \p FD is the standard library function \p Name, a member
+  /// included (isStdLibraryFunction), or the call operator of the
+  /// std::ranges object \p Name.
+  static bool isStdCallable(const FunctionDecl *FD, StringRef Name);
 
   /// std::init / ref_to_uninit: a handle reseat (getHandleReseat) binds the
   /// handle to its source, judged against the handle's marking
@@ -935,6 +983,9 @@ public:
     /// handle lands, or at the reset, not here.
     bool transfersParam(const ParmVarDecl *P) const;
   };
+  /// True if \p T is std::unique_ptr: an owner whose destruction, reset, or
+  /// reassignment destroys the object it refers to.
+  static bool isUniqueOwnerType(QualType T);
   /// The value type of the handle type \p T (or a reference to one) as an
   /// iterator or a range, unqualified, looked up in the class and then its
   /// bases: its \c element_type member type (std::unique_ptr<T[]>'s is

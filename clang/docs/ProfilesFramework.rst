@@ -1236,6 +1236,33 @@ over a marked handle binds its elements to uninitialized memory:
 ``for (int &x [[ref_to_uninit]] : s)`` is accepted, and
 ``for (int x : s)`` reads uninitialized memory.
 
+Inside a function body, what a marked local handle refers to is flow-tracked
+like a marked pointer's referent (see `Binding Pointers and References`_): it
+is the storage its initializer names -- another marked handle's referent, or
+storage a standard handle was built over whole
+(``std::span<int> s [[ref_to_uninit]](arr)`` refers to ``arr``) -- and a
+credit through the handle initializes it, so after
+``std::uninitialized_fill(s.begin(), s.end(), 0)`` or
+``std::construct_at(up.get(), 5)``, ``*s.data()`` and ``*up`` read initialized
+memory, and so does an unmarked copy of the handle; a standard handle built
+over a marked pointer (``std::span<int>(p, 4)``) reads what ``p`` refers to.
+The referent is one object: ``*up``, ``up->m``, ``*it``, ``up.get()``, and
+``s.data()`` name it whole, also through a prefix (``s.first(2).data()``),
+while ``s[i]``, ``s.front()``, ``s.back()``, any other accessor with arguments,
+and an access through a handle past the referent's start
+(``s.subspan(1).data()``) name an element, judged by its form as
+``p[i]`` through a marked pointer is: a read of it is rejected whatever the
+referent's state, and a store to it initializes nothing.  Incrementing or
+advancing an iterator keeps its referent but reaches part of it, as a prefix
+does, so a fill through either initializes the referent on no path; a reset
+or an assignment gives the handle a new referent, a move or ``release()``
+hands it over, and
+any other non-const member call -- but one returning a pointer or reference
+into the referent -- or a non-const reference or pointer to the handle leaves
+it unknown, except a standard library function's other than ``std::swap``,
+``std::exchange``, and ``std::iter_swap``.  A destructor call on a handle ends
+the handle object, not its referent.
+
 Assigning a handle (``t = s``) binds it like an initialization, judged
 against the assigned-to handle's marking, and so does an owning smart
 pointer's ``reset(p)``, whose pointer is judged there: ``u.reset(new int)``

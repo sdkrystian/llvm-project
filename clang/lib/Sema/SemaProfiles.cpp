@@ -2242,6 +2242,12 @@ static bool isStdHandleConstruction(const CXXConstructorDecl *Ctor) {
          getStdHandleKind(Ctor->getParent()) != StdHandleKind::None;
 }
 
+bool SemaProfiles::isUniqueOwnerType(QualType T) {
+  const CXXRecordDecl *RD = T->getAsCXXRecordDecl();
+  return RD && RD->getIdentifier() && RD->getName() == "unique_ptr" &&
+         getStdHandleKind(RD) == StdHandleKind::Owner;
+}
+
 /// The declarations named \p Name in the class \p RD, or else in its nearest
 /// bases that declare it, breadth first.
 static SmallVector<const NamedDecl *, 2>
@@ -2515,8 +2521,11 @@ static bool isHandleResultOf(QualType R, const CXXRecordDecl *RD) {
 /// explicit template arguments (s.last<2>()), is ++, --, +=, -=, or a
 /// non-member + or -, or is a member named for a position past the start
 /// (s.end()) or a part (\c subspan, \c first, \c last, \c next, \c prev,
-/// \c advance).
-static const Expr *handleSelfReturnObject(const CallExpr *CE, bool &Partial) {
+/// \c advance). \p PastStart, if non-null, is set when the result is also
+/// positioned past the start: every such call but a prefix (\c first, a
+/// \c subspan at offset 0).
+static const Expr *handleSelfReturnObject(const CallExpr *CE, bool &Partial,
+                                          bool *PastStart = nullptr) {
   const FunctionDecl *FD = CE->getDirectCallee();
   if (!FD || FD->hasAttr<RefToUninitAttr>() || matchKnownCallee(FD).Entry)
     return nullptr;
@@ -2535,6 +2544,8 @@ static const Expr *handleSelfReturnObject(const CallExpr *CE, bool &Partial) {
                                         ->getAsCXXRecordDecl();
           PD && PD->getCanonicalDecl() == RD->getCanonicalDecl()) {
         Partial = true;
+        if (PastStart)
+          *PastStart = true;
         return CE->getArg(I);
       }
     return nullptr;
@@ -2550,11 +2561,32 @@ static const Expr *handleSelfReturnObject(const CallExpr *CE, bool &Partial) {
   const Expr *Obj = memberCallObject(CE, MD);
   if (!Obj)
     return nullptr;
-  bool Explicit = llvm::any_of(CE->arguments(), [&](const Expr *Arg) {
-    return Arg != Obj && !isa<CXXDefaultArgExpr>(Arg);
-  });
-  if (const auto *ME = dyn_cast<MemberExpr>(CE->getCallee()->IgnoreParens()))
-    Explicit |= ME->hasExplicitTemplateArgs();
+  SmallVector<const Expr *, 2> Args;
+  for (const Expr *Arg : CE->arguments())
+    if (Arg != Obj && !isa<CXXDefaultArgExpr>(Arg))
+      Args.push_back(Arg);
+  const auto *ME = dyn_cast<MemberExpr>(CE->getCallee()->IgnoreParens());
+  bool Explicit = !Args.empty() || (ME && ME->hasExplicitTemplateArgs());
+  StringRef Name = MD->getIdentifier() ? MD->getName() : StringRef();
+  // A prefix of the handle starts where the handle does: first(n),
+  // first<N>(), subspan(0, n), subspan<0, N>().
+  auto IsZero = [&](const Expr *E) {
+    std::optional<llvm::APSInt> V =
+        E->getIntegerConstantExpr(MD->getASTContext());
+    return V && V->isZero();
+  };
+  bool Prefix = Name == "first";
+  if (Name == "subspan") {
+    if (ME && ME->getNumTemplateArgs() != 0) {
+      const TemplateArgument &A = ME->getTemplateArgs()[0].getArgument();
+      Prefix = (A.getKind() == TemplateArgument::Integral &&
+                A.getAsIntegral().isZero()) ||
+               (A.getKind() == TemplateArgument::Expression &&
+                IsZero(A.getAsExpr()));
+    } else {
+      Prefix = !Args.empty() && IsZero(Args.front());
+    }
+  }
   switch (MD->getOverloadedOperator()) {
   case OO_PlusPlus:
   case OO_MinusMinus:
@@ -2565,13 +2597,14 @@ static const Expr *handleSelfReturnObject(const CallExpr *CE, bool &Partial) {
   default:
     Partial =
         Explicit ||
-        (MD->getIdentifier() &&
-         llvm::is_contained(ArrayRef<StringRef>{"end", "cend", "rend", "crend",
-                                                "last", "subspan", "first",
-                                                "next", "prev", "advance"},
-                            MD->getName()));
+        llvm::is_contained(ArrayRef<StringRef>{"end", "cend", "rend", "crend",
+                                               "last", "subspan", "first",
+                                               "next", "prev", "advance"},
+                           Name);
     break;
   }
+  if (PastStart)
+    *PastStart = Partial && !Prefix;
   return Obj;
 }
 
@@ -2722,6 +2755,98 @@ void SemaProfiles::forEachHandleSourceLeaf(
     return;
   HandleSourceWalk Walk{F, {}, {}};
   Walk.walk(Src, /*Partial=*/false);
+}
+
+bool SemaProfiles::isFlowTrackedHandleVar(const VarDecl *V) {
+  return V && V->hasLocalStorage() && isHandleType(V->getType()) &&
+         V->hasAttr<RefToUninitAttr>();
+}
+
+const DeclRefExpr *SemaProfiles::handleChainBase(const Expr *E,
+                                                 ArrayRef<const Expr *> Arms,
+                                                 bool &Partial,
+                                                 bool *PastStart) {
+  llvm::SmallPtrSet<const VarDecl *, 4> Followed;
+  while (E) {
+    E = peelHandleSource(E);
+    if (const Expr *Arm = chosenArm(E, Arms)) {
+      E = Arm;
+      continue;
+    }
+    if (const auto *CCE = dyn_cast<CXXConstructExpr>(E)) {
+      const CXXConstructorDecl *Ctor = CCE->getConstructor();
+      if (Ctor->isCopyOrMoveConstructor() && CCE->getNumArgs() != 0) {
+        E = CCE->getArg(0);
+        continue;
+      }
+      // A std-table construction stands for its first transfer argument
+      // (forEachHandleSourceLeaf), a pointer by its value.
+      if (!isStdHandleConstruction(Ctor))
+        return nullptr;
+      E = nullptr;
+      for (unsigned I = 0,
+                    N = std::min(CCE->getNumArgs(), Ctor->getNumParams());
+           I != N && !E; ++I) {
+        const ParmVarDecl *P = Ctor->getParamDecl(I);
+        std::optional<HandleLeaf::Mode> M = handleTransferMode(P);
+        if (!M || isa<CXXDefaultArgExpr>(CCE->getArg(I)))
+          continue;
+        bool AsPointerValue;
+        E = *M == HandleLeaf::Mode::PointerValue
+                ? bindingSourceOperand(CCE->getArg(I), P->getType(),
+                                       AsPointerValue)
+                : CCE->getArg(I);
+        if (!E)
+          return nullptr;
+        if (*M == HandleLeaf::Mode::PointerValue)
+          E = E->IgnoreParenImpCasts();
+      }
+      continue;
+    }
+    if (const auto *CE = dyn_cast<CallExpr>(E)) {
+      bool StepPartial = false, StepPastStart = false;
+      E = handleSelfReturnObject(CE, StepPartial, &StepPastStart);
+      Partial |= StepPartial;
+      if (PastStart)
+        *PastStart |= StepPastStart;
+      continue;
+    }
+    const auto *DRE = dyn_cast<DeclRefExpr>(E);
+    if (!DRE)
+      return nullptr;
+    // An implicit local or an unmarked local reference stands for its
+    // initializer, as in forEachHandleSourceLeaf -- unless a lambda or block
+    // reaches it by capture, whose initializer is the enclosing function's.
+    if (const auto *V = dyn_cast<VarDecl>(DRE->getDecl());
+        V && V->hasLocalStorage() && !isa<ParmVarDecl>(V) && V->getInit() &&
+        (V->isImplicit() ||
+         (V->getType()->isReferenceType() && !V->hasAttr<RefToUninitAttr>())) &&
+        !DRE->refersToEnclosingVariableOrCapture() &&
+        Followed.insert(V).second) {
+      E = V->getInit();
+      continue;
+    }
+    return DRE;
+  }
+  return nullptr;
+}
+
+bool SemaProfiles::isHandleDerefCall(const Expr *E, const Expr *&Obj,
+                                     bool &Element) {
+  const auto *CE = dyn_cast<CallExpr>(E);
+  if (!CE)
+    return false;
+  Obj = derivingObject(CE);
+  if (!Obj)
+    return false;
+  const auto *MD = cast<CXXMethodDecl>(CE->getDirectCallee());
+  OverloadedOperatorKind OO = MD->getOverloadedOperator();
+  bool Explicit = llvm::any_of(CE->arguments(), [&](const Expr *Arg) {
+    return Arg != Obj && !isa<CXXDefaultArgExpr>(Arg);
+  });
+  Element = !(OO == OO_Star || OO == OO_Arrow ||
+              (!Explicit && MD->getReturnType()->isPointerType()));
+  return true;
 }
 
 static UninitStorage
@@ -3560,9 +3685,12 @@ bool SemaProfiles::bindsHandleByReference(InitBindingKind Kind, QualType T,
   if (V && V->isImplicit())
     return false;
   const auto *P = dyn_cast_or_null<ParmVarDecl>(V);
-  // A comparison or a + or - compares or positions its handles.
+  // A comparison, a + or -, and std::advance compare or position their
+  // handles.
   if (const auto *FD =
           P ? dyn_cast<FunctionDecl>(P->getDeclContext()) : nullptr) {
+    if (isStdCallable(FD, "advance"))
+      return false;
     switch (FD->getOverloadedOperator()) {
     case OO_EqualEqual:
     case OO_ExclaimEqual:
@@ -3578,14 +3706,8 @@ bool SemaProfiles::bindsHandleByReference(InitBindingKind Kind, QualType T,
       break;
     }
   }
-  // The source of a copy or move constructor, or of an assignment, which
-  // binds where the copy lands.
-  if (isAssignmentSource(P))
-    return false;
-  const auto *Ctor =
-      P ? dyn_cast<CXXConstructorDecl>(P->getDeclContext()) : nullptr;
-  return !Ctor || P->getFunctionScopeIndex() != 0 ||
-         !Ctor->isCopyOrMoveConstructor();
+  // The source of a copy or move, which binds where the copy lands.
+  return !isCopySource(P);
 }
 
 bool SemaProfiles::isDefaultedComparison(const FunctionDecl *FD) {
@@ -3754,6 +3876,31 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
     return LeafFirst.empty() ? S.LeafBases : LeafFirst.back().Bases;
   };
   const Expr *Cur = peelBaseCasts(E, Bases(), Arms);
+  // Step through a member call deriving a pointer or reference from a
+  // handle (isHandleDerefCall) to the variable its chain bottoms out at
+  // (handleChainBase): a handle reaches its referent, a pointer -- a
+  // std-table handle built over it -- its referent as *p does, and storage
+  // is reached at an element; an element call or a handle past its
+  // referent's start names an element, and a prefix (first(n)) the referent.
+  auto StepThroughHandle = [&](const Expr *Call) {
+    const Expr *Obj;
+    bool Element;
+    if (!isHandleDerefCall(Call, Obj, Element))
+      return false;
+    bool Partial = false, PastStart = false;
+    const DeclRefExpr *Base = handleChainBase(Obj, Arms, Partial, &PastStart);
+    if (!Base)
+      return false;
+    QualType BT = Base->getType();
+    S.ThroughPointer = BT->isPointerType() || isHandleType(BT);
+    S.ThroughHandle = isHandleType(BT);
+    if (Element || PastStart || !S.ThroughPointer) {
+      S.Subscript = true;
+      NamedBelowElement = LeafFirst.size();
+    }
+    Cur = Base;
+    return true;
+  };
   // Step to the pointer operand of a * or ->: an address-of step's operand
   // continues the chain (true); any other pointer reaches its storage
   // through the pointer, which ends it.
@@ -3764,6 +3911,7 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
       return true;
     }
     S.ThroughPointer = true;
+    StepThroughHandle(Cur);
     return false;
   };
   while (true) {
@@ -3800,6 +3948,7 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
       // peeled decay leaves behind.
       if (Cur->getType()->isPointerType()) {
         S.ThroughPointer = true;
+        StepThroughHandle(Cur);
         break;
       }
       continue;
@@ -3810,6 +3959,8 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
         continue;
       break;
     }
+    if (Cur->isGLValue())
+      StepThroughHandle(Cur);
     break;
   }
   S.Members.assign(LeafFirst.rbegin(), LeafFirst.rend());
@@ -4222,6 +4373,18 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
                                /*AsPointerValue=*/false, CurContext, Use);
     if (isa<CXXThisExpr>(E))
       return CurrentObjectTracked();
+    // A pointer a tracked handle's member returns to its whole referent
+    // (up.get(), s.data()) or through a prefix of it (s.first(n).data());
+    // an element's, or one past the referent's start, is never tracked.
+    const Expr *Obj;
+    bool Element;
+    if (E->getType()->isPointerType() && isHandleDerefCall(E, Obj, Element)) {
+      bool Partial = false, PastStart = false;
+      const DeclRefExpr *Base =
+          handleChainBase(Obj, Leaf.Arms, Partial, &PastStart);
+      return !Element && !PastStart && Base &&
+             isFlowTrackedHandleVar(dyn_cast<VarDecl>(Base->getDecl()));
+    }
     // The value of a marked pointer member of the current object.
     if (E->getType()->isPointerType() && isa<MemberExpr>(E)) {
       std::optional<FlowLeafShape> Ptr = flowLeafShape(E, Leaf.Arms);
@@ -4263,6 +4426,10 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
   const VarDecl *V = Shape->Local;
   if (!V->hasLocalStorage())
     return false;
+  // *up, up->m: a marked handle's referent or a subobject of it; an element
+  // (s[i], or through an offset handle) is never tracked, as for a pointer.
+  if (Shape->ThroughHandle)
+    return !Shape->Subscript && isFlowTrackedHandleVar(V);
   // *p, p->m, (*p).m: a marked pointer's referent or a subobject of it; an
   // element (p[i]) is never tracked (P4222R2 §5.4).
   if (Shape->ThroughPointer)
@@ -4318,6 +4485,14 @@ bool SemaProfiles::isFlowTrackedSubobject(const CXXRecordDecl *RD,
   return Range.first != Range.second;
 }
 
+bool SemaProfiles::isFlowTrackedHandleLeaf(
+    const HandleLeaf &L, const DeclContext *CurContext) const {
+  if (L.M != HandleLeaf::Mode::Handle || !insideFunctionBody(CurContext))
+    return false;
+  const auto *DRE = dyn_cast<DeclRefExpr>(L.E->IgnoreParenImpCasts());
+  return DRE && isFlowTrackedHandleVar(dyn_cast<VarDecl>(DRE->getDecl()));
+}
+
 const Expr *SemaProfiles::bindingSourceOperand(const Expr *Src, QualType T,
                                                bool &AsPointerValue) {
   AsPointerValue = !T->isReferenceType() ||
@@ -4371,6 +4546,11 @@ bool SemaProfiles::hasFlowTrackedLeaf(const Expr *Src, QualType T,
     auto Visit = [&](auto &Self, const HandleLeaf &L) -> void {
       switch (L.M) {
       case HandleLeaf::Mode::Handle:
+        if (isFlowTrackedHandleLeaf(L, SemaRef.CurContext)) {
+          Any = true;
+          if (Leaves && !llvm::is_contained(*Leaves, L.E))
+            Leaves->push_back(L.E);
+        }
         return;
       case HandleLeaf::Mode::PointerValue:
       case HandleLeaf::Mode::Storage:
@@ -4905,6 +5085,43 @@ QualType SemaProfiles::handleReseatType(const Expr *Obj) {
   return T->isPointerType() ? T->getPointeeType() : T.getNonReferenceType();
 }
 
+bool SemaProfiles::isCopySource(const ParmVarDecl *P) {
+  if (isAssignmentSource(P))
+    return true;
+  const auto *Ctor =
+      P ? dyn_cast<CXXConstructorDecl>(P->getDeclContext()) : nullptr;
+  return Ctor && P->getFunctionScopeIndex() == 0 &&
+         Ctor->isCopyOrMoveConstructor();
+}
+
+bool SemaProfiles::isStdLibraryFunction(const FunctionDecl *FD) {
+  for (const DeclContext *DC = FD->getDeclContext();
+       DC && !DC->isTranslationUnit(); DC = DC->getParent())
+    if (const auto *NS = dyn_cast<NamespaceDecl>(DC);
+        NS && NS->isStdNamespace())
+      return true;
+  return false;
+}
+
+bool SemaProfiles::isStdCallable(const FunctionDecl *FD, StringRef Name) {
+  if (FD->getIdentifier() && FD->getName() == Name)
+    return isStdLibraryFunction(FD);
+  const auto *MD = dyn_cast<CXXMethodDecl>(FD);
+  if (!MD || MD->getOverloadedOperator() != OO_Call)
+    return false;
+  const CXXRecordDecl *RD = MD->getParent()->getCanonicalDecl();
+  const NamespaceDecl *Ranges = enclosingStdSubNamespace(RD, "ranges");
+  if (!Ranges)
+    return false;
+  for (const NamedDecl *ND :
+       Ranges->lookup(&FD->getASTContext().Idents.get(Name)))
+    if (const auto *VD = dyn_cast<VarDecl>(ND->getUnderlyingDecl()))
+      if (const CXXRecordDecl *VarClass = VD->getType()->getAsCXXRecordDecl();
+          VarClass && VarClass->getCanonicalDecl() == RD)
+        return true;
+  return false;
+}
+
 bool SemaProfiles::isAssignmentSource(const ParmVarDecl *P) {
   const auto *MD = P ? dyn_cast<CXXMethodDecl>(P->getDeclContext()) : nullptr;
   return MD && MD->getOverloadedOperator() == OO_Equal && !MD->isStatic() &&
@@ -4940,31 +5157,71 @@ static const Expr *shapeChainOperand(const Expr *E) {
   if (const auto *UO = dyn_cast<UnaryOperator>(E);
       UO && UO->getOpcode() == UO_Deref)
     return UO->getSubExpr();
+  // A handle's member call deriving a pointer or reference, or returning the
+  // handle itself, steps to its object (SemaProfiles::handleChainBase).
+  if (const auto *CE = dyn_cast<CallExpr>(E)) {
+    const Expr *Obj;
+    bool Element;
+    if (SemaProfiles::isHandleDerefCall(CE, Obj, Element))
+      return Obj;
+    bool Partial;
+    if (const Expr *Self = handleSelfReturnObject(CE, Partial))
+      return Self;
+  }
   return SemaProfiles::addressOfOperand(E);
+}
+
+/// The local \p E names when it stands for its initializer in a handle chain
+/// (SemaProfiles::handleChainBase): an implicit handle local (range-for's
+/// __range and __begin) or an unmarked local reference to a handle, not
+/// reached by capture; null otherwise.
+static const VarDecl *followedHandleLocal(const Expr *E) {
+  const auto *DRE = dyn_cast<DeclRefExpr>(E);
+  const auto *V = DRE ? dyn_cast<VarDecl>(DRE->getDecl()) : nullptr;
+  if (!V || !V->hasLocalStorage() || isa<ParmVarDecl>(V) || !V->getInit() ||
+      !SemaProfiles::isHandleType(V->getType().getNonReferenceType()) ||
+      DRE->refersToEnclosingVariableOrCapture())
+    return nullptr;
+  if (V->isImplicit() ||
+      (V->getType()->isReferenceType() && !V->hasAttr<RefToUninitAttr>()))
+    return V;
+  return nullptr;
 }
 
 /// Descend the chain below \p Cur, appending to \p Arms the arm taken at
 /// each conditional reached, and call \p Emit once per combination of arms.
-static void forEachNestedArmChoice(const Expr *Cur,
-                                   SmallVectorImpl<const Expr *> &Arms,
-                                   llvm::function_ref<void()> Emit) {
+/// A local in \p Followed, which the descent to \p Cur already stepped
+/// through, ends the chain.
+static void
+forEachNestedArmChoice(const Expr *Cur, SmallVectorImpl<const Expr *> &Arms,
+                       llvm::SmallPtrSetImpl<const VarDecl *> &Followed,
+                       llvm::function_ref<void()> Emit) {
+  SmallVector<const VarDecl *, 2> Entered;
   while (true) {
     Cur = SemaProfiles::ignoreTransparentCasts(Cur);
     if (const auto *CO = dyn_cast<AbstractConditionalOperator>(Cur)) {
       auto [T, F] = conditionalArms(CO);
       for (const Expr *Arm : {T, F}) {
         Arms.push_back(Arm);
-        forEachNestedArmChoice(Arm, Arms, Emit);
+        forEachNestedArmChoice(Arm, Arms, Followed, Emit);
         Arms.pop_back();
       }
-      return;
+      break;
     }
-    Cur = shapeChainOperand(Cur);
+    if (const VarDecl *V = followedHandleLocal(Cur);
+        V && Followed.insert(V).second) {
+      Entered.push_back(V);
+      Cur = V->getInit();
+      continue;
+    }
+    Cur = followedHandleLocal(Cur) ? nullptr : shapeChainOperand(Cur);
     if (!Cur) {
       Emit();
-      return;
+      break;
     }
   }
+  for (const VarDecl *V : Entered)
+    Followed.erase(V);
 }
 
 void SemaProfiles::forEachTargetLeaf(
@@ -4979,7 +5236,8 @@ void SemaProfiles::forEachTargetLeaf(
     return;
   }
   SmallVector<const Expr *, 4> Arms;
-  forEachNestedArmChoice(E, Arms, [&] { F(ShapeLeaf(E, Arms)); });
+  llvm::SmallPtrSet<const VarDecl *, 4> Followed;
+  forEachNestedArmChoice(E, Arms, Followed, [&] { F(ShapeLeaf(E, Arms)); });
 }
 
 /// The test::class_final pilot: fires on every completed non-lambda class.

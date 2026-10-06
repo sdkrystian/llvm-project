@@ -1850,8 +1850,8 @@ using MemberPath = SemaProfiles::MemberPath;
 /// by-value parameter -- a scalar, or a class or array object tracked whole --
 /// (directly or inside a member subobject;
 /// SemaProfiles::forEachFlowTrackedMember), an [[uninit]] local or parameter
-/// as a whole, the referent of a [[ref_to_uninit]] local pointer or
-/// reference (parameters included), which the dataflow identifies per program
+/// as a whole, the referent of a [[ref_to_uninit]] local pointer, reference,
+/// or handle (parameters included), which the dataflow identifies per program
 /// point (FlowState::Target), the referent of a [[ref_to_uninit]] pointer
 /// member of the current object (MemberPointee, keyed by the member's path;
 /// SemaProfiles::markedPointerMembers), which enters asserted
@@ -1902,8 +1902,8 @@ struct TrackedEntity {
   bool isMember() const {
     return K == Kind::CurrentObjectMember || K == Kind::LocalMember;
   }
-  /// The referent of a marked pointer or reference, identified per program
-  /// point (FlowState::Target).
+  /// The referent of a marked pointer, reference, or handle, identified per
+  /// program point (FlowState::Target).
   bool isPointee() const {
     return K == Kind::Pointee || K == Kind::MemberPointee;
   }
@@ -2237,12 +2237,12 @@ struct TrackedStorage {
   /// member of the current object (this->m, m, (*this).m, this->c.m) or of a
   /// directly named tracked local (V.m, V.c.m, through containers), an
   /// [[uninit]] local or a subobject of it (u, u.x, arr[i]), or a marked local
-  /// pointer's or reference's referent or a subobject of it (*p, p->m, r, r.m;
-  /// never an element, P4222R2 §5.4), or a marked pointer member's referent
-  /// (*elem, mem.elem->x). A sub-access below another named class or array
-  /// member of a tracked aggregate (x.in.v, x.arr[0]) names no entity and is
-  /// benign or an escape by that member's type. The one resolver behind every
-  /// event arm, so a leaf affects flow state exactly as
+  /// pointer's, reference's, or handle's referent or a subobject of it (*p,
+  /// p->m, r, r.m, *up, up->m; never an element, P4222R2 §5.4), or a marked
+  /// pointer member's referent (*elem, mem.elem->x). A sub-access below another
+  /// named class or array member of a tracked aggregate (x.in.v, x.arr[0])
+  /// names no entity and is benign or an escape by that member's type. The one
+  /// resolver behind every event arm, so a leaf affects flow state exactly as
   /// SemaProfiles::isFlowTrackedLeaf says it is tracked. A credit, store, or
   /// access passes its \p Designated type (and \p RawExempt; see
   /// designationCovers): a whole entity reached through a derived-to-base step
@@ -2274,6 +2274,21 @@ struct TrackedStorage {
   /// The Pointee entity of the marked local pointer \p V (a reference's
   /// referent cannot be reseated and is not one), if tracked.
   std::optional<unsigned> markedPointerObject(const VarDecl *V) const;
+  /// The Pointee entity of the marked local handle \p V
+  /// (SemaProfiles::isFlowTrackedHandleVar), if tracked.
+  std::optional<unsigned> markedHandleObject(const VarDecl *V) const;
+  /// The same for the handle object the glvalue \p Leaf directly names
+  /// through transparent casts: the object a reseat or an alias binding acts
+  /// on.
+  std::optional<unsigned>
+  markedHandleObject(const SemaProfiles::ShapeLeaf &Leaf) const;
+  /// Resolve the Handle leaf \p L of a handle source
+  /// (SemaProfiles::forEachHandleSourceLeaf): a tracked handle variable's
+  /// referent, a subobject of it when \p L is Partial or \p Designated does
+  /// not cover it (designationCovers).
+  Resolution resolveHandleLeaf(const SemaProfiles::HandleLeaf &L,
+                               QualType Designated = QualType(),
+                               bool RawExempt = false) const;
   /// The same for the pointer object the glvalue \p E directly names through
   /// transparent casts -- a marked pointer member of the current object
   /// included (its MemberPointee): the object a store reseats or an alias
@@ -2350,8 +2365,14 @@ unsigned TrackedStorage::addLocalEntity(TrackedEntity::Kind K, const VarDecl *V,
   if (It != LocalEntity.end())
     return It->second;
   QualType T = V->getType();
-  if (K == TrackedEntity::Kind::Pointee)
+  // A handle's referent is of its value type; with none, of no type.
+  if (K == TrackedEntity::Kind::Pointee && SemaProfiles::isHandleType(T)) {
+    T = SemaProfiles::handleValueType(T);
+    if (T.isNull())
+      T = Ctx.VoidTy;
+  } else if (K == TrackedEntity::Kind::Pointee) {
     T = T->isPointerType() ? T->getPointeeType() : T.getNonReferenceType();
+  }
   TrackedEntity E;
   E.K = K;
   E.Type = T;
@@ -2559,6 +2580,18 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
     return R;
   }
   const VarDecl *V = Shape->Local;
+  // *up, up->m: a marked handle's referent or a subobject of it; never an
+  // element (s[i], or through an offset handle), as for a pointer.
+  if (Shape->ThroughHandle) {
+    if (Shape->Subscript)
+      return {};
+    if (std::optional<unsigned> Idx = markedHandleObject(V)) {
+      R.Entity = Idx;
+      R.Subobject = !Shape->Members.empty() || DesignatesPart(*Idx);
+      R.Sub = subKey(*Idx, *Shape);
+    }
+    return R;
+  }
   // *p, p->m: a marked pointer's referent or a subobject of it.
   if (Shape->ThroughPointer) {
     if (Shape->Subscript)
@@ -2641,6 +2674,24 @@ TrackedStorage::resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
     R.Subobject = !covers(Designated, *CurrentObjectRoot, RawExempt);
     return R;
   }
+  // A pointer a marked handle's member returns to its whole referent, or
+  // through a prefix of it to a subobject; an element's, or one past the
+  // referent's start, names no entity.
+  const Expr *Obj;
+  bool Element;
+  if (E->getType()->isPointerType() &&
+      SemaProfiles::isHandleDerefCall(E, Obj, Element)) {
+    bool Partial = false, PastStart = false;
+    if (const DeclRefExpr *Base =
+            SemaProfiles::handleChainBase(Obj, Leaf.Arms, Partial, &PastStart);
+        Base && !Element && !PastStart)
+      if (std::optional<unsigned> Idx =
+              markedHandleObject(dyn_cast<VarDecl>(Base->getDecl()))) {
+        R.Entity = Idx;
+        R.Subobject = Partial || !covers(Designated, *Idx, RawExempt);
+      }
+    return R;
+  }
   if (std::optional<unsigned> Idx = markedPointerObject({E, Leaf.Arms})) {
     R.Entity = Idx;
     R.Subobject = !covers(Designated, *Idx, RawExempt);
@@ -2656,6 +2707,38 @@ TrackedStorage::markedPointerObject(const VarDecl *V) const {
       !V->getType()->isPointerType())
     return std::nullopt;
   return It->second;
+}
+
+std::optional<unsigned>
+TrackedStorage::markedHandleObject(const VarDecl *V) const {
+  auto It = LocalEntity.find(V);
+  if (It == LocalEntity.end() ||
+      Entities[It->second].K != TrackedEntity::Kind::Pointee ||
+      !SemaProfiles::isHandleType(V->getType()))
+    return std::nullopt;
+  return It->second;
+}
+
+std::optional<unsigned>
+TrackedStorage::markedHandleObject(const SemaProfiles::ShapeLeaf &Leaf) const {
+  const auto *V = dyn_cast_or_null<VarDecl>(SemaProfiles::getDirectlyNamedDecl(
+      SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms)));
+  return V ? markedHandleObject(V) : std::nullopt;
+}
+
+TrackedStorage::Resolution
+TrackedStorage::resolveHandleLeaf(const SemaProfiles::HandleLeaf &L,
+                                  QualType Designated, bool RawExempt) const {
+  Resolution R;
+  if (L.M != SemaProfiles::HandleLeaf::Mode::Handle)
+    return R;
+  const auto *DRE = dyn_cast<DeclRefExpr>(L.E->IgnoreParenImpCasts());
+  const auto *V = DRE ? dyn_cast<VarDecl>(DRE->getDecl()) : nullptr;
+  if (std::optional<unsigned> Idx = V ? markedHandleObject(V) : std::nullopt) {
+    R.Entity = Idx;
+    R.Subobject = L.Partial || !covers(Designated, *Idx, RawExempt);
+  }
+  return R;
 }
 
 std::optional<unsigned>
@@ -2685,25 +2768,25 @@ TrackedStorage::markedPointerObject(const SemaProfiles::ShapeLeaf &Leaf) const {
 /// Destroy: a [[now_uninit]] destruction, a destructor call, or a scope-exit
 /// destructor (DestroySites[Aux]), judged by the destroy rules; its storage is
 /// then unassigned and destroyed until stored again -- for an argument naming
-/// several storages, each may be. Reseat: the marked pointer or reference Idx
-/// refers, from here, to the storage DefAssignEvent::RT describes and, when a
-/// marked binding names an identified referent (Entity, ViaPointer), asserts it
-/// unassigned: Must and May cleared, MayUnassigned set, MayDestroyed and Esc
-/// kept. Escape: Idx may have been destroyed or released by one of several
-/// arms or an opaque callee: possibly assigned or not, and not destroyed.
-/// Reset: Idx belongs to a local whose declaration runs here, which begins a
-/// new object each time (a loop's next iteration, a backward goto): unassigned,
-/// not escaped, and not destroyed. AggregateEscape: the tracked aggregate local
-/// owning member Idx escapes as a whole (a non-benign DeclRefExpr), so reads of
-/// the member are trusted from here (the local read leniency) while its
-/// assignment state is unchanged. Binding: a pointer, reference, or handle
-/// binding whose source has a tracked leaf (BindingSites[Aux]), judged by the
-/// binding rule. ReadThrough / SubobjectWrite: a read through, or a store
-/// below, tracked storage (AccessSites[Aux]), judged by uninit_read /
-/// uninit_write. An event on a Pointee entity acts on the storage the pointer
-/// refers to at its program point (referent). Every event but a Reset and a
-/// scope-exit Destroy carries the anchor expression the diagnostic and the
-/// suppression walk use.
+/// several storages, each may be. Reseat: the marked pointer, reference, or
+/// handle Idx refers, from here, to the storage DefAssignEvent::RT describes
+/// and, when a marked binding names an identified referent (Entity,
+/// ViaPointer), asserts it unassigned: Must and May cleared, MayUnassigned set,
+/// MayDestroyed and Esc kept. Escape: Idx may have been destroyed or released
+/// by one of several arms or an opaque callee: possibly assigned or not, and
+/// not destroyed. Reset: Idx belongs to a local whose declaration runs here,
+/// which begins a new object each time (a loop's next iteration, a backward
+/// goto): unassigned, not escaped, and not destroyed. AggregateEscape: the
+/// tracked aggregate local owning member Idx escapes as a whole (a non-benign
+/// DeclRefExpr), so reads of the member are trusted from here (the local read
+/// leniency) while its assignment state is unchanged. Binding: a pointer,
+/// reference, or handle binding whose source has a tracked leaf
+/// (BindingSites[Aux]), judged by the binding rule. ReadThrough /
+/// SubobjectWrite: a read through, or a store below, tracked storage
+/// (AccessSites[Aux]), judged by uninit_read / uninit_write. An event on a
+/// Pointee entity acts on the storage the pointer refers to at its program
+/// point (referent). Every event but a Reset and a scope-exit Destroy carries
+/// the anchor expression the diagnostic and the suppression walk use.
 enum class DefAssignEventKind {
   Read,
   Write,
@@ -2720,7 +2803,7 @@ enum class DefAssignEventKind {
   ReadThrough,
   SubobjectWrite
 };
-/// What a Reseat makes its marked pointer or reference refer to.
+/// What a Reseat makes its marked pointer, reference, or handle refer to.
 enum class ReseatTarget {
   /// Its own anonymous referent, whose state is reset to unassigned: the
   /// source is one the analysis does not track (an allocation, pointer
@@ -2733,14 +2816,18 @@ enum class ReseatTarget {
   /// The entity DefAssignEvent::Aux (`&u`, `&a.m`, `&m`, `u` for a
   /// reference), which the binding's marker asserts uninitialized.
   Entity,
-  /// What the marked pointer or reference DefAssignEvent::Aux refers to
-  /// there (`q`, `&*q`, `&r`, `*q` for a reference), which the binding's
+  /// What the marked pointer, reference, or handle DefAssignEvent::Aux refers
+  /// to there (q, &*q, &r, *q for a reference), which the binding's
   /// marker asserts uninitialized; an unidentified referent asserts nothing.
   ViaPointer,
   /// Not identified: a conditional source with a tracked arm, or a store
   /// whose target names several pointers or a marked pointer on only some
   /// of its arms.
-  Unknown
+  Unknown,
+  /// The same referent, from a position past its start (a handle's ++, --,
+  /// +=, -=, std::advance): a credit or destroy through it reaches part of
+  /// the referent (FlowState::Offset).
+  Offset
 };
 struct DefAssignEvent {
   DefAssignEventKind Kind;
@@ -2917,6 +3004,9 @@ struct FlowState {
   /// SubMembers for are indeterminate until a store names one. Joined by
   /// union.
   llvm::BitVector MembersPending;
+  /// A marked handle positioned past its referent's start on some path
+  /// (ReseatTarget::Offset). Joined by union.
+  llvm::BitVector Offset;
   /// Per entity, meaningful for a Pointee: the entity's own index when the
   /// pointer refers to an anonymous referent whose state is the entity's
   /// bits, another entity's index when it refers to that entity's storage
@@ -2931,7 +3021,7 @@ struct FlowState {
   FlowState(unsigned N, bool Top)
       : Must(N, Top), May(N, false), MayUnassigned(N, !Top), Esc(N, Top),
         MayDestroyed(N, false), EntryAsserted(N, false),
-        MembersPending(N, false), Target(N, TopTarget) {
+        MembersPending(N, false), Offset(N, false), Target(N, TopTarget) {
     if (!Top)
       for (unsigned I = 0; I != N; ++I)
         Target[I] = I;
@@ -2944,6 +3034,7 @@ struct FlowState {
     MayDestroyed |= O.MayDestroyed;
     EntryAsserted |= O.EntryAsserted;
     MembersPending |= O.MembersPending;
+    Offset |= O.Offset;
     for (unsigned I = 0, N = Target.size(); I != N; ++I) {
       if (Target[I] == TopTarget)
         Target[I] = O.Target[I];
@@ -2955,7 +3046,8 @@ struct FlowState {
     return Must == O.Must && May == O.May && MayUnassigned == O.MayUnassigned &&
            Esc == O.Esc && MayDestroyed == O.MayDestroyed &&
            EntryAsserted == O.EntryAsserted &&
-           MembersPending == O.MembersPending && Target == O.Target;
+           MembersPending == O.MembersPending && Offset == O.Offset &&
+           Target == O.Target;
   }
   bool operator!=(const FlowState &O) const { return !(*this == O); }
 };
@@ -3284,6 +3376,10 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
     else
       WithSubs(R, F);
   };
+  auto MayWrite = [&](unsigned I) {
+    St.May.set(I);
+    St.EntryAsserted.reset(I);
+  };
   for (const DefAssignEvent &Ev : BlockEvents) {
     switch (Ev.Kind) {
     case DefAssignEventKind::Read:
@@ -3292,6 +3388,11 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       break;
     case DefAssignEventKind::Write:
       if (std::optional<unsigned> R = WriteTarget(Ev)) {
+        // Through an offset handle a credit reaches part of the referent.
+        if (St.Offset.test(Ev.Idx)) {
+          WriteStorage(Ev, *R, MayWrite);
+          break;
+        }
         WriteStorage(Ev, *R, Write);
         if (Ev.SkipUninitMembers)
           St.MembersPending.set(*R);
@@ -3310,10 +3411,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       break;
     case DefAssignEventKind::MayWrite:
       if (std::optional<unsigned> R = WriteTarget(Ev))
-        WriteStorage(Ev, *R, [&](unsigned I) {
-          St.May.set(I);
-          St.EntryAsserted.reset(I);
-        });
+        WriteStorage(Ev, *R, MayWrite);
       break;
     case DefAssignEventKind::Copy:
       St.Must[Ev.Idx] = St.Must.test(Ev.Aux);
@@ -3343,12 +3441,14 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
         std::optional<unsigned> R = referent(A, St, Storage);
         if (!R)
           continue;
+        // Through an offset handle a destroy reaches part of the referent.
+        bool Partial = Site.Conditional || St.Offset.test(A);
         WithSubs(*R, [&](unsigned I) {
           St.Must.reset(I);
           St.MayUnassigned.set(I);
           St.EntryAsserted.reset(I);
           St.MembersPending.reset(I);
-          if (Site.Conditional) {
+          if (Partial) {
             St.May.set(I);
             St.MayDestroyed.set(I);
           } else {
@@ -3389,6 +3489,9 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       case ReseatTarget::Unknown:
         NewTarget = UnknownTarget;
         break;
+      case ReseatTarget::Offset:
+        NewTarget = St.Target[Ev.Idx];
+        break;
       }
       // The binding's marker asserts the referent uninitialized; see
       // ReseatTarget.
@@ -3402,6 +3505,10 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
           St.MembersPending.reset(I);
         });
       St.Target[Ev.Idx] = NewTarget;
+      // A copy of an offset handle is offset too.
+      St.Offset[Ev.Idx] =
+          Ev.RT == ReseatTarget::Offset ||
+          (Ev.RT == ReseatTarget::ViaPointer && St.Offset.test(Ev.Aux));
       break;
     }
     case DefAssignEventKind::Escape:
@@ -3898,8 +4005,11 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
               {Leaf.E, HL.M, HL.Partial, Leaf.Arms}, D));
         };
         if (HL.M == HandleLeaf::Mode::Handle) {
-          ArgLeaf L{HL.E, {}};
-          L.Form = FormOf(HL.E);
+          ArgLeaf L{HL.E, Storage.resolveHandleLeaf(HL, Designated, RawExempt)};
+          L.Tracked = S.Profiles().isFlowTrackedHandleLeaf(HL, DC);
+          AnyTracked |= L.Tracked;
+          if (!L.R.Entity)
+            L.Form = FormOf(HL.E);
           Leaves.push_back(L);
           return;
         }
@@ -4415,29 +4525,81 @@ static void extractStdInitEvents(
           Read(Idx);
       }
     };
-    // A Reseat of the marked pointer or reference \p Idx at \p At.
+    // A Reseat of the marked pointer, reference, or handle \p Idx at \p At.
     auto AppendReseat = [&](unsigned Idx, const Expr *At, ReseatTarget RT,
                             unsigned Aux = 0) {
       DefAssignEvent Ev{DefAssignEventKind::Reseat, Idx, At, Aux};
       Ev.RT = RT;
       BlockEvents.push_back(Ev);
     };
-    // What a marked pointer or reference bound to \p Src as \p T refers to,
-    // as a ReseatTarget and its Aux, through the binding judgment's operand,
-    // leaf walk, and resolver (AddBinding, TrackedStorage::resolveFlowLeaf)
-    // so the two agree on the source's shape: the one tracked entity a
-    // single leaf names (`&u`, `&a.m`, `u` for a reference), what a single
-    // marked pointer or reference leaf refers to (`q`, `&*q`, `&r`), the target
-    // every leaf agrees on, nothing identifiable when the leaves disagree and
-    // one is tracked, and otherwise an anonymous referent -- also for a decayed
-    // [[uninit]] array, which the binding judges by the array's state but which
-    // names one element (P4222R2 §5.4).
+    // What a marked pointer, reference, or handle bound to \p Src as \p T
+    // refers to, as a ReseatTarget and its Aux, through the binding judgment's
+    // operand, leaf walk, and resolver (AddBinding,
+    // TrackedStorage::resolveFlowLeaf) so the two agree on the source's shape:
+    // the one tracked entity a single leaf names (&u, &a.m, u for a
+    // reference), what a single marked pointer or reference leaf refers to
+    // (q, &*q, &r), the target every leaf agrees on, nothing identifiable
+    // when the leaves disagree and one is tracked, and otherwise an anonymous
+    // referent -- also for a decayed [[uninit]] array, which the binding judges
+    // by the array's state but which names one element (P4222R2 §5.4).
     auto ReseatTargetFor =
         [&](const Expr *Src, QualType T) -> std::pair<ReseatTarget, unsigned> {
       std::pair<ReseatTarget, unsigned> Fresh{ReseatTarget::Fresh, 0};
       if (!Src || T.isNull() || T->isDependentType() ||
           isa<RecoveryExpr>(Src->IgnoreParens()))
         return Fresh;
+      // A handle refers to what the leaves of its walk name: a tracked
+      // handle's referent, or storage a transfer leaf names whole; a Partial
+      // leaf or a subobject is an anonymous referent.
+      if (SemaProfiles::isHandleType(T)) {
+        using HandleLeaf = SemaProfiles::HandleLeaf;
+        SmallVector<std::pair<ReseatTarget, unsigned>, 2> Targets;
+        bool AnyTracked = false;
+        auto Visit = [&](auto &Self, const HandleLeaf &HL) -> void {
+          if (HL.M == HandleLeaf::Mode::Handle) {
+            AnyTracked |= S.Profiles().isFlowTrackedHandleLeaf(HL, DC);
+            TrackedStorage::Resolution R = Storage.resolveHandleLeaf(HL);
+            Targets.push_back(
+                R.Entity && !R.Subobject
+                    ? std::pair{ReseatTarget::ViaPointer, *R.Entity}
+                    : Fresh);
+            return;
+          }
+          bool AsPointerValue = HL.M == HandleLeaf::Mode::PointerValue;
+          SemaProfiles::forEachTargetLeaf(
+              HL.E, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+                AnyTracked |=
+                    S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC);
+                TrackedStorage::Resolution R =
+                    Storage.resolveFlowLeaf(Leaf, AsPointerValue);
+                if (HL.M == HandleLeaf::Mode::Range && !R.Entity) {
+                  SemaProfiles::forEachHandleSourceLeaf(
+                      Leaf.E,
+                      [&](const HandleLeaf &Inner) { Self(Self, Inner); });
+                  return;
+                }
+                bool DecayedArray =
+                    AsPointerValue &&
+                    SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms)
+                        ->getType()
+                        ->isArrayType();
+                if (R.Entity && !R.Subobject && !HL.Partial && !DecayedArray)
+                  Targets.push_back({Storage.Entities[*R.Entity].isPointee()
+                                         ? ReseatTarget::ViaPointer
+                                         : ReseatTarget::Entity,
+                                     *R.Entity});
+                else
+                  Targets.push_back(Fresh);
+              });
+        };
+        SemaProfiles::forEachHandleSourceLeaf(
+            Src, [&](const HandleLeaf &HL) { Visit(Visit, HL); });
+        if (Targets.empty())
+          return Fresh;
+        if (!llvm::all_equal(Targets))
+          return AnyTracked ? std::pair{ReseatTarget::Unknown, 0u} : Fresh;
+        return Targets.front();
+      }
       bool AsPointerValue;
       const Expr *Operand =
           SemaProfiles::bindingSourceOperand(Src, T, AsPointerValue);
@@ -4579,7 +4741,8 @@ static void extractStdInitEvents(
     // §4.3): `p` bound to a `T *&`, or `&p` bound to a `T **`, per leaf,
     // gives the pointer an anonymous referent of unknown state. A const
     // pointer cannot be reseated through either.
-    auto AppendAliasEscapes = [&](const Expr *Src, QualType T, const Expr *At) {
+    auto AppendAliasEscapes = [&](const Expr *Src, QualType T, const Expr *At,
+                                  const ParmVarDecl *Parm = nullptr) {
       if (!Src || T.isNull())
         return;
       // A pointer or reference to the current object or to a member
@@ -4599,6 +4762,49 @@ static void extractStdInitEvents(
               if (isa<CXXThisExpr>(G) || G->getType()->isRecordType())
                 EscapeMemberPointers(G, At);
             });
+      // A non-const reference or pointer to a marked handle escapes its
+      // referent: the alias may reseat it. The source of a copy or a move,
+      // a transfer argument, and a reference a standard library function
+      // takes keep no alias -- but std::swap, std::exchange, and
+      // std::iter_swap exchange what it refers to, and std::advance offsets
+      // it.
+      bool HandleByRef = T->isReferenceType() &&
+                         !T.getNonReferenceType().isConstQualified() &&
+                         SemaProfiles::isHandleType(T.getNonReferenceType());
+      bool HandleByAddr = T->isPointerType() &&
+                          !T->getPointeeType().isConstQualified() &&
+                          SemaProfiles::isHandleType(T->getPointeeType());
+      if (HandleByRef || HandleByAddr) {
+        ReseatTarget RT = ReseatTarget::Escaped;
+        if (const auto *FD =
+                Parm ? dyn_cast<FunctionDecl>(Parm->getDeclContext())
+                     : nullptr) {
+          if (SemaProfiles::isStdCallable(FD, "advance"))
+            RT = ReseatTarget::Offset;
+          else if (SemaProfiles::isCopySource(Parm) ||
+                   SemaProfiles::getCalleeLifecycleRoles(FD).transfersParam(
+                       Parm) ||
+                   (SemaProfiles::isStdLibraryFunction(FD) &&
+                    !SemaProfiles::isStdCallable(FD, "swap") &&
+                    !SemaProfiles::isStdCallable(FD, "exchange") &&
+                    !SemaProfiles::isStdCallable(FD, "iter_swap")))
+            return;
+        }
+        SemaProfiles::forEachTargetLeaf(
+            Src, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+              const Expr *G =
+                  SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms);
+              if (HandleByAddr) {
+                G = SemaProfiles::addressOfOperand(G);
+                if (!G)
+                  return;
+              }
+              if (std::optional<unsigned> Idx =
+                      Storage.markedHandleObject({G, Leaf.Arms}))
+                AppendReseat(*Idx, At, RT);
+            });
+        return;
+      }
       bool ByRef = SemaProfiles::pointerAliasKind(T) ==
                    SemaProfiles::PointerAliasKind::Mutable;
       bool ByAddr = T->isPointerType() &&
@@ -4686,7 +4892,15 @@ static void extractStdInitEvents(
           };
           if (HL.M == HandleLeaf::Mode::Handle) {
             BindingLeaf L;
-            L.State = FormOf(HL.E, HL.M);
+            if (S.Profiles().isFlowTrackedHandleLeaf(HL, DC)) {
+              AnyTracked = true;
+              JudgedLeaves.insert(HL.E);
+              TrackedStorage::Resolution R = Storage.resolveHandleLeaf(HL);
+              L.Entity = R.Entity;
+              L.WholeLeaf = !R.Subobject;
+            }
+            if (!L.Entity)
+              L.State = FormOf(HL.E, HL.M);
             Site.Leaves.push_back(L);
             return;
           }
@@ -4895,7 +5109,7 @@ static void extractStdInitEvents(
                           Roles.roleOf(Parm) !=
                               SemaProfiles::KnownParamRole::None,
                       Parm);
-                AppendAliasEscapes(Arg, T, CallLike);
+                AppendAliasEscapes(Arg, T, CallLike, Parm);
               });
         };
     // A call of \p Callee (null when there is no declared callee) through
@@ -5227,17 +5441,74 @@ static void extractStdInitEvents(
         if (const auto *PDE = dyn_cast<CXXPseudoDestructorExpr>(
                 CE->getCallee()->IgnoreParens()))
           DestroyedObject = PDE->getBase();
+        // A destructor call on a marked handle destroys the handle object,
+        // whose storage no entity tracks, not its referent.
+        if (DestroyedObject &&
+            Storage.markedHandleObject({DestroyedObject, {}}))
+          DestroyedObject = nullptr;
         // A handle reseat is judged against the handle's marking
         // (SemaProfiles::checkInitProfileHandleReseat).
         const Expr *ReseatObj = nullptr, *ReseatSrc = nullptr;
         SourceLocation ReseatLoc;
-        if (SemaProfiles::getHandleReseat(CE, ReseatObj, ReseatSrc, ReseatLoc))
+        bool IsReseat =
+            SemaProfiles::getHandleReseat(CE, ReseatObj, ReseatSrc, ReseatLoc);
+        if (IsReseat)
           if (std::optional<bool> Marked =
                   SemaProfiles::resolveHandleReseatMarking(ReseatObj))
             AddBinding(K::PointerAssignment, ReseatLoc, *Marked,
                        SemaProfiles::handleReseatType(ReseatObj), ReseatSrc,
                        nullptr, CE);
         AppendCallEvents(CE, Callee, DestroyedObject);
+        // A member call on a marked local handle changes what it refers to:
+        // a reseat names its source's referent, a reset or an assignment of
+        // anything but a class an anonymous one, an offset (++, --, +=, -=)
+        // a part of it, and any other non-const call one of unknown state --
+        // but a call deriving a pointer or reference from it and a release.
+        // An object naming several handles (a conditional) reseats each to
+        // an unidentified referent.
+        if (ObjectMethod && Object && !Object->getType()->isPointerType() &&
+            !isa<CXXDestructorDecl>(ObjectMethod)) {
+          SmallVector<unsigned, 2> Handles;
+          unsigned NumLeaves = 0;
+          SemaProfiles::forEachTargetLeaf(
+              Object, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+                ++NumLeaves;
+                if (std::optional<unsigned> Idx =
+                        Storage.markedHandleObject(Leaf))
+                  Handles.push_back(*Idx);
+              });
+          bool Several = NumLeaves > 1;
+          for (unsigned Idx : Handles) {
+            OverloadedOperatorKind OO = ObjectMethod->getOverloadedOperator();
+            bool Written = llvm::any_of(CE->arguments(), [&](const Expr *A) {
+              return A != Object && !isa<CXXDefaultArgExpr>(A);
+            });
+            bool IsReset = ObjectMethod->getIdentifier() &&
+                           ObjectMethod->getName() == "reset";
+            bool IsRelease = ObjectMethod->getIdentifier() &&
+                             ObjectMethod->getName() == "release" &&
+                             SemaProfiles::isUniqueOwnerType(
+                                 Object->IgnoreParenImpCasts()->getType());
+            const Expr *DerivingObj;
+            bool Element;
+            if (IsReseat || OO == OO_Equal || (IsReset && !Written)) {
+              std::pair<ReseatTarget, unsigned> RT{ReseatTarget::Fresh, 0};
+              if (IsReseat)
+                RT = ReseatTargetFor(
+                    ReseatSrc, ReseatObj->getType().getNonReferenceType());
+              if (Several)
+                RT = {ReseatTarget::Unknown, 0};
+              AppendReseat(Idx, CE, RT.first, RT.second);
+            } else if (OO == OO_PlusPlus || OO == OO_MinusMinus ||
+                       OO == OO_PlusEqual || OO == OO_MinusEqual) {
+              AppendReseat(Idx, CE, ReseatTarget::Offset);
+            } else if (!ObjectMethod->isConst() && !IsRelease &&
+                       !SemaProfiles::isHandleDerefCall(CE, DerivingObj,
+                                                        Element)) {
+              AppendReseat(Idx, CE, ReseatTarget::Escaped);
+            }
+          }
+        }
       } else if (const auto *CCE = dyn_cast<CXXConstructExpr>(St)) {
         // A constructor call's parameter bindings, the copy of a class object
         // out of tracked storage included; a std-table construction's transfer
@@ -5298,9 +5569,13 @@ static void extractStdInitEvents(
             AddBinding(K::ByRefCapture, C.getLocation(),
                        /*TargetMarked=*/false, Ctx.getLValueReferenceType(VT),
                        Init, V, LE);
-            if (!VT.isConstQualified())
-              if (std::optional<unsigned> Idx = Storage.markedPointerObject(V))
+            if (!VT.isConstQualified()) {
+              std::optional<unsigned> Idx = Storage.markedPointerObject(V);
+              if (!Idx)
+                Idx = Storage.markedHandleObject(V);
+              if (Idx)
                 AppendReseat(*Idx, LE, ReseatTarget::Escaped);
+            }
           } else if (C.getCaptureKind() == LCK_ByCopy) {
             AddBinding(K::ByCopyCapture, C.getLocation(),
                        /*TargetMarked=*/false, VT, Init, nullptr, LE);
@@ -5334,14 +5609,16 @@ static void extractStdInitEvents(
           // included); the DeclStmt element follows its initializer's
           // subexpression elements, so the judgment sees their effects. An
           // implicit handle local (range-for's __begin) stands for its
-          // initializer, which the handle walk sees through.
+          // initializer, which the handle walk sees through, and no implicit
+          // local (range-for's __range) hands out an alias of its own.
           if (const Expr *Init = V->getInit()) {
             if (!V->isImplicit() || !SemaProfiles::isHandleType(V->getType()))
               AddBinding(K::Variable, V->getLocation(),
                          V->hasAttr<RefToUninitAttr>(), V->getType(), Init,
                          nullptr, Init, /*EveryPath=*/false, /*AsRange=*/false,
                          V);
-            AppendAliasEscapes(Init, V->getType(), Init);
+            if (!V->isImplicit())
+              AppendAliasEscapes(Init, V->getType(), Init);
             // A declared marked pointer or reference refers to what its
             // initializer names; a __block one can be reseated by a block
             // body the analysis does not see.
@@ -5582,8 +5859,8 @@ static bool isCurrentObjectLifecycleUse(Sema &S, const Stmt *St) {
 /// handler variable, or parameter whose class has marked scalar members
 /// (SemaProfiles::flowTrackedAggregateClass), every [[uninit]] local or
 /// parameter as a whole, and the referent of every [[ref_to_uninit]] local
-/// pointer or reference; a variable of an enclosing function the body reaches
-/// by capture is tracked from an unknown entry state. The read-tracking
+/// pointer, reference, or handle; a variable of an enclosing function the body
+/// reaches by capture is tracked from an unknown entry state. The read-tracking
 /// premises -- a copy does not inherit initialization, a by-value parameter is
 /// a copy of the caller's argument, a defaulted parameter is not -- are argued
 /// in ProfilesFrameworkInternals.rst, "Flow-Tracked Storage (std::init)" and
@@ -5591,14 +5868,16 @@ static bool isCurrentObjectLifecycleUse(Sema &S, const Stmt *St) {
 static void harvestTrackedLocals(Sema &S, const Decl *D,
                                  TrackedStorage &Storage) {
   // A marked local or parameter is tracked as a whole ([[uninit]]) or by
-  // its referent ([[ref_to_uninit]] pointer or reference).
+  // its referent ([[ref_to_uninit]] pointer, reference, or handle).
   auto HarvestMarked = [&](const VarDecl *V, bool UnknownEntry) {
     if (V->isInvalidDecl() || !V->hasLocalStorage())
       return;
     if (V->hasAttr<UninitAttr>())
       Storage.addLocalEntity(TrackedEntity::Kind::WholeLocal, V, UnknownEntry);
     else if (V->hasAttr<RefToUninitAttr>() &&
-             (V->getType()->isPointerType() || V->getType()->isReferenceType()))
+             (V->getType()->isPointerType() ||
+              V->getType()->isReferenceType() ||
+              SemaProfiles::isHandleType(V->getType())))
       Storage.addLocalEntity(TrackedEntity::Kind::Pointee, V, UnknownEntry);
   };
   llvm::SmallPtrSet<const VarDecl *, 16> Owned;
