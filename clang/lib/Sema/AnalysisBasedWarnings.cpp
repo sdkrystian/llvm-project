@@ -1995,18 +1995,31 @@ static std::optional<uint64_t> designationExtent(const ASTContext &Ctx,
 /// True if a credit, store, or access through a glvalue of type
 /// \p Designated covers the whole of storage of type \p Entity: the types
 /// agree canonically and unqualified, same-size signed and unsigned integer
-/// variants alike, an array compared by its base element type -- an array
-/// designation also by its extent (designationExtent), so it covers no larger
-/// array. Storage of type void (a void pointer's referent) has no type to
-/// disagree with. With
+/// variants alike, an array or a std::array compared by its base element
+/// type -- an array designation also by its extent (designationExtent), so it
+/// covers no larger array. Storage of type void (a void pointer's referent)
+/// has no type to disagree with. With
 /// \p RawExempt -- a [[now_init]] parameter or an initializing parameter,
 /// whose callee claims the bytes -- a designated void, char, unsigned char,
 /// or std::byte covers any storage. Any other designation names a subobject
 /// (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage (std::init)").
 static bool designationCovers(const ASTContext &Ctx, QualType Designated,
                               QualType Entity, bool RawExempt) {
-  QualType D = Ctx.getBaseElementType(Designated);
-  QualType E = Ctx.getBaseElementType(Entity);
+  // A std::array counts by its elements, as an array does (P4222R2 §5.5).
+  auto BaseElement = [&](QualType T) {
+    T = Ctx.getBaseElementType(T);
+    while (const auto *CTSD = dyn_cast_or_null<ClassTemplateSpecializationDecl>(
+               T->getAsCXXRecordDecl())) {
+      if (!CTSD->getIdentifier() || CTSD->getName() != "array" ||
+          !CTSD->isInStdNamespace() || CTSD->getTemplateArgs().size() == 0 ||
+          CTSD->getTemplateArgs()[0].getKind() != TemplateArgument::Type)
+        break;
+      T = Ctx.getBaseElementType(CTSD->getTemplateArgs()[0].getAsType());
+    }
+    return T;
+  };
+  QualType D = BaseElement(Designated);
+  QualType E = BaseElement(Entity);
   if (E->isVoidType())
     return true;
   if (RawExempt && (D->isVoidType() || D->isStdByteType() ||
@@ -2672,6 +2685,17 @@ TrackedStorage::resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
   if (isa<CXXThisExpr>(E) && CurrentObjectRoot) {
     R.Entity = CurrentObjectRoot;
     R.Subobject = !covers(Designated, *CurrentObjectRoot, RawExempt);
+    return R;
+  }
+  // A std::array's begin or data: the array it points into -- through a
+  // pointer, the pointer's referent -- a subobject from its end.
+  bool PastStart;
+  if (const Expr *Arr = SemaProfiles::stdArrayAddressObject(E, PastStart)) {
+    R = Arr->getType()->isPointerType()
+            ? resolveFlowLeaf({Arr, Leaf.Arms}, /*AsPointerValue=*/true,
+                              Designated, RawExempt)
+            : resolve({Arr, Leaf.Arms}, Designated, RawExempt);
+    R.Subobject |= PastStart;
     return R;
   }
   // A pointer a marked handle's member returns to its whole referent, or
@@ -5527,15 +5551,20 @@ static void extractStdInitEvents(
         const Expr *DestroyedObject = nullptr;
         if (ObjectMethod && Object && isa<CXXDestructorDecl>(ObjectMethod)) {
           DestroyedObject = Object;
-        } else if (ObjectMethod && Object) {
+        } else if (ObjectMethod && Object &&
+                   !SemaProfiles::isStdArrayAddressMember(ObjectMethod)) {
           QualType OT = Object->getType();
           QualType T =
               OT->isPointerType()
                   ? OT
                   : Ctx.getLValueReferenceType(OT.getNonReferenceType());
+          // A defaulted comparison reads its object whole, and a std::array's
+          // element access reads an element, as a built-in array's does: on
+          // every path.
           AddBinding(K::ObjectArgument, Object->IgnoreImplicit()->getExprLoc(),
                      /*TargetMarked=*/false, T, Object, ObjectMethod, CE,
-                     SemaProfiles::isDefaultedComparison(ObjectMethod));
+                     SemaProfiles::isDefaultedComparison(ObjectMethod) ||
+                         SemaProfiles::isStdArrayElementMember(ObjectMethod));
           EscapeMemberPointers(Object, CE);
         }
         if (const auto *PDE = dyn_cast<CXXPseudoDestructorExpr>(

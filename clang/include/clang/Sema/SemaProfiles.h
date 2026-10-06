@@ -433,6 +433,21 @@ public:
   /// a member are judged by flow state for every such object.
   static const CXXRecordDecl *flowTrackedAggregateClass(const VarDecl *V);
 
+  /// True if \p MD is a member of a std::array specialization that returns
+  /// an address into the array's elements -- begin, end, cbegin, cend, or
+  /// data: a call to one on uninitialized storage is no object-argument
+  /// violation, and its result designates the array's element storage
+  /// (P4222R2 §5.5).
+  static bool isStdArrayAddressMember(const CXXMethodDecl *MD);
+  /// For such a call \p E, the object -- or for an arrow call, the pointer
+  /// to it -- and whether the result is past its start (end, cend); null
+  /// otherwise.
+  static const Expr *stdArrayAddressObject(const Expr *E, bool &PastStart);
+  /// True if \p MD is a member of a std::array specialization that names an
+  /// element -- operator[], at, front, or back: its call reads the array as a
+  /// built-in array's element access does, on every path.
+  static bool isStdArrayElementMember(const CXXMethodDecl *MD);
+
   /// True if \p V is a handle variable whose referent the flow analysis
   /// tracks: a local or parameter of handle type (isHandleType) marked
   /// [[ref_to_uninit]].

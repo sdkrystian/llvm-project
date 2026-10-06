@@ -2733,6 +2733,17 @@ struct HandleSourceWalk {
       return;
     }
     if (const auto *CE = dyn_cast<CallExpr>(E)) {
+      // A std::array's begin or data designates its element storage, or,
+      // called through a pointer, the pointer's.
+      bool PastStart = false;
+      if (const Expr *Arr =
+              SemaProfiles::stdArrayAddressObject(CE, PastStart)) {
+        emit(Arr,
+             Arr->getType()->isPointerType() ? HandleLeaf::Mode::PointerValue
+                                             : HandleLeaf::Mode::Range,
+             Partial || PastStart);
+        return;
+      }
       bool StepPartial = false;
       if (const Expr *Obj = handleSelfReturnObject(CE, StepPartial)) {
         walk(Obj, Partial || StepPartial);
@@ -2769,6 +2780,41 @@ void SemaProfiles::forEachHandleSourceLeaf(
     return;
   HandleSourceWalk Walk{F, {}, {}};
   Walk.walk(Src, /*Partial=*/false);
+}
+
+bool SemaProfiles::isStdArrayAddressMember(const CXXMethodDecl *MD) {
+  const CXXRecordDecl *RD = MD->getParent();
+  if (!MD->getIdentifier() || !RD->getIdentifier() ||
+      RD->getName() != "array" || !RD->isInStdNamespace())
+    return false;
+  return llvm::is_contained(
+      ArrayRef<StringRef>{"begin", "end", "cbegin", "cend", "data"},
+      MD->getName());
+}
+
+const Expr *SemaProfiles::stdArrayAddressObject(const Expr *E,
+                                                bool &PastStart) {
+  const auto *CE = dyn_cast<CallExpr>(E);
+  const auto *MD =
+      CE ? dyn_cast_or_null<CXXMethodDecl>(CE->getDirectCallee()) : nullptr;
+  if (!MD || !isStdArrayAddressMember(MD))
+    return nullptr;
+  PastStart = MD->getName() == "end" || MD->getName() == "cend";
+  if (const auto *MCE = dyn_cast<CXXMemberCallExpr>(CE))
+    return MCE->getImplicitObjectArgument();
+  return memberCallObject(CE, MD);
+}
+
+bool SemaProfiles::isStdArrayElementMember(const CXXMethodDecl *MD) {
+  const CXXRecordDecl *RD = MD->getParent();
+  if (!RD->getIdentifier() || RD->getName() != "array" ||
+      !RD->isInStdNamespace())
+    return false;
+  if (MD->getOverloadedOperator() == OO_Subscript)
+    return true;
+  return MD->getIdentifier() &&
+         llvm::is_contained(ArrayRef<StringRef>{"at", "front", "back"},
+                            MD->getName());
 }
 
 bool SemaProfiles::isFlowTrackedHandleVar(const VarDecl *V) {
@@ -3025,6 +3071,14 @@ static UninitStorage classifyRefToUninitCallee(ASTContext &Ctx,
     }
   }
   if (!RefersToUninit) {
+    // A std::array's begin or data points into its element storage, as a
+    // decayed array does -- through a pointer, into the pointer's.
+    bool PastStart = false;
+    if (const Expr *Arr = SemaProfiles::stdArrayAddressObject(CE, PastStart))
+      return Arr->getType()->isPointerType()
+                 ? pointerRefersToUninitStorage(Ctx, Arr, Opts)
+                 : glvalueDenotesUninitStorage(Ctx, Arr,
+                                               Opts.withoutTopLevelDrop());
     if (const Expr *Obj = derivingObject(CE))
       if (UninitStorage S = classifyHandleSource(Ctx, Obj, Opts);
           isUninitializedOrMixed(S))
@@ -3915,6 +3969,18 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
     Cur = Base;
     return true;
   };
+  // Step through a std::array's begin or data on an object to the array,
+  // at an element, as through a decayed array.
+  auto StepThroughArray = [&](const Expr *Call) {
+    bool PastStart;
+    const Expr *Arr = stdArrayAddressObject(Call, PastStart);
+    if (!Arr || Arr->getType()->isPointerType())
+      return false;
+    S.Subscript = true;
+    NamedBelowElement = LeafFirst.size();
+    Cur = peelBaseCasts(Arr, Bases(), Arms);
+    return true;
+  };
   // Step to the pointer operand of a * or ->: an address-of step's operand
   // continues the chain (true); any other pointer reaches its storage
   // through the pointer, which ends it.
@@ -3924,6 +3990,8 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
       Cur = peelBaseCasts(Op, Bases(), Arms);
       return true;
     }
+    if (StepThroughArray(Cur))
+      return true;
     S.ThroughPointer = true;
     StepThroughHandle(Cur);
     return false;
@@ -3961,6 +4029,8 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
       // p[i] indexes the pointer's value; arr[i] the array glvalue its
       // peeled decay leaves behind.
       if (Cur->getType()->isPointerType()) {
+        if (StepThroughArray(Cur))
+          continue;
         S.ThroughPointer = true;
         StepThroughHandle(Cur);
         break;
@@ -4387,6 +4457,13 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
                                /*AsPointerValue=*/false, CurContext, Use);
     if (isa<CXXThisExpr>(E))
       return CurrentObjectTracked();
+    // A std::array's begin or data: the array it points into, or the
+    // pointer's referent through which it is called.
+    bool PastStart;
+    if (const Expr *Arr = stdArrayAddressObject(E, PastStart))
+      return isFlowTrackedLeaf(ShapeLeaf(Arr, Leaf.Arms),
+                               Arr->getType()->isPointerType(), CurContext,
+                               Use);
     // A pointer a tracked handle's member returns to its whole referent
     // (up.get(), s.data()) or through a prefix of it (s.first(n).data());
     // an element's, or one past the referent's start, is never tracked.
@@ -4746,6 +4823,9 @@ void SemaProfiles::checkInitProfileObjectArgument(const Expr *Object,
   // reaches this funnel. BuildCallToObjectOfClassType converts the object
   // argument for static call operators all the same, so skip them here.
   if (Method->isStatic())
+    return;
+  // A std::array's address members only take its address.
+  if (isStdArrayAddressMember(Method))
     return;
   // An arrow call's object argument arrives as the pointer expression, a dot
   // call's as the object glvalue; the implicit object parameter's type is the
@@ -5178,6 +5258,9 @@ static const Expr *shapeChainOperand(const Expr *E) {
   // A handle's member call deriving a pointer or reference, or returning the
   // handle itself, steps to its object (SemaProfiles::handleChainBase).
   if (const auto *CE = dyn_cast<CallExpr>(E)) {
+    bool PastStart;
+    if (const Expr *Arr = SemaProfiles::stdArrayAddressObject(CE, PastStart))
+      return Arr;
     const Expr *Obj;
     bool Element;
     if (SemaProfiles::isHandleDerefCall(CE, Obj, Element))

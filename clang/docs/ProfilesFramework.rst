@@ -1265,6 +1265,17 @@ it unknown, except a standard library function's other than ``std::swap``,
 than a marked ``std::unique_ptr`` (below) ends the handle object, not its
 referent.
 
+A ``std::array``'s ``begin``, ``end``, ``cbegin``, ``cend``, and ``data``
+only take its address: called on an uninitialized ``std::array`` they are
+accepted, and they designate its elements as a built-in array decays to its
+first element -- called through a pointer, the elements of what it points
+to -- so ``std::uninitialized_fill(a.begin(), a.end(), 0)`` and
+``std::ranges::uninitialized_fill(a, 0)`` initialize an ``[[uninit]]``
+``std::array`` whole (§5.5), and ``*a.data()`` then reads it as ``*arr``
+does, while ``a[0]`` before that is a member call on uninitialized storage.
+Its ``operator[]``, ``at``, ``front``, and ``back`` read the array as
+``arr[i]`` does: it must be initialized on every path.
+
 A ``std::uninitialized_*`` call, ``std::destroy`` and ``std::destroy_n``, and
 their ``std::ranges`` objects take a class-type iterator or range, and a
 ``[[now_uninit]]`` function's handle parameter is destroyed like its pointer

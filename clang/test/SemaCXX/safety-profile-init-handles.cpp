@@ -160,6 +160,19 @@ public:
   void reset(nullptr_t = nullptr) noexcept;
 };
 
+template <class T, size_t N> struct array {
+  T _M_elems[N];
+  using value_type = T;
+  using iterator = T *;
+  using const_iterator = const T *;
+  constexpr iterator begin() noexcept;
+  constexpr iterator end() noexcept;
+  constexpr const_iterator cbegin() const noexcept;
+  constexpr const_iterator cend() const noexcept;
+  constexpr T *data() noexcept;
+  constexpr T &operator[](size_t n) noexcept;
+};
+
 template <class T> class vector {
   T *_M_start, *_M_finish, *_M_end_of_storage;
 
@@ -1071,6 +1084,48 @@ void static_owners() {
   // no-profiles-error@+1 {{'ref_to_uninit' attribute cannot be applied to an owning smart pointer with thread storage duration}}
   thread_local std::shared_ptr<int> t [[ref_to_uninit]];
   static std::span<int> s [[ref_to_uninit]];
+}
+
+// A std::array's begin, end, and data only take its address, and through them
+// a call initializes the array whole (P4222R2 §5.5)
+int array_fill() {
+  std::array<int, 4> a [[uninit]];
+  std::uninitialized_fill(a.begin(), a.end(), 0);
+  return a[0];
+}
+int array_ranges_fill() {
+  std::array<int, 4> a [[uninit]];
+  std::ranges::uninitialized_fill(a, 0);
+  return a[0];
+}
+int array_address_read() {
+  std::array<int, 4> a [[uninit]];
+  std::uninitialized_fill(a.begin(), a.end(), 0);
+  return *a.begin() + *a.data() + a.data()[2];
+}
+
+// An element access reads a std::array as a built-in array's does: on every
+// path
+int array_partial() {
+  std::array<int, 4> a [[uninit]];
+  std::construct_at(a.data(), 1);
+  return a[3]; // expected-error {{calling member function 'operator[]' binds its implicit object parameter to uninitialized memory under profile 'std::init'}}
+}
+
+// Called through a pointer, a std::array's address members designate what
+// the pointer refers to
+int array_through_pointer(std::array<int, 4> *pa [[ref_to_uninit]]) {
+  int *q = pa->data(); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  std::uninitialized_fill(pa->begin(), pa->end(), 0);
+  (void)q;
+  return (*pa)[0];
+}
+
+int array_unfilled() {
+  std::array<int, 4> a [[uninit]];
+  int *p = a.data(); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)p;
+  return a[0]; // expected-error {{calling member function 'operator[]' binds its implicit object parameter to uninitialized memory under profile 'std::init'}}
 }
 
 //--- libcxx.cpp

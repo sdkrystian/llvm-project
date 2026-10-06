@@ -1033,6 +1033,19 @@ instead.  An author-marked constructor parameter makes a construction a
 terminal that refers to uninitialized memory, while the parameter's own
 binding is judged as usual.
 
+A ``std::array`` is storage, not a handle: its ``begin``, ``end``,
+``cbegin``, ``cend``, and ``data`` (``SemaProfiles::isStdArrayAddressMember``)
+are exempt from the object-argument rule, and their result designates the
+array's element storage -- the pointer recognizer classifies the array as a
+decayed array, the predicate and the resolver take the array whole (from
+``end``, a subobject), the shape walk steps through them to an element of the
+array, and the walk makes it a ``Range`` leaf; called through a pointer they
+designate its referent instead -- while ``designationCovers`` counts a
+``std::array`` by its elements, so an ``int`` credit covers a
+``std::array<int, 4>``.  Its element members (``operator[]``, ``at``,
+``front``, ``back``; ``isStdArrayElementMember``) bind the array on every
+path, as a built-in array's element read is judged.
+
 A handle is reseated by a one-parameter ``operator=`` whose source is a class
 object, as an operator or called by name, and an owner also by ``reset`` with
 a written argument (``SemaProfiles::getHandleReseat``), arrow calls included:
