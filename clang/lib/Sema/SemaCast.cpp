@@ -3427,6 +3427,9 @@ void CastOperation::CheckBuiltinBitCast() {
     return;
   }
 
+  // std::init: the cast reads its operand whole.
+  Self.Profiles().checkInitProfileReadThrough(SrcExpr.get()->getExprLoc(),
+                                              SrcExpr.get(), SrcType);
   Kind = CK_LValueToRValueBitCast;
 }
 

@@ -555,7 +555,8 @@ public:
   /// lvalue-to-rvalue chokepoint, with \p Glvalue the operand being loaded
   /// and \p ValueType its value type; and from the compound-assignment
   /// (Sema::CheckAssignmentOperands) and increment/decrement
-  /// (Sema::CreateBuiltinUnaryOp) operator sites, whose reads build no
+  /// (Sema::CreateBuiltinUnaryOp) operator sites and __builtin_bit_cast
+  /// (CastOperation::CheckBuiltinBitCast), whose reads build no
   /// lvalue-to-rvalue node (the shift-compounds are excluded there because
   /// their LHS promotion already funnels through the chokepoint). Reuses the
   /// ref_to_uninit recognizer with its read access preset, so a direct read

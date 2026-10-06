@@ -2459,6 +2459,10 @@ struct BindingSite {
   /// captured variable).
   const NamedDecl *Subject = nullptr;
   SmallVector<BindingLeaf, 2> Leaves;
+  /// The unmarked source parameter of a copy or move constructor or
+  /// assignment operator: the copy reads the source whole, so it must be
+  /// initialized on every path (P4222R2 §1.3, §9.2).
+  bool EveryPath = false;
 };
 
 /// A [[now_uninit]] destruction site derived from a call element: the
@@ -2617,18 +2621,18 @@ static LeafState leafState(const BindingLeaf &L, const FlowState &St,
 /// Judge a binding site against \p St with the funnel's verdict rule: a
 /// marked target rejects a source that is initialized (on every path) or
 /// Mixed, an unmarked one a source that is uninitialized (on every path) or
-/// Mixed; an Unknown source fires in neither direction.
+/// Mixed -- for a whole copy, a source left uninitialized on some path
+/// (BindingSite::EveryPath); an Unknown source fires in neither direction.
 static void judgeBindingSite(const BindingSite &Site, const FlowState &St,
                              const TrackedStorage &Storage,
                              SmallVectorImpl<PendingViolation> &Out) {
   using K = SemaProfiles::InitBindingKind;
   if (Site.Leaves.empty())
     return;
-  LeafState Acc =
-      leafState(Site.Leaves.front(), St, Storage, /*EveryPath=*/false);
+  bool EveryPath = Site.EveryPath && !Site.TargetMarked;
+  LeafState Acc = leafState(Site.Leaves.front(), St, Storage, EveryPath);
   for (const BindingLeaf &L : llvm::drop_begin(Site.Leaves))
-    Acc =
-        combineLeafStates(Acc, leafState(L, St, Storage, /*EveryPath=*/false));
+    Acc = combineLeafStates(Acc, leafState(L, St, Storage, EveryPath));
   if (Site.TargetMarked) {
     if (Acc == LeafState::Initialized || Acc == LeafState::Mixed)
       Out.push_back({diag::err_init_ref_to_uninit_requires_uninit, Site.Loc,
@@ -3156,6 +3160,62 @@ static void forEachArgumentBinding(
   }
 }
 
+/// True if \p FD is a defaulted comparison operator, which reads each of
+/// its operands -- its object argument included -- whole.
+static bool isDefaultedComparison(const FunctionDecl *FD) {
+  return FD && FD->isDefaulted() && FD->getOverloadedOperator() != OO_None &&
+         FD->getOverloadedOperator() != OO_Equal;
+}
+
+/// True if \p P is the source parameter of a copy or move constructor or of
+/// a copy or move assignment operator (after an explicit object parameter),
+/// an operand of a defaulted comparison, the source of std::bit_cast, memcpy,
+/// or memmove, or an argument of a Construct row of the constructed class
+/// type, whose call reads the argument whole.
+static bool isWholeCopySource(const ParmVarDecl *P) {
+  const auto *FD = P ? dyn_cast<FunctionDecl>(P->getDeclContext()) : nullptr;
+  if (!FD)
+    return false;
+  if (isDefaultedComparison(FD))
+    return true;
+  unsigned Index = P->getFunctionScopeIndex();
+  if (const auto *MD = dyn_cast<CXXMethodDecl>(FD);
+      MD && Index == (MD->isExplicitObjectMemberFunction() ? 1u : 0u)) {
+    if (const auto *Ctor = dyn_cast<CXXConstructorDecl>(MD))
+      return Ctor->isCopyOrMoveConstructor();
+    if (MD->isCopyAssignmentOperator() || MD->isMoveAssignmentOperator())
+      return true;
+  }
+  if (FD->isInStdNamespace() && FD->getIdentifier() &&
+      FD->getName() == "bit_cast")
+    return Index == 0;
+  switch (FD->getBuiltinID()) {
+  case Builtin::BImemcpy:
+  case Builtin::BI__builtin_memcpy:
+  case Builtin::BI__builtin___memcpy_chk:
+  case Builtin::BImemmove:
+  case Builtin::BI__builtin_memmove:
+  case Builtin::BI__builtin___memmove_chk:
+    return Index == 1;
+  default:
+    break;
+  }
+  // A Construct row's argument of the constructed class type is copied into
+  // the constructed object.
+  SemaProfiles::CalleeLifecycleRoles Roles =
+      SemaProfiles::getCalleeLifecycleRoles(FD);
+  if (Roles.KnownRole != SemaProfiles::KnownParamRole::Construct ||
+      !Roles.KnownParam || *Roles.KnownParam == Index ||
+      *Roles.KnownParam >= FD->getNumParams())
+    return false;
+  QualType Constructed =
+      FD->getParamDecl(*Roles.KnownParam)->getType()->getPointeeType();
+  QualType Arg = P->getType().getNonReferenceType();
+  return !Constructed.isNull() && Arg->isRecordType() &&
+         Constructed.getCanonicalType().getUnqualifiedType() ==
+             Arg.getCanonicalType().getUnqualifiedType();
+}
+
 /// The part of \p Whole, the entity range of the object \p G a credit's
 /// argument leaf \p Leaf names as a whole, that a credit designated as
 /// \p Designated reaches: the entities below the base subobject the
@@ -3474,25 +3534,23 @@ static void forEachAnalyzedStmt(const Decl *D,
 }
 
 // The lambda body is a separate function and never appears in the enclosing
-// constructor's CFG, but a this-capturing lambda can read members the moment
-// it is created (it may be invoked immediately). A `*this` capture
-// copy-constructs the whole object at creation, reading every member right
-// there: unless the class has a user-provided copy constructor (opaque and
-// trusted per the paper's §5.1 trust-the-constructor principle,
-// \p StarThisCopyTrusted -- consistent with this pass's other trust gates),
-// append one Read per tracked member at the LambdaExpr, and never
-// body-scan -- body accesses go to the *copy*, so attributing them to the
-// original would be wrong either way. A plain `this` capture instead reads
-// nothing at creation: treat every member read in its body -- and in nested
-// lambda bodies and OpenMP regions, reached through appendAnalyzedChildren --
-// as a Read at the LambdaExpr's program point, except that a nested lambda
-// capturing `*this` gets the whole-object reads at its own LambdaExpr (its
-// creation runs when the outer body does, which may be immediately) and is not
-// descended into. Writes in a body earn no assignment credit (the lambda may
-// never run), consistent with the intersection semantics; a lambda stored now
-// and called only after the member is assigned is still flagged (accepted
-// imprecision). Capture initializers are ordinary CFG elements, already handled
-// by the caller's other arms.
+// constructor's CFG, but a this-capturing lambda can read members the moment it
+// is created (it may be invoked immediately). A *this capture copy-constructs
+// the whole object at creation, reading every member right there: unless the
+// class has a user-provided copy constructor (\p StarThisCopyTrusted; see
+// ProfilesFrameworkInternals.rst, "Known Gaps (std::init)"), append one Read
+// per tracked member at the LambdaExpr, and never body-scan -- body accesses go
+// to the *copy*, so attributing them to the original would be wrong either way.
+// A plain this capture instead reads nothing at creation: treat every member
+// read in its body -- and in nested lambda bodies and OpenMP regions, reached
+// through appendAnalyzedChildren -- as a Read at the LambdaExpr's program
+// point, except that a nested lambda capturing *this gets the whole-object
+// reads at its own LambdaExpr (its creation runs when the outer body does,
+// which may be immediately) and is not descended into. Writes in a body earn no
+// assignment credit (the lambda may never run), consistent with the
+// intersection semantics; a lambda stored now and called only after the member
+// is assigned is still flagged (accepted imprecision). Capture initializers are
+// ordinary CFG elements, already handled by the caller's other arms.
 static void appendThisCaptureLambdaReadEvents(
     const LambdaExpr *LE, const TrackedStorage &Storage,
     bool StarThisCopyTrusted, SmallVectorImpl<DefAssignEvent> &BlockEvents) {
@@ -3659,6 +3717,8 @@ static void extractStdInitEvents(
       if (const auto *ICE = dyn_cast<ImplicitCastExpr>(St)) {
         if (ICE->getCastKind() == CK_LValueToRValue)
           NoteBenign(ICE->getSubExpr());
+      } else if (const auto *BBC = dyn_cast<BuiltinBitCastExpr>(St)) {
+        NoteBenign(BBC->getSubExpr());
       } else if (const auto *BO = dyn_cast<BinaryOperator>(St)) {
         if (BO->isAssignmentOp())
           NoteBenign(BO->getLHS());
@@ -3862,7 +3922,7 @@ static void extractStdInitEvents(
     // binding at parse time. A leaf no entity tracks is classified by form.
     auto AddBinding = [&](K Kind, SourceLocation Loc, bool TargetMarked,
                           QualType T, const Expr *Src, const NamedDecl *Subject,
-                          const Expr *At) {
+                          const Expr *At, bool EveryPath = false) {
       if (!Src || T.isNull() || T->isDependentType() ||
           (!T->isPointerType() && !T->isReferenceType()) ||
           isa<RecoveryExpr>(Src->IgnoreParens()))
@@ -3873,7 +3933,7 @@ static void extractStdInitEvents(
       if (!Operand)
         return;
       BindingSite Site{Kind,    Loc, TargetMarked, T->isReferenceType(),
-                       Subject, {}};
+                       Subject, {},  EveryPath};
       bool AnyTracked = false;
       SemaProfiles::forEachTargetLeaf(
           Operand, [&](const SemaProfiles::ShapeLeaf &Leaf) {
@@ -3901,9 +3961,11 @@ static void extractStdInitEvents(
     // with the parse-time check's location (the glvalue for a read, the
     // operator for a store): a site when a leaf is flow-tracked (the
     // parse-time checks judged every other access). A std::byte access is
-    // exempt (P4222R2 §4.6).
+    // exempt (P4222R2 §4.6). A \p WholeRead (__builtin_bit_cast) reads a
+    // whole [[uninit]] local as it reads a subobject of one.
     auto AppendAccess = [&](bool IsWrite, const Expr *G, QualType ValueTy,
-                            SourceLocation Loc, const Expr *At) {
+                            SourceLocation Loc, const Expr *At,
+                            bool WholeRead = false) {
       if (!G || Ctx.getBaseElementType(ValueTy)->isStdByteType() ||
           isa<RecoveryExpr>(G->IgnoreParens()))
         return;
@@ -3927,9 +3989,9 @@ static void extractStdInitEvents(
                 // A subobject of an [[uninit]] local; a store to part of a
                 // read-tracked member is one of an [[uninit]] object too (a
                 // read of it is the member's Read event).
-                bool UninitObject =
-                    R.Subobject && (Ent.K == TrackedEntity::Kind::WholeLocal ||
-                                    (IsWrite && !Pointee && Ent.TrackReads));
+                bool UninitObject = (R.Subobject || WholeRead) &&
+                                    (Ent.K == TrackedEntity::Kind::WholeLocal ||
+                                     (IsWrite && !Pointee && Ent.TrackReads));
                 if (UninitObject || (Pointee && (!IsWrite || R.Subobject))) {
                   L.Entity = R.Entity;
                   AnyPointee |= Pointee;
@@ -3992,7 +4054,7 @@ static void extractStdInitEvents(
                            Roles.isInitializingParam(Parm)))
                   AddBinding(K::Parameter, Loc,
                              Parm && Roles.isMarkedParam(Parm), T, Arg, nullptr,
-                             CallLike);
+                             CallLike, isWholeCopySource(Parm));
                 AppendAliasEscapes(Arg, T, CallLike);
               });
         };
@@ -4188,13 +4250,22 @@ static void extractStdInitEvents(
                   ? OT
                   : Ctx.getLValueReferenceType(OT.getNonReferenceType());
           AddBinding(K::ObjectArgument, Object->IgnoreImplicit()->getExprLoc(),
-                     /*TargetMarked=*/false, T, Object, ObjectMethod, CE);
+                     /*TargetMarked=*/false, T, Object, ObjectMethod, CE,
+                     isDefaultedComparison(ObjectMethod));
         }
         AppendCallEvents(CE, Callee);
       } else if (const auto *CCE = dyn_cast<CXXConstructExpr>(St)) {
         // A constructor call's parameter bindings, the copy of a class object
         // out of tracked storage included.
         AppendArgumentBindings(CCE, SemaProfiles::CalleeLifecycleRoles());
+      } else if (const auto *BBC = dyn_cast<BuiltinBitCastExpr>(St)) {
+        // __builtin_bit_cast reads its operand whole, with no
+        // lvalue-to-rvalue node.
+        const Expr *Op = BBC->getSubExpr();
+        CollectLeaves(Op);
+        AppendReads(BBC);
+        AppendAccess(/*IsWrite=*/false, Op, Op->getType(), Op->getExprLoc(),
+                     BBC, /*WholeRead=*/true);
       } else if (const auto *ME = dyn_cast<ObjCMessageExpr>(St)) {
         // A message's parameter bindings; a method carries no lifecycle
         // attribute.
@@ -4674,9 +4745,9 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
     if (const CXXRecordDecl *RD = MD->getParent()->getDefinition())
       Storage.addObject(S, /*Base=*/nullptr, RD, /*TrackReads=*/Ctor != nullptr,
                         /*UnknownEntry=*/false);
-    // A `[*this]` capture copy-constructs the whole object; a user-provided
-    // copy constructor is opaque and trusted (P4222R2 §5.1), so the
-    // capture's whole-object reads are appended only without one.
+    // A [*this] capture copy-constructs the whole object; its whole-object
+    // reads are appended only without a user-provided copy constructor (see
+    // ProfilesFrameworkInternals.rst, "Known Gaps (std::init)").
     if (Ctor)
       StarThisCopyTrusted = llvm::any_of(
           Ctor->getParent()->ctors(), [](const CXXConstructorDecl *C) {

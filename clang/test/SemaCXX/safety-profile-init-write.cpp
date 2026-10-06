@@ -601,3 +601,138 @@ struct MemberPointerCtorStore {
     (void)v;
   }
 };
+
+void sink_pair(Pair);
+
+// A copy returned after a construct_at on one path reads uninitialized storage
+Pair test_one_path_copy_return(bool c) {
+  Pair a [[uninit]];
+  if (c)
+    std::construct_at(&a, 1, 2);
+  return a; // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// A copy-initialization after a construct_at on one path reads uninitialized storage
+void test_one_path_copy_init(bool c) {
+  Pair a [[uninit]];
+  if (c)
+    std::construct_at(&a, 1, 2);
+  Pair t = a; // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)t;
+}
+
+// A by-value argument after a construct_at on one path reads uninitialized storage
+void test_one_path_copy_argument(bool c) {
+  Pair a [[uninit]];
+  if (c)
+    std::construct_at(&a, 1, 2);
+  sink_pair(a); // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// A copy assignment after a construct_at on one path reads uninitialized storage
+void test_one_path_copy_assign(bool c) {
+  Pair a [[uninit]];
+  Pair t{0, 0};
+  if (c)
+    std::construct_at(&a, 1, 2);
+  t = a; // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+namespace std {
+template <class To, class From> To bit_cast(const From &from);
+template <class It, class T>
+void uninitialized_fill(It first, It last, const T &value);
+} // namespace std
+extern "C" void *memcpy(void *, const void *, __SIZE_TYPE__);
+struct ComparedPair {
+  int x;
+  int y;
+  bool operator==(const ComparedPair &) const = default;
+};
+struct ExplicitAssignPair {
+  int x;
+  int y;
+  ExplicitAssignPair &operator=(this ExplicitAssignPair &self,
+                                const ExplicitAssignPair &o);
+};
+
+// std::bit_cast after a construct_at on one path reads uninitialized storage
+long test_one_path_std_bit_cast(bool c) {
+  Pair a [[uninit]];
+  if (c)
+    std::construct_at(&a, 1, 2);
+  return std::bit_cast<long>(a); // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// A construct_at source after a construct_at on one path reads uninitialized storage
+void test_one_path_construct_source(bool c) {
+  Pair a [[uninit]];
+  if (c)
+    std::construct_at(&a, 1, 2);
+  Pair b [[uninit]];
+  std::construct_at(&b, a); // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// A range fill's value after a construct_at on one path reads uninitialized storage
+void test_one_path_fill_value(bool c) {
+  Pair a [[uninit]];
+  if (c)
+    std::construct_at(&a, 1, 2);
+  Pair arr [[uninit]] [4];
+  std::uninitialized_fill(arr, arr + 4, a); // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// A defaulted comparison after a construct_at on one path reads both operands
+bool test_one_path_defaulted_comparison(bool c) {
+  ComparedPair a [[uninit]];
+  if (c)
+    std::construct_at(&a, 1, 2);
+  ComparedPair b{1, 2};
+  return b == a || // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+         a == b; // expected-error {{calling member function 'operator==' binds its implicit object parameter to uninitialized memory under profile 'std::init'}}
+}
+
+// A memcpy source after a construct_at on one path reads uninitialized storage
+void test_one_path_memcpy_source(bool c) {
+  Pair a [[uninit]];
+  if (c)
+    std::construct_at(&a, 1, 2);
+  Pair b [[uninit]];
+  memcpy(&b, &a, sizeof a); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// An explicit-object copy assignment reads its source, not its object
+void test_one_path_explicit_object_assign(bool c) {
+  ExplicitAssignPair a [[uninit]];
+  if (c)
+    std::construct_at(&a, 1, 2);
+  ExplicitAssignPair b{1, 2};
+  b = a; // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  a = b; // OK
+}
+
+// Whole copies after a construct_at on every path are accepted
+Pair test_every_path_copies(bool c) {
+  Pair a [[uninit]];
+  if (c)
+    std::construct_at(&a, 1, 2);
+  else
+    std::construct_at(&a, 3, 4);
+  Pair t = a;
+  sink_pair(a);
+  t = a;
+  return a;
+}
+
+// __builtin_bit_cast reads its operand whole
+long test_bit_cast_uninit() {
+  Pair s [[uninit]];
+  return __builtin_bit_cast(long, s); // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// __builtin_bit_cast after a construct_at is accepted
+long test_bit_cast_after_construct() {
+  Pair s [[uninit]];
+  std::construct_at(&s, 1, 2);
+  return __builtin_bit_cast(long, s);
+}

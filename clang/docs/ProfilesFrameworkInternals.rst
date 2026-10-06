@@ -1004,7 +1004,9 @@ reused from the pattern are ordinary elements.  Consumers read the lattices as
 follows: ``double_destroy`` fires on ``MayDestroyed``, a marked-target binding
 on ``Must``; an unmarked-target binding and ``destroy_uninit`` are suppressed
 by ``May``; a read through a marker or of a subobject of an ``[[uninit]]``
-object, and a subobject write, fire on ``MayUnassigned`` without ``Must``: every
+object, a subobject write, and the unmarked binding of a value copy's source
+(``isWholeCopySource``; ``BindingSite::EveryPath``: a whole copy reads every
+subobject) fire on ``MayUnassigned`` without ``Must``: every
 path must initialize the storage (P4222R2 §1.3, §9.2), and a path that does
 not know its state does not count against the read, just as an unidentified
 referent fires in neither direction.  A destroy or release whose arms name
@@ -1090,9 +1092,7 @@ Deliberate Strictnesses
   the members are assigned, is rejected the same way.  A ``*this`` capture
   copy-constructs the whole object at the lambda's creation, reading every
   member right there: it is rejected before every tracked member is
-  assigned -- unless the class has a *user-provided* copy constructor,
-  which is opaque and trusted (P4222R2 §5.1) -- and its body accesses go to
-  the copy, not the original.
+  assigned, and its body accesses go to the copy, not the original.
 - The flow-based read checks -- of a plain local, a member, a subobject of an
   ``[[uninit]]`` object, and through a ``[[ref_to_uninit]]`` pointer or
   reference -- promote every use a path *may* reach uninitialized to the profile
@@ -1214,8 +1214,7 @@ Missed Diagnostics
 - An unmarked binding of storage initialized on some paths only is accepted,
   and reads through the unmarked name are trusted: after ``if (c) *p = 1;``
   through a marked ``p``, ``int *q = p; return *q;`` is accepted while
-  ``return *p;`` is rejected; so is ``C c = *p;`` (the copy constructor's
-  reference parameter).
+  ``return *p;`` is rejected.
 - A read through a marked pointer or reference that a lambda or block
   captures is not diagnosed unless the body itself leaves the referent
   uninitialized on some path: the captured storage enters the body in an
@@ -1328,6 +1327,9 @@ Missed Diagnostics
   by-value entry under Deliberate Strictnesses), so an *explicit* call
   passing an uninitialized copy into such a parameter is not detected --
   reads of its marked members in the callee are trusted.
+- A ``*this`` capture in a constructor of a class with a *user-provided* copy
+  constructor reads no member at the lambda's creation, although a copy of an
+  object elsewhere reads its source whole whatever its copy constructor.
 - An *alias* of ``this`` in a constructor body -- a stored
   ``T *self = this;``, an init-capture ``[p = this]``, ``&*this`` -- is
   invisible to the flow engine: reads through the alias are not attributed

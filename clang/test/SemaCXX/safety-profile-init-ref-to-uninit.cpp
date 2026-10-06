@@ -4455,3 +4455,18 @@ int test_member_pointer_after_construct(PmPayload *p [[ref_to_uninit]]) {
   p->*pm = 3;
   return p->*pm;
 }
+
+// A copy through a marked pointer constructed on one path reads uninitialized storage
+int test_one_path_copy_through_marker(bool c, PmPayload *p [[ref_to_uninit]]) {
+  if (c)
+    construct_at(p, 1, 2);
+  PmPayload t = *p; // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  return t.x;
+}
+
+// A copy through a marked pointer constructed on every path is accepted
+int test_every_path_copy_through_marker(PmPayload *p [[ref_to_uninit]]) {
+  construct_at(p, 1, 2);
+  PmPayload t = *p;
+  return t.x;
+}

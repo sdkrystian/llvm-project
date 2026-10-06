@@ -551,11 +551,17 @@ within the defining constructor's body, and of ``[[uninit]]`` members of
 constructor-less aggregate locals; reads through ``[[ref_to_uninit]]``
 pointers and references and reads of subobjects of ``[[uninit]]`` objects
 (copying an ``[[uninit]]`` array -- a by-copy capture ``[arr]``,
-``auto [a, b] = arr;`` -- reads each element) are rejected unless the storage is
-initialized on every path reaching the read (§1.3) -- by a whole-entity store,
-a ``[[now_init]]`` call, or ``std::construct_at``; a path past a mutable alias
-of the pointer, which leaves the referent's state unknown, does not count
-against the read (see `Binding Pointers and References`_):
+``auto [a, b] = arr;`` -- reads each element, and copying a whole class
+object -- the source of a copy or move constructor or assignment, a by-value
+argument, ``__builtin_bit_cast`` or ``std::bit_cast``, an operand of a
+defaulted comparison, the source of ``memcpy`` or ``memmove``, an argument of
+``std::construct_at`` or the ``std::uninitialized_*`` family of the type they
+construct -- reads every subobject) are rejected unless
+the storage is initialized on every path reaching the read (§1.3) -- by a
+whole-entity store, a ``[[now_init]]`` call, or ``std::construct_at``; a path
+past a mutable alias of the pointer, which leaves the referent's state
+unknown, does not count against the read (see
+`Binding Pointers and References`_):
 
 .. code-block:: c++
 

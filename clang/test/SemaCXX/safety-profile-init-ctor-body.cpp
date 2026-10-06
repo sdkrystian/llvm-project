@@ -444,14 +444,12 @@ struct LambdaStarThisNested {
   }
 };
 
-// A user-provided copy constructor is opaque and trusted (§5.1's
-// trust-the-constructor principle): its body may leave the members alone, so
-// the `*this` capture's copy earns no whole-object reads.
+// A *this capture of a class with a user-provided copy constructor reads no member at creation
 struct LambdaStarThisTrustedCopy {
   int m [[uninit]];
   LambdaStarThisTrustedCopy(const LambdaStarThisTrustedCopy &);
   LambdaStarThisTrustedCopy() {
-    auto l = [*this] { return 0; }; // OK: user-provided copy ctor trusted
+    auto l = [*this] { return 0; }; // OK
     (void)l;
   }
 };
