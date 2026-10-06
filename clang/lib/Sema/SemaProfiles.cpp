@@ -2164,14 +2164,387 @@ bool SemaProfiles::CalleeLifecycleRoles::initializesParam(
                           R == KnownParamRole::InitializeAnyState);
 }
 
+/// The object a call to the non-static member function \p MD binds to its
+/// object parameter in \p CE -- a dot call's object, a member operator's
+/// first argument, or an explicit-object method's -- or null; an arrow call
+/// reaches its object through a pointer and has none, and a call operator's
+/// object is the callable (a std::ranges object), which none of its results
+/// refers into.
+static const Expr *memberCallObject(const CallExpr *CE,
+                                    const CXXMethodDecl *MD) {
+  if (MD->isStatic() || MD->getOverloadedOperator() == OO_Call)
+    return nullptr;
+  if (const auto *MCE = dyn_cast<CXXMemberCallExpr>(CE)) {
+    const auto *ME = dyn_cast<MemberExpr>(MCE->getCallee()->IgnoreParens());
+    return ME && !ME->isArrow() ? MCE->getImplicitObjectArgument() : nullptr;
+  }
+  if ((isa<CXXOperatorCallExpr>(CE) || MD->isExplicitObjectMemberFunction()) &&
+      CE->getNumArgs() > 0)
+    return CE->getArg(0);
+  return nullptr;
+}
+
+/// True if \p T is \p RD's class or one of its bases.
+static bool isClassOrBaseOf(QualType T, const CXXRecordDecl *RD) {
+  const CXXRecordDecl *TD = T->getAsCXXRecordDecl();
+  if (!TD || !RD->hasDefinition())
+    return false;
+  TD = TD->getCanonicalDecl();
+  return TD == RD->getCanonicalDecl() || RD->isDerivedFrom(TD);
+}
+
+/// The object of the member call \p CE when the call derives a pointer or
+/// reference from it: an unmarked dot call, member operator, or
+/// explicit-object method returning a pointer to an object, or a reference
+/// to an object of a type other than the method's own class and its bases
+/// (P4222R2 §4.6: what a member of an uninitialized handle returns refers to
+/// uninitialized memory); null otherwise.
+static const Expr *derivingObject(const CallExpr *CE) {
+  const auto *MD = dyn_cast_or_null<CXXMethodDecl>(CE->getDirectCallee());
+  if (!MD || MD->hasAttr<RefToUninitAttr>())
+    return nullptr;
+  QualType R = MD->getReturnType();
+  if (R->isPointerType()) {
+    if (R->isFunctionPointerType())
+      return nullptr;
+  } else if (R->isReferenceType()) {
+    QualType Referent = R.getNonReferenceType();
+    if (Referent->isFunctionType() ||
+        isClassOrBaseOf(Referent, MD->getParent()))
+      return nullptr;
+  } else {
+    return nullptr;
+  }
+  return memberCallObject(CE, MD);
+}
+
+QualType SemaProfiles::handleValueType(QualType T) {
+  const CXXRecordDecl *RD = T.getNonReferenceType()->getAsCXXRecordDecl();
+  if (!RD || !RD->hasDefinition())
+    return QualType();
+  RD = RD->getDefinition();
+  ASTContext &Ctx = RD->getASTContext();
+  for (const NamedDecl *ND : RD->lookup(&Ctx.Idents.get("value_type")))
+    if (const auto *TD = dyn_cast<TypeDecl>(ND))
+      return Ctx.getTypeDeclType(TD);
+  for (const NamedDecl *ND :
+       RD->lookup(Ctx.DeclarationNames.getCXXOperatorName(OO_Star)))
+    if (const auto *MD = dyn_cast<CXXMethodDecl>(ND->getUnderlyingDecl());
+        MD && !MD->isStatic() && MD->getNumParams() == 0 &&
+        !MD->getReturnType()->isDependentType())
+      return MD->getReturnType().getNonReferenceType().getUnqualifiedType();
+  return QualType();
+}
+
+/// True if the class \p R a member of \p RD returns by value is a handle to
+/// what an object of \p RD refers to: \p RD itself, another specialization of
+/// its class template, or a class of its value type
+/// (SemaProfiles::handleValueType) -- `s.subspan(1)`, `s.first<2>()`,
+/// `s.begin()` -- and not any other class a member returns (a name, a
+/// duration).
+static bool isHandleResultOf(QualType R, const CXXRecordDecl *RD) {
+  const CXXRecordDecl *RRD = R->getAsCXXRecordDecl();
+  if (!RRD)
+    return false;
+  if (RRD->getCanonicalDecl() == RD->getCanonicalDecl())
+    return true;
+  auto TemplateOf = [](const CXXRecordDecl *D) -> const ClassTemplateDecl * {
+    const auto *CTSD = dyn_cast<ClassTemplateSpecializationDecl>(D);
+    return CTSD ? CTSD->getSpecializedTemplate()->getCanonicalDecl() : nullptr;
+  };
+  if (const ClassTemplateDecl *T = TemplateOf(RRD); T && T == TemplateOf(RD))
+    return true;
+  ASTContext &Ctx = RD->getASTContext();
+  QualType RV = SemaProfiles::handleValueType(R);
+  QualType OV = SemaProfiles::handleValueType(Ctx.getCanonicalTagType(RD));
+  return !RV.isNull() && !OV.isNull() && Ctx.hasSameUnqualifiedType(RV, OV);
+}
+
+/// The object of the call \p CE when the call returns the handle itself, from
+/// an unmarked function no known-callee row describes: a member returning a
+/// handle to what its object refers to by value (isHandleResultOf), or a
+/// reference to the method's own class or a base (s.begin(),
+/// s.subspan(1), ++it); or the operand of a non-member + or - returning
+/// that operand's class (n + it). Null otherwise. \p Partial is set when
+/// the call refers to part of the handle: it has explicit arguments or
+/// explicit template arguments (s.last<2>()), is ++, --, +=, -=, or a
+/// non-member + or -, or is a member named for a position past the start
+/// (s.end()) or a part (\c subspan, \c first, \c last, \c next, \c prev,
+/// \c advance).
+static const Expr *handleSelfReturnObject(const CallExpr *CE, bool &Partial) {
+  const FunctionDecl *FD = CE->getDirectCallee();
+  if (!FD || FD->hasAttr<RefToUninitAttr>() || matchKnownCallee(FD).Entry)
+    return nullptr;
+  const auto *MD = dyn_cast<CXXMethodDecl>(FD);
+  if (!MD) {
+    OverloadedOperatorKind OO = FD->getOverloadedOperator();
+    const CXXRecordDecl *RD = FD->getReturnType()->getAsCXXRecordDecl();
+    if ((OO != OO_Plus && OO != OO_Minus) || !isa<CXXOperatorCallExpr>(CE) ||
+        !SemaProfiles::isHandleType(FD->getReturnType()))
+      return nullptr;
+    for (unsigned I = 0, N = std::min(CE->getNumArgs(), FD->getNumParams());
+         I != N; ++I)
+      if (const CXXRecordDecl *PD = FD->getParamDecl(I)
+                                        ->getType()
+                                        .getNonReferenceType()
+                                        ->getAsCXXRecordDecl();
+          PD && PD->getCanonicalDecl() == RD->getCanonicalDecl()) {
+        Partial = true;
+        return CE->getArg(I);
+      }
+    return nullptr;
+  }
+  QualType R = MD->getReturnType();
+  if (R->isReferenceType()) {
+    if (!isClassOrBaseOf(R.getNonReferenceType(), MD->getParent()))
+      return nullptr;
+  } else if (!SemaProfiles::isHandleType(R) ||
+             !isHandleResultOf(R, MD->getParent())) {
+    return nullptr;
+  }
+  const Expr *Obj = memberCallObject(CE, MD);
+  if (!Obj)
+    return nullptr;
+  bool Explicit = llvm::any_of(CE->arguments(), [&](const Expr *Arg) {
+    return Arg != Obj && !isa<CXXDefaultArgExpr>(Arg);
+  });
+  if (const auto *ME = dyn_cast<MemberExpr>(CE->getCallee()->IgnoreParens()))
+    Explicit |= ME->hasExplicitTemplateArgs();
+  switch (MD->getOverloadedOperator()) {
+  case OO_PlusPlus:
+  case OO_MinusMinus:
+  case OO_PlusEqual:
+  case OO_MinusEqual:
+    Partial = true;
+    break;
+  default:
+    Partial =
+        Explicit ||
+        (MD->getIdentifier() &&
+         llvm::is_contained(ArrayRef<StringRef>{"end", "cend", "rend", "crend",
+                                                "last", "subspan", "first",
+                                                "next", "prev", "advance"},
+                            MD->getName()));
+    break;
+  }
+  return Obj;
+}
+
+/// Peel what forEachHandleSourceLeaf looks through from \p E: parens, full
+/// expressions, temporaries, the no-op, constructor, derived-to-base, and
+/// user-defined conversions, and a comma's right operand, a statement
+/// expression's result, an opaque value's source, and an identity call's
+/// argument.
+static const Expr *peelHandleSource(const Expr *E) {
+  while (true) {
+    E = E->IgnoreParens();
+    if (const auto *FE = dyn_cast<FullExpr>(E)) {
+      E = FE->getSubExpr();
+      continue;
+    }
+    if (const auto *BTE = dyn_cast<CXXBindTemporaryExpr>(E)) {
+      E = BTE->getSubExpr();
+      continue;
+    }
+    if (const auto *MTE = dyn_cast<MaterializeTemporaryExpr>(E)) {
+      E = MTE->getSubExpr();
+      continue;
+    }
+    if (const auto *CE = dyn_cast<CastExpr>(E)) {
+      switch (CE->getCastKind()) {
+      case CK_NoOp:
+      case CK_ConstructorConversion:
+      case CK_DerivedToBase:
+      case CK_UncheckedDerivedToBase:
+      case CK_UserDefinedConversion:
+        E = CE->getSubExpr();
+        continue;
+      default:
+        return E;
+      }
+    }
+    if (isa<InitListExpr>(E))
+      return E;
+    if (const Expr *Op = passThroughOperand(E, /*Arms=*/{})) {
+      E = Op;
+      continue;
+    }
+    return E;
+  }
+}
+
+namespace {
+/// The walk of SemaProfiles::forEachHandleSourceLeaf.
+struct HandleSourceWalk {
+  using HandleLeaf = SemaProfiles::HandleLeaf;
+  llvm::function_ref<void(const HandleLeaf &)> F;
+  SmallVector<const Expr *, 4> Arms;
+  /// The locals whose initializers the walk follows, so a self-referential
+  /// initializer ends it.
+  llvm::SmallPtrSet<const VarDecl *, 4> Followed;
+
+  void emit(const Expr *E, HandleLeaf::Mode M, bool Partial) {
+    F(HandleLeaf{E, M, Partial, Arms});
+  }
+
+  void walk(const Expr *E, bool Partial) {
+    E = peelHandleSource(E);
+    if (const auto *CO = dyn_cast<AbstractConditionalOperator>(E)) {
+      auto [T, Fa] = conditionalArms(CO);
+      for (const Expr *Arm : {T, Fa}) {
+        Arms.push_back(Arm);
+        walk(Arm, Partial);
+        Arms.pop_back();
+      }
+      return;
+    }
+    if (const auto *CCE = dyn_cast<CXXConstructExpr>(E)) {
+      if (CCE->getConstructor()->isCopyOrMoveConstructor() &&
+          CCE->getNumArgs() >= 1) {
+        walk(CCE->getArg(0), Partial);
+        return;
+      }
+      emit(E, HandleLeaf::Mode::Handle, Partial);
+      return;
+    }
+    if (const auto *CE = dyn_cast<CallExpr>(E)) {
+      bool StepPartial = false;
+      if (const Expr *Obj = handleSelfReturnObject(CE, StepPartial)) {
+        walk(Obj, Partial || StepPartial);
+        return;
+      }
+      emit(E, HandleLeaf::Mode::Handle, Partial);
+      return;
+    }
+    if (const auto *DRE = dyn_cast<DeclRefExpr>(E)) {
+      if (const auto *BD = dyn_cast<BindingDecl>(DRE->getDecl());
+          BD && BD->getBinding()) {
+        walk(BD->getBinding(), Partial);
+        return;
+      }
+      // An implicit local (range-for's __range and __begin) or an unmarked
+      // local reference stands for its initializer.
+      if (const auto *V = dyn_cast<VarDecl>(DRE->getDecl());
+          V && V->hasLocalStorage() && !isa<ParmVarDecl>(V) && V->getInit() &&
+          (V->isImplicit() || (V->getType()->isReferenceType() &&
+                               !V->hasAttr<RefToUninitAttr>())) &&
+          Followed.insert(V).second) {
+        walk(V->getInit(), Partial);
+        return;
+      }
+    }
+    emit(E, HandleLeaf::Mode::Handle, Partial);
+  }
+};
+} // namespace
+
+void SemaProfiles::forEachHandleSourceLeaf(
+    const Expr *Src, llvm::function_ref<void(const HandleLeaf &)> F) {
+  if (!Src)
+    return;
+  HandleSourceWalk Walk{F, {}, {}};
+  Walk.walk(Src, /*Partial=*/false);
+}
+
+static UninitStorage
+pointerRefersToUninitStorage(ASTContext &Ctx, const Expr *E,
+                             UninitAccessOpts Opts = UninitBindAccess);
+/// The handle recognizer: classify whether the handle \p E refers to
+/// uninitialized memory, combining its leaves (forEachHandleSourceLeaf) as
+/// conditional arms combine. Markers count everywhere; \p Opts supplies
+/// whether \c this is under construction.
+static UninitStorage classifyHandleSource(ASTContext &Ctx, const Expr *E,
+                                          UninitAccessOpts Opts);
+
+/// Classify a terminal of the handle walk: a named variable, parameter, or
+/// member is Uninitialized when marked and Initialized otherwise, except
+/// that a marked reference to a class is Unknown (it refers to the handle's
+/// own uninitialized storage); a call takes its marked callee's state, and
+/// is otherwise Initialized, or Unknown with no direct callee; a
+/// construction with an author-marked parameter is Uninitialized; an
+/// initializer list is Unknown; and any other glvalue -- a handle reached
+/// through storage -- is Initialized when that storage is, and Unknown
+/// otherwise.
+static UninitStorage classifyHandleTerminal(ASTContext &Ctx, const Expr *E,
+                                            UninitAccessOpts Opts) {
+  E = E->IgnoreParenImpCasts();
+  if (isa<InitListExpr, CXXParenListInitExpr, RecoveryExpr>(E))
+    return UninitStorage::Unknown;
+  if (const auto *CCE = dyn_cast<CXXConstructExpr>(E))
+    return llvm::any_of(CCE->getConstructor()->parameters(),
+                        [](const ParmVarDecl *P) {
+                          return P->hasAttr<RefToUninitAttr>();
+                        })
+               ? UninitStorage::Uninitialized
+               : UninitStorage::Initialized;
+  if (const auto *CE = dyn_cast<CallExpr>(E)) {
+    const FunctionDecl *FD = CE->getDirectCallee();
+    if (!FD)
+      return UninitStorage::Unknown;
+    return FD->hasAttr<RefToUninitAttr>() ? UninitStorage::Uninitialized
+                                          : UninitStorage::Initialized;
+  }
+  if (const ValueDecl *VD = SemaProfiles::getDirectlyNamedDecl(E);
+      VD && isa<VarDecl, FieldDecl, IndirectFieldDecl>(VD)) {
+    bool Marked = VD->hasAttr<RefToUninitAttr>();
+    if (VD->getType()->isReferenceType())
+      return Marked ? UninitStorage::Unknown : UninitStorage::Initialized;
+    return Marked ? UninitStorage::Uninitialized : UninitStorage::Initialized;
+  }
+  if (E->isGLValue())
+    return glvalueDenotesUninitStorage(Ctx, E, Opts) ==
+                   UninitStorage::Initialized
+               ? UninitStorage::Initialized
+               : UninitStorage::Unknown;
+  return UninitStorage::Initialized;
+}
+
+/// Classify one leaf of a handle source by its mode
+/// (SemaProfiles::HandleLeaf::Mode).
+static UninitStorage classifyHandleLeaf(ASTContext &Ctx,
+                                        const SemaProfiles::HandleLeaf &L,
+                                        UninitAccessOpts Opts) {
+  using Mode = SemaProfiles::HandleLeaf::Mode;
+  switch (L.M) {
+  case Mode::PointerValue:
+    return pointerRefersToUninitStorage(Ctx, L.E, Opts);
+  case Mode::Storage:
+    return glvalueDenotesUninitStorage(Ctx, L.E, Opts);
+  case Mode::Range:
+    if (L.E->isGLValue())
+      if (UninitStorage S = glvalueDenotesUninitStorage(Ctx, L.E, Opts);
+          S != UninitStorage::Initialized)
+        return S;
+    return classifyHandleSource(Ctx, L.E, Opts);
+  case Mode::Handle:
+    return classifyHandleTerminal(Ctx, L.E, Opts);
+  }
+  llvm_unreachable("unknown HandleLeaf mode");
+}
+
+static UninitStorage classifyHandleSource(ASTContext &Ctx, const Expr *E,
+                                          UninitAccessOpts Opts) {
+  UninitAccessOpts LeafOpts =
+      UninitBindAccess.withThisUnderConstruction(Opts.ThisUnderConstruction);
+  std::optional<UninitStorage> Acc;
+  SemaProfiles::forEachHandleSourceLeaf(
+      E, [&](const SemaProfiles::HandleLeaf &L) {
+        UninitStorage S = classifyHandleLeaf(Ctx, L, LeafOpts);
+        Acc = Acc ? combineArms(*Acc, S) : S;
+      });
+  return Acc.value_or(UninitStorage::Unknown);
+}
+
 // A call to a [[ref_to_uninit]]-returning function yields uninitialized
 // storage (the pointed-to memory, or the returned referent) -- deferred to
 // Unknown when the marker is trusted (a store). Known allocator callees
-// (the table above) are classified the same way without a marker. Any other
-// unmarked direct callee is trusted Initialized (paper §4.3); a call with
-// no direct callee (through a function pointer) is Unknown. Shared by both
-// recognizers.
-static UninitStorage classifyRefToUninitCallee(const CallExpr *CE,
+// (the table above) are classified the same way without a marker, and so is
+// what a member call derives from an uninitialized handle (derivingObject).
+// Any other unmarked direct callee is trusted Initialized (paper §4.3); a
+// call with no direct callee (through a function pointer) is Unknown. Shared
+// by both recognizers.
+static UninitStorage classifyRefToUninitCallee(ASTContext &Ctx,
+                                               const CallExpr *CE,
                                                UninitAccessOpts Opts) {
   const FunctionDecl *FD = CE->getDirectCallee();
   if (!FD)
@@ -2202,17 +2575,22 @@ static UninitStorage classifyRefToUninitCallee(const CallExpr *CE,
       }
     }
   }
-  if (!RefersToUninit)
+  if (!RefersToUninit) {
+    if (const Expr *Obj = derivingObject(CE))
+      if (UninitStorage S = classifyHandleSource(Ctx, Obj, Opts);
+          isUninitializedOrMixed(S))
+        return Opts.TrustRefToUninit ? UninitStorage::Unknown : S;
     return UninitStorage::Initialized;
+  }
   return Opts.TrustRefToUninit ? UninitStorage::Unknown
                                : UninitStorage::Uninitialized;
 }
 
 // \p E is a pointer prvalue. Classifies whether it points to uninitialized
 // storage.
-static UninitStorage
-pointerRefersToUninitStorage(ASTContext &Ctx, const Expr *E,
-                             UninitAccessOpts Opts = UninitBindAccess) {
+static UninitStorage pointerRefersToUninitStorage(ASTContext &Ctx,
+                                                  const Expr *E,
+                                                  UninitAccessOpts Opts) {
   if (!E)
     return UninitStorage::Unknown;
   E = E->IgnoreParenImpCasts();
@@ -2302,7 +2680,7 @@ pointerRefersToUninitStorage(ASTContext &Ctx, const Expr *E,
     return Opts.ThisUnderConstruction ? UninitStorage::Unknown
                                       : UninitStorage::Initialized;
   if (const auto *CE = dyn_cast<CallExpr>(E))
-    return classifyRefToUninitCallee(CE, Opts);
+    return classifyRefToUninitCallee(Ctx, CE, Opts);
 
   // A default-initialized new-expression (none init style: no initializer
   // written) whose allocated type's default-initialization leaves a scalar
@@ -2478,7 +2856,7 @@ static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
   // A call to a [[ref_to_uninit]]-returning reference function: the referent
   // it returns is uninitialized.
   if (const auto *CE = dyn_cast<CallExpr>(E))
-    return classifyRefToUninitCallee(CE, Opts);
+    return classifyRefToUninitCallee(Ctx, CE, Opts);
   // An element access classifies like its base (an element is never
   // flow-tracked: `*p = 5;` never legalizes `p[1]` -- the pointee may be an
   // array with only element 0 written, and element-wise state is
@@ -2500,12 +2878,17 @@ static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
   return UninitStorage::Unknown;
 }
 
-// Dispatches a binding source to the pointer or glvalue recognizer.
+/// Dispatch a binding source bound as \p T to the glvalue recognizer for a
+/// reference, the handle recognizer for a handle (SemaProfiles::isHandleType),
+/// and the pointer recognizer otherwise.
 static UninitStorage
-classifyUninitSource(ASTContext &Ctx, const Expr *E, bool IsReference,
+classifyUninitSource(ASTContext &Ctx, const Expr *E, QualType T,
                      UninitAccessOpts Opts = UninitBindAccess) {
-  return IsReference ? glvalueDenotesUninitStorage(Ctx, E, Opts)
-                     : pointerRefersToUninitStorage(Ctx, E, Opts);
+  if (T->isReferenceType())
+    return glvalueDenotesUninitStorage(Ctx, E, Opts);
+  if (SemaProfiles::isHandleType(T))
+    return classifyHandleSource(Ctx, E, Opts);
+  return pointerRefersToUninitStorage(Ctx, E, Opts);
 }
 
 /// True for the binding kinds whose target declaration can carry
@@ -2821,9 +3204,9 @@ void SemaProfiles::judgeInitProfileBinding(
           .withThisUnderConstruction(thisIsUnderConstruction(AfterFlowPass))
           .withUninitMemberTrust(ValueCopy &&
                                  trustsUninitMembers(AfterFlowPass));
-  diagnoseBindingVerdict(
-      *this, Kind, Loc, TargetMarked, IsReference,
-      classifyUninitSource(getASTContext(), Src, IsReference, Opts), Subject);
+  diagnoseBindingVerdict(*this, Kind, Loc, TargetMarked, IsReference,
+                         classifyUninitSource(getASTContext(), Src, T, Opts),
+                         Subject);
 }
 
 bool SemaProfiles::isDefaultedComparison(const FunctionDecl *FD) {
@@ -2884,8 +3267,7 @@ SemaProfiles::classifyInitBindingLeaf(const ShapeLeaf &Leaf, QualType T,
           .withThisUnderConstruction(isa_and_nonnull<CXXConstructorDecl>(MD))
           .withArms(Leaf.Arms)
           .withUninitMemberTrust(ValueCopy);
-  switch (classifyUninitSource(getASTContext(), Leaf.E, T->isReferenceType(),
-                               Opts)) {
+  switch (classifyUninitSource(getASTContext(), Leaf.E, T, Opts)) {
   case UninitStorage::Initialized:
     return InitSourceState::Initialized;
   case UninitStorage::Uninitialized:
@@ -3694,7 +4076,7 @@ void SemaProfiles::judgeDestroyUninitByForm(SourceLocation Loc, QualType T,
   if (shouldEmitProfileViolation("std::init", diag::err_init_destroy_uninit,
                                  Loc, D, /*PostParse=*/AfterFlowPass) &&
       isUninitializedOrMixed(
-          classifyUninitSource(getASTContext(), Src, T->isReferenceType(),
+          classifyUninitSource(getASTContext(), Src, T,
                                UninitBindAccess.withThisUnderConstruction(
                                    thisIsUnderConstruction(AfterFlowPass)))))
     Diag(Loc, diag::err_init_destroy_uninit)
@@ -3826,8 +4208,25 @@ static bool uninitWriteChainSeesMarker(const Expr *E) {
     }
     if (const auto *CE = dyn_cast<CallExpr>(E)) {
       const FunctionDecl *FD = CE->getDirectCallee();
-      return FD && FD->hasAttr<RefToUninitAttr>();
+      if (FD && FD->hasAttr<RefToUninitAttr>())
+        return true;
+      // What a member call derives from a handle is reached through the
+      // handle's marker when one of its leaves carries it.
+      const Expr *Obj = derivingObject(CE);
+      if (!Obj)
+        return false;
+      bool Marked = false;
+      SemaProfiles::forEachHandleSourceLeaf(
+          Obj, [&](const SemaProfiles::HandleLeaf &L) {
+            if (L.M == SemaProfiles::HandleLeaf::Mode::Handle)
+              Marked |= uninitWriteChainSeesMarker(L.E);
+          });
+      return Marked;
     }
+    if (const auto *CCE = dyn_cast<CXXConstructExpr>(E))
+      return llvm::any_of(
+          CCE->getConstructor()->parameters(),
+          [](const ParmVarDecl *P) { return P->hasAttr<RefToUninitAttr>(); });
     if (const auto *DRE = dyn_cast<DeclRefExpr>(E))
       return DRE->getDecl()->hasAttr<RefToUninitAttr>();
     return false;

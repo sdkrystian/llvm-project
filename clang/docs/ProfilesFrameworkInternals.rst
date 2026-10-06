@@ -844,11 +844,13 @@ follows:
        glvalue recognizer clears the trust, so subobject writes below the marker
        classify uninitialized)
 
-Two helpers are shared across the rules.  ``classifyUninitSource`` -- the
-pointer and glvalue recognizers -- classifies an expression as referring to
+Three recognizers and a helper are shared across the rules.  The pointer,
+glvalue, and handle recognizers -- ``classifyUninitSource`` dispatches a
+binding source to one by its bound type, the handle recognizer taking a
+handle (`Handles (std::init)`_) -- classify an expression as referring to
 initialized, uninitialized, or unknown storage purely from its syntactic form
 (the flow state of tracked storage is the CFG pass's, "Flow-Tracked Storage
-(std::init)" below); its ``UninitAccessOpts`` presets distinguish a *binding*
+(std::init)" below); their ``UninitAccessOpts`` presets distinguish a *binding*
 source (markers count everywhere), a value *read*, and a scalar *store* (which
 differ in whether the top-level ``[[uninit]]`` marker counts and whether
 ``[[ref_to_uninit]]`` storage is trusted; the read and store presets also ignore
@@ -914,6 +916,54 @@ the acceptance survives but the credit does not, mirroring the release rows'
 ``[[ref_to_uninit]]`` with ``[[now_init]]``, the role is one-directional: it
 asserts nothing about the prior state, so an initialized destination is legal
 and a repeated call is no double initialization.
+
+
+Handles (std::init)
+===================
+
+A *handle* is an object of non-union class type
+(``SemaProfiles::isHandleType``): a smart pointer, a span, an iterator.  On
+one, ``[[ref_to_uninit]]`` says the memory it refers to is uninitialized
+(P4222R2 §4.6, §9.3); the handle object itself is initialized.  The handle
+recognizer classifies a handle expression from its *leaves*, which one walk
+enumerates for every consumer (``SemaProfiles::forEachHandleSourceLeaf``,
+``HandleLeaf``).  The walk peels parentheses, full expressions, temporaries,
+the no-op, constructor, derived-to-base, and user-defined conversions, and the
+pass-through forms; it follows a copy or move construction to its source, a
+member call that returns the handle itself -- by reference to the method's
+own class or a base (``++it``), or by value as its own class, another
+specialization of its class template, or a class of its value type
+(``s.subspan(1)``, ``s.begin()``; ``handleSelfReturnObject``) -- to its
+object, and a non-member ``+`` or ``-`` returning an operand's class
+(``n + it``) to that operand, marking the leaf ``Partial`` when the call refers
+to part of the handle (it has explicit arguments or template arguments, is
+``++``, ``--``, ``+=``, ``-=``, or a non-member ``+`` or ``-``, or is a member
+named for a position past the start or a part: ``end``, ``cend``, ``rend``,
+``crend``, ``first``, ``last``, ``subspan``, ``next``, ``prev``, ``advance``),
+and an implicit local (range-for's ``__range`` and ``__begin``) or an
+unmarked local reference to its initializer; and it distributes a conditional
+into one leaf per arm, combined as the recognizers combine arms, so a marked
+and an unmarked arm are Mixed (P4222R2 §4.9).  A terminal classifies by its
+form: a named variable, parameter, or member is uninitialized when marked; a
+marked reference to a class is Unknown, since it is the handle object that is
+uninitialized there; a call takes its marked callee's state; a construction is
+uninitialized when its constructor has an author-marked parameter; an
+initializer list is Unknown; and a handle reached through other storage is
+initialized when that storage is, and Unknown otherwise.
+
+A pointer or reference a member function of a handle returns is *derived* from
+the handle: the call arm of the pointer and glvalue recognizers gives an
+unmarked dot call, member operator, or explicit-object method that returns a
+pointer to an object, or a reference to an object of a type other than the
+method's class and its bases (``derivingObject``), the state of its object as a
+handle when that is uninitialized or Mixed -- Unknown under the store preset's
+marker trust, so ``*p = 5`` stores like ``*q = 5`` through a marked pointer.
+The library's members carry no marker, and nothing tells the memory a handle
+refers to apart from the handle's own parts, so every such result counts (see
+`Known Gaps (std::init)`_).  An arrow call reaches its object through a pointer,
+and a call operator's object is the callable (a ``std::ranges`` object):
+neither derives anything.  The object-argument rule still judges the handle
+object's own storage, so ``s.size()`` on a marked span is accepted.
 
 
 Flow-Tracked Storage (std::init)
@@ -1293,6 +1343,12 @@ Deliberate Strictnesses
   uninitialized start, like a scalar member's, because the constructor's
   initialization is not visible there (the P4222R2 §5 exposure analysis is not
   implemented).
+- Every pointer or reference a member function of an uninitialized handle
+  returns is presumed to refer to uninitialized memory -- the deleter
+  ``up.get_deleter()`` included -- and every handle to the same memory a member
+  returns (``s.begin() + 1``, ``s.subspan(1)``) inherits the handle's state:
+  the library's members carry no marker.
+  The remedies are a marked result or suppression.
 - Storage that is not flow-tracked -- the referent of a marked pointer member
   of an object other than the current one (``o.p``, ``q->p``) -- is judged by
   its form alone at every read, write, and destroy: a ``construct_at`` into

@@ -874,6 +874,10 @@ public:
     /// row's Construct or InitializeAnyState role.
     bool initializesParam(const ParmVarDecl *P) const;
   };
+  /// The value type of the handle type \p T (or a reference to one) as an
+  /// iterator or a range: its \c value_type member type, else the
+  /// non-reference type its \c operator* returns; null when it has neither.
+  static QualType handleValueType(QualType T);
   /// Derive what \p FD does to the storage bound to its parameters: the
   /// lifetime attributes plus the known-callee row, looked up at the call
   /// so the library's own declarations need no annotation. Shared by the
@@ -990,6 +994,46 @@ public:
   static void
   forEachTargetLeaf(const Expr *E,
                     llvm::function_ref<void(const ShapeLeaf &Leaf)> F);
+
+  /// One leaf of a handle source (forEachHandleSourceLeaf): the expression
+  /// \c E the handle's state comes from, how \c E is classified (\c M), and
+  /// the arms taken at the conditionals the walk passed (valid only while the
+  /// walk that yields the leaf runs). See ProfilesFrameworkInternals.rst,
+  /// "Handles (std::init)".
+  struct HandleLeaf {
+    enum class Mode {
+      /// A pointer value passed into a std-table handle: the pointer
+      /// recognizer's.
+      PointerValue,
+      /// An array or non-class lvalue passed by reference into a std-table
+      /// handle: the glvalue recognizer's.
+      Storage,
+      /// A class object passed into a std-table constructor: its storage's
+      /// state, then its own handle state.
+      Range,
+      /// A terminal of the walk, classified as a handle.
+      Handle
+    };
+    const Expr *E;
+    Mode M;
+    /// The walk reached \c E through a call that refers to part of the handle
+    /// (handleSelfReturnObject in SemaProfiles.cpp): the handle refers to
+    /// part of \c E's memory.
+    bool Partial = false;
+    ArrayRef<const Expr *> Arms;
+  };
+
+  /// Enumerate the leaves the state of the handle \p Src comes from, and
+  /// hand each to \p F: peel parens, full expressions, temporaries, the
+  /// no-op, constructor, derived-to-base, and user-defined conversions, and
+  /// the pass-through forms; follow a copy or move construction to its
+  /// source, a member call returning the handle itself to its object, and an
+  /// implicit local or an unmarked local reference to its initializer; and
+  /// distribute every conditional into one leaf per arm. The one walk shared
+  /// by the parse-time recognizers and the CFG pass.
+  static void
+  forEachHandleSourceLeaf(const Expr *Src,
+                          llvm::function_ref<void(const HandleLeaf &)> F);
 
   /// std::init / pointer_marker + union_marker (paper §4.1, §5.6): diagnose
   /// [[uninit]] placed on a pointer, a union variable, or a union member.

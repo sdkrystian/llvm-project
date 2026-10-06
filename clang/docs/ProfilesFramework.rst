@@ -1130,6 +1130,40 @@ A union, an array of handles, and a structured binding cannot carry the
 marker.  A reference to a class keeps its meaning: it refers to the class
 object itself.
 
+A pointer or reference that a member function of a handle returns refers to
+memory the handle refers to, so for a marked handle it refers to
+uninitialized memory: ``s[i]``, ``s.front()``, ``*s.begin()``, ``*p``,
+``p.get()``, and ``p->m`` behave as the same forms through a marked pointer
+do.  A member function that returns the handle itself -- by reference to its
+own class (``++it``), or by value as a handle to the same memory: its own
+class, another specialization of its class template, or a class of its value
+type (``s.subspan(1)``, ``s.begin()``) -- yields a handle in the same state,
+and so do ``n + it``, a copy of it, and a local reference to it, while any
+other class a member returns by value (a name, a duration) is an ordinary
+result.  A call operator's result never refers to its callable object's
+memory.  ``s.size()`` uses only the handle object, which is initialized:
+
+.. code-block:: c++
+
+   struct X { int v; X(int x) : v(x) {} };
+   struct S { int x; };
+
+   void init(std::span<X> s [[ref_to_uninit]], int i1, int i2) {
+     int *q = &s.front().v;           // error: needs [[ref_to_uninit]]
+     std::construct_at(&s[2], 10);    // OK
+     X y = s[i2];                     // error: reads uninitialized memory
+     auto n = s.size();               // OK
+   }
+
+   void use(std::unique_ptr<S> p [[ref_to_uninit]]) {
+     *p = S{};                        // error: a member call (operator=)
+     p->x = 1;                        // error: writes a member
+     S *raw [[ref_to_uninit]] = p.get();  // OK
+   }
+
+A conditional whose arms are a marked and an unmarked handle is rejected for
+either target (§4.9).
+
 
 Constructors
 ------------
