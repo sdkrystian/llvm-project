@@ -486,3 +486,59 @@ void test_sibling_scope_credit(bool c) {
     (void)q;
   }
 }
+
+// A store through a cast to a narrower type writes part of the object
+int test_narrowing_cast_store() {
+  Pair a [[uninit]];
+  *(int *)&a = 5; // expected-error {{writing an element of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
+  return a.y;     // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A store through a reference cast to a narrower type writes part of the object
+int test_narrowing_reference_cast_store() {
+  Pair a [[uninit]];
+  (int &)a = 5; // expected-error {{writing an element of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
+  return a.y;   // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A store through a character pointer writes part of the object
+int test_char_cast_store() {
+  Pair a [[uninit]];
+  *reinterpret_cast<char *>(&a) = 0; // expected-error {{writing an element of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
+  return a.x;                        // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A narrowing store through a marked pointer writes part of its referent
+int test_narrowing_cast_store_through_marker(Pair *p [[ref_to_uninit]]) {
+  *(int *)p = 5; // expected-error {{writing an element of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
+  return p->y;   // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A store through a marked pointer of another type writes part of the local
+int test_store_through_retyped_marker() {
+  Pair a [[uninit]];
+  int *p [[ref_to_uninit]] = (int *)&a;
+  *p = 5;     // expected-error {{writing an element of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
+  return a.y; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A cast to the same type or its signedness variant writes the whole scalar
+int test_same_type_cast_store() {
+  int u [[uninit]];
+  (int &)u = 5;
+  int *q = &u; // OK: u is initialized
+  int v [[uninit]];
+  (unsigned &)v = 5;
+  int *r = &v; // OK: v is initialized
+  return *q + *r;
+}
+
+// A narrowing store to a constructor-body member writes part of it
+struct PunnedMemberStore {
+  long m [[uninit]]; // expected-note {{member 'm' declared here}}
+  PunnedMemberStore() {
+    (int &)m = 1; // expected-error {{writing an element of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
+    long v = m;   // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    (void)v;
+  }
+};

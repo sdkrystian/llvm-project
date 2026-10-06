@@ -1017,8 +1017,26 @@ decides, enters in that unknown state, so no binding, destroy, or read fires on
 it until the body itself stores to it or reseats it.  A local copied or moved
 from a read-tracked local starts in the source's per-member state at the copy
 point: a copy does not inherit initialization, it copies the source's bits,
-initialized or not.  The remaining blind spots are listed in
-`Known Gaps (std::init)`_.
+initialized or not.  A credit, store, or access designates a type -- a store's
+or access's glvalue type, a call credit's parameter pointee or referenced type
+-- and covers an entity whole only when no derived-to-base step intervenes and
+the type agrees with the entity's (``designationCovers``: canonical and
+unqualified, same-size signed and unsigned integer variants alike, an array by
+its base element type -- and by its extent, ``designationExtent``, when the
+designation is an array -- a ``void`` referent by any type); otherwise it
+designates a subobject, which earns no credit and is a subobject store or read
+(P4222R2 §4.2, §5.4).  A ``[[now_init]]`` or initializing parameter whose
+pointee is ``void``, ``char``, ``unsigned char``, or ``std::byte`` claims the
+bytes and covers any entity it reaches without a derived-to-base step.  A
+Construct row whose callee takes constructor arguments
+(``constructsOneObject``) designates one element, ``T[1]``, and a marked
+pointer to a base class reaches only the base subobject of a referent of a
+derived class.  A marked pointer's or reference's referent is checked
+against its anonymous referent's type at extraction and against the storage it
+refers to at each transfer (``DefAssignEvent::Designated``,
+``BindingLeaf::WholeIf``), and an object a credit takes as a whole is credited
+only below the base subobject its argument converts to.  The remaining blind
+spots are listed in `Known Gaps (std::init)`_.
 
 
 .. _profiles-init-known-gaps:
@@ -1149,6 +1167,11 @@ Deliberate Strictnesses
   definition has been parsed: a marker written between the class definition
   and the constructor's still sees a declared-but-undefined constructor and
   is rejected as running a constructor.
+- A ``construct_at`` or ``[[now_init]]`` credit of a base subobject of an
+  ``[[uninit]]`` local or a marked pointer's referent, and a store through a
+  narrower type, initialize nothing: the storage is one entity, so even the
+  constructed base's own members stay uninitialized for a later read.  The
+  remedies are a credit of the whole object or suppression.
 - Storage that is not flow-tracked -- a class-type or array ``[[uninit]]``
   member, a marked pointer member's referent -- is judged by its form alone
   at every read, write, and destroy: a ``construct_at`` into it legalizes no
@@ -1210,8 +1233,12 @@ Missed Diagnostics
   ``std::uninitialized_*`` family, ``std::destroy`` and ``std::destroy_n`` where
   the iterator is a pointer; a call with a class-type iterator checks nothing.
   A whole ``[[uninit]]`` array passed as a range is initialized or destroyed
-  whatever the range's length, and ``std::construct_at(arr, v)`` on a decayed
-  ``[[uninit]]`` array initializes the whole array.
+  whatever the range's length.
+- Storage of no type -- a marked ``void *``'s referent, such as a ``malloc``
+  block -- is covered by a credit or store of any type: after
+  ``std::construct_at((int *)v, 1)`` the whole block counts as initialized, so a
+  read of a wider object through an unmarked alias, ``((Triv *)v)->y``, is
+  accepted.
 - ``memset``, ``memcpy``, and ``memmove`` initialize their whole destination
   whatever the byte count and the type: after ``memset(arr, 0, sizeof(int))`` a
   read of ``arr[3]`` is accepted, and a class object written by ``memcpy`` is

@@ -813,8 +813,22 @@ object, a default member initializer, a default argument -- has no flow and
 is judged by its form alone.  A default argument is judged where it is
 declared (once per instantiation of a template), never at a call that uses
 it, so a suppression for it belongs on the declaration.  A transparent cast is as transparent to a
-store as to a binding: ``(int &)u = 5`` initializes ``u`` whole,
-``*(int *)p = 5`` the referent, and ``(int *&)p = q`` reseats ``p`` (§4.3).
+store as to a binding: ``(int &)u = 5`` initializes an ``int u`` whole,
+``*(int *)p = 5`` the ``int`` referent, and ``(int *&)p = q`` reseats ``p``
+(§4.3).  A store or a credit -- ``construct_at``, the ``uninitialized_*``
+family, a ``[[now_init]]`` call -- initializes the storage only when it
+designates the whole of it: one through another type than the storage's
+(same-size signed and unsigned integer types agree, and an array counts by its
+element type, though an array type must span the whole array) or through a
+conversion to a base class names a subobject,
+initializes nothing, and as a store is rejected like ``s.x = 1``
+(``*(int *)&s = 1``, ``std::construct_at(static_cast<Base *>(&d))``).
+``std::construct_at`` constructs one object, so on an array it constructs the
+first element and initializes nothing.
+``memset``, ``memcpy``, ``memmove``, and a ``[[now_init]]`` parameter whose
+pointee is ``void``, ``char``, ``unsigned char``, or ``std::byte`` claim the
+bytes and initialize the whole storage, unless reached through a conversion to
+a base class.
 The standard identity functions -- ``std::move``, ``std::forward``,
 ``std::forward_like``, ``std::move_if_noexcept``, and ``std::as_const`` -- are
 as transparent as such a cast: ``*std::move(p)`` reads what ``*p`` reads,

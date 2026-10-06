@@ -618,6 +618,21 @@ struct NowInitWholeObject {
   }
 };
 
+// Passing `this` to a base-typed marked parameter initializes the base only
+struct NowInitBaseMembers {
+  int a [[uninit]];
+};
+[[now_init]] void now_init_base(NowInitBaseMembers *obj [[ref_to_uninit]]);
+struct NowInitDerivedMembers : NowInitBaseMembers {
+  int b [[uninit]]; // expected-note {{member 'b' declared here}}
+  NowInitDerivedMembers() {
+    now_init_base(this);
+    int x = a; // OK: the base was handed over for initialization
+    int y = b; // expected-error {{member 'b' is read before initialization under profile 'std::init'}}
+    (void)x; (void)y;
+  }
+};
+
 // Argument mapping through operator calls: a member operator() receives the
 // object as operator-call argument 0 ahead of its declared parameters --
 // for a C++23 static operator() too, whose object argument is still

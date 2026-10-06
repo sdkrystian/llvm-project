@@ -1857,6 +1857,11 @@ struct TrackedEntity {
   BasePath Path;
   /// The member (member kinds); null otherwise.
   const FieldDecl *Field = nullptr;
+  /// The type of the storage the entity stands for: the member's or the
+  /// local's declared type, or the referent type of a marked pointer or
+  /// reference (its anonymous referent). A credit or store covers the entity
+  /// only through a designation of this type (designationCovers).
+  QualType Type;
   /// Read events are extracted for this entity (a constructor body's or a
   /// default-initialized constructor-less local's members).
   bool TrackReads = true;
@@ -1895,10 +1900,96 @@ static bool typeHoldsPointerOrReference(
   return false;
 }
 
+/// \p T canonical and unqualified, with a signed or plain integer type
+/// replaced by its unsigned variant (char, signed char, short, int, long,
+/// long long, __int128).
+static QualType designationKey(const ASTContext &Ctx, QualType T) {
+  T = T.getCanonicalType().getUnqualifiedType();
+  const auto *BT = T->getAs<BuiltinType>();
+  if (!BT)
+    return T;
+  switch (BT->getKind()) {
+  case BuiltinType::Char_S:
+  case BuiltinType::Char_U:
+  case BuiltinType::SChar:
+    return Ctx.UnsignedCharTy;
+  case BuiltinType::Short:
+    return Ctx.UnsignedShortTy;
+  case BuiltinType::Int:
+    return Ctx.UnsignedIntTy;
+  case BuiltinType::Long:
+    return Ctx.UnsignedLongTy;
+  case BuiltinType::LongLong:
+    return Ctx.UnsignedLongLongTy;
+  case BuiltinType::Int128:
+    return Ctx.UnsignedInt128Ty;
+  default:
+    return T;
+  }
+}
+
+/// The number of elements of \p T as a constant array or a std::array, nested
+/// ones multiplied out, or std::nullopt when \p T is neither or a bound is
+/// unknown.
+static std::optional<uint64_t> designationExtent(const ASTContext &Ctx,
+                                                 QualType T) {
+  std::optional<uint64_t> N;
+  while (true) {
+    if (const ConstantArrayType *CAT = Ctx.getAsConstantArrayType(T)) {
+      N = N.value_or(1) * CAT->getZExtSize();
+      T = CAT->getElementType();
+      continue;
+    }
+    if (T->isArrayType())
+      return std::nullopt;
+    const auto *CTSD = dyn_cast_or_null<ClassTemplateSpecializationDecl>(
+        T->getAsCXXRecordDecl());
+    if (!CTSD || !CTSD->getIdentifier() || CTSD->getName() != "array" ||
+        !CTSD->isInStdNamespace() || CTSD->getTemplateArgs().size() != 2 ||
+        CTSD->getTemplateArgs()[0].getKind() != TemplateArgument::Type ||
+        CTSD->getTemplateArgs()[1].getKind() != TemplateArgument::Integral)
+      return N;
+    N = N.value_or(1) *
+        CTSD->getTemplateArgs()[1].getAsIntegral().getZExtValue();
+    T = CTSD->getTemplateArgs()[0].getAsType();
+  }
+}
+
+/// True if a credit, store, or access through a glvalue of type
+/// \p Designated covers the whole of storage of type \p Entity: the types
+/// agree canonically and unqualified, same-size signed and unsigned integer
+/// variants alike, an array compared by its base element type -- an array
+/// designation also by its extent (designationExtent), so it covers no larger
+/// array. Storage of type void (a void pointer's referent) has no type to
+/// disagree with. With
+/// \p RawExempt -- a [[now_init]] parameter or an initializing parameter,
+/// whose callee claims the bytes -- a designated void, char, unsigned char,
+/// or std::byte covers any storage. Any other designation names a subobject
+/// (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage (std::init)").
+static bool designationCovers(const ASTContext &Ctx, QualType Designated,
+                              QualType Entity, bool RawExempt) {
+  QualType D = Ctx.getBaseElementType(Designated);
+  QualType E = Ctx.getBaseElementType(Entity);
+  if (E->isVoidType())
+    return true;
+  if (RawExempt && (D->isVoidType() || D->isStdByteType() ||
+                    Ctx.hasSameUnqualifiedType(D, Ctx.CharTy) ||
+                    Ctx.hasSameUnqualifiedType(D, Ctx.UnsignedCharTy)))
+    return true;
+  if (std::optional<uint64_t> DN = designationExtent(Ctx, Designated))
+    if (std::optional<uint64_t> EN = designationExtent(Ctx, Entity);
+        EN && *DN < *EN)
+      return false;
+  return designationKey(Ctx, D) == designationKey(Ctx, E);
+}
+
 /// The entity table of one analyzed body and the lvalue-shape resolvers
 /// over it. Each object's entities are contiguous, so a whole-object event
 /// covers a range.
 struct TrackedStorage {
+  explicit TrackedStorage(const ASTContext &Ctx) : Ctx(Ctx) {}
+
+  const ASTContext &Ctx;
   SmallVector<TrackedEntity, 8> Entities;
   /// The contiguous entity range of each tracked local's members.
   llvm::DenseMap<const VarDecl *, std::pair<unsigned, unsigned>> LocalRange;
@@ -1942,7 +2033,8 @@ struct TrackedStorage {
 
   /// What resolving a glvalue found: the tracked entity it names -- Subobject
   /// when it reaches storage below that entity (a member or element of an
-  /// [[uninit]] object, a member of a marked pointer's referent), which a store
+  /// [[uninit]] object, a member of a marked pointer's referent, or a
+  /// designation that does not cover the entity; see resolve), which a store
   /// does not initialize and a binding judges by the entity's state -- or, for
   /// an access that reaches a tracked aggregate local without naming a tracked
   /// member, the consumed base and whether the access is benign: it cannot
@@ -1964,15 +2056,32 @@ struct TrackedStorage {
   /// (x.in.v, x.arr[0]) names no entity and is benign or an escape by that
   /// member's type. The one resolver behind every event arm, so a leaf
   /// affects flow state exactly as SemaProfiles::isFlowTrackedLeaf says it
-  /// is tracked.
-  Resolution resolve(const SemaProfiles::ShapeLeaf &Leaf) const;
+  /// is tracked. A credit, store, or access passes its \p Designated type
+  /// (and \p RawExempt; see designationCovers): a whole entity reached
+  /// through a derived-to-base step or a designation that does not cover it
+  /// is a subobject. A marked pointer's or reference's referent is checked
+  /// against its anonymous referent's type here and against the storage it
+  /// refers to by the transfer function (DefAssignEvent::Designated).
+  Resolution resolve(const SemaProfiles::ShapeLeaf &Leaf,
+                     QualType Designated = QualType(),
+                     bool RawExempt = false) const;
 
   /// Resolve a binding or argument leaf: the glvalue \p E (resolve), or --
   /// with \p AsPointerValue, a leaf used as a pointer value -- the storage
   /// `&x` names, a marked local pointer's referent (its value), or a decayed
-  /// [[uninit]] array as a whole.
+  /// [[uninit]] array as a whole. \p Designated and \p RawExempt are
+  /// resolve's; for a pointer value, the designated type is the pointee's.
   Resolution resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
-                             bool AsPointerValue) const;
+                             bool AsPointerValue,
+                             QualType Designated = QualType(),
+                             bool RawExempt = false) const;
+
+  /// True if a designation of type \p Designated covers entity \p Idx whole
+  /// (designationCovers); a null \p Designated covers everything.
+  bool covers(QualType Designated, unsigned Idx, bool RawExempt) const {
+    return Designated.isNull() ||
+           designationCovers(Ctx, Designated, Entities[Idx].Type, RawExempt);
+  }
 
   /// The Pointee entity of the marked local pointer \p V (a reference's
   /// referent cannot be reseated and is not one), if tracked.
@@ -2001,7 +2110,7 @@ TrackedStorage::addObject(Sema &S, const VarDecl *Base, const CXXRecordDecl *RD,
             return;
         TrackedEntity E{Base ? TrackedEntity::Kind::LocalMember
                              : TrackedEntity::Kind::CurrentObjectMember,
-                        Path, F};
+                        Path, F, F->getType()};
         E.TrackReads = TrackReads;
         E.UnknownEntry = UnknownEntry;
         Entities.push_back(std::move(E));
@@ -2019,7 +2128,10 @@ unsigned TrackedStorage::addLocalEntity(TrackedEntity::Kind K, const VarDecl *V,
   auto It = LocalEntity.find(V);
   if (It != LocalEntity.end())
     return It->second;
-  TrackedEntity E{K, BasePath(), nullptr};
+  QualType T = V->getType();
+  if (K == TrackedEntity::Kind::Pointee)
+    T = T->isPointerType() ? T->getPointeeType() : T.getNonReferenceType();
+  TrackedEntity E{K, BasePath(), nullptr, T};
   E.TrackReads = false;
   E.UnknownEntry = UnknownEntry;
   Entities.push_back(std::move(E));
@@ -2054,16 +2166,25 @@ std::pair<unsigned, unsigned> TrackedStorage::wholeObject(const Expr *E) const {
 }
 
 TrackedStorage::Resolution
-TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf) const {
+TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
+                        QualType Designated, bool RawExempt) const {
   std::optional<SemaProfiles::FlowLeafShape> Shape =
       SemaProfiles::flowLeafShape(Leaf.E, Leaf.Arms);
   if (!Shape)
     return {};
+  // A designation of a whole entity names a subobject when it takes a
+  // derived-to-base step or does not cover the entity's type.
+  auto DesignatesPart = [&](unsigned Idx) {
+    return !Designated.isNull() &&
+           (!Shape->Path.empty() || !covers(Designated, Idx, RawExempt));
+  };
   Resolution R;
   if (Shape->IsThis) {
     if (Shape->Named.size() != 1 || Shape->Subscript)
       return {};
     R.Entity = find(nullptr, Shape->Path, Shape->Named.front());
+    // The path is the member's own: only the type decides.
+    R.Subobject = R.Entity && !covers(Designated, *R.Entity, RawExempt);
     return R;
   }
   const VarDecl *V = Shape->Local;
@@ -2073,7 +2194,7 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf) const {
       return {};
     if (std::optional<unsigned> Idx = markedPointerObject(V)) {
       R.Entity = Idx;
-      R.Subobject = !Shape->Named.empty();
+      R.Subobject = !Shape->Named.empty() || DesignatesPart(*Idx);
     }
     return R;
   }
@@ -2083,11 +2204,12 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf) const {
     const TrackedEntity &Ent = Entities[It->second];
     if (Ent.K == TrackedEntity::Kind::WholeLocal) {
       R.Entity = It->second;
-      R.Subobject = !Shape->Named.empty() || Shape->Subscript;
+      R.Subobject = !Shape->Named.empty() || Shape->Subscript ||
+                    DesignatesPart(It->second);
     } else if (Ent.K == TrackedEntity::Kind::Pointee &&
                V->getType()->isReferenceType() && !Shape->Subscript) {
       R.Entity = It->second;
-      R.Subobject = !Shape->Named.empty();
+      R.Subobject = !Shape->Named.empty() || DesignatesPart(It->second);
     }
     return R;
   }
@@ -2101,6 +2223,7 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf) const {
   if (Shape->Named.size() == 1 && !Shape->Subscript) {
     if (std::optional<unsigned> Idx = find(V, Shape->Path, Top)) {
       R.Entity = Idx;
+      R.Subobject = !covers(Designated, *Idx, RawExempt);
       R.Benign = true;
       return R;
     }
@@ -2119,15 +2242,17 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf) const {
 
 TrackedStorage::Resolution
 TrackedStorage::resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
-                                bool AsPointerValue) const {
+                                bool AsPointerValue, QualType Designated,
+                                bool RawExempt) const {
   if (!AsPointerValue)
-    return resolve(Leaf);
+    return resolve(Leaf, Designated, RawExempt);
   const Expr *E = SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms);
   if (const Expr *Op = SemaProfiles::addressOfOperand(E))
-    return resolve({Op, Leaf.Arms});
+    return resolve({Op, Leaf.Arms}, Designated, RawExempt);
   Resolution R;
   if (std::optional<unsigned> Idx = markedPointerObject(E)) {
     R.Entity = Idx;
+    R.Subobject = !covers(Designated, *Idx, RawExempt);
     return R;
   }
   // A decayed [[uninit]] array.
@@ -2136,8 +2261,10 @@ TrackedStorage::resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
   if (VD && VD->getType()->isArrayType())
     if (auto It = LocalEntity.find(VD);
         It != LocalEntity.end() &&
-        Entities[It->second].K == TrackedEntity::Kind::WholeLocal)
+        Entities[It->second].K == TrackedEntity::Kind::WholeLocal) {
       R.Entity = It->second;
+      R.Subobject = !covers(Designated, It->second, RawExempt);
+    }
   return R;
 }
 
@@ -2234,6 +2361,12 @@ struct DefAssignEvent {
   unsigned Aux = 0;
   /// Reseat: what Idx refers to from here.
   ReseatTarget RT = ReseatTarget::Fresh;
+  /// Write and MayWrite: the credit's or store's designated type (null: no
+  /// type check) and its RawExempt (designationCovers). A Pointee's write
+  /// reaches storage its marked pointer or reference refers to only when the
+  /// designation covers that storage.
+  QualType Designated;
+  bool RawExempt = false;
 };
 
 /// The form classification of a binding leaf: the parse-time recognizers'
@@ -2263,6 +2396,11 @@ static LeafState combineLeafStates(LeafState A, LeafState B) {
 struct BindingLeaf {
   std::optional<unsigned> Entity;
   LeafState State = LeafState::Unknown;
+  /// A store site's whole-referent leaf of a marked pointer or reference: the
+  /// store's designated type. The store is the referent's initialization when
+  /// the designation covers the storage referred to there, and a subobject
+  /// store otherwise.
+  QualType WholeIf;
 };
 
 /// A ref_to_uninit binding site derived from a CFG element: the construct's
@@ -2511,6 +2649,12 @@ static void judgeAccessSite(const AccessSite &Site, bool IsWrite,
                             SmallVectorImpl<PendingViolation> &Out) {
   bool Fires = false;
   for (const BindingLeaf &L : Site.Leaves) {
+    if (!L.WholeIf.isNull()) {
+      std::optional<unsigned> R = referent(*L.Entity, St, Storage);
+      if (!R || *R == *L.Entity ||
+          Storage.covers(L.WholeIf, *R, /*RawExempt=*/false))
+        continue;
+    }
     LeafState S = leafState(L, St, Storage, /*EveryPath=*/true);
     Fires |= S == LeafState::Uninitialized || S == LeafState::Mixed;
   }
@@ -2545,6 +2689,24 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
     St.MayUnassigned.reset(I);
     St.MayDestroyed.reset(I);
   };
+  // The storage a Write or MayWrite reaches: Idx's referent, when the
+  // designation covers it (a Pointee's own anonymous referent was checked at
+  // extraction).
+  auto WriteTarget = [&](const DefAssignEvent &Ev) -> std::optional<unsigned> {
+    std::optional<unsigned> R = referent(Ev.Idx, St, Storage);
+    if (R && *R != Ev.Idx && !Storage.covers(Ev.Designated, *R, Ev.RawExempt))
+      return std::nullopt;
+    // A marked pointer to a base class reaches only the base subobject of a
+    // referent of a derived class.
+    if (R && *R != Ev.Idx)
+      if (const CXXRecordDecl *PRD =
+              Storage.Entities[Ev.Idx].Type->getAsCXXRecordDecl())
+        if (const CXXRecordDecl *RRD =
+                Storage.Entities[*R].Type->getAsCXXRecordDecl();
+            RRD && RRD->hasDefinition() && RRD->isDerivedFrom(PRD))
+          return std::nullopt;
+    return R;
+  };
   for (const DefAssignEvent &Ev : BlockEvents) {
     switch (Ev.Kind) {
     case DefAssignEventKind::Read:
@@ -2552,7 +2714,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
         (*Offending)[Ev.Idx].push_back(Ev.E);
       break;
     case DefAssignEventKind::Write:
-      if (std::optional<unsigned> R = referent(Ev.Idx, St, Storage))
+      if (std::optional<unsigned> R = WriteTarget(Ev))
         Write(*R);
       break;
     case DefAssignEventKind::ReadWrite:
@@ -2561,7 +2723,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       Write(Ev.Idx);
       break;
     case DefAssignEventKind::MayWrite:
-      if (std::optional<unsigned> R = referent(Ev.Idx, St, Storage))
+      if (std::optional<unsigned> R = WriteTarget(Ev))
         St.May.set(*R);
       break;
     case DefAssignEventKind::Copy:
@@ -2950,6 +3112,62 @@ static void forEachArgumentBinding(
   }
 }
 
+/// The part of \p Whole, the entity range of the object \p G a credit's
+/// argument leaf \p Leaf names as a whole, that a credit designated as
+/// \p Designated reaches: the entities below the base subobject the
+/// argument's derived-to-base casts convert to -- \p OuterPath, the casts
+/// above the leaf, after the leaf's own -- contiguous, as the enumeration is
+/// depth-first, when \p Designated covers that subobject's class
+/// (designationCovers), and none otherwise.
+static std::pair<unsigned, unsigned>
+designatedWholeRange(const TrackedStorage &Storage,
+                     const SemaProfiles::ShapeLeaf &Leaf, bool AsPointerValue,
+                     const Expr *G, std::pair<unsigned, unsigned> Whole,
+                     ArrayRef<const CXXRecordDecl *> OuterPath,
+                     QualType Designated, bool RawExempt) {
+  if (Whole.first == Whole.second)
+    return Whole;
+  BasePath CastPath(OuterPath);
+  const Expr *Inner = SemaProfiles::peelBaseCasts(Leaf.E, CastPath, Leaf.Arms);
+  if (const Expr *Op = SemaProfiles::addressOfOperand(Inner);
+      AsPointerValue && Op)
+    SemaProfiles::peelBaseCasts(Op, CastPath, Leaf.Arms);
+  QualType Class = G->getType();
+  if (Class->isPointerType())
+    Class = Class->getPointeeType();
+  if (!CastPath.empty())
+    Class = Storage.Ctx.getCanonicalTagType(CastPath.back());
+  if (!designationCovers(Storage.Ctx, Designated, Class, RawExempt))
+    return {0, 0};
+  std::optional<unsigned> First, Last;
+  for (unsigned I = Whole.first; I != Whole.second; ++I) {
+    ArrayRef<const CXXRecordDecl *> Path = Storage.Entities[I].Path;
+    if (Path.size() < CastPath.size() ||
+        Path.take_front(CastPath.size()) != ArrayRef(CastPath))
+      continue;
+    if (!First)
+      First = I;
+    Last = I;
+  }
+  return First ? std::pair{*First, *Last + 1} : std::pair{0u, 0u};
+}
+
+/// True if \p P is the Construct role parameter of a known-callee row whose
+/// callee takes a pack of constructor arguments (std::construct_at,
+/// std::ranges::construct_at, std::allocator_traits::construct): the call
+/// constructs one object, so of an array it constructs the first element.
+static bool constructsOneObject(const SemaProfiles::CalleeLifecycleRoles &Roles,
+                                const ParmVarDecl *P) {
+  if (Roles.roleOf(P) != SemaProfiles::KnownParamRole::Construct)
+    return false;
+  const auto *FD = dyn_cast<FunctionDecl>(P->getDeclContext());
+  const FunctionTemplateDecl *FTD = FD ? FD->getPrimaryTemplate() : nullptr;
+  return FTD && llvm::any_of(FTD->getTemplatedDecl()->parameters(),
+                             [](const ParmVarDecl *Param) {
+                               return Param->isParameterPack();
+                             });
+}
+
 /// The lifecycle effects of the call-like \p CallLike on the storage bound to
 /// its parameters (\p Roles, derived by the caller; the pairs come from
 /// forEachArgumentBinding). A [[now_init]] callee writes the storage
@@ -2996,17 +3214,36 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
     /// The form state of a leaf no entity tracks.
     LeafState Form = LeafState::Unknown;
   };
+  // Resolve the leaves of \p Arg; a credit passes its \p Designated type and
+  // RawExempt (TrackedStorage::resolve). A credit of an object passed as a
+  // whole reaches only the entities of the base subobject its argument
+  // converts to, and none when \p Designated is not that subobject's class.
   auto ResolveArg = [&](const Expr *Arg, QualType ParamTy,
-                        SmallVectorImpl<ArgLeaf> &Leaves) {
+                        SmallVectorImpl<ArgLeaf> &Leaves,
+                        QualType Designated = QualType(),
+                        bool RawExempt = false) {
     bool AsPointerValue;
     const Expr *Operand =
         SemaProfiles::bindingSourceOperand(Arg, ParamTy, AsPointerValue);
     if (!Operand)
       return false;
+    // The derived-to-base casts above the leaves, which the leaf walk peels.
+    BasePath OuterPath;
+    if (!Designated.isNull())
+      SemaProfiles::peelBaseCasts(Operand, OuterPath);
     bool AnyTracked = false;
     SemaProfiles::forEachTargetLeaf(
         Operand, [&](const SemaProfiles::ShapeLeaf &Leaf) {
-          ArgLeaf L{Leaf.E, Storage.resolveFlowLeaf(Leaf, AsPointerValue)};
+          ArgLeaf L{Leaf.E, Storage.resolveFlowLeaf(Leaf, AsPointerValue,
+                                                    Designated, RawExempt)};
+          // A credit through a conversion to a base class names the base
+          // subobject, whatever its designated type.
+          if (L.R.Entity && !Designated.isNull()) {
+            BasePath CastPath(OuterPath);
+            SemaProfiles::peelBaseCasts(Leaf.E, CastPath, Leaf.Arms);
+            if (!CastPath.empty())
+              L.R.Subobject = true;
+          }
           L.Tracked = SemaProfiles::isFlowTrackedLeaf(S.Context, Leaf,
                                                       AsPointerValue, DC);
           AnyTracked |= L.Tracked;
@@ -3017,6 +3254,10 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
                 AsPointerValue && Op)
               G = SemaProfiles::ignoreTransparentCasts(Op, Leaf.Arms);
             L.Whole = Storage.wholeObject(G);
+            if (!Designated.isNull())
+              L.Whole = designatedWholeRange(Storage, Leaf, AsPointerValue, G,
+                                             L.Whole, OuterPath, Designated,
+                                             RawExempt);
             L.Form = formState(
                 S.Profiles().classifyInitBindingLeaf(Leaf, ParamTy, D));
           }
@@ -3034,11 +3275,14 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
     });
   };
   // The storage an argument names, as events of \p Kind: the resolved whole
-  // entity, or every entity of the object passed as a whole.
+  // entity, or every entity of the object passed as a whole. A credit passes
+  // its \p Designated type and RawExempt (ResolveArg).
   auto AppendFor = [&](const Expr *Arg, QualType ParamTy,
-                       DefAssignEventKind Kind) {
+                       DefAssignEventKind Kind,
+                       QualType Designated = QualType(),
+                       bool RawExempt = false) {
     SmallVector<ArgLeaf, 2> Leaves;
-    ResolveArg(Arg, ParamTy, Leaves);
+    ResolveArg(Arg, ParamTy, Leaves, Designated, RawExempt);
     if (Leaves.empty())
       return;
     if (NameOneStorage(Leaves))
@@ -3046,14 +3290,20 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
     else
       Kind = Kind == DefAssignEventKind::Write ? DefAssignEventKind::MayWrite
                                                : DefAssignEventKind::Escape;
+    auto Push = [&](unsigned Idx) {
+      DefAssignEvent Ev{Kind, Idx, CallLike};
+      Ev.Designated = Designated;
+      Ev.RawExempt = RawExempt;
+      BlockEvents.push_back(Ev);
+    };
     for (const ArgLeaf &L : Leaves) {
       if (L.R.Entity) {
         if (!L.R.Subobject)
-          BlockEvents.push_back({Kind, *L.R.Entity, CallLike});
+          Push(*L.R.Entity);
         continue;
       }
       for (unsigned Idx = L.Whole.first; Idx != L.Whole.second; ++Idx)
-        BlockEvents.push_back({Kind, Idx, CallLike});
+        Push(Idx);
     }
   };
   // A [[now_uninit]] parameter's argument: one destroy site.
@@ -3106,10 +3356,25 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
       else if (Roles.releasesParam(P, /*TrustedOnly=*/true))
         AppendFor(Arg, PT, DefAssignEventKind::Kill);
     });
+  // A credit designates the parameter's pointee or referenced type; a
+  // [[now_init]] or initializing parameter claims raw bytes
+  // (designationCovers).
   if (Roles.InitializesRefToUninitParams || Roles.KnownParam)
     ForEachParam([&](const ParmVarDecl *P, const Expr *Arg) {
-      if (Roles.initializesParam(P))
-        AppendFor(Arg, P->getType(), DefAssignEventKind::Write);
+      if (!Roles.initializesParam(P))
+        return;
+      QualType PT = P->getType();
+      QualType Designated =
+          PT->isPointerType() ? PT->getPointeeType() : PT.getNonReferenceType();
+      bool RawExempt =
+          (Roles.InitializesRefToUninitParams && Roles.isMarkedParam(P)) ||
+          Roles.isInitializingParam(P);
+      if (constructsOneObject(Roles, P) && Designated->isObjectType() &&
+          !Designated->isIncompleteType())
+        Designated = S.Context.getConstantArrayType(
+            Designated, llvm::APInt(64, 1), nullptr, ArraySizeModifier::Normal,
+            0);
+      AppendFor(Arg, PT, DefAssignEventKind::Write, Designated, RawExempt);
     });
 }
 
@@ -3324,10 +3589,11 @@ static void extractStdInitEvents(
     collectCtorBodyStmts(Ctor, cfg, BodyStmts);
   auto ForEachLeaf =
       [&](const Expr *E,
-          llvm::function_ref<void(const TrackedStorage::Resolution &)> F) {
+          llvm::function_ref<void(const TrackedStorage::Resolution &)> F,
+          QualType Designated = QualType()) {
         SemaProfiles::forEachTargetLeaf(
             E, [&](const SemaProfiles::ShapeLeaf &Leaf) {
-              F(Storage.resolve(Leaf));
+              F(Storage.resolve(Leaf, Designated));
             });
       };
 
@@ -3374,19 +3640,21 @@ static void extractStdInitEvents(
   // Pass two: the events, in CFG element order.
   for (const CFGBlock *B : cfg) {
     auto &BlockEvents = Events[B->getBlockID()];
-    // The resolutions of a glvalue's leaves, one per leaf.
+    // The resolutions of a glvalue's leaves, one per leaf, with the access's
+    // \p Designated type (TrackedStorage::resolve).
     SmallVector<TrackedStorage::Resolution, 4> Leaves;
-    auto CollectLeaves = [&](const Expr *G) {
+    auto CollectLeaves = [&](const Expr *G, QualType Designated = QualType()) {
       Leaves.clear();
       ForEachLeaf(
-          G, [&](const TrackedStorage::Resolution &R) { Leaves.push_back(R); });
+          G, [&](const TrackedStorage::Resolution &R) { Leaves.push_back(R); },
+          Designated);
     };
-    // One Read per distinct resolved, read-tracked whole-entity leaf.
+    // One Read per distinct resolved, read-tracked leaf: only members are
+    // read-tracked, and a read of part of a member reads the member.
     auto AppendReads = [&](const Expr *At) {
       SmallVector<unsigned, 4> Seen;
       for (const TrackedStorage::Resolution &R : Leaves)
-        if (R.Entity && !R.Subobject &&
-            Storage.Entities[*R.Entity].TrackReads &&
+        if (R.Entity && Storage.Entities[*R.Entity].TrackReads &&
             !llvm::is_contained(Seen, *R.Entity)) {
           Seen.push_back(*R.Entity);
           BlockEvents.push_back({DefAssignEventKind::Read, *R.Entity, At});
@@ -3461,7 +3729,9 @@ static void extractStdInitEvents(
     // SemaProfiles::resolveAssignTargetMarking).
     auto AppendStore = [&](const Expr *G, const Expr *At, bool ReadsFirst,
                            const Expr *ReseatSource) {
-      CollectLeaves(G);
+      // The store designates its target's type.
+      QualType Designated = G->getType();
+      CollectLeaves(G, Designated);
       std::optional<unsigned> Same;
       bool AllSame = !Leaves.empty();
       for (const TrackedStorage::Resolution &R : Leaves) {
@@ -3474,18 +3744,22 @@ static void extractStdInitEvents(
         else if (*Same != *R.Entity)
           AllSame = false;
       }
+      auto Push = [&](DefAssignEventKind Kind, unsigned Idx) {
+        DefAssignEvent Ev{Kind, Idx, At};
+        Ev.Designated = Designated;
+        BlockEvents.push_back(Ev);
+      };
       if (AllSame) {
-        BlockEvents.push_back({ReadsFirst && Storage.Entities[*Same].TrackReads
-                                   ? DefAssignEventKind::ReadWrite
-                                   : DefAssignEventKind::Write,
-                               *Same, At});
+        Push(ReadsFirst && Storage.Entities[*Same].TrackReads
+                 ? DefAssignEventKind::ReadWrite
+                 : DefAssignEventKind::Write,
+             *Same);
       } else {
         if (ReadsFirst)
           AppendReads(At);
         for (const TrackedStorage::Resolution &R : Leaves)
           if (R.Entity && !R.Subobject)
-            BlockEvents.push_back(
-                {DefAssignEventKind::MayWrite, *R.Entity, At});
+            Push(DefAssignEventKind::MayWrite, *R.Entity);
       }
       SmallVector<unsigned, 2> Reseated;
       bool AllMarked = true;
@@ -3588,6 +3862,8 @@ static void extractStdInitEvents(
       AccessSite Site;
       Site.Loc = Loc;
       bool AnyTracked = false, AnyPointee = false, AnyUninitObject = false;
+      // The access designates the glvalue's type (TrackedStorage::resolve).
+      QualType Designated = G->getType();
       SemaProfiles::forEachTargetLeaf(
           G, [&](const SemaProfiles::ShapeLeaf &Leaf) {
             BindingLeaf L;
@@ -3595,17 +3871,27 @@ static void extractStdInitEvents(
                                                 /*AsPointerValue=*/false, DC)) {
               AnyTracked = true;
               JudgedLeaves.insert(Leaf.E);
-              TrackedStorage::Resolution R =
-                  Storage.resolveFlowLeaf(Leaf, /*AsPointerValue=*/false);
+              TrackedStorage::Resolution R = Storage.resolveFlowLeaf(
+                  Leaf, /*AsPointerValue=*/false, Designated);
               if (R.Entity) {
-                TrackedEntity::Kind K = Storage.Entities[*R.Entity].K;
-                bool Pointee = K == TrackedEntity::Kind::Pointee;
+                const TrackedEntity &Ent = Storage.Entities[*R.Entity];
+                bool Pointee = Ent.K == TrackedEntity::Kind::Pointee;
+                // A subobject of an [[uninit]] local; a store to part of a
+                // read-tracked member is one of an [[uninit]] object too (a
+                // read of it is the member's Read event).
                 bool UninitObject =
-                    K == TrackedEntity::Kind::WholeLocal && R.Subobject;
+                    R.Subobject && (Ent.K == TrackedEntity::Kind::WholeLocal ||
+                                    (IsWrite && !Pointee && Ent.TrackReads));
                 if (UninitObject || (Pointee && (!IsWrite || R.Subobject))) {
                   L.Entity = R.Entity;
                   AnyPointee |= Pointee;
                   AnyUninitObject |= UninitObject;
+                } else if (Pointee) {
+                  // A whole store through a marked pointer or reference: a
+                  // subobject store where the storage it refers to is not
+                  // covered by the designation.
+                  L.Entity = R.Entity;
+                  L.WholeIf = Designated;
                 } else {
                   // A whole [[uninit]] local's read, a tracked member, or a
                   // whole-entity store: not this rule's.
@@ -4328,7 +4614,7 @@ static void verifyDeferredInitSites(
 static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
                                        AnalysisDeclContext &,
                                        const CFGProfileEntry &Entry) {
-  TrackedStorage Storage;
+  TrackedStorage Storage(S.Context);
   const auto *Ctor = dyn_cast<CXXConstructorDecl>(D);
   if (Ctor && (Ctor->isDelegatingConstructor() || Ctor->getParent()->isUnion()))
     Ctor = nullptr;

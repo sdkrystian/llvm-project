@@ -662,6 +662,160 @@ int destroy_one_path_read_through(int *p [[ref_to_uninit]], bool c) {
   return *p; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
 }
 
+
+struct Base { int b; };
+struct Derived : Base { int d; };
+[[now_init]] void fill_base(Base *p [[ref_to_uninit]]);
+[[now_init]] void fill_base_ref(Base &r [[ref_to_uninit]]);
+[[now_init]] void fill_bytes(void *p [[ref_to_uninit]]);
+[[now_init]] void fill_ints(int *p [[ref_to_uninit]]);
+namespace std {
+template <class It, class T> void uninitialized_fill(It first, It last, const T &x);
+} // namespace std
+extern "C" void *memset(void *, int, __SIZE_TYPE__);
+struct Pair { int x; int y; };
+
+// construct_at of a base subobject leaves the derived member uninitialized
+int construct_base_subobject() {
+  Derived d [[uninit]];
+  std::construct_at(static_cast<Base *>(&d), 1);
+  return d.d; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// construct_at through the implicit conversion to the base
+int construct_base_implicit() {
+  Derived d [[uninit]];
+  std::construct_at<Base>(&d, 1);
+  return d.d; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A [[now_init]] call through a base-typed parameter initializes the base
+int now_init_base_subobject() {
+  Derived d [[uninit]];
+  fill_base(&d);
+  return d.d; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A [[now_init]] call through a base-typed reference parameter initializes the base
+int now_init_base_reference() {
+  Derived d [[uninit]];
+  fill_base_ref(d);
+  return d.d; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// construct_at through a marked base pointer to a derived local
+int construct_through_base_pointer() {
+  Derived d [[uninit]];
+  Base *bp [[ref_to_uninit]] = &d;
+  std::construct_at(bp, 1);
+  return d.d; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// construct_at through a marked derived pointer's base conversion
+int construct_base_through_marker(Derived *p [[ref_to_uninit]]) {
+  std::construct_at<Base>(p, 1);
+  return p->d; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A raw-bytes credit through a conversion to a base initializes only the base
+int fill_bytes_base_subobject() {
+  Derived d [[uninit]];
+  fill_bytes(static_cast<Base *>(&d));
+  return d.d; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A raw-bytes credit through a marked derived pointer's base conversion
+int fill_bytes_base_through_marker(Derived *p [[ref_to_uninit]]) {
+  fill_bytes(static_cast<Base *>(p));
+  return p->d; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A raw-bytes credit through a marked derived reference's base conversion
+int fill_bytes_base_through_reference(Derived &r [[ref_to_uninit]]) {
+  fill_bytes(static_cast<Base *>(&r));
+  return r.d; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A raw-bytes credit through a marked base pointer to a derived local
+int fill_bytes_through_base_pointer() {
+  Derived d [[uninit]];
+  Base *bp [[ref_to_uninit]] = &d;
+  fill_bytes(bp);
+  return d.d; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// memset through a conversion to a base initializes only the base
+int memset_base_subobject() {
+  Derived d [[uninit]];
+  memset(static_cast<Base *>(&d), 0, sizeof(Base));
+  return d.d; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// construct_at of an int into a class object
+int construct_int_into_object() {
+  Pair a [[uninit]];
+  std::construct_at((int *)&a, 5);
+  return a.y; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// construct_at of a char into a class object
+int construct_char_into_object() {
+  Pair a [[uninit]];
+  std::construct_at((char *)&a, 0);
+  return a.y; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A [[now_init]] call through a void pointer parameter initializes the whole object
+int now_init_raw_bytes() {
+  Pair a [[uninit]];
+  fill_bytes(&a);
+  return a.y; // OK
+}
+
+// memset initializes the whole object
+int memset_object() {
+  Pair a [[uninit]];
+  memset(&a, 0, sizeof a);
+  return a.y; // OK
+}
+
+// A range fill of an array designates its element type
+int fill_array_range() {
+  int arr [[uninit]] [4];
+  std::uninitialized_fill(arr, arr + 4, 0);
+  return arr[3]; // OK
+}
+
+// construct_at of an array constructs its first element
+int construct_array_first_element() {
+  int arr [[uninit]] [4];
+  std::construct_at(arr, 1);
+  return arr[3]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A [[now_init]] call through a pointer to a smaller array initializes part of the array
+[[now_init]] void fill_two(int (*p [[ref_to_uninit]])[2]);
+int now_init_smaller_array() {
+  int arr [[uninit]] [4];
+  fill_two((int (*)[2])&arr);
+  return arr[3]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A [[now_init]] call through a pointer to the whole array initializes it
+[[now_init]] void fill_four(int (*p [[ref_to_uninit]])[4]);
+int now_init_whole_array() {
+  int arr [[uninit]] [4];
+  fill_four(&arr);
+  return arr[3]; // OK
+}
+
+// A [[now_init]] call with a decayed array designates its element type
+int now_init_array() {
+  int arr [[uninit]] [4];
+  fill_ints(arr);
+  return arr[3]; // OK
+}
+
 //--- sys/init_mem.h
 inline void *operator new(__SIZE_TYPE__, void *p) noexcept { return p; }
 namespace std {
