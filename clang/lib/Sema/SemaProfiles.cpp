@@ -1382,6 +1382,14 @@ const Expr *SemaProfiles::addressOfOperand(const Expr *E) {
   return nullptr;
 }
 
+const BinaryOperator *SemaProfiles::asDataMemberPointerAccess(const Expr *E) {
+  const auto *BO = dyn_cast<BinaryOperator>(E);
+  return BO && BO->isPtrMemOp() &&
+                 BO->getRHS()->getType()->isMemberDataPointerType()
+             ? BO
+             : nullptr;
+}
+
 /// The arms of the conditional \p CO; the GNU \c ?: form's true arm is
 /// its written common operand.
 static std::pair<const Expr *, const Expr *>
@@ -2193,6 +2201,16 @@ static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
                                Ctx, ME->getBase(),
                                Opts.withoutTopLevelDrop().withoutMarkerTrust());
   }
+  // a.*pm and p->*pm: a member access whose member is not named, so it
+  // classifies like the member arm above for an unmarked member.
+  if (const BinaryOperator *BO = SemaProfiles::asDataMemberPointerAccess(E))
+    return BO->getOpcode() == BO_PtrMemI
+               ? pointerRefersToUninitStorage(
+                     Ctx, BO->getLHS(),
+                     Opts.withoutTopLevelDrop().withoutMarkerTrust())
+               : glvalueDenotesUninitStorage(
+                     Ctx, BO->getLHS(),
+                     Opts.withoutTopLevelDrop().withoutMarkerTrust());
   // A call to a [[ref_to_uninit]]-returning reference function: the referent
   // it returns is uninitialized.
   if (const auto *CE = dyn_cast<CallExpr>(E))
@@ -2639,6 +2657,17 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
         continue;
       break;
     }
+    // a.*pm, p->*pm: a member step that names no member.
+    if (const BinaryOperator *BO = asDataMemberPointerAccess(Cur)) {
+      S.Named.push_back(nullptr);
+      if (BO->getOpcode() == BO_PtrMemD) {
+        Cur = peelBaseCasts(BO->getLHS(), S.Path, Arms);
+        continue;
+      }
+      if (StepThroughPointer(BO->getLHS()))
+        continue;
+      break;
+    }
     if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(Cur)) {
       S.Subscript = true;
       Cur = peelBaseCasts(ASE->getBase(), S.Path, Arms);
@@ -3013,6 +3042,12 @@ static bool isMemberChainOfUninitObject(const Expr *E) {
       E = ME->getBase()->IgnoreParenImpCasts();
       continue;
     }
+    if (const BinaryOperator *BO = SemaProfiles::asDataMemberPointerAccess(E)) {
+      if (BO->getOpcode() == BO_PtrMemI)
+        return false;
+      E = BO->getLHS()->IgnoreParenImpCasts();
+      continue;
+    }
     // a[i] and *a on an array glvalue (decay stripped below) are subobject
     // accesses like a dot member access; on a pointer base they reach the
     // object through the pointer.
@@ -3052,6 +3087,10 @@ static bool uninitWriteChainSeesMarker(const Expr *E) {
       if (ME->getMemberDecl()->hasAttr<RefToUninitAttr>())
         return true;
       E = ME->getBase();
+      continue;
+    }
+    if (const BinaryOperator *BO = SemaProfiles::asDataMemberPointerAccess(E)) {
+      E = BO->getLHS();
       continue;
     }
     if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(E)) {
@@ -3161,8 +3200,10 @@ void SemaProfiles::checkInitProfileSubobjectWrite(SourceLocation Loc,
   // isMemberChainOfUninitObject alone cannot key the split -- it is false
   // for allocator and new-expression provenance, which needs arm 2's
   // marker-free wording.
+  const Expr *Target = LHS->IgnoreParenImpCasts();
   Diag(Loc, diag::err_init_uninit_subobject_write)
-      << "std::init" << !isa<MemberExpr>(LHS->IgnoreParenImpCasts())
+      << "std::init"
+      << !(isa<MemberExpr>(Target) || asDataMemberPointerAccess(Target))
       << (isMemberChainOfUninitObject(LHS)
               ? 0
               : (uninitWriteChainSeesMarker(LHS) ? 1 : 2));
@@ -3243,6 +3284,8 @@ static const Expr *shapeChainOperand(const Expr *E) {
     return isa<FieldDecl, IndirectFieldDecl>(ME->getMemberDecl())
                ? ME->getBase()
                : nullptr;
+  if (const BinaryOperator *BO = SemaProfiles::asDataMemberPointerAccess(E))
+    return BO->getLHS();
   if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(E))
     return ASE->getBase();
   if (const auto *UO = dyn_cast<UnaryOperator>(E);

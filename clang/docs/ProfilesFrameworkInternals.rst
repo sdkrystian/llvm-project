@@ -1272,7 +1272,8 @@ Missed Diagnostics
   the variable as an assignment (member accesses are not escapes, including
   accesses through anonymous aggregates and below a class or array member
   whose type holds no pointer or reference; an access through a member that
-  does hold one is an escape), so a read after the escape is accepted.  The
+  does hold one is an escape, as is one below a pointer-to-data-member step,
+  ``(a.*pm).x``), so a read after the escape is accepted.  The
   paper credits a callee's initialization only through a function marked
   ``[[now_init]]`` (P4222R2 §6).
 - A destroy of *unknown* storage is accepted (``destroy_uninit`` fires only

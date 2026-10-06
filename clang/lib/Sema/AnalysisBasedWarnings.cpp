@@ -2046,6 +2046,11 @@ struct TrackedStorage {
     bool Subobject = false;
     const DeclRefExpr *LocalBase = nullptr;
     bool Benign = false;
+    /// A pointer-to-data-member step on the current object or a tracked
+    /// aggregate local (this->*pm, x.*pm): the member entities it may
+    /// access, every one below the object's derived-to-base path. A read of
+    /// it reads each of them; a store credits none.
+    std::pair<unsigned, unsigned> Opaque{0, 0};
   };
   /// Resolve the glvalue \p E through SemaProfiles::flowLeafShape: a tracked
   /// member of the current object (this->m, m, (*this).m) or of a directly
@@ -2095,6 +2100,13 @@ struct TrackedStorage {
   /// The range of the object \p E names as a whole -- `this` / `*this`, or
   /// a tracked local's DeclRefExpr -- empty otherwise.
   std::pair<unsigned, unsigned> wholeObject(const Expr *E) const;
+
+  /// The entities of the object range \p Range below its base subobject at
+  /// the derived-to-base path \p Base -- contiguous, as the enumeration is
+  /// depth-first -- or an empty range.
+  std::pair<unsigned, unsigned>
+  belowBase(std::pair<unsigned, unsigned> Range,
+            ArrayRef<const CXXRecordDecl *> Base) const;
 };
 
 std::pair<unsigned, unsigned>
@@ -2165,6 +2177,21 @@ std::pair<unsigned, unsigned> TrackedStorage::wholeObject(const Expr *E) const {
   return {0, 0};
 }
 
+std::pair<unsigned, unsigned>
+TrackedStorage::belowBase(std::pair<unsigned, unsigned> Range,
+                          ArrayRef<const CXXRecordDecl *> Base) const {
+  std::optional<unsigned> First, Last;
+  for (unsigned I = Range.first; I != Range.second; ++I) {
+    ArrayRef<const CXXRecordDecl *> Path = Entities[I].Path;
+    if (Path.size() < Base.size() || Path.take_front(Base.size()) != Base)
+      continue;
+    if (!First)
+      First = I;
+    Last = I;
+  }
+  return First ? std::pair{*First, *Last + 1} : std::pair{0u, 0u};
+}
+
 TrackedStorage::Resolution
 TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
                         QualType Designated, bool RawExempt) const {
@@ -2180,6 +2207,14 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
   };
   Resolution R;
   if (Shape->IsThis) {
+    // An access at any depth below a step through a pointer to data member
+    // may reach any member below the object it applies to.
+    if (!Shape->Named.empty() && !Shape->Named.back()) {
+      R.Opaque = belowBase(CurrentObjectRange, Shape->Named.size() == 1
+                                                   ? Shape->Path
+                                                   : BasePath());
+      return R;
+    }
     if (Shape->Named.size() != 1 || Shape->Subscript)
       return {};
     R.Entity = find(nullptr, Shape->Path, Shape->Named.front());
@@ -2220,6 +2255,15 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
   R.LocalBase = Shape->LocalRef;
   // The member directly on the object.
   const FieldDecl *Top = Shape->Named.back();
+  if (!Top) {
+    // x.*pm: any member, modeled by its reads; below it, a pointer-to-member
+    // step's type is unknown here, so the access escapes the object.
+    if (Shape->Named.size() == 1 && !Shape->Subscript) {
+      R.Opaque = belowBase(RangeIt->second, Shape->Path);
+      R.Benign = true;
+    }
+    return R;
+  }
   if (Shape->Named.size() == 1 && !Shape->Subscript) {
     if (std::optional<unsigned> Idx = find(V, Shape->Path, Top)) {
       R.Entity = Idx;
@@ -3115,10 +3159,10 @@ static void forEachArgumentBinding(
 /// The part of \p Whole, the entity range of the object \p G a credit's
 /// argument leaf \p Leaf names as a whole, that a credit designated as
 /// \p Designated reaches: the entities below the base subobject the
-/// argument's derived-to-base casts convert to -- \p OuterPath, the casts
-/// above the leaf, after the leaf's own -- contiguous, as the enumeration is
-/// depth-first, when \p Designated covers that subobject's class
-/// (designationCovers), and none otherwise.
+/// argument's derived-to-base casts convert to (TrackedStorage::belowBase;
+/// \p OuterPath holds the casts above the leaf, which follow the leaf's own)
+/// when \p Designated covers that subobject's class (designationCovers), and
+/// none otherwise.
 static std::pair<unsigned, unsigned>
 designatedWholeRange(const TrackedStorage &Storage,
                      const SemaProfiles::ShapeLeaf &Leaf, bool AsPointerValue,
@@ -3139,17 +3183,7 @@ designatedWholeRange(const TrackedStorage &Storage,
     Class = Storage.Ctx.getCanonicalTagType(CastPath.back());
   if (!designationCovers(Storage.Ctx, Designated, Class, RawExempt))
     return {0, 0};
-  std::optional<unsigned> First, Last;
-  for (unsigned I = Whole.first; I != Whole.second; ++I) {
-    ArrayRef<const CXXRecordDecl *> Path = Storage.Entities[I].Path;
-    if (Path.size() < CastPath.size() ||
-        Path.take_front(CastPath.size()) != ArrayRef(CastPath))
-      continue;
-    if (!First)
-      First = I;
-    Last = I;
-  }
-  return First ? std::pair{*First, *Last + 1} : std::pair{0u, 0u};
+  return Storage.belowBase(Whole, CastPath);
 }
 
 /// True if \p P is the Construct role parameter of a known-callee row whose
@@ -3507,14 +3541,20 @@ static void appendThisCaptureLambdaReadEvents(
     else if (const auto *BodyUO = dyn_cast<UnaryOperator>(Cur);
              BodyUO && BodyUO->isIncrementDecrementOp())
       G = BodyUO->getSubExpr();
-    if (G)
-      if (std::optional<unsigned> Idx = Storage.resolve(G).Entity;
-          Idx &&
-          Storage.Entities[*Idx].K ==
-              TrackedEntity::Kind::CurrentObjectMember &&
-          Storage.Entities[*Idx].TrackReads)
-        BlockEvents.push_back(
-            {DefAssignEventKind::Read, *Idx, cast<Expr>(Cur)});
+    if (G) {
+      TrackedStorage::Resolution R = Storage.resolve(G);
+      auto Read = [&](unsigned Idx) {
+        if (Storage.Entities[Idx].K ==
+                TrackedEntity::Kind::CurrentObjectMember &&
+            Storage.Entities[Idx].TrackReads)
+          BlockEvents.push_back(
+              {DefAssignEventKind::Read, Idx, cast<Expr>(Cur)});
+      };
+      if (R.Entity)
+        Read(*R.Entity);
+      for (unsigned Idx = R.Opaque.first; Idx != R.Opaque.second; ++Idx)
+        Read(Idx);
+    }
     appendAnalyzedChildren(Cur, Stack, /*EnterLambdaBodies=*/true);
   }
 }
@@ -3650,15 +3690,23 @@ static void extractStdInitEvents(
           Designated);
     };
     // One Read per distinct resolved, read-tracked leaf: only members are
-    // read-tracked, and a read of part of a member reads the member.
+    // read-tracked, a read of part of a member reads the member, and a
+    // pointer-to-data-member read reads each member it may name.
     auto AppendReads = [&](const Expr *At) {
       SmallVector<unsigned, 4> Seen;
-      for (const TrackedStorage::Resolution &R : Leaves)
-        if (R.Entity && Storage.Entities[*R.Entity].TrackReads &&
-            !llvm::is_contained(Seen, *R.Entity)) {
-          Seen.push_back(*R.Entity);
-          BlockEvents.push_back({DefAssignEventKind::Read, *R.Entity, At});
+      auto Read = [&](unsigned Idx) {
+        if (Storage.Entities[Idx].TrackReads &&
+            !llvm::is_contained(Seen, Idx)) {
+          Seen.push_back(Idx);
+          BlockEvents.push_back({DefAssignEventKind::Read, Idx, At});
         }
+      };
+      for (const TrackedStorage::Resolution &R : Leaves) {
+        if (R.Entity)
+          Read(*R.Entity);
+        for (unsigned Idx = R.Opaque.first; Idx != R.Opaque.second; ++Idx)
+          Read(Idx);
+      }
     };
     // A Reseat of the marked pointer or reference \p Idx at \p At.
     auto AppendReseat = [&](unsigned Idx, const Expr *At, ReseatTarget RT,
@@ -3913,7 +3961,9 @@ static void extractStdInitEvents(
       bool UninitObjectOnly = AnyUninitObject && !AnyPointee;
       Site.Select =
           IsWrite ? (UninitObjectOnly ? 0u : 1u) : (UninitObjectOnly ? 1u : 0u);
-      Site.Flag = IsWrite && !isa<MemberExpr>(G->IgnoreParenImpCasts());
+      const Expr *Target = G->IgnoreParenImpCasts();
+      Site.Flag = IsWrite && !isa<MemberExpr>(Target) &&
+                  !SemaProfiles::asDataMemberPointerAccess(Target);
       ASites.push_back(std::move(Site));
       BlockEvents.push_back({IsWrite ? DefAssignEventKind::SubobjectWrite
                                      : DefAssignEventKind::ReadThrough,

@@ -4434,3 +4434,24 @@ void test_nullptr_read(decltype(nullptr) *np [[ref_to_uninit]]) {
   int *c = *g_nullptr_marked; // OK
   (void)a; (void)b; (void)c;
 }
+
+// A pointer-to-data-member read through a marked pointer reads its referent
+struct PmPayload { int x; int y; };
+int test_member_pointer_read_through(PmPayload *p [[ref_to_uninit]]) {
+  int PmPayload::*pm = &PmPayload::x;
+  return p->*pm; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A pointer-to-data-member store through a marked pointer writes a member
+void test_member_pointer_write_through(PmPayload *p [[ref_to_uninit]]) {
+  int PmPayload::*pm = &PmPayload::x;
+  p->*pm = 1; // expected-error {{writing a member of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
+}
+
+// Pointer-to-data-member accesses through a marked pointer after construct_at are accepted
+int test_member_pointer_after_construct(PmPayload *p [[ref_to_uninit]]) {
+  construct_at(p, 1, 2);
+  int PmPayload::*pm = &PmPayload::x;
+  p->*pm = 3;
+  return p->*pm;
+}

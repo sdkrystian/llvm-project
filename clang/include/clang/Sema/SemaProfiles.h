@@ -280,7 +280,8 @@ public:
     /// `p->m`, `p[i]`, `this->m` -- rather than through the object itself.
     bool ThroughPointer = false;
     /// The named member steps, leaf first; anonymous-record steps are
-    /// transparent.
+    /// transparent, and a pointer-to-data-member step (`.*`, `->*`;
+    /// asDataMemberPointerAccess) is a null entry, which names no member.
     SmallVector<const FieldDecl *, 2> Named;
     /// An element step (`a[i]`) occurs in the chain.
     bool Subscript = false;
@@ -463,6 +464,11 @@ public:
   /// \c &, or the argument of std::addressof, std::__addressof, or
   /// __builtin_addressof -- or null.
   static const Expr *addressOfOperand(const Expr *E);
+
+  /// The \c .* or \c ->* access through a pointer to data member that \p E
+  /// is, or null: a member step the checks cannot name (P4222R2 §5.4 treats
+  /// it like any member access). A pointer to member function is excluded.
+  static const BinaryOperator *asDataMemberPointerAccess(const Expr *E);
 
   /// True if \p CE calls one of the standard library functions that return
   /// a reference to their argument (std::move, std::forward,

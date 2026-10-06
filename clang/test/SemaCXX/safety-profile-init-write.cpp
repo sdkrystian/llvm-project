@@ -542,3 +542,62 @@ struct PunnedMemberStore {
     (void)v;
   }
 };
+
+namespace std {
+template <class T, class... A> T *construct_at(T *p, A &&...args);
+} // namespace std
+
+// A pointer-to-data-member read of an [[uninit]] object reads a subobject
+int test_member_pointer_read() {
+  Pair a [[uninit]];
+  int Pair::*pm = &Pair::x;
+  return a.*pm; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A pointer-to-data-member store writes a member of an [[uninit]] object
+void test_member_pointer_write() {
+  Pair a [[uninit]];
+  int Pair::*pm = &Pair::x;
+  a.*pm = 1; // expected-error {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
+}
+
+// Pointer-to-data-member accesses after construct_at are accepted
+int test_member_pointer_after_construct() {
+  Pair a [[uninit]];
+  std::construct_at(&a, 1, 2);
+  int Pair::*pm = &Pair::x;
+  a.*pm = 3;
+  return a.*pm;
+}
+
+// A pointer-to-data-member read in a constructor reads every tracked member
+struct MemberPointerCtorRead {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  int n [[uninit]];
+  MemberPointerCtorRead(int MemberPointerCtorRead::*pm) {
+    n = 1;
+    int v = this->*pm; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    (void)v;
+  }
+};
+
+// A read below a pointer-to-data-member step in a constructor reads every tracked member
+struct MemberPointerCtorDeepRead {
+  struct In { int a; int b; };
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  In in{};
+  MemberPointerCtorDeepRead(In MemberPointerCtorDeepRead::*pm) {
+    int v = (this->*pm).b; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    (void)v;
+  }
+};
+
+// A pointer-to-data-member store in a constructor credits no member
+struct MemberPointerCtorStore {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  MemberPointerCtorStore(int MemberPointerCtorStore::*pm) {
+    this->*pm = 1;
+    int v = m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    (void)v;
+  }
+};

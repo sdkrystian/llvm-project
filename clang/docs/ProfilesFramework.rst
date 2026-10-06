@@ -597,7 +597,12 @@ value first, so it is diagnosed like a read.  A comma or conditional lvalue,
 written whole or below a member access, subscript, indirection, or ``&``
 (``(c ? a : b).m``), reads (or assigns) whichever member the chosen arm names;
 an assignment through a conditional whose arms name different members assigns
-neither for the purpose of a later read.  Inside a constructor body only that
+neither for the purpose of a later read.  An access through a pointer to data
+member (``a.*pm``, ``p->*pm``) is a member access whose member is not known:
+it reads or writes a subobject of ``a`` or of ``*p``, and on the current object
+-- or, as the last step, on a tracked local -- a read through it reads every
+tracked member while a store through it initializes none.  Inside a
+constructor body only that
 plain whole-member assignment counts as initialization: passing ``&m`` to a
 function (even one whose parameter is marked ``[[ref_to_uninit]]``), binding a
 reference to the member, calling a member function, or letting ``this`` escape
