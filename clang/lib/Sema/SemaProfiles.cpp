@@ -2141,13 +2141,15 @@ pointerRefersToUninitStorage(ASTContext &Ctx, const Expr *E,
   // initializing a class synthesizes a (possibly trivial) constructor call.
   // new T(...) / new T{} are value- or list-initialized; a user-provided
   // default constructor is trusted by defaultInitLeavesScalarIndeterminate.
+  // An [[uninit]] member is left indeterminate too: its marker acknowledges
+  // the member, it does not initialize it.
   if (const auto *NE = dyn_cast<CXXNewExpr>(E)) {
     if (NE->getInitializationStyle() != CXXNewInitializationStyle::None)
       return UninitStorage::Initialized;
     llvm::SmallPtrSet<const CXXRecordDecl *, 8> Visited;
-    return defaultInitLeavesScalarIndeterminateImpl(Ctx, NE->getAllocatedType(),
-                                                    /*HonorUninitMarkers=*/true,
-                                                    Visited)
+    return defaultInitLeavesScalarIndeterminateImpl(
+               Ctx, NE->getAllocatedType(),
+               /*HonorUninitMarkers=*/false, Visited)
                ? UninitStorage::Uninitialized
                : UninitStorage::Initialized;
   }

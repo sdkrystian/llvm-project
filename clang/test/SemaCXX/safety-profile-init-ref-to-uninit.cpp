@@ -1178,6 +1178,14 @@ void test_new_class() {
   (void)c1; (void)c2; (void)a1; (void)a2; (void)b1; (void)b2;
 }
 
+// A raw new of a type whose only indeterminate member is [[uninit]] leaves it indeterminate
+struct NewMarkedMember { int x [[uninit]]; int y = 0; };
+void test_new_marked_member() {
+  NewMarkedMember *p [[ref_to_uninit]] = new NewMarkedMember; // OK
+  NewMarkedMember *q = new NewMarkedMember;                    // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)p; (void)q;
+}
+
 // A record whose only member is a vector is indeterminate after default-init
 // (the walk counts vector members like scalar ones), so a raw new of it is a
 // source of uninitialized memory.
