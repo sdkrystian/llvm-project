@@ -1696,13 +1696,12 @@ void test_element_read_of_uninit_array(int i) {
   (void)y1; (void)y2; (void)y3;
 }
 
-// An [[uninit]] array *member*'s element read is flagged the same way: like
-// the class-type member in HasAggMember below, an array member has no legal
-// element-wise assignment path, so the marker counts even on the current
-// object.
+// An [[uninit]] array *member*'s element read on the current object is
+// trusted outside a constructor, like the class-type member in HasAggMember
+// below.
 struct WithArrMember {
   [[uninit]] int a[2];
-  int get() { return a[0]; } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  int get() { return a[0]; } // OK: trusted
 };
 
 // Discarded values and address-taking apply no lvalue-to-rvalue conversion

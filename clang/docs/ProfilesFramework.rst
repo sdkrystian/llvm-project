@@ -907,7 +907,7 @@ parameter.  A call to a ``[[now_init]]`` function initializes the
 argument's storage exactly as the equivalent direct store would --
 ``fill(&u)`` initializes ``u`` whole, ``fill(p)`` the storage ``p`` refers
 to there, ``fill(&a.m)`` the member ``m`` of ``a``,
-and ``fill(arr)`` a local ``[[uninit]]`` array whole (§6's
+and ``fill(arr)`` an ``[[uninit]]`` array whole, local or member (§6's
 ``uninitialized_fill`` shape; the element form ``fill(&arr[0])`` initializes
 nothing, §5.4) -- with the same reverse-direction consequence (after a
 ``fill(&u)`` on every path, a second ``fill(&u)`` is rejected: ``u`` no
@@ -941,8 +941,11 @@ only where default-initialization of the value type leaves no scalar
 indeterminate -- a user-provided default constructor, a default member
 initializer on every scalar, ``std::string`` (§2) -- and otherwise require an
 uninitialized range that stays uninitialized (``int``, a trivial class).  The
-treatment applies where the iterator is a pointer (``arr, arr + n``); a call
-with a class-type iterator checks and initializes nothing.  The §4.4
+treatment applies where the iterator is a pointer (``arr, arr + n``), and a
+decayed ``[[uninit]]`` array member is its whole array: in a constructor,
+``std::uninitialized_fill(arr, arr + n, v)`` initializes the member ``arr``
+and ``std::destroy(arr, arr + n)`` destroys it; a call with a class-type
+iterator checks and initializes nothing.  The §4.4
 ``now_init()`` identity function is treated the same way: the parameter of a
 ``std::now_init`` with one pointer parameter is treated as marked, so its
 argument must refer to uninitialized memory, its unmarked return is trusted as

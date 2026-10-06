@@ -999,8 +999,9 @@ object to the member's class, then the member.  A class's tracked member paths
 form a table (``SemaProfiles::flowTrackedMembers``), enumerated depth-first so
 the paths under any prefix are contiguous, and an object's member entities are
 that table in order; an anonymous struct's step is transparent, and an
-anonymous union is never entered.  A class-type ``[[uninit]]`` member is an
-entry tracked whole (``TrackedEntity::Whole``): it is initialized by a credit,
+anonymous union is never entered.  A class-type or array ``[[uninit]]`` member
+is an entry tracked whole (``TrackedEntity::Whole``; a decayed array is the
+array it decays from): it is initialized by a credit,
 a written initializer, or a whole-object credit of its object, never by a
 store, and a read or store below it is an access site, judged on every path
 where the entity is read-tracked and trusted elsewhere -- also below a local's
@@ -1224,20 +1225,20 @@ Deliberate Strictnesses
   narrower type, initialize nothing: the storage is one entity, so even the
   constructed base's own members stay uninitialized for a later read.  The
   remedies are a credit of the whole object or suppression.
-- A class-type ``[[uninit]]`` member, and a member subobject holding tracked
-  members, is initialized only whole -- ``std::construct_at``, a
-  ``[[now_init]]`` call, ``memset``, ``memcpy``, ``memmove``, or a written
-  mem-initializer: a class's assignment (``m = Mid{1}`` in a constructor body)
-  is a member call, never an initialization, and a member-wise store is a
-  subobject write (P4222R2 §4.6, §5.4).  Outside its
+- A class-type or array ``[[uninit]]`` member, and a member subobject holding
+  tracked members, is initialized only whole -- ``std::construct_at``, the
+  ``std::uninitialized_*`` family, a ``[[now_init]]`` call, ``memset``,
+  ``memcpy``, ``memmove``, or a written mem-initializer: a class's assignment
+  (``m = Mid{1}`` in a constructor body) is a member call, never an
+  initialization, and a member-wise or element store is a subobject write
+  (P4222R2 §4.6, §5.4, §5.5).  Outside its
   constructor, its bindings, member calls, and destroys are judged from an
   uninitialized start, like a scalar member's, because the constructor's
   initialization is not visible there (the P4222R2 §5 exposure analysis is not
   implemented); reads and stores below it are trusted there.
-- Storage that is not flow-tracked -- an array ``[[uninit]]``
-  member, a marked pointer member's referent -- is judged by its form alone
-  at every read, write, and destroy: a ``construct_at`` into it legalizes no
-  later access.
+- Storage that is not flow-tracked -- a marked pointer member's referent --
+  is judged by its form alone at every read, write, and destroy: a
+  ``construct_at`` into it legalizes no later access.
 
 Missed Diagnostics
 ------------------
@@ -1425,6 +1426,5 @@ Missed Diagnostics
 - An assignment through a conditional, comma, or GNU ``?:`` target whose
   arms differ in marking accepts either source: any single answer would
   reject a legal combination.
-- A second ``destroy_at`` of storage that is not flow-tracked (an array
-  ``[[uninit]]`` member, a marked pointer member's referent) is not a double
-  destroy.
+- A second ``destroy_at`` of storage that is not flow-tracked (a marked
+  pointer member's referent) is not a double destroy.

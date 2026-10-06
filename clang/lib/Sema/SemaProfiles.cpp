@@ -2813,26 +2813,37 @@ bool SemaProfiles::hasUserProvidedCtor(const CXXRecordDecl *RD) {
   });
 }
 
+/// True if \p T is a built-in scalar (arithmetic or enum) type the flow
+/// analysis tracks, std::byte excepted (P4222R2 §4.6).
+static bool isFlowTrackedScalarType(QualType T) {
+  return (T->isIntegralOrEnumerationType() || T->isFloatingType()) &&
+         !T->isStdByteType();
+}
+
 /// True if \p F is a member the flow analysis tracks as a scalar: an
-/// [[uninit]] built-in scalar (arithmetic or enum) member with no default
-/// member initializer, std::byte excepted (P4222R2 §4.6).
-static bool isFlowTrackedScalarMember(const ASTContext &Ctx,
-                                      const FieldDecl *F) {
-  if (!F->hasAttr<UninitAttr>() || !F->getDeclName() ||
-      F->hasInClassInitializer())
-    return false;
-  QualType T = F->getType();
-  if (!T->isIntegralOrEnumerationType() && !T->isFloatingType())
-    return false;
-  return !Ctx.getBaseElementType(T)->isStdByteType();
+/// [[uninit]] member of a tracked scalar type (isFlowTrackedScalarType) with
+/// no default member initializer.
+static bool isFlowTrackedScalarMember(const FieldDecl *F) {
+  return F->hasAttr<UninitAttr>() && F->getDeclName() &&
+         !F->hasInClassInitializer() && isFlowTrackedScalarType(F->getType());
 }
 
 /// True if \p F is a member the flow analysis tracks as a whole object
 /// (SemaProfiles::forEachFlowTrackedMember).
-static bool isFlowTrackedWholeMember(const FieldDecl *F) {
-  return F->hasAttr<UninitAttr>() && F->getDeclName() &&
-         !F->hasInClassInitializer() &&
-         SemaProfiles::getDefaultInitTrackableClass(F->getType());
+static bool isFlowTrackedWholeMember(const ASTContext &Ctx,
+                                     const FieldDecl *F) {
+  if (!F->hasAttr<UninitAttr>() || !F->getDeclName() ||
+      F->hasInClassInitializer())
+    return false;
+  QualType T = F->getType();
+  if (T->isArrayType()) {
+    if (!Ctx.getAsConstantArrayType(T))
+      return false;
+    T = Ctx.getBaseElementType(T);
+    if (isFlowTrackedScalarType(T))
+      return true;
+  }
+  return SemaProfiles::getDefaultInitTrackableClass(T);
 }
 
 /// The class of \p F when it is a container the flow-tracked member walk
@@ -2893,8 +2904,8 @@ struct FlowTrackedMemberWalk {
           walkFields(Anon, Bases);
         continue;
       }
-      bool Scalar = isFlowTrackedScalarMember(Ctx, F);
-      if (Scalar || isFlowTrackedWholeMember(F)) {
+      bool Scalar = isFlowTrackedScalarMember(F);
+      if (Scalar || isFlowTrackedWholeMember(Ctx, F)) {
         Prefix.push_back({Bases, F});
         Visit(Prefix, /*Whole=*/!Scalar);
         ++Paths;
@@ -3067,13 +3078,15 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
       return isFlowTrackedLeaf(ShapeLeaf(Op, Leaf.Arms),
                                /*AsPointerValue=*/false, CurContext,
                                ForMarkedTarget);
-    // The value of a marked pointer, or a decayed [[uninit]] array.
+    // A decayed array is the array it decays from.
+    if (E->getType()->isArrayType())
+      return isFlowTrackedLeaf(ShapeLeaf(E, Leaf.Arms),
+                               /*AsPointerValue=*/false, CurContext,
+                               ForMarkedTarget);
+    // The value of a marked pointer.
     const auto *VD = dyn_cast_or_null<VarDecl>(getDirectlyNamedDecl(E));
-    if (!VD || !VD->hasLocalStorage())
-      return false;
-    if (VD->getType()->isPointerType())
-      return VD->hasAttr<RefToUninitAttr>();
-    return VD->getType()->isArrayType() && VD->hasAttr<UninitAttr>();
+    return VD && VD->hasLocalStorage() && VD->getType()->isPointerType() &&
+           VD->hasAttr<RefToUninitAttr>();
   }
   std::optional<FlowLeafShape> Shape = flowLeafShape(E, Leaf.Arms);
   if (!Shape)

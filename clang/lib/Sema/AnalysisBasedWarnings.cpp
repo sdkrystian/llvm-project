@@ -2091,8 +2091,8 @@ struct TrackedStorage {
 
   /// Resolve a binding or argument leaf: the glvalue \p E (resolve), or --
   /// with \p AsPointerValue, a leaf used as a pointer value -- the storage
-  /// `&x` names, a marked local pointer's referent (its value), or a decayed
-  /// [[uninit]] array as a whole. \p Designated and \p RawExempt are
+  /// `&x` names, the array a decayed array decays from, or a marked local
+  /// pointer's referent (its value). \p Designated and \p RawExempt are
   /// resolve's; for a pointer value, the designated type is the pointee's.
   Resolution resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
                              bool AsPointerValue,
@@ -2410,22 +2410,14 @@ TrackedStorage::resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
   const Expr *E = SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms);
   if (const Expr *Op = SemaProfiles::addressOfOperand(E))
     return resolve({Op, Leaf.Arms}, Designated, RawExempt);
+  // A decayed array is the array it decays from.
+  if (E->getType()->isArrayType())
+    return resolve({E, Leaf.Arms}, Designated, RawExempt);
   Resolution R;
   if (std::optional<unsigned> Idx = markedPointerObject(E)) {
     R.Entity = Idx;
     R.Subobject = !covers(Designated, *Idx, RawExempt);
-    return R;
   }
-  // A decayed [[uninit]] array.
-  const auto *VD =
-      dyn_cast_or_null<VarDecl>(SemaProfiles::getDirectlyNamedDecl(E));
-  if (VD && VD->getType()->isArrayType())
-    if (auto It = LocalEntity.find(VD);
-        It != LocalEntity.end() &&
-        Entities[It->second].K == TrackedEntity::Kind::WholeLocal) {
-      R.Entity = It->second;
-      R.Subobject = !covers(Designated, It->second, RawExempt);
-    }
   return R;
 }
 

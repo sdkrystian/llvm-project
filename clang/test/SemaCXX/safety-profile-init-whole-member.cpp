@@ -16,6 +16,8 @@ namespace std {
 using size_t = decltype(sizeof 0);
 template <class T, class... A> constexpr T *construct_at(T *p, A &&...args);
 template <class T> constexpr void destroy_at(T *p);
+template <class It, class T> void uninitialized_fill(It first, It last, const T &x);
+template <class It> constexpr void destroy(It first, It last);
 } // namespace std
 extern "C" void *memset(void *, int, std::size_t);
 
@@ -272,3 +274,61 @@ int local_copy_unconstructed() {
 int parameter_read(Holder p) {
   return p.inner.x; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
 }
+
+// An [[uninit]] array member is tracked as a whole object too
+struct ArrayFill {
+  S arr [[uninit]] [2];
+  int r;
+  ArrayFill() : r(0) {
+    std::uninitialized_fill(arr, arr + 2, S{});
+    r = arr[0].x; // OK
+  }
+};
+
+// An element store does not initialize the array
+struct ArrayStoreBefore {
+  int a [[uninit]] [4];
+  ArrayStoreBefore() {
+    a[0] = 1; // expected-error {{writing an element of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
+    std::uninitialized_fill(a, a + 4, 0);
+  }
+};
+
+// memset initializes the whole array
+struct ArrayMemset {
+  int a [[uninit]] [4];
+  int r;
+  ArrayMemset() : r(0) {
+    memset(a, 0, sizeof a);
+    r = a[3]; // OK
+  }
+};
+
+// std::destroy leaves the array uninitialized
+struct ArrayDestroy {
+  S arr [[uninit]] [2];
+  int r;
+  ArrayDestroy() : r(0) {
+    std::uninitialized_fill(arr, arr + 2, S{});
+    std::destroy(arr, arr + 2);
+    r = arr[1].y; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  }
+};
+
+// Constructing one element initializes nothing
+struct ArrayElementConstruct {
+  S arr [[uninit]] [2];
+  int r;
+  ArrayElementConstruct() : r(0) {
+    std::construct_at(&arr[0], 1, 2);
+    r = arr[0].x; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  }
+};
+
+// Outside a constructor, element reads and stores are trusted
+struct ArrayMethods {
+  int a [[uninit]] [4];
+  ArrayMethods();
+  int read() { return a[1]; } // OK
+  void store() { a[2] = 1; }  // OK
+};

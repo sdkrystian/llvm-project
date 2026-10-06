@@ -337,7 +337,8 @@ public:
   /// are contiguous. Tracked are the [[uninit]] members with no default
   /// member initializer of a built-in scalar (arithmetic or enum) type,
   /// std::byte excepted (P4222R2 §4.6), and, as whole objects, of a
-  /// trackable class type (getTrackableSlotClass). The walk enters a
+  /// trackable class type (getTrackableSlotClass) or of a complete array
+  /// type of such a scalar or class element type. The walk enters a
   /// container -- a named, unmarked, non-reference, non-array member with no
   /// default member initializer whose type is a trackable class -- while a
   /// path has fewer than 8 steps and fewer than 64 paths were visited. An

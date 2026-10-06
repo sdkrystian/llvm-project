@@ -93,11 +93,13 @@ void test_element_store(int i) {
 }
 
 // A marked array *member*'s elements are proper subobjects of the marked
-// array, so element stores are banned even on the current object.
+// array: outside a constructor an element store on the current object is
+// trusted like a scalar member's store, while one through an untracked object
+// is banned.
 struct WithArrMember {
   [[uninit]] int a[2];
   void set() {
-    a[0] = 1; // expected-error {{writing an element of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
+    a[0] = 1; // OK
   }
 };
 void test_member_array_element_store(WithArrMember &w) {
