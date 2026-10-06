@@ -1957,6 +1957,8 @@ SemaProfiles::getCalleeLifecycleRoles(const FunctionDecl *FD) {
         defaultInitLeavesScalarIndeterminateImpl(
             FD->getASTContext(), T, /*HonorUninitMarkers=*/true, Visited))
       Roles.KnownRole = KnownParamRole::AssertUninit;
+    else
+      Roles.DefaultInitCredit = true;
   }
   return Roles;
 }

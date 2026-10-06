@@ -959,7 +959,13 @@ neither initializes nor destroys what it points to.
 only where default-initialization of the value type leaves no scalar
 indeterminate -- a user-provided default constructor, a default member
 initializer on every scalar, ``std::string`` (§2) -- and otherwise require an
-uninitialized range that stays uninitialized (``int``, a trivial class).  The
+uninitialized range that stays uninitialized (``int``, a trivial class).  An
+``[[uninit]]`` member of the value type stays uninitialized after the call: a
+read of it through the range -- or through a base class view of it -- is
+rejected until it is stored, and so is a copy of a whole object while one is
+uninitialized, while the objects are alive: constructing them again is
+rejected, an ordinary pointer may refer to them, and a marked pointer may
+refer to such a member until it is stored.  The
 treatment applies where the iterator is a pointer (``arr, arr + n``), and a
 decayed ``[[uninit]]`` array member is its whole array: in a constructor,
 ``std::uninitialized_fill(arr, arr + n, v)`` initializes the member ``arr``

@@ -837,6 +837,10 @@ public:
     /// The known-callee row's end iterator of the range at KnownParam, if
     /// the row has one: it bounds the range and is accepted in any state.
     std::optional<unsigned> EndParam;
+    /// The KnownParam's Construct role is a default-initialization's
+    /// (std::uninitialized_default_construct), which leaves the [[uninit]]
+    /// members of the range's objects uninitialized.
+    bool DefaultInitCredit = false;
     /// Whether the row matched by builtin ID, form, or namespace-std name
     /// rather than by the name-only fallback, which -fno-builtin /
     /// -ffreestanding leaves: the name says what the function is meant to

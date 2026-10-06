@@ -933,11 +933,12 @@ it, and a ``Reseat`` event carries the new referent (``ReseatTarget``): the
 entity a single-leaf source names, what another marked pointer refers to,
 a fresh anonymous referent for an untracked source, the target every arm of the
 source agrees on, or unidentified when the arms disagree and one is tracked.  An
-identified referent named by a marked binding is asserted unassigned (``Must``
-and ``May`` cleared, ``MayUnassigned`` set, ``MayDestroyed`` and ``Esc`` kept);
-the ``Reseat`` follows the binding's ``Binding`` event in block order, so the
-judgment sees the pre-assertion state.  A binding to a marked parameter is a
-``Binding`` event only and asserts nothing.  A tracked local's DeclStmt emits a
+identified referent named by a marked binding is asserted unassigned (``Must``,
+``May``, and ``MembersPending`` cleared, ``MayUnassigned`` set,
+``MayDestroyed`` and ``Esc`` kept); the ``Reseat`` follows the binding's
+``Binding`` event in block order, so the judgment sees the pre-assertion
+state.  A binding to a marked parameter is a ``Binding`` event only and
+asserts nothing.  A tracked local's DeclStmt emits a
 ``Reset`` of its ``[[uninit]]`` entity and of its member entities ahead of the
 declaration's own binding and copy events, clearing every bit but
 ``MayUnassigned``, which it sets: each execution of the declaration starts a
@@ -1024,14 +1025,29 @@ reseats it -- its written initializer, its default member initializer, or the
 written initializer of a member subobject or base holding it, by the braced
 element naming it or else to an unidentified referent; a store to the member
 reseats it; and a member call on the object holding it, a pointer or
-reference binding of that object, and a ``this`` capture escape it.  The
-enumeration enters a *container* -- a named, unmarked, non-reference,
-non-array member with no default member initializer whose default constructor
-is not user-provided (``SemaProfiles::getDefaultInitTrackableClass``) -- up to
-eight member steps deep and until 64 paths and containers are visited, so a
-credit, kill, or written initializer of a container covers the contiguous
-range under it, and a value copy of it (``FlowLeafUse::ValueCopy``) reads the
-range on every path.
+reference binding of that object, and a ``this`` capture escape it.  A
+class-type ``[[uninit]]`` local's storage, and a marked local pointer's,
+reference's, or pointer member's referent, carries one ``SubMember`` entity
+per flow-tracked member of its class (the same table), when its
+default-initialization runs no user-provided constructor
+(``TrackedStorage::addSubMembers``): every event on the storage applies to
+them too, except a default-initialization's credit
+(``CalleeLifecycleRoles::DefaultInitCredit``), which leaves the storage's
+members pending (``FlowState::MembersPending``), and a store or credit naming
+one writes it alone; a read below the storage takes the worse of the storage's
+and the member's state -- through a base view, the derived class's SubMember
+for the same member; an ``[[uninit]]`` member of storage with no SubMember for
+it (a ``void`` referent) is uninitialized while members are pending, until a
+store naming one such member -- and a whole copy the worst of all of them.  A
+marked binding is judged by the storage alone, or, when it names one SubMember
+exactly, by that member; an unmarked one of live storage whose SubMembers
+alone are unassigned is Unknown unless it names one exactly.  The enumeration
+enters a *container* -- a named, unmarked, non-reference, non-array member with
+no default member initializer whose default constructor is not user-provided
+(``SemaProfiles::getDefaultInitTrackableClass``) -- up to eight member steps
+deep and until 64 paths and containers are visited, so a credit, kill, or
+written initializer of a container covers the contiguous range under it, and a
+value copy of it (``FlowLeafUse::ValueCopy``) reads the range on every path.
 In a constructor body the current object's containers are tracked whole like a
 local's.
 One matcher (``SemaProfiles::matchFlowTrackedMember``) finds the entry an
@@ -1253,6 +1269,11 @@ Deliberate Strictnesses
   narrower type, initialize nothing: the storage is one entity, so even the
   constructed base's own members stay uninitialized for a later read.  The
   remedies are a credit of the whole object or suppression.
+- A store through a marked pointer bound to one ``[[uninit]]`` member of
+  default-initialized storage (``int *pa [[ref_to_uninit]] = &p->a; *pa = 1;``)
+  initializes the pointer's own referent, not the member, so a later read of
+  ``p->a`` is rejected.  The remedies are a store naming the member
+  (``p->a = 1``) or suppression.
 - A class-type or array ``[[uninit]]`` member, and a member subobject holding
   tracked members, is initialized only whole -- ``std::construct_at``, the
   ``std::uninitialized_*`` family, a ``[[now_init]]`` call, ``memset``,
@@ -1332,6 +1353,10 @@ Missed Diagnostics
   ``std::construct_at((int *)v, 1)`` the whole block counts as initialized, so a
   read of a wider object through an unmarked alias, ``((Triv *)v)->y``, is
   accepted.
+- After a default-initialization's credit of storage of no type viewed through
+  a marked class pointer (``M *p [[ref_to_uninit]] = static_cast<M *>(v)``), a
+  store naming one ``[[uninit]]`` member ends the pending state of every
+  member: a later read of another one, still indeterminate, is accepted.
 - ``memset``, ``memcpy``, and ``memmove`` initialize their whole destination
   whatever the byte count and the type: after ``memset(arr, 0, sizeof(int))`` a
   read of ``arr[3]`` is accepted, and a class object written by ``memcpy`` is

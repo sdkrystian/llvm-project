@@ -331,6 +331,116 @@ int default_construct_determinate(UserCtor *p [[ref_to_uninit]],
   return p->v + q->v; // OK
 }
 
+// default_construct leaves the [[uninit]] members of the range's objects uninitialized
+struct MarkedMember {
+  int x [[uninit]];
+  int y = 0;
+};
+int default_construct_marked_member(std::allocator<MarkedMember> &a, int n) {
+  MarkedMember *p [[ref_to_uninit]] = a.allocate(n);
+  std::uninitialized_default_construct(p, p + n);
+  int y = p->y;        // OK
+  int x = p->x;        // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  MarkedMember c = *p; // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  p->x = 1;
+  MarkedMember d = *p; // OK
+  return x + y + c.y + d.x;
+}
+
+// Through a base view, default_construct leaves the base's [[uninit]] members uninitialized
+struct MarkedBase {
+  int bx [[uninit]];
+  int k = 0;
+};
+struct MarkedDerived : MarkedBase {
+  int dz = 0;
+};
+int default_construct_base_view(std::allocator<MarkedDerived> &a) {
+  MarkedDerived *p [[ref_to_uninit]] = a.allocate(1);
+  MarkedBase *b [[ref_to_uninit]] = p;
+  std::uninitialized_default_construct(p, p + 1);
+  return b->bx; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A member stored after default_construct through one view is initialized
+// through the other
+int default_construct_base_view_store(std::allocator<MarkedDerived> &a) {
+  MarkedDerived *p [[ref_to_uninit]] = a.allocate(1);
+  MarkedBase *b [[ref_to_uninit]] = p;
+  std::uninitialized_default_construct(p, p + 1);
+  p->bx = 1;
+  int r = b->bx; // OK
+  b->bx = 2;
+  return r + p->bx + static_cast<MarkedBase *>(p)->bx; // OK
+}
+
+// Through a void pointer's referent, default_construct leaves the [[uninit]] members uninitialized
+int default_construct_through_void(std::allocator<MarkedMember> &a) {
+  void *v [[ref_to_uninit]] = a.allocate(1);
+  MarkedMember *p [[ref_to_uninit]] = static_cast<MarkedMember *>(v);
+  std::uninitialized_default_construct_n(p, 1);
+  return p->x; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// Through a void pointer's referent, a store after default_construct
+// initializes the member it names
+int default_construct_through_void_store(std::allocator<MarkedMember> &a) {
+  void *v [[ref_to_uninit]] = a.allocate(1);
+  MarkedMember *p [[ref_to_uninit]] = static_cast<MarkedMember *>(v);
+  std::uninitialized_default_construct_n(p, 1);
+  p->x = 1;
+  return p->x; // OK
+}
+
+// A class with a converting constructor leaves its [[uninit]] members to default_construct uninitialized
+struct MarkedConverting {
+  int x [[uninit]];
+  int y = 0;
+  MarkedConverting() = default;
+  MarkedConverting(int v) : x(v) {}
+};
+int default_construct_converting(MarkedConverting *p [[ref_to_uninit]]) {
+  std::uninitialized_default_construct_n(p, 1);
+  return p->x; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// Default-constructed objects are alive: constructing them again is rejected, binding them is not
+void take_marked_member(MarkedMember *);
+int default_construct_then_bind(MarkedMember *p [[ref_to_uninit]]) {
+  std::uninitialized_default_construct_n(p, 1);
+  MarkedMember *q = p;   // OK
+  take_marked_member(p); // OK
+  std::construct_at(p);  // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  return q->y;
+}
+
+// A marked binding of one member of a default-constructed object is judged by that member's state
+int default_construct_bind_member(MarkedMember *p [[ref_to_uninit]]) {
+  std::uninitialized_default_construct_n(p, 1);
+  int *px [[ref_to_uninit]] = &p->x; // OK
+  int *py [[ref_to_uninit]] = &p->y; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  return 0;
+}
+
+// An unmarked binding of one member default_construct left uninitialized is rejected
+int default_construct_bind_member_unmarked(MarkedMember *p [[ref_to_uninit]]) {
+  std::uninitialized_default_construct_n(p, 1);
+  int *px = &p->x; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  int *py = &p->y; // OK
+  return *py;
+}
+
+// A marked pointer member's referent keeps the [[uninit]] members default_construct leaves uninitialized
+struct HoldsMarkedMember {
+  MarkedMember *p [[ref_to_uninit]];
+  HoldsMarkedMember();
+  int read() {
+    std::uninitialized_default_construct(p, p + 1);
+    int y = p->y; // OK
+    return y + p->x; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  }
+};
+
 // A class-type iterator is outside the marker: the call is inert
 struct Iter {
   int *p [[ref_to_uninit]];
