@@ -1846,8 +1846,9 @@ using MemberStep = SemaProfiles::MemberStep;
 using MemberPath = SemaProfiles::MemberPath;
 
 /// One flow-tracked std::init storage entity of the analyzed body: an
-/// [[uninit]] scalar member of the current object or of a directly named
-/// local or by-value parameter (directly or inside a member subobject;
+/// [[uninit]] member of the current object or of a directly named local or
+/// by-value parameter -- a scalar, or a class or array object tracked whole --
+/// (directly or inside a member subobject;
 /// SemaProfiles::forEachFlowTrackedMember), an [[uninit]] local or parameter
 /// as a whole, or the referent of a [[ref_to_uninit]] local pointer or
 /// reference (parameters included), which the dataflow identifies per program
@@ -2828,7 +2829,20 @@ static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
     } else {
       std::optional<unsigned> R =
           L.Entity ? referent(*L.Entity, St, Storage) : std::nullopt;
-      AllDestroyed &= R && St.MayDestroyed.test(*R);
+      // At its scope exit, a member of a local that escaped after the
+      // member's destroy may have been reconstructed since. (An explicit
+      // destroy's own argument escapes the local just before the destroy.)
+      AllDestroyed &=
+          R && St.MayDestroyed.test(*R) &&
+          !(Site.Destroyer == SemaProfiles::InitDestroyer::ScopeExit &&
+            St.Esc.test(*R));
+      // The state of a member of an escaped local is no evidence that a
+      // destroy takes uninitialized storage.
+      if (R && St.Esc.test(*R)) {
+        Acc = Acc ? combineLeafStates(*Acc, LeafState::Unknown)
+                  : LeafState::Unknown;
+        continue;
+      }
     }
     LeafState S = leafState(L, St, Storage, /*EveryPath=*/false);
     Acc = Acc ? combineLeafStates(*Acc, S) : S;
@@ -2864,6 +2878,12 @@ static void judgeAccessSite(const AccessSite &Site, bool IsWrite,
           Storage.covers(L.WholeIf, *R, /*RawExempt=*/false))
         continue;
     }
+    // Below a local's member tracked whole, an escape of the local trusts the
+    // access, as it trusts a read of a scalar member (Read).
+    if (L.Entity && Storage.Entities[*L.Entity].Whole &&
+        Storage.Entities[*L.Entity].K == TrackedEntity::Kind::LocalMember &&
+        St.Esc.test(*L.Entity))
+      continue;
     LeafState S = leafState(L, St, Storage, /*EveryPath=*/true);
     Fires |= S == LeafState::Uninitialized || S == LeafState::Mixed;
   }
@@ -3958,7 +3978,7 @@ static void extractStdInitEvents(
     auto AppendReads = [&](const Expr *At) {
       SmallVector<unsigned, 4> Seen;
       auto Read = [&](unsigned Idx) {
-        if (Storage.Entities[Idx].TrackReads &&
+        if (Storage.Entities[Idx].TrackReads && !Storage.Entities[Idx].Whole &&
             !llvm::is_contained(Seen, Idx)) {
           Seen.push_back(Idx);
           BlockEvents.push_back({DefAssignEventKind::Read, Idx, At});
@@ -4202,12 +4222,14 @@ static void extractStdInitEvents(
               if (R.Entity) {
                 const TrackedEntity &Ent = Storage.Entities[*R.Entity];
                 bool Pointee = Ent.K == TrackedEntity::Kind::Pointee;
-                // A subobject of an [[uninit]] local; a store to part of a
-                // read-tracked member is one of an [[uninit]] object too (a
-                // read of it is the member's Read event).
-                bool UninitObject = (R.Subobject || WholeRead) &&
-                                    (Ent.K == TrackedEntity::Kind::WholeLocal ||
-                                     (IsWrite && !Pointee && Ent.TrackReads));
+                // A subobject of an [[uninit]] local or of a read-tracked
+                // member tracked whole; a store to part of any read-tracked
+                // member is one of an [[uninit]] object too (a read of a
+                // scalar one is the member's Read event).
+                bool UninitObject =
+                    (R.Subobject || WholeRead) &&
+                    (Ent.K == TrackedEntity::Kind::WholeLocal ||
+                     (!Pointee && Ent.TrackReads && (IsWrite || Ent.Whole)));
                 if (UninitObject || (Pointee && (!IsWrite || R.Subobject))) {
                   L.Entity = R.Entity;
                   AnyPointee |= Pointee;
@@ -4398,6 +4420,33 @@ static void extractStdInitEvents(
         // non-trivial destructor destroys it (P4222R2 §4.6), reported where
         // the scope ends. Member and base destructors are not judged.
         const VarDecl *V = Dtor->getVarDecl();
+        // The scope exit of a read-tracked aggregate local destroys its
+        // tracked whole members with non-trivial destructors.
+        if (auto RIt = Storage.LocalRange.find(V);
+            RIt != Storage.LocalRange.end()) {
+          for (unsigned I = RIt->second.first; I != RIt->second.second; ++I) {
+            const TrackedEntity &Member = Storage.Entities[I];
+            const auto *MRD =
+                Ctx.getBaseElementType(Member.Type)->getAsCXXRecordDecl();
+            if (!Member.Whole || !Member.TrackReads || !MRD ||
+                !MRD->hasDefinition() || MRD->hasTrivialDestructor())
+              continue;
+            DestroySite Site;
+            const Stmt *Trigger = Dtor->getTriggerStmt();
+            Site.Loc = Trigger ? Trigger->getEndLoc() : V->getLocation();
+            Site.Judged = true;
+            Site.Destroyer = SemaProfiles::InitDestroyer::ScopeExit;
+            Site.ScopeExitVar = V;
+            BindingLeaf Leaf;
+            Leaf.Entity = I;
+            Site.Leaves.push_back(Leaf);
+            Site.Affected.push_back(I);
+            DSites.push_back(std::move(Site));
+            BlockEvents.push_back({DefAssignEventKind::Destroy, 0, nullptr,
+                                   (unsigned)(DSites.size() - 1)});
+          }
+          continue;
+        }
         auto It = Storage.LocalEntity.find(V);
         if (It == Storage.LocalEntity.end() ||
             Storage.Entities[It->second].K != TrackedEntity::Kind::WholeLocal)

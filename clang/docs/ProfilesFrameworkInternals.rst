@@ -737,7 +737,8 @@ follows:
      - ``CFGProfiles`` row for local variables; ``runStdInitMemberReadChecks``
        for the same row through its ``ExtraPass`` hook: one
        ``TrackedStorage`` entity table (the current object's and tracked
-       locals' ``[[uninit]]`` scalar members), one ``extractStdInitEvents``
+       locals' ``[[uninit]]`` members: scalars, and class-type members as
+       whole objects), one ``extractStdInitEvents``
        loop whose arms resolve every leaf of the one shape walk
        (``SemaProfiles::forEachTargetLeaf``) through
        ``TrackedStorage::resolve``, and one definite-assignment run over a
@@ -823,8 +824,8 @@ follows:
        object, the operand of a ``delete`` that runs a non-trivial destructor
        (``appendLifecycleCallEvents``), and the non-trivial scope-exit
        destructor of an ``[[uninit]]`` local (its ``CFGAutomaticObjDtor``,
-       gated at the declaration, unless a marker rule rejects the marker) --
-       for a source with a
+       gated at the declaration, unless a marker rule rejects the marker) or
+       of a read-tracked aggregate local's whole member -- for a source with a
        flow-tracked leaf (``judgeDestroySite``: ``double_destroy`` on
        ``MayDestroyed``, ``destroy_uninit`` unless ``May``, a reinitializer, or
        a marked parameter); otherwise ``checkInitProfileDestroy``, entered
@@ -998,26 +999,31 @@ object to the member's class, then the member.  A class's tracked member paths
 form a table (``SemaProfiles::flowTrackedMembers``), enumerated depth-first so
 the paths under any prefix are contiguous, and an object's member entities are
 that table in order; an anonymous struct's step is transparent, and an
-anonymous union is never entered.  The enumeration enters a *container* -- a
-named, unmarked, non-reference, non-array member with no default member
-initializer whose default constructor is not user-provided
+anonymous union is never entered.  A class-type ``[[uninit]]`` member is an
+entry tracked whole (``TrackedEntity::Whole``): it is initialized by a credit,
+a written initializer, or a whole-object credit of its object, never by a
+store, and a read or store below it is an access site, judged on every path
+where the entity is read-tracked and trusted elsewhere -- also below a local's
+member once the local escapes, as a scalar member's read is.  The enumeration
+enters a *container* -- a named, unmarked, non-reference, non-array member with
+no default member initializer whose default constructor is not user-provided
 (``SemaProfiles::getDefaultInitTrackableClass``) -- up to eight member steps
 deep and until 64 paths and containers are visited, so a credit, kill, or
-written initializer of a container covers the contiguous range under it.  In a
-constructor body the current object's containers are tracked whole like a
-local's.  One matcher (``SemaProfiles::matchFlowTrackedMember``)
-finds the entry an lvalue's member steps start with, for both the predicate and
-the resolver.  For a marked target the predicate also takes a directly named
-local or by-value parameter with tracked members as a whole, or a subobject
-enclosing some of them (``SemaProfiles::flowTrackedMemberRange``), when its
-default-initialization is trivial, and the pass classifies that leaf from the
-member entities below it and below any base its casts convert it to
-(``TrackedStorage::objectPart``, ``BindingLeaf::Range``): Initialized when
-every one is ``Must``, Uninitialized when none is ``May``, and Unknown
-otherwise.  An unmarked binding of it keeps the form's answer: a copy, an
-escape, or a placement ``new`` of the object is judged by form.  A marked
-pointer or reference bound to it gets an unidentified referent
-(``ReseatTarget::Unknown``).
+written initializer of a container covers the contiguous range under it.
+In a constructor body the current object's containers are tracked whole like a
+local's.
+One matcher (``SemaProfiles::matchFlowTrackedMember``) finds the entry an
+lvalue's member steps start with, for both the predicate and the resolver.  For
+a marked target the predicate also takes a directly named local or by-value
+parameter with tracked members as a whole, or a subobject enclosing some of them
+(``SemaProfiles::flowTrackedMemberRange``), when its default-initialization is
+trivial, and the pass classifies that leaf from the member entities below it
+and below any base its casts convert it to (``TrackedStorage::objectPart``,
+``BindingLeaf::Range``): Initialized when every one is ``Must``, Uninitialized
+when none is ``May``, and Unknown otherwise.  An unmarked binding of it keeps
+the form's answer: a copy, an escape, or a placement ``new`` of the object is
+judged by form.  A marked pointer or reference bound to it gets an
+unidentified referent (``ReseatTarget::Unknown``).
 The walk distributes each
 conditional at every step of the chain, not only at the top, and records the
 arm each leaf takes (``SemaProfiles::ShapeLeaf``), which every interpreter
@@ -1218,12 +1224,17 @@ Deliberate Strictnesses
   narrower type, initialize nothing: the storage is one entity, so even the
   constructed base's own members stay uninitialized for a later read.  The
   remedies are a credit of the whole object or suppression.
-- Assigning a member subobject whole (``m = Mid{1}`` in a constructor body)
-  initializes none of the tracked members inside it: a class assignment is a
-  member call, never an initialization (P4222R2 §4.6, §6).  Its written
-  mem-initializer, ``std::construct_at(&m)``, a ``[[now_init]]`` call, or
-  ``memset`` initializes them.
-- Storage that is not flow-tracked -- a class-type or array ``[[uninit]]``
+- A class-type ``[[uninit]]`` member, and a member subobject holding tracked
+  members, is initialized only whole -- ``std::construct_at``, a
+  ``[[now_init]]`` call, ``memset``, ``memcpy``, ``memmove``, or a written
+  mem-initializer: a class's assignment (``m = Mid{1}`` in a constructor body)
+  is a member call, never an initialization, and a member-wise store is a
+  subobject write (P4222R2 §4.6, §5.4).  Outside its
+  constructor, its bindings, member calls, and destroys are judged from an
+  uninitialized start, like a scalar member's, because the constructor's
+  initialization is not visible there (the P4222R2 §5 exposure analysis is not
+  implemented); reads and stores below it are trusted there.
+- Storage that is not flow-tracked -- an array ``[[uninit]]``
   member, a marked pointer member's referent -- is judged by its form alone
   at every read, write, and destroy: a ``construct_at`` into it legalizes no
   later access.
@@ -1387,6 +1398,11 @@ Missed Diagnostics
 - A ``*this`` capture in a constructor of a class with a *user-provided* copy
   constructor reads no member at the lambda's creation, although a copy of an
   object elsewhere reads its source whole whatever its copy constructor.
+- A ``this``-capturing *generic* lambda created in a constructor counts no
+  member read at its creation: its body is a template, whose reads the
+  constructor's analysis does not see
+  (``[this](auto x) { return m.y + x; }(1)`` before ``m`` is initialized is
+  accepted).
 - An *alias* of ``this`` in a constructor body -- a stored
   ``T *self = this;``, an init-capture ``[p = this]``, ``&*this`` -- is
   invisible to the flow engine: reads through the alias are not attributed
@@ -1409,6 +1425,6 @@ Missed Diagnostics
 - An assignment through a conditional, comma, or GNU ``?:`` target whose
   arms differ in marking accepts either source: any single answer would
   reject a legal combination.
-- A second ``destroy_at`` of storage that is not flow-tracked (a class-type
-  or array ``[[uninit]]`` member, a marked pointer member's referent) is not
-  a double destroy.
+- A second ``destroy_at`` of storage that is not flow-tracked (an array
+  ``[[uninit]]`` member, a marked pointer member's referent) is not a double
+  destroy.

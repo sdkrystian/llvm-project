@@ -553,7 +553,8 @@ constructor-less aggregate locals -- also inside a member subobject
 class has no user-provided default constructor, so that ``m``'s written
 initializer,
 ``std::construct_at(&o.m)``, a ``[[now_init]]`` call, or ``memset`` of it
-initializes ``n``; reads through ``[[ref_to_uninit]]``
+initializes ``n``, and an ``[[uninit]]`` member of a class type is tracked as
+a whole object (below); reads through ``[[ref_to_uninit]]``
 pointers and references and reads of subobjects of ``[[uninit]]`` objects
 (copying an ``[[uninit]]`` array -- a by-copy capture ``[arr]``,
 ``auto [a, b] = arr;`` -- reads each element, and copying a whole class
@@ -596,6 +597,29 @@ unknown, does not count against the read (see
        int r = m;    // error: 'm' is read before the body assigns it
        m = v;        // OK: for a built-in type, a write is its
      }               // initialization (§4.5)
+   };
+
+An ``[[uninit]]`` member of a class type is initialized only as a whole --
+by ``std::construct_at``, a ``[[now_init]]`` call, ``memset``, ``memcpy``,
+``memmove``, or a written mem-initializer -- and a read of a subobject of it
+is rejected unless that has happened on every path reaching the read; its
+assignment (``s = S{}``) is a member call on uninitialized storage, and a
+member-wise store initializes nothing (see
+`Writes to Subobjects of Uninitialized Objects`_):
+
+.. code-block:: c++
+
+   struct S { int x; int y; };
+
+   struct T {
+     S s [[uninit]];
+     int v;
+     T() : v(0) {
+       v = s.x;                      // error: 's' is not initialized
+       std::construct_at(&s, 1, 2);
+       v = s.x;                      // OK
+     }
+     int get() { return s.x; }       // OK: trusted outside the constructor
    };
 
 A member (each base-class copy of a member separately) or variable counts as
@@ -669,6 +693,14 @@ the entity for every path after it (see `Binding Pointers and References`_):
                 // through a [[ref_to_uninit]] pointer (uninit_write)
    }
 
+A class-type ``[[uninit]]`` member is such an entity wherever its reads are
+checked (see `Reads of Uninitialized Objects`_), when its class's default
+constructor is not user-provided: ``s.x = 1`` in its constructor before
+``std::construct_at(&s)`` is rejected, and the same store in another member
+function is trusted.  The scope exit of a constructor-less aggregate local
+destroys such a member whose destructor is non-trivial, judged like an
+``[[uninit]]`` local's scope exit (`Binding Pointers and References`_).
+
 Subobject writes below the marker are rejected like the named twin: a
 write below a member step initializes nothing (§5.4's piecemeal ban; §4.5
 makes only the whole scalar write an initialization), whether the storage
@@ -678,7 +710,9 @@ expression.  A class pointee's initialization is ``construct_at`` (its
 ``[[ref_to_uninit]]`` parameter accepts the pointer) or, for a scalar
 pointee, the whole ``*p`` store.  For a marked local pointer or reference the
 store is accepted once its referent is initialized on every path reaching it
-(``construct_at(p, ...)`` or a ``[[now_init]]`` call first).
+(``construct_at(p, ...)`` or a ``[[now_init]]`` call first).  A store below a
+class-type ``[[uninit]]`` member of an object no analysis tracks
+(``h.s.x = 1`` through a reference ``h``) is judged by its form and rejected.
 
 A compound assignment or increment/decrement of such a subobject also reads
 its old value, so the read diagnostic fires alongside this one.  Assigning a

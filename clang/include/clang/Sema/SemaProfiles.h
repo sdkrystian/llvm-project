@@ -334,14 +334,15 @@ public:
   /// (\p Whole), which the enumeration never descends into. The walk is
   /// depth-first -- a class's fields in order, then its non-virtual bases
   /// without a user-provided constructor -- so the paths under any prefix
-  /// are contiguous. Tracked are the [[uninit]] built-in scalar (arithmetic
-  /// or enum) members with no default member initializer, std::byte
-  /// excepted (P4222R2 §4.6). The walk enters a container -- a named,
-  /// unmarked, non-reference, non-array member with no default member
-  /// initializer whose type is a trackable class (getTrackableSlotClass) --
-  /// while a path has fewer than 8 steps and fewer than 64 paths were
-  /// visited. An anonymous struct's members count as the enclosing class's,
-  /// with no step of their own; an anonymous union is never entered.
+  /// are contiguous. Tracked are the [[uninit]] members with no default
+  /// member initializer of a built-in scalar (arithmetic or enum) type,
+  /// std::byte excepted (P4222R2 §4.6), and, as whole objects, of a
+  /// trackable class type (getTrackableSlotClass). The walk enters a
+  /// container -- a named, unmarked, non-reference, non-array member with no
+  /// default member initializer whose type is a trackable class -- while a
+  /// path has fewer than 8 steps and fewer than 64 paths were visited. An
+  /// anonymous struct's members count as the enclosing class's, with no step
+  /// of their own; an anonymous union is never entered.
   static void forEachFlowTrackedMember(
       const ASTContext &Ctx, const CXXRecordDecl *RD,
       llvm::function_ref<void(ArrayRef<MemberStep>, bool Whole)> Visit);
@@ -407,8 +408,9 @@ public:
   /// True if the leaf \p Leaf of a binding source names storage the
   /// std::init CFG pass flow-tracks -- an [[uninit]] local or parameter (or
   /// a subobject of one), a marked local pointer's or reference's referent
-  /// (or a subobject of it), or a tracked [[uninit]] scalar member of a
-  /// directly named local or of the current object -- while a function body
+  /// (or a subobject of it), or a tracked [[uninit]] member (a scalar, or a
+  /// class or array object tracked whole) of a directly named local or of the
+  /// current object -- while a function body
   /// is being parsed (\p CurContext inside one). \p AsPointerValue says the
   /// leaf is used as a pointer value (a pointer binding, or a read-only alias
   /// binding of a pointer) rather than as a glvalue. With \p ForMarkedTarget

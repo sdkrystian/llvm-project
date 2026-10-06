@@ -66,17 +66,19 @@ void test_static_member_store() {
   s.sm = 1; // OK: static storage, not a subobject
 }
 
-// A marked *member* below the top level bans the store the same way, on a
-// named object or on the current object -- a class-type member has no legal
-// piecemeal path (only whole-object construct_at, which is unmodeled).
+// A marked *member* below the top level bans the store the same way on a
+// named object that is not flow-tracked -- a class-type member has no legal
+// piecemeal path, only whole-object initialization.
 struct HasAgg { Pair agg [[uninit]]; };
 void test_nested_marked_member_store(HasAgg &h) {
   h.agg.x = 1; // expected-error {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
 }
+// Outside a constructor, a store below the current object's class-type
+// [[uninit]] member is trusted like a scalar member's.
 struct SelfAgg {
   Pair agg [[uninit]];
   void set() {
-    agg.x = 1; // expected-error {{writing a member of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
+    agg.x = 1; // OK
   }
 };
 

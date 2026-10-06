@@ -1748,13 +1748,11 @@ struct BodyInit {
   int get() { return m; } // OK: trusted, assigned in the constructor body
 };
 
-// But a subobject of an [[uninit]] *class-type member* has no legal
-// assignment path (member-wise delayed initialization is banned, and
-// construct_at flow is uniformly unmodeled), so its read is flagged even on
-// the current object.
+// A subobject read of a *class-type* [[uninit]] member of the current object
+// is trusted the same way outside a constructor.
 struct HasAggMember {
   Pair agg [[uninit]];
-  int get() { return agg.x; } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  int get() { return agg.x; } // OK: trusted
 };
 
 // A member read of a flow-tracked local is judged on the instantiation's own

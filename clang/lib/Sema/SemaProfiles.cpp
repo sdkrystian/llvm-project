@@ -2827,6 +2827,14 @@ static bool isFlowTrackedScalarMember(const ASTContext &Ctx,
   return !Ctx.getBaseElementType(T)->isStdByteType();
 }
 
+/// True if \p F is a member the flow analysis tracks as a whole object
+/// (SemaProfiles::forEachFlowTrackedMember).
+static bool isFlowTrackedWholeMember(const FieldDecl *F) {
+  return F->hasAttr<UninitAttr>() && F->getDeclName() &&
+         !F->hasInClassInitializer() &&
+         SemaProfiles::getDefaultInitTrackableClass(F->getType());
+}
+
 /// The class of \p F when it is a container the flow-tracked member walk
 /// enters (SemaProfiles::forEachFlowTrackedMember); null otherwise.
 static const CXXRecordDecl *flowTrackedContainerClass(const FieldDecl *F) {
@@ -2885,9 +2893,10 @@ struct FlowTrackedMemberWalk {
           walkFields(Anon, Bases);
         continue;
       }
-      if (isFlowTrackedScalarMember(Ctx, F)) {
+      bool Scalar = isFlowTrackedScalarMember(Ctx, F);
+      if (Scalar || isFlowTrackedWholeMember(F)) {
         Prefix.push_back({Bases, F});
-        Visit(Prefix, /*Whole=*/false);
+        Visit(Prefix, /*Whole=*/!Scalar);
         ++Paths;
         Prefix.pop_back();
         continue;
