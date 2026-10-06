@@ -448,3 +448,60 @@ void copy_pins(Box *h) {
   (void)r;
   (void)t;
 }
+
+// Outside a constructor, destroying the current object ends its lifetime
+struct Lifetime {
+  int x = 0;
+  int y [[uninit]];
+  Lifetime();
+  void reinitialize() {
+    std::destroy_at(this);
+    std::construct_at(this); // OK
+  }
+  int read_after_destroy() {
+    std::destroy_at(this);
+    return x; // expected-error {{read of a subobject of uninitialized storage accesses uninitialized memory under profile 'std::init'}}
+  }
+  int read_after_destructor_call() {
+    this->~Lifetime();
+    return x; // expected-error {{read of a subobject of uninitialized storage accesses uninitialized memory under profile 'std::init'}}
+  }
+  void store_after_destroy() {
+    std::destroy_at(this);
+    x = 1; // expected-error {{writing a member of uninitialized storage does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
+  }
+  void destroy_twice() {
+    this->~Lifetime();
+    this->~Lifetime(); // expected-error {{storage already destroyed by a destructor call is destroyed again under profile 'std::init'}}
+  }
+  void construct_live() {
+    std::construct_at(this); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  }
+  int read_live() {
+    std::construct_at(&y, 1);
+    return x + y; // OK
+  }
+};
+
+// A raw-bytes credit through a conversion to a base reconstructs only the base
+struct LifetimeBase {
+  int b = 0;
+};
+[[now_init]] void fill_raw(void *p [[ref_to_uninit]]);
+struct LifetimeDerived : LifetimeBase {
+  int d = 0;
+  LifetimeDerived();
+  int reconstruct_base() {
+    std::destroy_at(this);
+    fill_raw(static_cast<LifetimeBase *>(this));
+    return d; // expected-error {{read of a subobject of uninitialized storage accesses uninitialized memory under profile 'std::init'}}
+  }
+};
+
+// A marked binding of the live current object is judged without a lifecycle call
+struct ReturnsThis {
+  int x = 0;
+  ReturnsThis *self [[ref_to_uninit]] () {
+    return this; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  }
+};

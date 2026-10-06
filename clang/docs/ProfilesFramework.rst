@@ -1019,7 +1019,12 @@ call.  So is the destructor that ends an ``[[uninit]]`` local's scope when its
 type's destructor is non-trivial: such a local must be constructed on some path
 before its scope ends (``destroy_uninit``) and must not be destroyed on any
 path before (``double_destroy``); the diagnostic is at the scope's end, and a
-suppression on the declaration covers it.  A function may carry both
+suppression on the declaration covers it.  Outside its constructors, a member
+function that destroys the current object (``std::destroy_at(this)``,
+``this->~T()``, ``delete this``) or binds it to a lifecycle parameter ends and
+restarts its lifetime: after the destroy, an access to a member is rejected
+until ``std::construct_at(this)`` reconstructs it, and ``construct_at(this)``
+on the live object is rejected.  A function may carry both
 attributes -- a reinitializer that destroys and then reconstructs its
 argument's storage -- and models destroy-then-construct: the storage bound to
 its ``[[ref_to_uninit]]`` parameters is initialized after the call, and calling

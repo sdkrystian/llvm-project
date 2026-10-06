@@ -3154,6 +3154,11 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
                                      FlowLeafUse Use) const {
   if (!insideFunctionBody(CurContext))
     return false;
+  // The current object as a whole, outside its constructors.
+  auto CurrentObjectTracked = [&] {
+    const CXXMethodDecl *MD = enclosingInstanceMethod(CurContext);
+    return Use != FlowLeafUse::Plain && MD && !isa<CXXConstructorDecl>(MD);
+  };
   const Expr *E = ignoreTransparentCasts(Leaf.E, Leaf.Arms);
   if (AsPointerValue) {
     if (const Expr *Op = addressOfOperand(E))
@@ -3163,6 +3168,8 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
     if (E->getType()->isArrayType())
       return isFlowTrackedLeaf(ShapeLeaf(E, Leaf.Arms),
                                /*AsPointerValue=*/false, CurContext, Use);
+    if (isa<CXXThisExpr>(E))
+      return CurrentObjectTracked();
     // The value of a marked pointer.
     const auto *VD = dyn_cast_or_null<VarDecl>(getDirectlyNamedDecl(E));
     return VD && VD->hasLocalStorage() && VD->getType()->isPointerType() &&
@@ -3173,6 +3180,8 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
     return false;
   if (Shape->IsThis) {
     const CXXMethodDecl *MD = enclosingInstanceMethod(CurContext);
+    if (Shape->Members.empty() && !Shape->Subscript)
+      return CurrentObjectTracked();
     if (!MD)
       return false;
     if (matchFlowTrackedMember(MD->getParent(), *Shape))
@@ -3378,7 +3387,7 @@ void SemaProfiles::checkInitProfileDestroy(SourceLocation Loc, QualType T,
     return;
   if (SmallVector<const Expr *, 2> Leaves; hasFlowTrackedLeaf(
           Src, T, &Leaves,
-          TargetMarked ? FlowLeafUse::MarkedTarget : FlowLeafUse::Plain)) {
+          TargetMarked ? FlowLeafUse::MarkedTarget : FlowLeafUse::Destroy)) {
     DeferredInitSite Site{DeferredInitSite::Kind::Destroy,
                           InitBindingKind::Parameter,
                           Loc,

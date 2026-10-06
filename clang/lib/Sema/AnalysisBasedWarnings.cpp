@@ -1850,11 +1850,18 @@ using MemberPath = SemaProfiles::MemberPath;
 /// by-value parameter -- a scalar, or a class or array object tracked whole --
 /// (directly or inside a member subobject;
 /// SemaProfiles::forEachFlowTrackedMember), an [[uninit]] local or parameter
-/// as a whole, or the referent of a [[ref_to_uninit]] local pointer or
+/// as a whole, the referent of a [[ref_to_uninit]] local pointer or
 /// reference (parameters included), which the dataflow identifies per program
-/// point (FlowState::Target).
+/// point (FlowState::Target), or the current object as a whole outside its
+/// constructors, which enters live (SemaProfiles::FlowLeafUse).
 struct TrackedEntity {
-  enum class Kind { CurrentObjectMember, LocalMember, WholeLocal, Pointee };
+  enum class Kind {
+    CurrentObjectMember,
+    LocalMember,
+    WholeLocal,
+    Pointee,
+    CurrentObject
+  };
   Kind K;
   /// The member path from the object (member kinds; its key in the object's
   /// SemaProfiles::flowTrackedMembers table); empty otherwise.
@@ -2013,6 +2020,9 @@ struct TrackedStorage {
   /// The class of the current object whose members are tracked; null when
   /// none is.
   const CXXRecordDecl *CurrentObjectClass = nullptr;
+  /// The CurrentObject entity, when the body binds the current object to a
+  /// lifecycle role or destroys it.
+  std::optional<unsigned> CurrentObjectRoot;
   /// The tracked local a tracked copy was copy- or move-constructed from,
   /// and the derived-to-base path of the conversion a slicing copy applied
   /// to it (empty for a same-class copy).
@@ -2032,6 +2042,16 @@ struct TrackedStorage {
   std::pair<unsigned, unsigned> addObject(const VarDecl *Base,
                                           const CXXRecordDecl *RD,
                                           bool TrackReads, bool UnknownEntry);
+
+  /// Append the CurrentObject entity of class \p RD.
+  void addCurrentObjectRoot(const CXXRecordDecl *RD) {
+    TrackedEntity E;
+    E.K = TrackedEntity::Kind::CurrentObject;
+    E.Type = Ctx.getCanonicalTagType(RD);
+    E.TrackReads = false;
+    Entities.push_back(std::move(E));
+    CurrentObjectRoot = Entities.size() - 1;
+  }
 
   /// Append the WholeLocal or Pointee entity of the marked local or
   /// parameter \p V (once); returns its index.
@@ -2338,6 +2358,12 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
                      Steps[OpaqueStep].Bases);
   };
   if (Shape->IsThis) {
+    // *this: the current object as a whole, when its lifetime is tracked.
+    if (Steps.empty() && !Shape->Subscript && CurrentObjectRoot) {
+      R.Entity = CurrentObjectRoot;
+      R.Subobject = DesignatesPart(*CurrentObjectRoot);
+      return R;
+    }
     if (Steps.empty() || ResolveMember(CurrentObjectRange, CurrentObjectClass))
       return R;
     // An access at any depth below the step may reach any of them.
@@ -2421,6 +2447,11 @@ TrackedStorage::resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
   if (E->getType()->isArrayType())
     return resolve({E, Leaf.Arms}, Designated, RawExempt);
   Resolution R;
+  if (isa<CXXThisExpr>(E) && CurrentObjectRoot) {
+    R.Entity = CurrentObjectRoot;
+    R.Subobject = !covers(Designated, *CurrentObjectRoot, RawExempt);
+    return R;
+  }
   if (std::optional<unsigned> Idx = markedPointerObject(E)) {
     R.Entity = Idx;
     R.Subobject = !covers(Designated, *Idx, RawExempt);
@@ -3105,11 +3136,16 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
   std::vector<FlowState> EntryState(NumBlocks, FlowState(NumTracked, true));
   std::vector<FlowState> ExitState(NumBlocks, FlowState(NumTracked, true));
   FlowState FunctionEntry(NumTracked, false);
-  for (unsigned I = 0; I != NumTracked; ++I)
+  for (unsigned I = 0; I != NumTracked; ++I) {
     if (Storage.Entities[I].UnknownEntry) {
       FunctionEntry.May.set(I);
       FunctionEntry.MayUnassigned.reset(I);
+    } else if (Storage.Entities[I].K == TrackedEntity::Kind::CurrentObject) {
+      FunctionEntry.Must.set(I);
+      FunctionEntry.May.set(I);
+      FunctionEntry.MayUnassigned.reset(I);
     }
+  }
   const CFGBlock &CFGEntry = cfg.getEntry();
   ForwardDataflowWorklist Worklist(cfg, AC);
   Worklist.enqueueBlock(&CFGEntry);
@@ -3493,7 +3529,8 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
               !L.R.Entity)
             L.Part = Storage.objectPart(Leaf, AsPointerValue, OuterPath);
           AnyTracked |= L.Tracked;
-          if (!L.R.Entity) {
+          // The current object's lifetime entity stands beside its members.
+          if (!L.R.Entity || L.R.Entity == Storage.CurrentObjectRoot) {
             const Expr *G =
                 SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms);
             if (const Expr *Op = SemaProfiles::addressOfOperand(G);
@@ -3543,17 +3580,15 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
       BlockEvents.push_back(Ev);
     };
     for (const ArgLeaf &L : Leaves) {
-      if (L.R.Entity) {
-        if (!L.R.Subobject)
-          Push(*L.R.Entity);
-        // A credit of part of the storage may have initialized it, so it is
-        // no longer uninitialized on every path; a read still needs every
-        // part.
-        else if (Kind == DefAssignEventKind::Write)
-          BlockEvents.push_back(
-              {DefAssignEventKind::MayWrite, *L.R.Entity, CallLike});
+      if (L.R.Entity && !L.R.Subobject)
+        Push(*L.R.Entity);
+      // A credit of part of the storage may have initialized it, so it is no
+      // longer uninitialized on every path; a read still needs every part.
+      if (L.R.Entity && L.R.Subobject && Kind == DefAssignEventKind::Write)
+        BlockEvents.push_back(
+            {DefAssignEventKind::MayWrite, *L.R.Entity, CallLike});
+      if (L.R.Entity && L.R.Entity != Storage.CurrentObjectRoot)
         continue;
-      }
       for (unsigned Idx = L.Whole.first; Idx != L.Whole.second; ++Idx)
         Push(Idx);
     }
@@ -3570,7 +3605,7 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
     Site.Destroyer = Destroyer;
     Site.Judged = ResolveArg(Arg, T, Leaves, QualType(), /*RawExempt=*/false,
                              Marked ? SemaProfiles::FlowLeafUse::MarkedTarget
-                                    : SemaProfiles::FlowLeafUse::Plain);
+                                    : SemaProfiles::FlowLeafUse::Destroy);
     Site.Conditional = !NameOneStorage(Leaves);
     for (const ArgLeaf &L : Leaves) {
       if (L.Tracked)
@@ -3583,10 +3618,11 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
       } else {
         Leaf.State = L.Form;
         Leaf.Range = L.Part;
+      }
+      if (!L.R.Entity || L.R.Entity == Storage.CurrentObjectRoot)
         for (unsigned Idx = L.Whole.first; Idx != L.Whole.second; ++Idx)
           if (!llvm::is_contained(Site.Affected, Idx))
             Site.Affected.push_back(Idx);
-      }
       Site.Leaves.push_back(Leaf);
     }
     if (!Site.Judged && Site.Affected.empty())
@@ -4172,11 +4208,28 @@ static void extractStdInitEvents(
         return;
       AccessSite Site;
       Site.Loc = Loc;
-      bool AnyTracked = false, AnyPointee = false, AnyUninitObject = false;
+      bool AnyTracked = false, AnyPointee = false, AnyUninitObject = false,
+           AnyCurrentObject = false;
+      // The leaves classified by form, which the parse-time check judged
+      // unless a leaf is flow-tracked.
+      SmallVector<unsigned, 2> FormLeaves;
       // The access designates the glvalue's type (TrackedStorage::resolve).
       QualType Designated = G->getType();
       SemaProfiles::forEachTargetLeaf(
           G, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+            // An access below the current object is also one of its
+            // lifetime, when that is tracked, judged on every path.
+            if (Storage.CurrentObjectRoot) {
+              std::optional<SemaProfiles::FlowLeafShape> Shape =
+                  SemaProfiles::flowLeafShape(Leaf.E, Leaf.Arms);
+              if (Shape && Shape->IsThis &&
+                  (!Shape->Members.empty() || Shape->Subscript)) {
+                BindingLeaf Root;
+                Root.Entity = Storage.CurrentObjectRoot;
+                Site.Leaves.push_back(Root);
+                AnyCurrentObject = true;
+              }
+            }
             BindingLeaf L;
             if (S.Profiles().isFlowTrackedLeaf(Leaf,
                                                /*AsPointerValue=*/false, DC)) {
@@ -4219,13 +4272,20 @@ static void extractStdInitEvents(
                 IsWrite ? SemaProfiles::InitAccessKind::Write
                         : SemaProfiles::InitAccessKind::Read,
                 D));
+            FormLeaves.push_back(Site.Leaves.size());
             Site.Leaves.push_back(L);
           });
-      if (!AnyTracked)
+      if (!AnyTracked && !AnyCurrentObject)
         return;
+      if (!AnyTracked)
+        for (unsigned I : FormLeaves)
+          Site.Leaves[I].State = LeafState::Initialized;
       bool UninitObjectOnly = AnyUninitObject && !AnyPointee;
-      Site.Select =
-          IsWrite ? (UninitObjectOnly ? 0u : 1u) : (UninitObjectOnly ? 1u : 0u);
+      if (AnyCurrentObject && !AnyUninitObject && !AnyPointee)
+        Site.Select = 2;
+      else
+        Site.Select = IsWrite ? (UninitObjectOnly ? 0u : 1u)
+                              : (UninitObjectOnly ? 1u : 0u);
       const Expr *Target = G->IgnoreParenImpCasts();
       Site.Flag = IsWrite && !isa<MemberExpr>(Target) &&
                   !SemaProfiles::asDataMemberPointerAccess(Target);
@@ -4815,6 +4875,48 @@ static const DeclRefExpr *getLocalCopySourceRef(const VarDecl *V,
       SemaProfiles::peelBaseCasts(CCE->getArg(0), CastPath));
 }
 
+/// True if \p E is the current object or its address through transparent
+/// casts (\c this, \c *this, \c &*this).
+static bool isCurrentObjectOrAddress(const Expr *E) {
+  E = SemaProfiles::ignoreTransparentCasts(E);
+  if (const Expr *Op = SemaProfiles::addressOfOperand(E))
+    E = Op;
+  return isCurrentObjectBase(E);
+}
+
+/// True if \p St destroys the current object as a whole -- an explicit
+/// destructor call on it, delete this -- or binds it whole to a marked,
+/// initializing, destroying, or releasing parameter of a call: the uses for
+/// which the current object's lifetime is tracked
+/// (SemaProfiles::FlowLeafUse).
+static bool isCurrentObjectLifecycleUse(Sema &S, const Stmt *St) {
+  auto IsCurrentObject = isCurrentObjectOrAddress;
+  if (const auto *DE = dyn_cast<CXXDeleteExpr>(St))
+    return IsCurrentObject(DE->getArgument());
+  const auto *CE = dyn_cast<CallExpr>(St);
+  if (!CE)
+    return false;
+  if (const auto *MCE = dyn_cast<CXXMemberCallExpr>(CE);
+      MCE && isa_and_nonnull<CXXDestructorDecl>(MCE->getMethodDecl()))
+    return IsCurrentObject(MCE->getImplicitObjectArgument());
+  const FunctionDecl *Callee = CE->getDirectCallee();
+  if (!Callee)
+    return false;
+  SemaProfiles::CalleeLifecycleRoles Roles =
+      SemaProfiles::getCalleeLifecycleRoles(Callee);
+  bool Found = false;
+  forEachArgumentBinding(
+      S.Context, CE,
+      [&](const ParmVarDecl *P, QualType, const Expr *Arg, bool Variadic) {
+        Found |= P && !Variadic &&
+                 (Roles.isMarkedParam(P) || Roles.initializesParam(P) ||
+                  Roles.destroysParam(P) ||
+                  Roles.releasesParam(P, /*TrustedOnly=*/false)) &&
+                 IsCurrentObject(Arg);
+      });
+  return Found;
+}
+
 /// Harvest the tracked storage of the analyzed body \p D into \p Storage.
 /// Read-tracked (TrackedEntity::TrackReads) are the members of by-value
 /// parameters of a trackable class without a default argument, of
@@ -4867,6 +4969,13 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
                             SemaProfiles::getTrackableSlotClass(P->getType()),
                         /*UnknownEntry=*/false);
   }
+  // The current object's lifetime, outside its constructors, when the body
+  // has a lifecycle use of it.
+  const CXXMethodDecl *Method =
+      SemaProfiles::enclosingInstanceMethod(dyn_cast<DeclContext>(D));
+  if (isa_and_nonnull<CXXConstructorDecl>(Method))
+    Method = nullptr;
+  bool CurrentObjectUsed = false;
   // The body's own variables (DeclStmts and handler declarations, in source
   // order) and the local-storage variables of enclosing functions it reaches
   // by capture.
@@ -4874,6 +4983,8 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
   SmallVector<const DeclStmt *, 8> DeclStmts;
   SmallVector<const VarDecl *, 4> Referenced;
   forEachAnalyzedStmt(D, [&](const Stmt *Cur) {
+    if (Method && !CurrentObjectUsed)
+      CurrentObjectUsed = isCurrentObjectLifecycleUse(S, Cur);
     if (const auto *DS = dyn_cast<DeclStmt>(Cur)) {
       DeclStmts.push_back(DS);
       for (const Decl *Dcl : DS->decls())
@@ -4889,6 +5000,8 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
         Referenced.push_back(V);
     }
   });
+  if (CurrentObjectUsed)
+    Storage.addCurrentObjectRoot(Method->getParent());
   for (const VarDecl *V : Locals) {
     HarvestMarked(V, /*UnknownEntry=*/false);
     if (const CXXRecordDecl *RD = getTrackedLocalAggregate(V))
@@ -5070,6 +5183,16 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
   harvestTrackedLocals(S, D, Storage);
   SmallVector<SemaProfiles::DeferredInitSite, 4> Deferred =
       S.Profiles().takeDeferredInitSites(D);
+  // A marked binding of the current object, deferred by the parse-time
+  // funnel, is a lifecycle use of it too.
+  if (const CXXMethodDecl *Method =
+          SemaProfiles::enclosingInstanceMethod(dyn_cast<DeclContext>(D));
+      Method && !isa<CXXConstructorDecl>(Method) &&
+      !Storage.CurrentObjectRoot &&
+      llvm::any_of(Deferred, [](const SemaProfiles::DeferredInitSite &Site) {
+        return llvm::any_of(Site.TrackedLeaves, isCurrentObjectOrAddress);
+      }))
+    Storage.addCurrentObjectRoot(Method->getParent());
   if (Storage.Entities.empty() && Deferred.empty())
     return;
   // The engine's own CFG, built only for a body with tracked storage or

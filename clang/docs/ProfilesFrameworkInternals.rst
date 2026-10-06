@@ -1007,7 +1007,14 @@ array it decays from): it is initialized by a credit,
 a written initializer, or a whole-object credit of its object, never by a
 store, and a read or store below it is an access site, judged on every path
 where the entity is read-tracked and trusted elsewhere -- also below a local's
-member once the local escapes, as a scalar member's read is.  The enumeration
+member once the local escapes, as a scalar member's read is.  Outside its
+constructors, the current object as a whole is an entity of its own
+(``TrackedEntity::Kind::CurrentObject``) when the body destroys it or binds it
+to a lifecycle parameter (``isCurrentObjectLifecycleUse``) or the parse-time
+funnel deferred a marked binding of it (a body with none builds no CFG for it):
+it enters initialized, its credits and destroys apply
+beside its members', and an access below it is judged against it on every
+path.  The enumeration
 enters a *container* -- a named, unmarked, non-reference, non-array member with
 no default member initializer whose default constructor is not user-provided
 (``SemaProfiles::getDefaultInitTrackableClass``) -- up to eight member steps

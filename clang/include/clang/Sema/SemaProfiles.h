@@ -410,12 +410,15 @@ public:
   /// [[ref_to_uninit]] variable, parameter, or role parameter -- a directly
   /// named local or by-value parameter with tracked members, as a whole or a
   /// subobject enclosing some of them (flowTrackedMemberRange), is tracked
-  /// and judged by its members' state. For a ValueCopy -- the source of an
-  /// unmarked value copy (isValueCopySource) -- a subobject of such a local
-  /// enclosing tracked members is tracked and read by its members' state; in
-  /// a constructor body, so are the current object's subobjects, for a
-  /// MarkedTarget too.
-  enum class FlowLeafUse { Plain, MarkedTarget, ValueCopy };
+  /// and judged by its members' state. For a MarkedTarget or a Destroy, the
+  /// current object as a whole (\c this, \c *this) in an instance member
+  /// function other than a constructor is tracked: the pass tracks its
+  /// lifetime when the body binds it so (P4222R2 §4.6). For a ValueCopy -- the
+  /// source of an unmarked value copy (isValueCopySource) -- a subobject of
+  /// such a local enclosing tracked members is tracked and read by its
+  /// members' state; in a constructor body, so are the current object's
+  /// subobjects, for a MarkedTarget too.
+  enum class FlowLeafUse { Plain, MarkedTarget, Destroy, ValueCopy };
 
   /// True if the leaf \p Leaf of a binding source names storage the
   /// std::init CFG pass flow-tracks -- an [[uninit]] local or parameter (or

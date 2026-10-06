@@ -14511,7 +14511,8 @@ def err_init_uninit_requires_ref_to_uninit : ProfileRule<
   ProfileStdInitRefToUninit>;
 def err_init_uninit_read_through : ProfileRule<
   "read %select{through a '[[ref_to_uninit]]' pointer or reference|"
-  "of a subobject of an '[[uninit]]' object}1 accesses "
+  "of a subobject of an '[[uninit]]' object|"
+  "of a subobject of uninitialized storage}1 accesses "
   "uninitialized memory under profile '%0'",
   ProfileStdInitUninitRead>;
 def err_init_uninit_subobject_write : ProfileRule<
