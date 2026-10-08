@@ -5148,6 +5148,10 @@ bool Parser::ParseNonCommaBalancedToken(std::string &Spelling) {
     }
 
     for (const auto &T : Toks) {
+      if (T.isAnnotation() || T.is(tok::unknown)) {
+        Diag(T, diag::err_profiles_invalid_argument_token);
+        return true;
+      }
       Spelling += " ";
       Spelling += PP.getSpelling(T);
     }
@@ -5155,7 +5159,8 @@ bool Parser::ParseNonCommaBalancedToken(std::string &Spelling) {
   }
 
   if (Tok.isOneOf(tok::comma, tok::r_paren, tok::r_square, tok::r_brace,
-                  tok::eof)) {
+                  tok::eof, tok::unknown) ||
+      Tok.isAnnotation()) {
     Diag(Tok, diag::err_profiles_invalid_argument_token);
     return true;
   }
@@ -5168,7 +5173,8 @@ bool Parser::ParseNonCommaBalancedToken(std::string &Spelling) {
 bool Parser::ParseNonOperatorNonPunctuatorToken(std::string &Spelling) {
   // P3589R2 [dcl.attr.profiles]: A bare profile-argument is a
   // non-operator-non-punctuator-token.
-  if (tok::getPunctuatorSpelling(Tok.getKind()) || Tok.is(tok::eof)) {
+  if (tok::getPunctuatorSpelling(Tok.getKind()) ||
+      Tok.isOneOf(tok::eof, tok::unknown) || Tok.isAnnotation()) {
     Diag(Tok, diag::err_profiles_invalid_argument_token);
     return true;
   }

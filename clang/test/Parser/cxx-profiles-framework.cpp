@@ -70,6 +70,26 @@ void suppress_bare_operator();
 [[profiles::suppress(std::type, (a b))]] // expected-error {{invalid token in profile argument}}
 void suppress_bare_group();
 
+// A pragma the preprocessor leaves as an annotation token is no argument
+[[profiles::suppress(acme, _Pragma("pack(push, 1)"))]] // expected-error {{invalid token in profile argument}}
+void suppress_pragma_positional();
+
+// A pragma inside a bracketed argument is no part of it
+[[profiles::suppress(acme, rule: ( // expected-error@+1 {{invalid token in profile argument}}
+#pragma clang loop unroll(enable)
+))]] void suppress_pragma_in_group();
+
+// A pragma is no named argument's value
+[[profiles::suppress(acme, k: // expected-error@+1 {{invalid token in profile argument}}
+#pragma STDC FP_CONTRACT ON
+1)]] void suppress_pragma_named();
+
+// An unknown token is no argument, alone or in a bracketed argument
+[[profiles::suppress(acme, `)]] // expected-error {{invalid token in profile argument}}
+void suppress_unknown();
+[[profiles::suppress(acme, rule: (a ` b))]] // expected-error {{invalid token in profile argument}}
+void suppress_unknown_in_group();
+
 // Missing argument clause: must diagnose, not crash
 
 // enforce with no argument clause at TU scope

@@ -2416,10 +2416,13 @@ private:
   /// true on error.
   bool ParseProfileSuppressBody(ParsedProfileSuppressArgs &Args);
   /// Capture the spelling of one balanced token, or of a bracketed token
-  /// sequence, that is not a bare comma. Returns true on error.
+  /// sequence, that is not a bare comma. Returns true on error, which an
+  /// annotation token (a pragma or module import inside the argument) or an
+  /// unknown token also is.
   bool ParseNonCommaBalancedToken(std::string &Spelling);
   /// Capture the spelling of one non-operator-non-punctuator-token (P3589R2
-  /// [dcl.attr.profiles]). Returns true on error.
+  /// [dcl.attr.profiles]); an annotation or unknown token is none. Returns
+  /// true on error.
   bool ParseNonOperatorNonPunctuatorToken(std::string &Spelling);
 
   /// Diagnose C++11 attributes on a module- or import-declaration, which
