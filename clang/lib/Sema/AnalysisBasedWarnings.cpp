@@ -3261,13 +3261,18 @@ static const DeclRefExpr *getLocalCopySourceRef(const VarDecl *V,
 /// initializer expression (the CFG is built with AddInitializers=true, so those
 /// run as CFG elements in execution order, and a written initializer's own
 /// member is assigned at its CFGInitializer element, so declaration order
-/// decides what an initializer may read). An NSDMI's subexpressions are
-/// excluded although AddCXXDefaultInitExprInCtors puts them in the CFG, so a
-/// read of a tracked member inside another member's default initializer stays
-/// undetected (see ProfilesFrameworkInternals.rst, "Known Gaps (std::init)").
-static void collectCtorBodyStmts(const CXXConstructorDecl *Ctor,
+/// decides what an initializer may read), and each single-declarator DeclStmt
+/// \p cfg synthesizes from a multi-declarator one of the body. An NSDMI's
+/// subexpressions are excluded although AddCXXDefaultInitExprInCtors puts them
+/// in the CFG, so a read of a tracked member inside another member's default
+/// initializer stays undetected (see ProfilesFrameworkInternals.rst,
+/// "Known Gaps (std::init)").
+static void collectCtorBodyStmts(const CXXConstructorDecl *Ctor, const CFG &cfg,
                                  llvm::SmallPtrSetImpl<const Stmt *> &Body) {
   forEachAnalyzedStmt(Ctor, [&](const Stmt *S) { Body.insert(S); });
+  for (const auto &[Synthetic, Source] : cfg.synthetic_stmts())
+    if (Body.count(Source))
+      Body.insert(Synthetic);
 }
 
 /// Recover the per-block std::init events of \p cfg over \p Storage: the one
@@ -3315,7 +3320,7 @@ static void extractStdInitEvents(
   const auto *DC = cast<DeclContext>(D);
   llvm::SmallPtrSet<const Stmt *, 32> BodyStmts;
   if (Ctor)
-    collectCtorBodyStmts(Ctor, BodyStmts);
+    collectCtorBodyStmts(Ctor, cfg, BodyStmts);
   auto ForEachLeaf =
       [&](const Expr *E,
           llvm::function_ref<void(const TrackedStorage::Resolution &)> F) {

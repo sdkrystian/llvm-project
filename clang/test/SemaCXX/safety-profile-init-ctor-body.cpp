@@ -1117,3 +1117,15 @@ void RebuiltAggregate::g() {
   RebuiltAggregate a{};
   (void)a;
 }
+
+// Each declarator of a multi-declarator declaration in a constructor body is judged
+struct MultiDeclarator {
+  MultiDeclarator(int *raw [[ref_to_uninit]], int *fresh [[ref_to_uninit]]) {
+    now_init_pointee(raw);
+    int *p = raw, *q = raw; // OK
+    int *r [[ref_to_uninit]] = raw, *s [[ref_to_uninit]] = raw; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+    int *t [[ref_to_uninit]] = fresh, *u [[ref_to_uninit]] = fresh;
+    now_init_pointee(t);
+    int v = *u; // OK
+  }
+};
