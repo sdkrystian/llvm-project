@@ -1871,6 +1871,9 @@ Parser::ProfileSuppressionDominion::ProfileSuppressionDominion(
 }
 
 Parser::ProfileSuppressionDominion::~ProfileSuppressionDominion() {
+  // A begin that recorded no change leaves nothing to end.
+  if (Record.Changes.empty())
+    return;
   // The last consumed token's end, at the expansion site of a macro-spelled
   // token; the record clamps an end that precedes its begin.
   SourceLocation Last =
