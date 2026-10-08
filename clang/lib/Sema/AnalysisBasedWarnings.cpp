@@ -3142,13 +3142,14 @@ static void appendAnalyzedChildren(const Stmt *S,
   llvm::append_range(Out, S->children());
 }
 
-/// Call \p F on each statement of the body the engine analyzes over \p D,
-/// parents first: a constructor's written initializers, then the body -- a
-/// coroutine's user-written body, from which AnalysisDeclContext builds the
-/// CFG -- descending through appendAnalyzedChildren. The harvest, the
-/// exemption walk, and the constructor-body set take the body's statements
-/// from here (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage
-/// (std::init)").
+/// Call \p F once on each statement of the body the engine analyzes over
+/// \p D, parents first: a constructor's written initializers, then the body --
+/// a coroutine's user-written body, from which AnalysisDeclContext builds the
+/// CFG -- descending through appendAnalyzedChildren. An opaque value's source
+/// is reached from the opaque value and from its owner, and is visited at the
+/// first. The harvest, the exemption walk, and the constructor-body set take
+/// the body's statements from here (ProfilesFrameworkInternals.rst,
+/// "Flow-Tracked Storage (std::init)").
 static void forEachAnalyzedStmt(const Decl *D,
                                 llvm::function_ref<void(const Stmt *)> F) {
   const Stmt *Body = D->getBody();
@@ -3160,9 +3161,10 @@ static void forEachAnalyzedStmt(const Decl *D,
       if (Init->isWritten())
         Stack.push_back(Init->getInit());
   SmallVector<const Stmt *, 8> Children;
+  llvm::SmallPtrSet<const Stmt *, 32> Visited;
   while (!Stack.empty()) {
     const Stmt *Cur = Stack.pop_back_val();
-    if (!Cur)
+    if (!Cur || !Visited.insert(Cur).second)
       continue;
     F(Cur);
     Children.clear();
@@ -3217,9 +3219,10 @@ static void appendThisCaptureLambdaReadEvents(
     return;
   }
   SmallVector<const Stmt *, 16> Stack(1, LE->getBody());
+  llvm::SmallPtrSet<const Stmt *, 16> Visited;
   while (!Stack.empty()) {
     const Stmt *Cur = Stack.pop_back_val();
-    if (!Cur)
+    if (!Cur || !Visited.insert(Cur).second)
       continue;
     if (const auto *NestedLE = dyn_cast<LambdaExpr>(Cur)) {
       if (GetThisCaptureKind(NestedLE) == LCK_StarThis) {
@@ -4225,11 +4228,12 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
 /// "Known Gaps (std::init)").
 static void collectUnenumeratedExprs(const ASTContext &Ctx, const Decl *D,
                                      llvm::SmallPtrSetImpl<const Expr *> &Out) {
+  llvm::SmallPtrSet<const Stmt *, 16> Visited;
   auto AddSubtree = [&](const Stmt *Root) {
     SmallVector<const Stmt *, 16> Stack(1, Root);
     while (!Stack.empty()) {
       const Stmt *Cur = Stack.pop_back_val();
-      if (!Cur)
+      if (!Cur || !Visited.insert(Cur).second)
         continue;
       if (const auto *E = dyn_cast<Expr>(Cur))
         Out.insert(E);

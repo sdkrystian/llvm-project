@@ -283,6 +283,14 @@ CoTask coroutine_await_uninit() {
   co_await c; // OK
 }
 
+// Each opaque value's source is walked once however deeply GNU ?: nests
+int *nested_gnu_conditionals(int *a) {
+  int u [[uninit]];
+  return ((((((((((((((((((((((((a ?: &u) // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+         ?: a) ?: a) ?: a) ?: a) ?: a) ?: a) ?: a) ?: a) ?: a) ?: a) ?: a) ?: a)
+         ?: a) ?: a) ?: a) ?: a) ?: a) ?: a) ?: a) ?: a) ?: a) ?: a) ?: a);
+}
+
 // A system-header body is not analyzed
 void call_sys_body() { sys_body(); }
 

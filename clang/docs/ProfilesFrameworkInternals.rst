@@ -945,7 +945,9 @@ walk, and the constructor-body set: those the engine's CFG visits -- a
 coroutine's user-written body, a constructor's written initializers, an
 OpenMP directive's clause expressions and region, a lambda's capture
 initializers but not its body -- so a local declared inside an OpenMP region
-is tracked like any other.  After the pass, every recorded site
+is tracked like any other.  The walk visits each statement once: the source of
+an opaque value, which both the opaque value and its owner list, is not walked
+again for each use.  After the pass, every recorded site
 must have produced a Binding, Destroy, ReadThrough, or SubobjectWrite site
 on one of its tracked leaves (``verifyDeferredInitSites``).  A leftover none
 of whose leaves is an element of the engine's CFG lies in code the CFG does
