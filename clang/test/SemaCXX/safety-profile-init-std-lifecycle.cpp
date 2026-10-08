@@ -109,6 +109,46 @@ void double_destroy() {
   std::destroy_at(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
 }
 
+// A destroy_at after a destroy_at on one path is a double destruction
+void double_destroy_one_path(bool c) {
+  int u [[uninit]];
+  std::construct_at(&u, 5);
+  if (c)
+    std::destroy_at(&u);
+  std::destroy_at(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+}
+
+// A destroy_at after a destroy_at and a reconstruction on one path is accepted
+void destroy_reconstructed_one_path(bool c) {
+  int u [[uninit]];
+  std::construct_at(&u, 5);
+  if (c) {
+    std::destroy_at(&u);
+    std::construct_at(&u, 6);
+  }
+  std::destroy_at(&u); // OK
+}
+
+// A destroy_at after a conditional destroy_at that may name the storage is a
+// double destruction
+void double_destroy_after_conditional(bool c) {
+  int a [[uninit]], b [[uninit]];
+  std::construct_at(&a, 1);
+  std::construct_at(&b, 2);
+  std::destroy_at(c ? &a : &b);
+  std::destroy_at(&a); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+}
+
+// A conditional destroy_at keeps an earlier destroy on every path
+void double_destroy_across_conditional(bool c) {
+  int a [[uninit]], b [[uninit]];
+  std::construct_at(&a, 1);
+  std::construct_at(&b, 2);
+  std::destroy_at(&a);
+  std::destroy_at(c ? &a : &b); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+  std::destroy_at(&a); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+}
+
 // Binding the destroyed storage is the unmarked-direction violation.
 void destroy_then_bind() {
   int u [[uninit]];
@@ -489,6 +529,14 @@ void double_destroy_across_names() {
   std::construct_at(&u, 5);
   std::destroy_at(p);
   std::destroy_at(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+}
+
+// A destroy_at through the pointer after one on one path is a double destruction
+void double_destroy_one_path(bool c, int *p [[ref_to_uninit]]) {
+  std::construct_at(p, 5);
+  if (c)
+    std::destroy_at(p);
+  std::destroy_at(p); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
 }
 
 // destroy_at through the pointer destroys the local: never-constructed

@@ -428,7 +428,7 @@ Rule                        Diagnoses
 ``ref_to_uninit``           A pointer or reference binding inconsistent with its
                             ``[[ref_to_uninit]]`` marking.
 ``double_destroy``          A ``[[now_uninit]]`` call on storage already
-                            destroyed.
+                            destroyed on some path.
 ``destroy_uninit``          A ``[[now_uninit]]`` call on storage that is
                             (still or again) uninitialized.
 ``ctor_uninit_member``      A constructor that leaves a member or base subobject
@@ -895,11 +895,11 @@ constructed), a reinitializer (below) is exempt, and so
 is any parameter that itself carries ``[[ref_to_uninit]]``: the marker
 declares that the parameter accepts uninitialized storage -- the annotation
 spelling for an unrecognized release function.  Never accepted is storage
-destroyed on every path reaching the call and not stored since: a double
-destruction (rule ``double_destroy``).  A destroy on one path only leaves
-the storage neither definitely initialized nor definitely destroyed: a
-marked binding is not forced, an unmarked binding stays accepted, a
-second destroy is not a double destroy, and a read through a marker, a read of a
+destroyed on some path reaching the call and not stored since: a double
+destruction on that path (rule ``double_destroy``).  A destroy on one path only
+leaves the storage neither definitely initialized nor definitely destroyed: a
+marked binding is not forced, an unmarked binding stays accepted, a second
+destroy is a double destroy, and a read through a marker, a read of a
 subobject of an ``[[uninit]]`` object, or a subobject write is rejected.  Clang
 treats ``std::destroy_at`` this way itself -- a call to a ``std::destroy_at``
 whose first parameter is of pointer type destroys that argument's storage, and

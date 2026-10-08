@@ -820,7 +820,7 @@ follows:
      - CFG rider for flow-tracked sources, expression site otherwise
      - the Destroy sites of ``extractStdInitEvents`` for a source with a
        flow-tracked leaf (``judgeDestroySite``: ``double_destroy`` on
-       ``Destroyed``, ``destroy_uninit`` unless ``May``, a reinitializer, or
+       ``MayDestroyed``, ``destroy_uninit`` unless ``May``, a reinitializer, or
        a marked parameter); otherwise the destroy arm of
        ``checkInitProfileBinding`` (its Parameter kind), where
        ``classifyUninitSource`` -- run exactly as for an
@@ -908,7 +908,7 @@ the current object), extracts one event stream from a CFG of its own
 vectors per entity -- ``Must`` (assigned on every path), ``May`` (assigned
 on some path), ``MayUnassigned`` (unassigned on some path that knows the
 entity's state), ``Esc`` (escaped; read leniency for local aggregates), and
-``Destroyed`` (destroyed on every path and not stored since) -- plus, per
+``MayDestroyed`` (destroyed on some path and not stored since) -- plus, per
 marked pointer or reference, ``Target``, the entity it refers to at that
 point: an ``[[uninit]]`` local, a tracked member, another pointer's
 anonymous referent, itself (an anonymous referent whose state is the
@@ -919,8 +919,8 @@ entity a single-leaf source names, what another marked pointer refers to,
 a fresh anonymous referent for an untracked source, the target every arm of the
 source agrees on, or unidentified when the arms disagree and one is tracked.  An
 identified referent named by a marked binding is asserted unassigned (``Must``
-and ``May`` cleared, ``MayUnassigned`` set, ``Destroyed`` and ``Esc`` kept); the
-``Reseat`` follows the binding's ``Binding`` event in block order, so the
+and ``May`` cleared, ``MayUnassigned`` set, ``MayDestroyed`` and ``Esc`` kept);
+the ``Reseat`` follows the binding's ``Binding`` event in block order, so the
 judgment sees the pre-assertion state.  A binding to a marked parameter is a
 ``Binding`` event only and asserts nothing.  A tracked local's DeclStmt emits a
 ``Reset`` of its ``[[uninit]]`` entity and of its member entities ahead of the
@@ -997,8 +997,8 @@ than collapsed to an unidentified referent, which would lose the mix of tracked
 and untracked arms P4222R2 §4.9 rejects.  A templated body is never analyzed;
 each instantiation is analyzed on its own CFG, in which statements TreeTransform
 reused from the pattern are ordinary elements.  Consumers read the lattices as
-follows: a marked-target binding fires on ``Must`` and ``double_destroy`` on
-``Destroyed``; an unmarked-target binding and ``destroy_uninit`` are suppressed
+follows: ``double_destroy`` fires on ``MayDestroyed``, a marked-target binding
+on ``Must``; an unmarked-target binding and ``destroy_uninit`` are suppressed
 by ``May``; a read through a marker or of a subobject of an ``[[uninit]]``
 object, and a subobject write, fire on ``MayUnassigned`` without ``Must``: every
 path must initialize the storage (P4222R2 §1.3, §9.2), and a path that does

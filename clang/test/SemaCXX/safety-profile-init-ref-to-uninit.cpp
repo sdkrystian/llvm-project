@@ -2737,9 +2737,7 @@ void test_double_destroy() {
   nu_wipe(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
 }
 
-// A marked binding keeps its referent's destroyed state: a destroy through
-// the pointer is a double destroy, and after a destroy on one path only it
-// destroys storage the marker asserts uninitialized.
+// A marked binding keeps its referent's destroyed state: a destroy through the pointer is a double destroy
 void test_assert_keeps_destroyed() {
   int u [[uninit]];
   u = 1;
@@ -2753,7 +2751,7 @@ void test_assert_conditional_destroy(bool c) {
   if (c)
     nu_wipe(&u);
   int *p [[ref_to_uninit]] = &u; // OK: destroyed on one path
-  nu_wipe(p); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+  nu_wipe(p); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
 }
 
 // Destroying storage that was never initialized is rejected: destruction
@@ -2998,14 +2996,13 @@ void test_now_uninit_array_decay_withdrawal() {
   ni_sink(arr); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 }
 
-// A *conditional* destroy records no destroyed state -- it may not have
-// run, so a later destroy is not a definite double destroy.
-void test_conditional_destroy_no_destroyed_state(bool c) {
+// A destroy after a destroy on one path destroys twice on that path
+void test_destroy_after_conditional_destroy(bool c) {
   int u [[uninit]];
   u = 5;
   if (c)
     nu_wipe(&u);
-  nu_wipe(&u); // OK
+  nu_wipe(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
 }
 
 void test_use_after_destroy_binding() {
@@ -3461,8 +3458,7 @@ skip:;
   int *r [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   (void)r;
 }
-// A goto-skippable *destroy* records no destroyed state either: the later
-// destroy may be the only one that ran.
+// A destroy after a destroy a goto may skip destroys twice on the other path
 void test_destroy_after_goto(bool c) {
   int u [[uninit]];
   u = 5;
@@ -3470,7 +3466,7 @@ void test_destroy_after_goto(bool c) {
     goto skip;
   nu_wipe(&u);
 skip:;
-  nu_wipe(&u); // OK: the first destroy may have been skipped
+  nu_wipe(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
 }
 // A switch cannot skip a later store: the store is on every path and the
 // marked binding is rejected.

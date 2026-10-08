@@ -2167,12 +2167,12 @@ TrackedStorage::markedPointerObject(const SemaProfiles::ShapeLeaf &Leaf) const {
 /// (free, realloc, operator delete, a delete-expression) leaves Idx
 /// unassigned. Destroy: a [[now_uninit]] destruction (DestroySites[Aux]),
 /// judged by the destroy rules; its storage is then unassigned and destroyed
-/// until stored again -- or, for an argument naming several storages,
-/// escaped. Reseat: the marked pointer or reference Idx refers, from here,
+/// until stored again -- for an argument naming several storages, each may
+/// be. Reseat: the marked pointer or reference Idx refers, from here,
 /// to the storage DefAssignEvent::RT describes and, when a marked binding
 /// names an identified referent (Entity, ViaPointer), asserts it unassigned:
-/// Must and May cleared, MayUnassigned set, Destroyed and Esc kept. Escape: Idx
-/// may have been destroyed or released on one of several arms, so it is
+/// Must and May cleared, MayUnassigned set, MayDestroyed and Esc kept. Escape:
+/// Idx may have been destroyed or released on one of several arms, so it is
 /// possibly assigned, possibly unassigned, and not destroyed. Reset: Idx
 /// belongs to a local whose declaration runs here, which begins a new object
 /// each time (a loop's next iteration, a backward goto): unassigned, not
@@ -2341,26 +2341,26 @@ static constexpr unsigned UnknownTarget = ~1u;
 /// past a mutable alias of a marked pointer, does not), escaped as a local
 /// aggregate on every path (Esc: the read leniency for locals,
 /// ProfilesFrameworkInternals.rst, "Known Gaps (std::init)"), destroyed on
-/// every path and not stored since (Destroyed), and, for a Pointee entity, the
-/// entity the marked pointer or reference refers to (Target). The join of
-/// predecessors intersects Must, Esc, and Destroyed, unites May and
-/// MayUnassigned, and keeps a Target the predecessors agree on.
+/// some path and not stored since (MayDestroyed), and, for a Pointee entity,
+/// the entity the marked pointer or reference refers to (Target). The join of
+/// predecessors intersects Must and Esc, unites May, MayUnassigned, and
+/// MayDestroyed, and keeps a Target the predecessors agree on.
 struct FlowState {
-  llvm::BitVector Must, May, MayUnassigned, Esc, Destroyed;
+  llvm::BitVector Must, May, MayUnassigned, Esc, MayDestroyed;
   /// Per entity, meaningful for a Pointee: the entity's own index when the
   /// pointer refers to an anonymous referent whose state is the entity's
   /// bits, another entity's index when it refers to that entity's storage
   /// (an [[uninit]] local, a tracked member, or another pointer's anonymous
   /// referent), UnknownTarget, or TopTarget.
   SmallVector<unsigned, 8> Target;
-  /// \p Top is the identity of the join: all-assigned, may-assigned and
-  /// unassigned on no path, escaped, destroyed, referring to nothing yet --
-  /// the state of an unreached predecessor. Otherwise every entity is
+  /// \p Top is the identity of the join: all-assigned, escaped, may-assigned,
+  /// unassigned, and destroyed on no path, and referring to nothing yet -- the
+  /// state of an unreached predecessor. Otherwise every entity is
   /// unassigned and every marked pointer or reference refers to its own
   /// anonymous referent.
   FlowState(unsigned N, bool Top)
       : Must(N, Top), May(N, false), MayUnassigned(N, !Top), Esc(N, Top),
-        Destroyed(N, Top), Target(N, TopTarget) {
+        MayDestroyed(N, false), Target(N, TopTarget) {
     if (!Top)
       for (unsigned I = 0; I != N; ++I)
         Target[I] = I;
@@ -2370,7 +2370,7 @@ struct FlowState {
     May |= O.May;
     MayUnassigned |= O.MayUnassigned;
     Esc &= O.Esc;
-    Destroyed &= O.Destroyed;
+    MayDestroyed |= O.MayDestroyed;
     for (unsigned I = 0, N = Target.size(); I != N; ++I) {
       if (Target[I] == TopTarget)
         Target[I] = O.Target[I];
@@ -2380,7 +2380,7 @@ struct FlowState {
   }
   bool operator==(const FlowState &O) const {
     return Must == O.Must && May == O.May && MayUnassigned == O.MayUnassigned &&
-           Esc == O.Esc && Destroyed == O.Destroyed && Target == O.Target;
+           Esc == O.Esc && MayDestroyed == O.MayDestroyed && Target == O.Target;
   }
   bool operator!=(const FlowState &O) const { return !(*this == O); }
 };
@@ -2467,11 +2467,12 @@ static void judgeBindingSite(const BindingSite &Site, const FlowState &St,
   Out.push_back({DiagID, Site.Loc, Site.IsReference ? 1u : 0u, false, Subject});
 }
 
-/// Judge a destroy site against \p St. Storage destroyed on every path
-/// (every leaf's entity Destroyed; a leaf no entity tracks is never
-/// destroyed) is double_destroy whatever the exemption -- a reinitializer's
-/// destroy half is as invalid on destroyed storage as anyone else's, and
-/// construct_at is the sanctioned recovery path. Otherwise a non-exempt
+/// Judge a destroy site against \p St. Storage destroyed on some path and not
+/// stored since (every leaf's entity MayDestroyed; a leaf no entity tracks is
+/// never destroyed) is double_destroy, since that path destroys it twice
+/// (P4222R2 §1, §9.2), whatever the exemption -- a reinitializer's destroy
+/// half is as invalid on destroyed storage as anyone else's, and construct_at
+/// is the sanctioned recovery path. Otherwise a non-exempt
 /// destroy of storage uninitialized on every path, or of a Mixed combination
 /// of arms (P4222R2 §4.9), is destroy_uninit: destruction makes an object
 /// uninitialized, so a first destroy of never-constructed storage is as much
@@ -2486,7 +2487,7 @@ static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
   for (const BindingLeaf &L : Site.Leaves) {
     std::optional<unsigned> R =
         L.Entity ? referent(*L.Entity, St, Storage) : std::nullopt;
-    AllDestroyed &= R && St.Destroyed.test(*R);
+    AllDestroyed &= R && St.MayDestroyed.test(*R);
     LeafState S = leafState(L, St, Storage, /*EveryPath=*/false);
     Acc = Acc ? combineLeafStates(*Acc, S) : S;
   }
@@ -2542,7 +2543,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
     St.Must.set(I);
     St.May.set(I);
     St.MayUnassigned.reset(I);
-    St.Destroyed.reset(I);
+    St.MayDestroyed.reset(I);
   };
   for (const DefAssignEvent &Ev : BlockEvents) {
     switch (Ev.Kind) {
@@ -2568,7 +2569,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       St.May[Ev.Idx] = St.May.test(Ev.Aux);
       St.MayUnassigned[Ev.Idx] = St.MayUnassigned.test(Ev.Aux);
       St.Esc[Ev.Idx] = St.Esc.test(Ev.Aux);
-      St.Destroyed[Ev.Idx] = St.Destroyed.test(Ev.Aux);
+      St.MayDestroyed[Ev.Idx] = St.MayDestroyed.test(Ev.Aux);
       break;
     case DefAssignEventKind::Kill:
       if (std::optional<unsigned> R = referent(Ev.Idx, St, Storage)) {
@@ -2590,11 +2591,11 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
         St.MayUnassigned.set(*R);
         if (Site.Conditional) {
           St.May.set(*R);
-          St.Destroyed.reset(*R);
+          St.MayDestroyed.set(*R);
         } else {
           St.May.reset(*R);
           St.Esc.reset(*R);
-          St.Destroyed.set(*R);
+          St.MayDestroyed.set(*R);
         }
       }
       break;
@@ -2613,7 +2614,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
         St.Must.reset(Ev.Idx);
         St.May[Ev.Idx] = Ev.RT == ReseatTarget::Escaped;
         St.MayUnassigned[Ev.Idx] = Ev.RT != ReseatTarget::Escaped;
-        St.Destroyed.reset(Ev.Idx);
+        St.MayDestroyed.reset(Ev.Idx);
         break;
       case ReseatTarget::Entity:
         NewTarget = Ev.Aux;
@@ -2642,7 +2643,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
         St.Must.reset(*R);
         St.May.set(*R);
         St.MayUnassigned.set(*R);
-        St.Destroyed.reset(*R);
+        St.MayDestroyed.reset(*R);
       }
       break;
     case DefAssignEventKind::Reset:
@@ -2650,7 +2651,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       St.May.reset(Ev.Idx);
       St.MayUnassigned.set(Ev.Idx);
       St.Esc.reset(Ev.Idx);
-      St.Destroyed.reset(Ev.Idx);
+      St.MayDestroyed.reset(Ev.Idx);
       break;
     case DefAssignEventKind::AggregateEscape:
       St.Esc.set(Ev.Idx);
@@ -2678,7 +2679,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
 /// is the event replay above -- the same replay the reporting pass uses. Every
 /// transfer is monotone in each lattice (Read, MayWrite, and AggregateEscape
 /// only set bits, Write and ReadWrite set Must and May and clear MayUnassigned
-/// and Destroyed, Copy projects the source's bits, Kill, Destroy, Reseat,
+/// and MayDestroyed, Copy projects the source's bits, Kill, Destroy, Reseat,
 /// Escape, and Reset are constant functions of their bits -- a Reseat's
 /// assertion clears its referent's Must and May like Kill), so a block's exit
 /// only ever descends from the join identity in a finite lattice and the
