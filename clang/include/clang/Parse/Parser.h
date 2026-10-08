@@ -518,6 +518,22 @@ public:
     ~ProfileSuppressionDominion();
   };
 
+  /// The last token of the token-cached region being parsed late, or invalid
+  /// outside one. A dominion that begins or ends in the region reaches the
+  /// diagnostic states recorded ahead of it only up to there; see
+  /// ProfilesFrameworkInternals.rst, "Enforcement and Suppression State".
+  SourceLocation LateParsedRegionEnd;
+
+  /// RAII marking a token-cached region as the one being parsed late
+  /// (LateParsedRegionEnd), given its tokens before the current token is
+  /// appended to them.
+  class LateParsedRegion {
+    llvm::SaveAndRestore<SourceLocation> Saved;
+
+  public:
+    LateParsedRegion(Parser &P, ArrayRef<Token> Toks);
+  };
+
   class ParseScope {
     Parser *Self;
     ParseScope(const ParseScope &) = delete;

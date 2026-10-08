@@ -419,6 +419,7 @@ void Parser::ParseLexedMethodDeclaration(LateParsedMethodDeclaration &LM) {
       DefArgEnd.setEofData(Param);
       Toks->push_back(DefArgEnd);
 
+      LateParsedRegion Region(*this, *Toks);
       // Parse the default argument from its saved token stream.
       Toks->push_back(Tok); // So that the current token doesn't get lost
       PP.EnterTokenStream(*Toks, true, /*IsReinject*/ true);
@@ -499,6 +500,7 @@ void Parser::ParseLexedMethodDeclaration(LateParsedMethodDeclaration &LM) {
     ExceptionSpecEnd.setEofData(LM.Method);
     Toks->push_back(ExceptionSpecEnd);
 
+    LateParsedRegion Region(*this, *Toks);
     // Parse the default argument from its saved token stream.
     Toks->push_back(Tok); // So that the current token doesn't get lost
     PP.EnterTokenStream(*Toks, true, /*IsReinject*/true);
@@ -596,6 +598,7 @@ void Parser::ParseLexedMethodDef(LexedMethod &LM) {
   BodyEnd.setLocation(LastBodyToken.getEndLoc());
   BodyEnd.setEofData(LM.D);
   LM.Toks.push_back(BodyEnd);
+  LateParsedRegion Region(*this, LM.Toks);
   // Append the current token at the end of the new token stream so that it
   // doesn't get lost.
   LM.Toks.push_back(Tok);
@@ -679,6 +682,7 @@ void Parser::ParseLexedMemberInitializer(LateParsedMemberInitializer &MI) {
 
   ParenBraceBracketBalancer BalancerRAIIObj(*this);
 
+  LateParsedRegion Region(*this, MI.Toks);
   // Append the current token at the end of the new token stream so that it
   // doesn't get lost.
   MI.Toks.push_back(Tok);
@@ -752,6 +756,7 @@ void Parser::ParseLexedAttribute(LateParsedAttribute &LPA, bool EnterScope,
   AttrEnd.setLocation(Tok.getLocation());
   AttrEnd.setEofData(LPA.Toks.data());
   LPA.Toks.push_back(AttrEnd);
+  LateParsedRegion Region(*this, LPA.Toks);
 
   // Append the current token at the end of the new token stream so that it
   // doesn't get lost.

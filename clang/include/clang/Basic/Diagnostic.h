@@ -437,12 +437,14 @@ private:
     /// within the region the new state covers take it as their entry state.
     void insert(SourceManager &SrcMgr, SourceLocation Loc, DiagState *State);
 
-    /// Replace each state \p S recorded after \p Loc by \p Replace(S): the
-    /// later transitions of \p Loc's file and of the files enclosing it,
-    /// those of the files included or expanded at or after \p Loc, and the
-    /// current state.
+    /// Replace each state \p S recorded after \p Loc and not after
+    /// \p Frontier by \p Replace(S): the later transitions of \p Loc's file
+    /// and of the files enclosing it, those of the files included or
+    /// expanded at or after \p Loc, and the current state. An invalid
+    /// \p Frontier bounds nothing.
     void
     replaceStatesAfter(SourceManager &SrcMgr, SourceLocation Loc,
+                       SourceLocation Frontier,
                        llvm::function_ref<DiagState *(DiagState *)> Replace);
 
     /// Look up the diagnostic state at a given source location.
@@ -534,10 +536,16 @@ private:
     void refreshEntryStates(File *F, unsigned Offset, unsigned End,
                             DiagState *Old, DiagState *State) const;
 
+    /// The offset of a bounding location in each file of its include chain
+    /// that has diagnostic state.
+    using FileBounds = llvm::SmallDenseMap<const File *, unsigned, 4>;
+
     /// Replace every state of \p F and of the files included or expanded
-    /// into it.
-    void replaceFileStates(
-        File &F, llvm::function_ref<DiagState *(DiagState *)> Replace) const;
+    /// into it, up to the offset \p Bounds gives a file on the bound's
+    /// include chain.
+    void replaceFileStates(File &F,
+                           llvm::function_ref<DiagState *(DiagState *)> Replace,
+                           const FileBounds &Bounds) const;
   };
 
   DiagStateMap DiagStatesByLoc;
@@ -907,12 +915,14 @@ public:
   /// diagnostic as the change's From: the state in effect at \p Loc, as a
   /// new state established there (the current state when \p Loc is not
   /// before the current state's location, otherwise a transition of
-  /// \p Loc's file); the states recorded after \p Loc, by a diagnostic
-  /// pragma lexed ahead of the caller; and the states saved by a diagnostic
-  /// 'push', which a 'pop' brings back after \p Loc. A mapping a pragma set
-  /// differently is kept. No existing state is modified.
+  /// \p Loc's file); the states recorded after \p Loc and not after
+  /// \p Frontier, the last position the caller's tokens were lexed ahead
+  /// to (all of them when \p Frontier is invalid); and the states saved by
+  /// a diagnostic 'push', which a 'pop' brings back after \p Loc. A mapping
+  /// a pragma set differently is kept. No existing state is modified.
   void replaceDiagnosticMappingsAt(ArrayRef<DiagnosticMappingChange> Changes,
-                                   SourceLocation Loc);
+                                   SourceLocation Loc,
+                                   SourceLocation Frontier = SourceLocation());
 
   /// Install \p Mappings from \p Loc to the end of the translation unit: in
   /// a new current state based on the current one -- established at \p Loc,

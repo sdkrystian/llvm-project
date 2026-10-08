@@ -328,12 +328,24 @@ SemaProfiles::makeProfilesSuppressAttr(const ParsedAttr &AL) {
       RawArgumentKinds.size());
 }
 
+/// The position up to which a suppression's begin or end reaches the states
+/// recorded ahead of it: the expansion site of the last token of the
+/// token-cached region \p Frontier names, or invalid (no bound) outside a
+/// late parse.
+static SourceLocation suppressionFrontier(const SourceManager &SM,
+                                          SourceLocation Frontier) {
+  return Frontier.isValid() ? SM.getExpansionRange(Frontier).getEnd()
+                            : Frontier;
+}
+
 /// Map every diagnostic of the rule groups named by \p Suppressions (profile,
 /// rule) to ignored from \p Begin on, recording the changes into \p Record;
 /// a diagnostic already ignored at \p Begin needs nothing.
-static void beginSuppressionOf(
-    Sema &S, ArrayRef<std::pair<StringRef, StringRef>> Suppressions,
-    SourceLocation Begin, SemaProfiles::SuppressionRecord &Record) {
+static void
+beginSuppressionOf(Sema &S,
+                   ArrayRef<std::pair<StringRef, StringRef>> Suppressions,
+                   SourceLocation Begin, SourceLocation Frontier,
+                   SemaProfiles::SuppressionRecord &Record) {
   if (Suppressions.empty() || Begin.isInvalid())
     return;
   DiagnosticsEngine &Diags = S.getDiagnostics();
@@ -362,11 +374,14 @@ static void beginSuppressionOf(
   if (Record.Changes.empty())
     return;
   Record.Begin = Begin;
-  Diags.replaceDiagnosticMappingsAt(Record.Changes, Begin);
+  Diags.replaceDiagnosticMappingsAt(
+      Record.Changes, Begin,
+      suppressionFrontier(S.getSourceManager(), Frontier));
 }
 
 void SemaProfiles::beginSuppression(const ParsedAttributesView &Attrs,
                                     SourceLocation Begin,
+                                    SourceLocation Frontier,
                                     SuppressionRecord &Record) {
   if (!getLangOpts().Profiles)
     return;
@@ -378,10 +393,11 @@ void SemaProfiles::beginSuppression(const ParsedAttributesView &Attrs,
     if (!Args.Name.empty())
       Suppressions.push_back({Args.Name, Args.Rule});
   }
-  beginSuppressionOf(SemaRef, Suppressions, Begin, Record);
+  beginSuppressionOf(SemaRef, Suppressions, Begin, Frontier, Record);
 }
 
 void SemaProfiles::beginSuppression(const Decl *D, SourceLocation Begin,
+                                    SourceLocation Frontier,
                                     SuppressionRecord &Record) {
   if (!getLangOpts().Profiles || !D)
     return;
@@ -394,11 +410,11 @@ void SemaProfiles::beginSuppression(const Decl *D, SourceLocation Begin,
     if (Begin.isInvalid())
       Begin = A->getLocation();
   }
-  beginSuppressionOf(SemaRef, Suppressions, Begin, Record);
+  beginSuppressionOf(SemaRef, Suppressions, Begin, Frontier, Record);
 }
 
-void SemaProfiles::endSuppression(SuppressionRecord &Record,
-                                  SourceLocation End) {
+void SemaProfiles::endSuppression(SuppressionRecord &Record, SourceLocation End,
+                                  SourceLocation Frontier) {
   if (Record.Changes.empty())
     return;
   const SourceManager &SM = getASTContext().getSourceManager();
@@ -406,7 +422,8 @@ void SemaProfiles::endSuppression(SuppressionRecord &Record,
     End = Record.Begin;
   for (DiagnosticsEngine::DiagnosticMappingChange &C : Record.Changes)
     std::swap(C.From, C.To);
-  getDiagnostics().replaceDiagnosticMappingsAt(Record.Changes, End);
+  getDiagnostics().replaceDiagnosticMappingsAt(
+      Record.Changes, End, suppressionFrontier(SM, Frontier));
   Record.Changes.clear();
 }
 

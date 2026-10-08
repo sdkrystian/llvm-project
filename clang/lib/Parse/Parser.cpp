@@ -1859,13 +1859,15 @@ Parser::TryAnnotateName(CorrectionCandidateCallback *CCC,
 Parser::ProfileSuppressionDominion::ProfileSuppressionDominion(
     Parser &P, const ParsedAttributesView &Attrs, SourceLocation Begin)
     : P(P) {
-  P.Actions.Profiles().beginSuppression(Attrs, Begin, Record);
+  P.Actions.Profiles().beginSuppression(Attrs, Begin, P.LateParsedRegionEnd,
+                                        Record);
 }
 
 Parser::ProfileSuppressionDominion::ProfileSuppressionDominion(
     Parser &P, const Decl *D, SourceLocation Begin)
     : P(P) {
-  P.Actions.Profiles().beginSuppression(D, Begin, Record);
+  P.Actions.Profiles().beginSuppression(D, Begin, P.LateParsedRegionEnd,
+                                        Record);
 }
 
 Parser::ProfileSuppressionDominion::~ProfileSuppressionDominion() {
@@ -1874,7 +1876,17 @@ Parser::ProfileSuppressionDominion::~ProfileSuppressionDominion() {
   SourceLocation Last =
       P.PP.getSourceManager().getExpansionRange(P.PrevTokLocation).getEnd();
   SourceLocation End = P.PP.getLocForEndOfToken(Last);
-  P.Actions.Profiles().endSuppression(Record, End.isValid() ? End : Last);
+  P.Actions.Profiles().endSuppression(Record, End.isValid() ? End : Last,
+                                      P.LateParsedRegionEnd);
+}
+
+Parser::LateParsedRegion::LateParsedRegion(Parser &P, ArrayRef<Token> Toks)
+    : Saved(P.LateParsedRegionEnd) {
+  // An artificial eof may follow the region's last token.
+  auto Last = llvm::find_if(llvm::reverse(Toks),
+                            [](const Token &T) { return T.isNot(tok::eof); });
+  if (Last != Toks.rend())
+    P.LateParsedRegionEnd = Last->getLastLoc();
 }
 
 SourceLocation Parser::getEndOfPreviousToken() const {

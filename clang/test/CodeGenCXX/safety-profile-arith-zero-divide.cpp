@@ -73,6 +73,21 @@ int const_div(int a) { return a / 2; }
   return a / b;
 }
 
+// A member's suppression holds after a statement suppression in an earlier
+// member's late-parsed body.
+// CHECK-LABEL: define {{.*}} @_Z9late_bodyR8LateBodyii(
+// CHECK-LABEL: define {{.*}} @_ZN8LateBody2n1Eii(
+// CHECK-NOT: llvm.ubsantrap
+// CHECK: ret i32
+// CHECK-LABEL: define {{.*}} @_ZN8LateBody2m2Eii(
+// CHECK-NOT: llvm.ubsantrap
+// CHECK: ret i32
+struct LateBody {
+  int n1(int a, int b) { [[profiles::suppress(test::arith)]] return a / b; }
+  int m2 [[profiles::suppress(test::arith)]] (int a, int b) { return a / b; }
+};
+int late_body(LateBody &s, int a, int b) { return s.n1(a, b) + s.m2(a, b); }
+
 // Suppression at statement granularity.
 // CHECK-LABEL: define {{.*}} @_Z15stmt_suppressedii(
 // CHECK-NOT: llvm.ubsantrap

@@ -1483,6 +1483,7 @@ void Parser::ParseLateTemplatedFuncDef(LateParsedTemplate &LPT) {
 
   assert(!LPT.Toks.empty() && "Empty body!");
 
+  LateParsedRegion Region(*this, LPT.Toks);
   // Append the current token at the end of the new token stream so that it
   // doesn't get lost.
   LPT.Toks.push_back(Tok);

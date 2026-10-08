@@ -63,8 +63,12 @@ void immediate_dfl([[profiles::suppress(test::type_cast)]] long p =
                        (long)reinterpret_cast<long *>(0));
 void immediate_dfl_control(long p = (long)reinterpret_cast<long *>(0)); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
 
-// Late-parsed member default argument and late-parsed member body
+// Late-parsed statement, member default argument, and member body
 struct LateParsed {
+  void stmt() {
+    [[profiles::suppress(test::type_cast)]] (void)reinterpret_cast<long *>(0);
+    (void)reinterpret_cast<long *>(0); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}
+  }
   void dfl([[profiles::suppress(test::type_cast)]] long p =
                (long)reinterpret_cast<long *>(0));
   void dfl_control(long p = (long)reinterpret_cast<long *>(0)); // expected-error {{'reinterpret_cast' is unsafe under profile 'test::type_cast'}}

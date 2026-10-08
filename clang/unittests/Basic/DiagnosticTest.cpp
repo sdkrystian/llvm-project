@@ -486,18 +486,20 @@ protected:
     return DiagnosticMapping::Make(S, /*IsUser=*/true, /*IsPragma=*/true);
   }
   /// Map \p D from the mapping in effect at \p Loc to \p S from \p Loc on,
-  /// as a suppression's begin does; returns the change, whose reverse ends
-  /// the region.
+  /// as a suppression's begin does, reaching the states recorded ahead up to
+  /// \p Frontier; returns the change, whose reverse ends the region.
   DiagnosticsEngine::DiagnosticMappingChange
-  begin(diag::kind D, diag::Severity S, SourceLocation Loc) {
+  begin(diag::kind D, diag::Severity S, SourceLocation Loc,
+        SourceLocation Frontier = SourceLocation()) {
     DiagnosticsEngine::DiagnosticMappingChange C{
         D, Diags.getDiagnosticMappingAt(D, Loc), mapping(S)};
-    Diags.replaceDiagnosticMappingsAt({C}, Loc);
+    Diags.replaceDiagnosticMappingsAt({C}, Loc, Frontier);
     return C;
   }
-  void end(DiagnosticsEngine::DiagnosticMappingChange C, SourceLocation Loc) {
+  void end(DiagnosticsEngine::DiagnosticMappingChange C, SourceLocation Loc,
+           SourceLocation Frontier = SourceLocation()) {
     std::swap(C.From, C.To);
-    Diags.replaceDiagnosticMappingsAt({C}, Loc);
+    Diags.replaceDiagnosticMappingsAt({C}, Loc, Frontier);
   }
   /// A macro expansion at \p Offset of the main file.
   SourceLocation expansionAt(unsigned Offset) {
@@ -599,6 +601,38 @@ TEST_F(PositionalMappingTest, RestoresInStatesRecordedAhead) {
   // The current state carries the restored mapping too.
   Diags.setSeverity(W2, diag::Severity::Warning, at(40));
   EXPECT_EQ(levelAt(W1, 45), DiagnosticsEngine::Warning);
+}
+
+TEST_F(PositionalMappingTest, LateRegionStopsAtTheFrontier) {
+  // A pragma lexed while the region [10, 30] was token-cached, then a later
+  // construct's region, then the cached region parsed late.
+  Diags.setSeverity(W2, diag::Severity::Error, at(20));
+  auto Later = begin(W1, diag::Severity::Ignored, at(40));
+  end(Later, at(50));
+  auto C = begin(W1, diag::Severity::Ignored, at(12), at(30));
+  EXPECT_EQ(levelAt(W1, 22), DiagnosticsEngine::Ignored);
+  end(C, at(25), at(30));
+  EXPECT_EQ(levelAt(W1, 15), DiagnosticsEngine::Ignored);
+  EXPECT_EQ(levelAt(W1, 22), DiagnosticsEngine::Ignored);
+  EXPECT_EQ(levelAt(W2, 22), DiagnosticsEngine::Error);
+  EXPECT_EQ(levelAt(W1, 27), DiagnosticsEngine::Warning);
+  EXPECT_EQ(levelAt(W1, 35), DiagnosticsEngine::Warning);
+  EXPECT_EQ(levelAt(W1, 45), DiagnosticsEngine::Ignored);
+  EXPECT_EQ(levelAt(W1, 55), DiagnosticsEngine::Warning);
+}
+
+TEST_F(PositionalMappingTest, LateRegionLeavesLaterExpansions) {
+  auto Later = begin(W1, diag::Severity::Ignored, at(35));
+  SourceLocation InLater = expansionAt(40);
+  EXPECT_EQ(levelAt(W1, InLater), DiagnosticsEngine::Ignored);
+  end(Later, at(45));
+  SourceLocation InRegion = expansionAt(20);
+  EXPECT_EQ(levelAt(W1, InRegion), DiagnosticsEngine::Warning);
+  auto C = begin(W1, diag::Severity::Ignored, at(10), at(30));
+  end(C, at(25), at(30));
+  EXPECT_EQ(levelAt(W1, InRegion), DiagnosticsEngine::Ignored);
+  EXPECT_EQ(levelAt(W1, InLater), DiagnosticsEngine::Ignored);
+  EXPECT_EQ(levelAt(W1, 47), DiagnosticsEngine::Warning);
 }
 
 TEST_F(PositionalMappingTest, KeepsAPragmaMappingAtTheEnd) {

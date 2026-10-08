@@ -24,6 +24,7 @@
 #include "clang/Basic/TokenKinds.h"
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
@@ -47,6 +48,11 @@
 #include <vector>
 
 using namespace clang;
+
+#define DEBUG_TYPE "diagnostic"
+
+STATISTIC(NumReplacedDiagStates,
+          "Number of diagnostic states created by positional replacements");
 
 const StreamingDiagnostic &clang::operator<<(const StreamingDiagnostic &DB,
                                              DiagNullabilityKind nullability) {
@@ -238,13 +244,27 @@ void DiagnosticsEngine::DiagStateMap::refreshEntryStates(
 }
 
 void DiagnosticsEngine::DiagStateMap::replaceStatesAfter(
-    SourceManager &SrcMgr, SourceLocation Loc,
+    SourceManager &SrcMgr, SourceLocation Loc, SourceLocation Frontier,
     llvm::function_ref<DiagState *(DiagState *)> Replace) {
+  FileBounds Bounds;
+  if (Frontier.isValid()) {
+    if (!SrcMgr.isBeforeInTranslationUnit(Loc, Frontier))
+      return;
+    for (FileIDAndOffset D = SrcMgr.getDecomposedLoc(Frontier);;
+         D = SrcMgr.getDecomposedIncludedLoc(D.first)) {
+      if (auto It = Files.find(D.first); It != Files.end())
+        Bounds[&It->second] = D.second;
+      if (D.first.isInvalid())
+        break;
+    }
+  }
   FileIDAndOffset Decomp = SrcMgr.getDecomposedLoc(Loc);
   unsigned Offset = Decomp.second;
   File *From = nullptr;
   for (File *F = getFile(SrcMgr, Decomp.first); F;
        From = F, Offset = F->ParentOffset, F = F->Parent) {
+    auto Bound = Bounds.find(F);
+    unsigned End = Bound != Bounds.end() ? Bound->second : ~0u;
     // In an enclosing file, the transition at From's offset is the state
     // after From, and a file included at that offset is not ordered after
     // From.
@@ -252,23 +272,38 @@ void DiagnosticsEngine::DiagStateMap::replaceStatesAfter(
         F->StateTransitions, [&](const DiagStatePoint &P) {
           return From ? P.Offset < Offset : P.Offset <= Offset;
         });
-    for (; Point != F->StateTransitions.end(); ++Point)
+    for (; Point != F->StateTransitions.end() && Point->Offset <= End; ++Point)
       Point->State = Replace(Point->State);
     auto Child = llvm::partition_point(F->Children, [&](const File *C) {
       return From ? C->ParentOffset <= Offset : C->ParentOffset < Offset;
     });
-    for (; Child != F->Children.end(); ++Child)
-      replaceFileStates(**Child, Replace);
+    for (; Child != F->Children.end() && (*Child)->ParentOffset <= End; ++Child)
+      replaceFileStates(**Child, Replace, Bounds);
+    // The frontier lies in F, so the later states of the enclosing files
+    // are beyond it.
+    if (Bound != Bounds.end())
+      break;
   }
-  CurDiagState = Replace(CurDiagState);
+  if (Frontier.isInvalid() || CurDiagStateLoc.isInvalid() ||
+      !SrcMgr.isBeforeInTranslationUnit(Frontier, CurDiagStateLoc))
+    CurDiagState = Replace(CurDiagState);
 }
 
 void DiagnosticsEngine::DiagStateMap::replaceFileStates(
-    File &F, llvm::function_ref<DiagState *(DiagState *)> Replace) const {
-  for (DiagStatePoint &Point : F.StateTransitions)
+    File &F, llvm::function_ref<DiagState *(DiagState *)> Replace,
+    const FileBounds &Bounds) const {
+  auto Bound = Bounds.find(&F);
+  unsigned End = Bound != Bounds.end() ? Bound->second : ~0u;
+  for (DiagStatePoint &Point : F.StateTransitions) {
+    if (Point.Offset > End)
+      break;
     Point.State = Replace(Point.State);
-  for (File *Child : F.Children)
-    replaceFileStates(*Child, Replace);
+  }
+  for (File *Child : F.Children) {
+    if (Child->ParentOffset > End)
+      break;
+    replaceFileStates(*Child, Replace, Bounds);
+  }
 }
 
 DiagnosticsEngine::DiagState *
@@ -501,7 +536,8 @@ DiagnosticsEngine::DiagState *DiagnosticsEngine::copyDiagStateWith(
 }
 
 void DiagnosticsEngine::replaceDiagnosticMappingsAt(
-    ArrayRef<DiagnosticMappingChange> Changes, SourceLocation Loc) {
+    ArrayRef<DiagnosticMappingChange> Changes, SourceLocation Loc,
+    SourceLocation Frontier) {
   assert(Loc.isValid() && SourceMgr && "positional mapping needs a location");
   // Each state with the changes that apply to it, so a state shared by
   // several points stays shared.
@@ -517,6 +553,7 @@ void DiagnosticsEngine::replaceDiagnosticMappingsAt(
       if (!New) {
         DiagStates.push_back(*S);
         New = &DiagStates.back();
+        ++NumReplacedDiagStates;
       }
       New->setMapping(C.Diag, C.To);
     }
@@ -536,7 +573,7 @@ void DiagnosticsEngine::replaceDiagnosticMappingsAt(
     // The new state already has the changes.
     Replaced.try_emplace(State, State);
   }
-  DiagStatesByLoc.replaceStatesAfter(*SourceMgr, Loc, Replace);
+  DiagStatesByLoc.replaceStatesAfter(*SourceMgr, Loc, Frontier, Replace);
   for (DiagState *&Pushed : DiagStateOnPushStack)
     Pushed = Replace(Pushed);
 }

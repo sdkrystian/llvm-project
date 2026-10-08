@@ -422,10 +422,21 @@ Both go through ``DiagnosticsEngine::replaceDiagnosticMappingsAt``, which
 replaces a mapping only where it is still the one replaced: in the state at
 the location, in the states a ``#pragma clang diagnostic`` lexed ahead of
 the parser recorded after it, and in the states a ``push`` saved, which a
-``pop`` can bring back.  A pragma's mapping always carries the
-no-``-Werror`` and no-``-Wfatal-errors`` flags and the framework's never does,
-so a pragma inside the dominion that maps a suppressed rule keeps its effect
-after the dominion.  A guard whose attributes suppress nothing new (an enclosing
+``pop`` can bring back.  The second set is bounded by the parser's
+frontier, the last position its tokens were lexed to: unbounded in an
+in-order parse, where every state recorded after the location was lexed
+ahead, and, while a token-cached body, default argument, member
+initializer, or delayed template is parsed late, that region's last token
+(``Parser::LateParsedRegionEnd``).  The region's tokens were lexed when it
+was cached, so a pragma among them is one the parser lexed ahead: a
+dominion that begins in the region covers it from the begin on, before the
+check sites inside are judged at parse time.  The states recorded beyond
+the region belong to the constructs that follow it, which were parsed
+before it, and keep their dominions.
+A pragma's mapping always carries the no-``-Werror`` and
+no-``-Wfatal-errors`` flags and the framework's never does, so a pragma
+inside the dominion that maps a suppressed rule keeps its effect after the
+dominion.  A guard whose attributes suppress nothing new (an enclosing
 construct already suppresses the rule) records nothing, so the doubled
 guards of a block-scope declaration cost nothing.  Because the state is
 keyed on positions, a token-cached body, default argument, or member

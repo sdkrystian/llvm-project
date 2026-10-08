@@ -107,20 +107,24 @@ public:
   /// Record into \p Record that the dominion of the [[profiles::suppress]]
   /// attributes among \p Attrs begins at \p Begin: every diagnostic of each
   /// attribute's rule group (the profile's group when it names no rule) is
-  /// mapped to ignored from the expansion site of \p Begin on. See
+  /// mapped to ignored from the expansion site of \p Begin on. A valid
+  /// \p Frontier, the last token of the token-cached region being parsed
+  /// late, bounds the states recorded ahead that the mapping reaches. See
   /// ProfilesFrameworkInternals.rst, "Enforcement and Suppression State".
   void beginSuppression(const ParsedAttributesView &Attrs, SourceLocation Begin,
-                        SuppressionRecord &Record);
+                        SourceLocation Frontier, SuppressionRecord &Record);
   /// The same for the ProfilesSuppressAttrs attached to \p D (a template's
   /// templated declaration); an invalid \p Begin starts the dominion at the
   /// attributes themselves.
   void beginSuppression(const Decl *D, SourceLocation Begin,
-                        SuppressionRecord &Record);
+                        SourceLocation Frontier, SuppressionRecord &Record);
   /// Record that \p Record's dominion ends at \p End: each mapping its begin
   /// replaced is restored from there on, except where a pragma inside the
   /// dominion remapped the diagnostic. An \p End not after the begin
-  /// (nothing was consumed) ends the dominion where it began.
-  void endSuppression(SuppressionRecord &Record, SourceLocation End);
+  /// (nothing was consumed) ends the dominion where it began. \p Frontier
+  /// is as for beginSuppression.
+  void endSuppression(SuppressionRecord &Record, SourceLocation End,
+                      SourceLocation Frontier);
 
   /// P3589R2 [decl.attr.enforce]p5: a declaration and its redeclarations must
   /// appear in the dominions of mutually compatible profiles. Called from

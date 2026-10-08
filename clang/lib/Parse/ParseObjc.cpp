@@ -3276,6 +3276,7 @@ void Parser::ParseLexedObjCMethodDefs(LexedMethod &LM, bool parseMethod) {
   SourceLocation OrigLoc = Tok.getLocation();
 
   assert(!LM.Toks.empty() && "ParseLexedObjCMethodDef - Empty body!");
+  LateParsedRegion Region(*this, LM.Toks);
   // Store an artificial EOF token to ensure that we don't run off the end of
   // the method's body when we come to parse it.
   Token Eof;
