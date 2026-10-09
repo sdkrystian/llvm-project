@@ -1528,6 +1528,19 @@ Deliberate Strictnesses
   of an object other than the current one (``o.p``, ``q->p``) -- is judged by
   its form alone at every read, write, and destroy: a ``construct_at`` into
   it legalizes no later access.
+- A range-for over an ``[[uninit]]`` array or ``std::array`` binds the
+  range to its implicit ``__range`` reference, an unmarked binding, so before
+  the array is filled the loop is rejected there whatever its body does; a
+  marked loop variable (``for (int &x [[ref_to_uninit]] : a)``) is rejected
+  there and again as a marked binding of an element.  A fill of the whole
+  array before the loop is the remedy.
+- In a constructor, a binding of, or a destroy through, a member reached by a
+  pointer-to-data-member step on the current object (``&(this->*pm).d``) is
+  judged by its form, so it is rejected even after the member is constructed,
+  while a read through the step is flow-judged.
+- ``std::construct_at(&r[1], v)`` on a ``std::array`` that is not yet filled is
+  rejected as a member call (``operator[]``) on uninitialized storage and
+  again as a marked binding to initialized memory.
 
 Missed Diagnostics
 ------------------
