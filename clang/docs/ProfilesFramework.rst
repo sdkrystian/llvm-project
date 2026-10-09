@@ -657,8 +657,10 @@ function (even one whose parameter is marked ``[[ref_to_uninit]]``), binding a
 reference to the member, calling a member function, or letting ``this`` escape
 does not count as initializing ``m``; suppress the rule where such a flow is
 intended.  A ``this``-capturing lambda might run immediately, so member reads in
-its body count at the point the lambda is created (and writes there initialize
-nothing -- the same strict policy).  For a *local* variable the analyses instead
+its body count at the point the lambda is created, and writes there initialize
+nothing (the same strict policy); a generic lambda's body counts in each call
+operator instantiated by the end of the constructor body.  For a *local*
+variable the analyses instead
 treat any escape as an assignment (see :ref:`profiles-init-known-gaps`).  A
 local copied or moved from a tracked local (``Agg b = a;``,
 ``Agg b = std::move(a);``) is tracked too: the copy's members start in the

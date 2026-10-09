@@ -4428,7 +4428,17 @@ static void appendThisCaptureLambdaReadEvents(
     return;
   }
   SmallVector<const Stmt *, 16> Stack(1, LE->getBody());
+  // A generic lambda's body is a pattern whose dependent reads carry no
+  // load: its call operators instantiated so far are scanned too.
+  auto PushSpecializations = [&](const LambdaExpr *L) {
+    if (const FunctionTemplateDecl *FTD = L->getDependentCallOperator())
+      for (const FunctionDecl *Spec : FTD->specializations())
+        Stack.push_back(Spec->getBody());
+  };
+  PushSpecializations(LE);
   llvm::SmallPtrSet<const Stmt *, 16> Visited;
+  // A read the pattern and its instantiations share is one read.
+  llvm::DenseSet<std::pair<SourceLocation, SourceLocation>> ReadLocs;
   while (!Stack.empty()) {
     const Stmt *Cur = Stack.pop_back_val();
     if (!Cur || !Visited.insert(Cur).second)
@@ -4439,6 +4449,7 @@ static void appendThisCaptureLambdaReadEvents(
           AppendWholeObjectReads(NestedLE);
         continue;
       }
+      PushSpecializations(NestedLE);
     }
     const Expr *G = nullptr;
     if (const auto *BodyICE = dyn_cast<ImplicitCastExpr>(Cur);
@@ -4450,7 +4461,7 @@ static void appendThisCaptureLambdaReadEvents(
     else if (const auto *BodyUO = dyn_cast<UnaryOperator>(Cur);
              BodyUO && BodyUO->isIncrementDecrementOp())
       G = BodyUO->getSubExpr();
-    if (G) {
+    if (G && ReadLocs.insert({Cur->getBeginLoc(), Cur->getEndLoc()}).second) {
       TrackedStorage::Resolution R = Storage.resolve(G);
       auto Read = [&](unsigned Idx) {
         if (Storage.Entities[Idx].K ==

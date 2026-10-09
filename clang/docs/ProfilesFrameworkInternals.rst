@@ -1394,7 +1394,9 @@ Deliberate Strictnesses
   its body count at the point the lambda is created, and writes there earn
   no credit (see "Reads of Uninitialized Objects" in
   :doc:`ProfilesFramework`): a lambda that is only ever run later, after
-  the members are assigned, is rejected the same way.  A ``*this`` capture
+  the members are assigned, is rejected the same way, and so is a generic
+  one, in each of its call operators instantiated by the end of the
+  constructor body.  A ``*this`` capture
   copy-constructs the whole object at the lambda's creation, reading every
   member right there: it is rejected before every tracked member is
   assigned, and its body accesses go to the copy, not the original.
@@ -1754,11 +1756,11 @@ Missed Diagnostics
 - A ``*this`` capture in a constructor of a class with a *user-provided* copy
   constructor reads no member at the lambda's creation, although a copy of an
   object elsewhere reads its source whole whatever its copy constructor.
-- A ``this``-capturing *generic* lambda created in a constructor counts no
-  member read at its creation: its body is a template, whose reads the
-  constructor's analysis does not see
-  (``[this](auto x) { return m.y + x; }(1)`` before ``m`` is initialized is
-  accepted).
+- A ``this``-capturing *generic* lambda created in a constructor counts the
+  member reads of its call operators instantiated by the end of the
+  constructor body only: one the constructor never calls, or calls only
+  through a function template instantiated later
+  (``template <class F> void run(F f) { f(1); }``), counts none.
 - An *alias* of ``this`` in a constructor body -- a stored
   ``T *self = this;``, an init-capture ``[p = this]``, ``&*this`` -- is
   invisible to the flow engine: reads through the alias are not attributed

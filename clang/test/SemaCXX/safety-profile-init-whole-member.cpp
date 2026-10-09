@@ -156,6 +156,18 @@ struct ThisLambda {
   }
 };
 
+// A generic this-capturing lambda reads the member in its instantiated call
+// operator
+struct GenericThisLambda {
+  S s [[uninit]]; // expected-note {{member 's' declared here}}
+  int r;
+  GenericThisLambda() : r(0) {
+    auto l = [this](auto k) { return s.x + k; }; // expected-error {{member 's' is read before initialization under profile 'std::init'}}
+    r = l(1);
+    std::construct_at(&s, 1, 2);
+  }
+};
+
 // A *this capture copies every member where the lambda is created
 struct StarThisLambda {
   S s [[uninit]]; // expected-note {{member 's' declared here}}

@@ -375,6 +375,65 @@ struct LambdaImplicitThisCapture {
   }
 };
 
+// A generic lambda's member reads come from its call operators instantiated
+// by the end of the constructor body
+struct LambdaGenericRead {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  LambdaGenericRead() {
+    auto l = [this](auto x) { return m + x; }; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    m = l(1);
+  }
+};
+
+// A read instantiated for two argument types is one read
+struct LambdaGenericTwoTypes {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  LambdaGenericTwoTypes() {
+    auto l = [this](auto x) { return m + x; }; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    m = l(1) + l(2L);
+  }
+};
+
+// A deducing-this lambda is generic too
+struct LambdaGenericDeducingThis {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  LambdaGenericDeducingThis() {
+    auto l = [this](this auto &&) { return m; }; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    m = l();
+  }
+};
+
+// A generic lambda nested in a this-capturing lambda
+struct LambdaGenericNested {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  LambdaGenericNested() {
+    auto l = [this] { return [this](auto x) { return m + x; }(1); }; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    m = l();
+  }
+};
+
+// A generic lambda instantiated after the member is assigned still reads it
+// where the lambda is created
+struct LambdaGenericCalledLater {
+  int m [[uninit]]; // expected-note {{member 'm' declared here}}
+  LambdaGenericCalledLater() {
+    auto l = [this](auto x) { return m + x; }; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+    m = 1;
+    (void)l(1);
+  }
+};
+
+// A generic lambda the constructor never calls has no instantiated call
+// operator and reads nothing
+struct LambdaGenericNeverCalled {
+  int m [[uninit]];
+  LambdaGenericNeverCalled() {
+    auto l = [this](auto) { return m; }; // OK: never instantiated here
+    m = 1;
+    (void)l;
+  }
+};
+
 // An init-capture's initializer is an ordinary CFG element of the ctor and is
 // checked by the plain read arm, independent of the body scan.
 struct LambdaCaptureInitRead {
