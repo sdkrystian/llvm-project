@@ -4384,6 +4384,68 @@ static void forEachAnalyzedStmt(const Decl *D,
   }
 }
 
+/// Call \p Read with each glvalue a read in the body of the lambda \p LE
+/// loads -- an lvalue-to-rvalue conversion's operand, a compound assignment's
+/// left operand, an increment's or decrement's operand -- and the reading
+/// expression, once per source range: in the body, in the call operators of a
+/// generic lambda instantiated so far (its pattern's dependent reads carry no
+/// load), and in the nested lambdas and OpenMP regions appendAnalyzedChildren
+/// reaches, except below a nested lambda \p Skip returns true for.
+static void forEachLambdaBodyRead(
+    const LambdaExpr *LE, llvm::function_ref<bool(const LambdaExpr *)> Skip,
+    llvm::function_ref<void(const Expr *, const Expr *)> Read) {
+  SmallVector<const Stmt *, 16> Stack(1, LE->getBody());
+  auto PushSpecializations = [&](const LambdaExpr *L) {
+    if (const FunctionTemplateDecl *FTD = L->getDependentCallOperator())
+      for (const FunctionDecl *Spec : FTD->specializations())
+        Stack.push_back(Spec->getBody());
+  };
+  PushSpecializations(LE);
+  llvm::SmallPtrSet<const Stmt *, 16> Visited;
+  llvm::DenseSet<std::pair<SourceLocation, SourceLocation>> ReadRanges;
+  while (!Stack.empty()) {
+    const Stmt *Cur = Stack.pop_back_val();
+    if (!Cur || !Visited.insert(Cur).second)
+      continue;
+    if (const auto *NestedLE = dyn_cast<LambdaExpr>(Cur)) {
+      if (Skip(NestedLE))
+        continue;
+      PushSpecializations(NestedLE);
+    }
+    const Expr *G = nullptr;
+    if (const auto *BodyICE = dyn_cast<ImplicitCastExpr>(Cur);
+        BodyICE && BodyICE->getCastKind() == CK_LValueToRValue)
+      G = BodyICE->getSubExpr();
+    else if (const auto *BodyBO = dyn_cast<BinaryOperator>(Cur);
+             BodyBO && BodyBO->isCompoundAssignmentOp())
+      G = BodyBO->getLHS();
+    else if (const auto *BodyUO = dyn_cast<UnaryOperator>(Cur);
+             BodyUO && BodyUO->isIncrementDecrementOp())
+      G = BodyUO->getSubExpr();
+    if (G && ReadRanges.insert({Cur->getBeginLoc(), Cur->getEndLoc()}).second)
+      Read(G, cast<Expr>(Cur));
+    appendAnalyzedChildren(Cur, Stack, /*EnterLambdaBodies=*/true);
+  }
+}
+
+/// Append a Read at \p At of each entity among \p Entities the read of \p G
+/// resolves to (TrackedStorage::resolve): the entity it names, or each one a
+/// pointer-to-data-member step may access.
+static void appendResolvedReads(const TrackedStorage &Storage, const Expr *G,
+                                const Expr *At,
+                                llvm::function_ref<bool(unsigned)> Entities,
+                                SmallVectorImpl<DefAssignEvent> &BlockEvents) {
+  TrackedStorage::Resolution R = Storage.resolve(G);
+  auto Read = [&](unsigned Idx) {
+    if (Storage.Entities[Idx].TrackReads && Entities(Idx))
+      BlockEvents.push_back({DefAssignEventKind::Read, Idx, At});
+  };
+  if (R.Entity)
+    Read(*R.Entity);
+  for (unsigned Idx = R.Opaque.first; Idx != R.Opaque.second; ++Idx)
+    Read(Idx);
+}
+
 // The lambda body is a separate function and never appears in the enclosing
 // constructor's CFG, but a this-capturing lambda can read members the moment it
 // is created (it may be invoked immediately). A *this capture copy-constructs
@@ -4393,15 +4455,15 @@ static void forEachAnalyzedStmt(const Decl *D,
 // per tracked member at the LambdaExpr, and never body-scan -- body accesses go
 // to the *copy*, so attributing them to the original would be wrong either way.
 // A plain this capture instead reads nothing at creation: treat every member
-// read in its body -- and in nested lambda bodies and OpenMP regions, reached
-// through appendAnalyzedChildren -- as a Read at the LambdaExpr's program
-// point, except that a nested lambda capturing *this gets the whole-object
-// reads at its own LambdaExpr (its creation runs when the outer body does,
-// which may be immediately) and is not descended into. Writes in a body earn no
-// assignment credit (the lambda may never run), consistent with the
-// intersection semantics; a lambda stored now and called only after the member
-// is assigned is still flagged (accepted imprecision). Capture initializers are
-// ordinary CFG elements, already handled by the caller's other arms.
+// read in its body (forEachLambdaBodyRead) as a Read at the LambdaExpr's
+// program point, except that a nested lambda capturing *this gets the
+// whole-object reads at its own LambdaExpr (its creation runs when the outer
+// body does, which may be immediately) and is not descended into. Writes in a
+// body earn no assignment credit (the lambda may never run), consistent with
+// the intersection semantics; a lambda stored now and called only after the
+// member is assigned is still flagged (accepted imprecision). Capture
+// initializers are ordinary CFG elements, already handled by the caller's
+// other arms.
 static void appendThisCaptureLambdaReadEvents(
     const LambdaExpr *LE, const TrackedStorage &Storage,
     bool StarThisCopyTrusted, SmallVectorImpl<DefAssignEvent> &BlockEvents) {
@@ -4427,60 +4489,86 @@ static void appendThisCaptureLambdaReadEvents(
       AppendWholeObjectReads(LE);
     return;
   }
-  SmallVector<const Stmt *, 16> Stack(1, LE->getBody());
-  // A generic lambda's body is a pattern whose dependent reads carry no
-  // load: its call operators instantiated so far are scanned too.
-  auto PushSpecializations = [&](const LambdaExpr *L) {
-    if (const FunctionTemplateDecl *FTD = L->getDependentCallOperator())
-      for (const FunctionDecl *Spec : FTD->specializations())
-        Stack.push_back(Spec->getBody());
-  };
-  PushSpecializations(LE);
-  llvm::SmallPtrSet<const Stmt *, 16> Visited;
-  // A read the pattern and its instantiations share is one read.
-  llvm::DenseSet<std::pair<SourceLocation, SourceLocation>> ReadLocs;
-  while (!Stack.empty()) {
-    const Stmt *Cur = Stack.pop_back_val();
-    if (!Cur || !Visited.insert(Cur).second)
-      continue;
-    if (const auto *NestedLE = dyn_cast<LambdaExpr>(Cur)) {
-      if (GetThisCaptureKind(NestedLE) == LCK_StarThis) {
+  forEachLambdaBodyRead(
+      LE,
+      [&](const LambdaExpr *Nested) {
+        if (GetThisCaptureKind(Nested) != LCK_StarThis)
+          return false;
         if (!StarThisCopyTrusted)
-          AppendWholeObjectReads(NestedLE);
-        continue;
-      }
-      PushSpecializations(NestedLE);
-    }
-    const Expr *G = nullptr;
-    if (const auto *BodyICE = dyn_cast<ImplicitCastExpr>(Cur);
-        BodyICE && BodyICE->getCastKind() == CK_LValueToRValue)
-      G = BodyICE->getSubExpr();
-    else if (const auto *BodyBO = dyn_cast<BinaryOperator>(Cur);
-             BodyBO && BodyBO->isCompoundAssignmentOp())
-      G = BodyBO->getLHS();
-    else if (const auto *BodyUO = dyn_cast<UnaryOperator>(Cur);
-             BodyUO && BodyUO->isIncrementDecrementOp())
-      G = BodyUO->getSubExpr();
-    if (G && ReadLocs.insert({Cur->getBeginLoc(), Cur->getEndLoc()}).second) {
-      TrackedStorage::Resolution R = Storage.resolve(G);
-      auto Read = [&](unsigned Idx) {
-        if (Storage.Entities[Idx].K ==
-                TrackedEntity::Kind::CurrentObjectMember &&
-            Storage.Entities[Idx].TrackReads)
-          BlockEvents.push_back(
-              {DefAssignEventKind::Read, Idx, cast<Expr>(Cur)});
-      };
-      if (R.Entity)
-        Read(*R.Entity);
-      for (unsigned Idx = R.Opaque.first; Idx != R.Opaque.second; ++Idx)
-        Read(Idx);
-    }
-    appendAnalyzedChildren(Cur, Stack, /*EnterLambdaBodies=*/true);
-  }
+          AppendWholeObjectReads(Nested);
+        return true;
+      },
+      [&](const Expr *G, const Expr *At) {
+        appendResolvedReads(
+            Storage, G, At,
+            [&](unsigned Idx) {
+              return Storage.Entities[Idx].K ==
+                     TrackedEntity::Kind::CurrentObjectMember;
+            },
+            BlockEvents);
+      });
 }
 
 static const DeclRefExpr *getLocalCopySourceRef(const VarDecl *V,
                                                 BasePath &CastPath);
+
+/// A by-copy capture of a read-tracked local copies it into the closure where
+/// the lambda \p LE is created, as a tracked copy's declaration copies its
+/// source, and so does an init-capture copying one of its own class: a member
+/// read of the copy in the body (forEachLambdaBodyRead) is a Read of the
+/// local's member at the LambdaExpr; writes in the body earn no credit, as for
+/// a this capture.
+static void
+appendByCopyCaptureReadEvents(const LambdaExpr *LE,
+                              const TrackedStorage &Storage,
+                              SmallVectorImpl<DefAssignEvent> &BlockEvents) {
+  SmallVector<std::pair<unsigned, unsigned>, 2> Copied;
+  SmallVector<std::pair<const VarDecl *, const VarDecl *>, 2> InitCopies;
+  for (const LambdaCapture &C : LE->captures()) {
+    if (!C.capturesVariable() || C.getCaptureKind() != LCK_ByCopy)
+      continue;
+    const auto *V = dyn_cast<VarDecl>(C.getCapturedVar());
+    if (!V)
+      continue;
+    if (V->isInitCapture()) {
+      BasePath CastPath;
+      const DeclRefExpr *SrcRef = getLocalCopySourceRef(V, CastPath);
+      const auto *Src = SrcRef ? dyn_cast<VarDecl>(SrcRef->getDecl()) : nullptr;
+      if (Src && CastPath.empty() && Storage.LocalRange.count(Src))
+        InitCopies.push_back({V, Src});
+      continue;
+    }
+    if (auto It = Storage.LocalRange.find(V); It != Storage.LocalRange.end())
+      Copied.push_back(It->second);
+  }
+  if (Copied.empty() && InitCopies.empty())
+    return;
+  forEachLambdaBodyRead(
+      LE, [](const LambdaExpr *) { return false; },
+      [&](const Expr *G, const Expr *At) {
+        appendResolvedReads(
+            Storage, G, At,
+            [&](unsigned Idx) {
+              return llvm::any_of(Copied, [&](std::pair<unsigned, unsigned> R) {
+                return Idx >= R.first && Idx < R.second;
+              });
+            },
+            BlockEvents);
+        std::optional<SemaProfiles::FlowLeafShape> Shape =
+            SemaProfiles::flowLeafShape(G);
+        for (auto [Capture, Src] : InitCopies) {
+          if (!Shape || Shape->Local != Capture)
+            continue;
+          if (std::optional<SemaProfiles::FlowMemberMatch> M =
+                  Storage.Profiles.matchFlowTrackedMember(
+                      Storage.LocalClass.lookup(Src), *Shape)) {
+            unsigned Idx = Storage.LocalRange.lookup(Src).first + M->Index;
+            if (Storage.Entities[Idx].TrackReads)
+              BlockEvents.push_back({DefAssignEventKind::Read, Idx, At});
+          }
+        }
+      });
+}
 
 /// The statements of a constructor body the engine takes current-object events
 /// from (forEachAnalyzedStmt): the body plus each *written* member/base
@@ -4614,6 +4702,21 @@ static void extractStdInitEvents(
               if (const DeclRefExpr *Base = getLocalCopySourceRef(V, Unused))
                 Benign.insert(Base);
             }
+      } else if (const auto *LE = dyn_cast<LambdaExpr>(St)) {
+        // A by-copy capture of a tracked aggregate copies it
+        // (appendByCopyCaptureReadEvents).
+        for (const Expr *Init : LE->capture_inits())
+          if (const auto *CCE = dyn_cast_or_null<CXXConstructExpr>(
+                  Init ? Init->IgnoreImplicit() : nullptr);
+              CCE && CCE->getNumArgs() >= 1 &&
+              CCE->getConstructor()->isCopyOrMoveConstructor()) {
+            BasePath Unused;
+            if (const auto *Src = dyn_cast<DeclRefExpr>(
+                    SemaProfiles::peelBaseCasts(CCE->getArg(0), Unused));
+                Src &&
+                Storage.LocalRange.count(dyn_cast<VarDecl>(Src->getDecl())))
+              Benign.insert(Src);
+          }
       }
     }
   }
@@ -5779,6 +5882,7 @@ static void extractStdInitEvents(
         if (Ctor)
           appendThisCaptureLambdaReadEvents(LE, Storage, StarThisCopyTrusted,
                                             BlockEvents);
+        appendByCopyCaptureReadEvents(LE, Storage, BlockEvents);
         // An init-capture is a variable binding; a by-reference capture
         // binds an unmarked reference to the variable and hands out a
         // mutable alias of a marked pointer; a by-copy capture copies a

@@ -666,7 +666,10 @@ local copied or moved from a tracked local (``Agg b = a;``,
 ``Agg b = std::move(a);``) is tracked too: the copy's members start in the
 source's per-member state at the copy point; a member of class type is
 copy-constructed from the source's, which must then be initialized on every
-path, and starts initialized.  A by-value *parameter* of such a
+path, and starts initialized.  A lambda's by-copy capture of one
+(``[a]``, ``[=]``, ``[b = a]``) is such a copy, made where the lambda is
+created: a member read of it in the body counts there, as for a ``this``
+capture.  A by-value *parameter* of such a
 class that declares no default argument is likewise a copy, of the caller's
 argument, so its marked members are tracked from an unassigned start: a read
 before a local assignment (or an escape of the parameter) is rejected even if

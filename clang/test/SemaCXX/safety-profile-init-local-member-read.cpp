@@ -36,7 +36,7 @@ int leading_unrelated_error = undeclared_identifier;
 #endif
 
 struct Agg {
-  int m [[uninit]]; // expected-note 24 {{member 'm' declared here}}
+  int m [[uninit]]; // expected-note 29 {{member 'm' declared here}}
 };
 void take_ref(Agg &);
 // The pointee is uninitialized memory, so the parameter carries the marker
@@ -690,6 +690,45 @@ int test_copy_escape() {
   Agg b = a;
   take_ref(b);
   return b.m; // OK: escaped
+}
+
+// A by-copy lambda capture copies the local where the lambda is created, so
+// a member read of the copy in the body is a read of the local's member there
+int test_capture_copy_read() {
+  Agg a;
+  return [a] { return a.m; }(); // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+}
+
+int test_capture_copy_after_source_assigned() {
+  Agg a;
+  a.m = 5;
+  return [a] { return a.m; }(); // OK
+}
+
+// An implicit by-copy capture and an init-capture copy are copies too
+int test_capture_copy_implicit() {
+  Agg a;
+  return [=] { return a.m; }(); // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+}
+
+int test_capture_copy_init_capture() {
+  Agg a;
+  return [b = a] { return b.m; }(); // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+}
+
+// The capture consumes the source ref without escaping it
+int test_capture_copy_keeps_source_tracked() {
+  Agg a;
+  auto l = [a] { return 0; };
+  (void)l;
+  return a.m; // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
+}
+
+// A write in the body initializes nothing for a read there: the read counts
+// where the lambda is created
+int test_capture_copy_body_write() {
+  Agg a;
+  return [a]() mutable { a.m = 1; return a.m; }(); // expected-error {{member 'm' is read before initialization under profile 'std::init'}}
 }
 
 // The destruction mirror of escape crediting: a [[now_uninit]] call kills

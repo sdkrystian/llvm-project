@@ -194,7 +194,7 @@ struct Methods {
 
 // An aggregate local's member is tracked the same way
 struct Holder {
-  S inner [[uninit]];
+  S inner [[uninit]]; // expected-note {{member 'inner' declared here}}
   int k = 0;
 };
 int local_read_before() {
@@ -206,6 +206,13 @@ int local_construct_then_read() {
   Holder h;
   std::construct_at(&h.inner, 1, 2);
   return h.inner.x; // OK
+}
+
+// A by-copy capture copies the local where the lambda is created, so a read
+// below the member in the body reads it there
+int local_capture_copy_read() {
+  Holder h;
+  return [h] { return h.inner.x; }(); // expected-error {{member 'inner' is read before initialization under profile 'std::init'}}
 }
 
 // An escape of the local trusts later accesses below the member

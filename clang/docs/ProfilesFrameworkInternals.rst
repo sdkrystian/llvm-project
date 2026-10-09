@@ -1396,7 +1396,10 @@ Deliberate Strictnesses
   :doc:`ProfilesFramework`): a lambda that is only ever run later, after
   the members are assigned, is rejected the same way, and so is a generic
   one, in each of its call operators instantiated by the end of the
-  constructor body.  A ``*this`` capture
+  constructor body.  A by-copy capture of a tracked local (``[a]``,
+  ``[b = a]``) copies it at the lambda's creation, so the member reads of
+  the copy in the body count there too, and a write in the body earns the
+  copy no credit for them.  A ``*this`` capture
   copy-constructs the whole object at the lambda's creation, reading every
   member right there: it is rejected before every tracked member is
   assigned, and its body accesses go to the copy, not the original.
@@ -1665,7 +1668,8 @@ Missed Diagnostics
   accesses through anonymous aggregates and below a class or array member
   whose type holds no pointer or reference; an access through a member that
   does hold one is an escape, as is one below a pointer-to-data-member step,
-  ``(a.*pm).x``), so a read after the escape is accepted.  The
+  ``(a.*pm).x``; nor is the source of a tracked copy or of a by-copy
+  capture), so a read after the escape is accepted.  The
   paper credits a callee's initialization only through a function marked
   ``[[now_init]]`` (P4222R2 §6).
 - A destroy of *unknown* storage is accepted (``destroy_uninit`` fires only
@@ -1747,8 +1751,8 @@ Missed Diagnostics
   copy does not inherit initialization -- it copies indeterminate bits -- but
   the source's per-member state is unknown, so reads of such members are
   trusted (a missed diagnostic, never a false positive).  Copies of tracked
-  locals and by-value parameters *are* tracked (see "Reads of Uninitialized
-  Objects" in :doc:`ProfilesFramework`).
+  locals and by-value parameters, by-copy captures included, *are* tracked
+  (see "Reads of Uninitialized Objects" in :doc:`ProfilesFramework`).
 - A by-value parameter with a default argument is not tracked (see the
   by-value entry under Deliberate Strictnesses), so an *explicit* call
   passing an uninitialized copy into such a parameter is not detected --
