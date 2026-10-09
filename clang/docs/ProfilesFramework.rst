@@ -1437,10 +1437,10 @@ In a template, the declaration rules, the constructor rules, and the
 flow-based rules fire per instantiation; ``uninit_read`` (through a
 marker), ``uninit_write``, and the binding rule fire at the definition
 when their operands are not flow-tracked and do not depend on the
-template's parameters, and again at each instantiation that rebuilds the
-expression.  A binding, read, write, or destroy of flow-tracked storage is
-judged at instantiation only, whatever its operands depend on; a
-never-instantiated template's are not diagnosed.
+template's parameters, and ``uninit_write`` and the binding rule again at
+each instantiation that rebuilds the expression.  A binding, read, write, or
+destroy of flow-tracked storage is judged at instantiation only, whatever its
+operands depend on; a never-instantiated template's are not diagnosed.
 
 
 Limitations

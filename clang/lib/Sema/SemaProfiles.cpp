@@ -5294,6 +5294,14 @@ void SemaProfiles::checkInitProfileReadThrough(SourceLocation Loc,
                                   diag::err_init_uninit_read_through, Loc,
                                   /*D=*/nullptr, /*PostParse=*/AfterFlowPass))
     return;
+  // A read of a non-dependent operand is judged once, in the template
+  // pattern, also where an instantiation rebuilds it.
+  if (!AfterFlowPass) {
+    if (SemaRef.CurContext->isDependentContext())
+      PatternReadSites.insert(Loc);
+    else if (SemaRef.inTemplateInstantiation() && PatternReadSites.count(Loc))
+      return;
+  }
   if (!isUninitializedOrMixed(glvalueDenotesUninitStorage(
           getASTContext(), Glvalue,
           UninitReadAccess

@@ -23,6 +23,7 @@
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Sema/SemaBase.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
@@ -1302,6 +1303,11 @@ private:
   /// (recordDeferredInitSite).
   llvm::DenseMap<const Decl *, SmallVector<DeferredInitSite, 4>>
       DeferredInitSites;
+
+  /// The locations of the reads checkInitProfileReadThrough judged by form in
+  /// a template pattern: an instantiation that rebuilds one does not judge it
+  /// again.
+  llvm::DenseSet<SourceLocation> PatternReadSites;
 
   /// Per complete class, its flow-tracked member table (flowTrackedMembers).
   mutable llvm::DenseMap<const CXXRecordDecl *,

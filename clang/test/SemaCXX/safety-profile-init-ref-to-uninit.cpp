@@ -1788,17 +1788,24 @@ void template_read_never_instantiated(int *p [[ref_to_uninit]]) {
   (void)y;
 }
 
-// An all-global read is not flow-tracked: the definition-time fire, plus a
-// repeat when the initialization of the local y is rebuilt at instantiation.
+// An all-global read is not flow-tracked: it is judged once, at the
+// definition, although the instantiation rebuilds the initialization of y.
 // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
 [[profiles::suppress(std::init, rule: "static_marker")]] [[uninit]] Pair g_uninit_pair;
 
 template <typename T>
 void template_global_read_bad() {
-  int y = g_uninit_pair.x; // expected-error 2 {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  int y = g_uninit_pair.x; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
   (void)y;
 }
-template void template_global_read_bad<int>(); // expected-note {{in instantiation of function template specialization 'template_global_read_bad<int>' requested here}}
+template void template_global_read_bad<int>();
+
+// A read through a global marked pointer in a template is judged once too
+extern int *g_marked_ptr [[ref_to_uninit]];
+template <typename T> int template_global_marked_read() {
+  return *g_marked_ptr; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+template int template_global_marked_read<int>();
 
 template <typename T>
 void template_global_read_never_instantiated() {

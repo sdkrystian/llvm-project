@@ -759,7 +759,9 @@ follows:
        ``checkInitProfileReadThrough`` at the lvalue-to-rvalue chokepoint,
        plus compound-assignment and increment/decrement hooks, for a
        glvalue with no flow-tracked leaf (a rebuilt default argument or
-       initializer is skipped, as for ``ref_to_uninit``); the ReadThrough sites of
+       initializer is skipped, as for ``ref_to_uninit``, and so is a read the
+       template pattern judged, where an instantiation rebuilds it,
+       ``PatternReadSites``); the ReadThrough sites of
        ``extractStdInitEvents`` (``judgeAccessSite``, which requires
        initialization on every path) otherwise
    * - ``uninit_decl``
