@@ -869,7 +869,13 @@ source (markers count everywhere), a value *read*, and a scalar *store* (which
 differ in whether the top-level ``[[uninit]]`` marker counts and whether
 ``[[ref_to_uninit]]`` storage is trusted; the read and store presets also ignore
 a data member's ``[[uninit]]`` marker at every level, ``TrustUninitMembers``,
-outside a default member initializer, ``trustsUninitMembers``).
+outside a default member initializer, ``trustsUninitMembers``).  Storage
+reached through pointer arithmetic -- the glvalue recognizer's indirection,
+arrow, and subscript arms -- is classified by the arithmetic's pointer operand
+(``SemaProfiles::pointerArithmeticBase``), as through ``p[n]``; the pointer
+recognizer leaves the arithmetic's value unknown, so a binding of an end
+iterator is unclassified.  The by-form destroy judgment skips an element of
+what a pointer or handle refers to (``designatesReferentElement``).
 ``defaultInitLeavesScalarIndeterminate`` answers whether a type's
 default-initialization leaves an unacknowledged scalar subobject indeterminate,
 trusting user-provided default constructors -- the paper's trust-the-constructor
@@ -1165,7 +1171,15 @@ skip it as they skip a rebuilt default argument or initializer
 One walk enumerates the leaves of a shape
 (``SemaProfiles::forEachTargetLeaf``) and one chain resolver interprets each
 (``SemaProfiles::flowLeafShape``, shared by ``TrackedStorage::resolve`` and the
-predicate), so no binding falls between the two.  A member entity is keyed by
+predicate), so no binding falls between the two.  Pointer arithmetic is an
+element step there but by a literal 0, and so is the indirection of a
+decayed array (``*(a + 1)`` is ``a[1]``, ``*(p + 0)`` is ``*p``, ``*a`` is
+``a[0]``); a pointer arithmetic value
+credited, destroyed, or bound to a marked target is resolved as the element
+it points to (``flowLeafShape``'s ``Pointee``), while its other bindings are
+not flow-tracked.  A destroy site drops a leaf naming an element of what a
+pointer or handle refers to (``ArgLeaf::Element``) and judges no destroy
+through an offset handle, which kills nothing.  A member entity is keyed by
 its member path: per member step, the derived-to-base path from the step's
 object to the member's class, then the member.  A class's tracked member paths
 form a table (``SemaProfiles::flowTrackedMembers``), enumerated depth-first so
@@ -1683,6 +1697,23 @@ Missed Diagnostics
   loop through a marked pointer into a hard error, with range algorithms,
   ``construct_at``, or suppression as the only remedies (``std::byte``
   buffers excepted, P4222R2 §4.6).
+- A destroy of an element of what a marked pointer or handle refers to --
+  ``std::destroy_at(&p[i])``, ``std::destroy_at(p + i)``,
+  ``std::destroy(p + 1, p + n)``, a destroy through an offset iterator -- is
+  not judged and destroys nothing tracked, as an element credit initializes
+  nothing: an element never constructed, or destroyed twice, is destroyed
+  without a diagnostic (P4222R2 §5.4's element form).
+- The value of pointer arithmetic bound to an unmarked target is not
+  classified, so that an end iterator binds in any state:
+  ``int *q = p + 1;`` through a marked ``p``, or ``int *q = a + 1;`` before an
+  ``[[uninit]]`` array is filled, is accepted, while ``&p[1]`` and ``&a[1]``
+  are rejected.
+- An offsetting Derive call over pointer arithmetic through a marked ``p``
+  (``*std::prev(p + 2)``, ``*std::next(p + 1, -1)``) reads unjudged: the
+  call's argument is an arithmetic value, which is not classified.  Without
+  the arithmetic, ``std::next(p)`` as a value is ``p``'s referent: an
+  unmarked ``int *q = std::next(p);`` is rejected before a fill and accepted
+  after it, where ``int *q = p + 1;`` is accepted in any state.
 - A ``new`` expression whose result is not bound to anything (``new int;``)
   is not checked.
 - Outside the contexts whose member reads are flow-checked (a constructor

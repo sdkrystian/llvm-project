@@ -10,12 +10,12 @@
 
 // std::init: each row spells one step into tracked storage -- a member, base,
 // element, dereference, address-of, identity call, derivation, handle
-// accessor, std::array member, conditional, pointer to data member, range-for
-// element, lambda capture, or constructor member -- and runs a read, a store, an
-// unmarked pointer binding, std::construct_at, and std::destroy_at through it,
-// each in a function of its own, before and after the storage is filled.  A
-// walker that designates other storage than its siblings changes a verdict
-// here.
+// accessor, std::array member, conditional, pointer to data member, pointer
+// arithmetic, range, range-for element, lambda capture, or constructor member
+// -- and runs a read, a store, an unmarked pointer binding, std::construct_at,
+// and std::destroy_at through it, each in a function of its own, before and
+// after the storage is filled.  A walker that designates other storage than
+// its siblings changes a verdict here.
 
 //--- sys/std_matrix.h
 // The shapes of libstdc++'s <span>, <memory>, <array>, <iterator> and
@@ -43,6 +43,7 @@ template <class T, class... A> constexpr T *construct_at(T *p, A &&...args);
 template <class T> constexpr void destroy_at(T *p);
 template <class FwdIt, class T>
 void uninitialized_fill(FwdIt first, FwdIt last, const T &x);
+template <class FwdIt> void destroy(FwdIt first, FwdIt last);
 } // namespace std
 
 namespace __gnu_cxx {
@@ -269,67 +270,89 @@ int e3_read_before(int *p [[ref_to_uninit]]) { return p[1]; } // expected-error 
 void e3_store_before(int *p [[ref_to_uninit]]) { p[1] = 1; }
 void e3_bind_before(int *p [[ref_to_uninit]]) { int *q_ = &(p[1]); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void e3_credit_before(int *p [[ref_to_uninit]]) { std::construct_at(&(p[1]), 1); }
-void e3_destroy_before(int *p [[ref_to_uninit]]) { std::destroy_at(&(p[1])); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+void e3_destroy_before(int *p [[ref_to_uninit]]) { std::destroy_at(&(p[1])); }
 int e3_read_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); return p[1]; } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void e3_store_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); p[1] = 1; }
 void e3_bind_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); int *q_ = &(p[1]); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void e3_credit_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::construct_at(&(p[1]), 1); }
-void e3_destroy_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::destroy_at(&(p[1])); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+void e3_destroy_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::destroy_at(&(p[1])); }
 // e4, element: p[0]
 int e4_read_before(int *p [[ref_to_uninit]]) { return p[0]; } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void e4_store_before(int *p [[ref_to_uninit]]) { p[0] = 1; }
 void e4_bind_before(int *p [[ref_to_uninit]]) { int *q_ = &(p[0]); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void e4_credit_before(int *p [[ref_to_uninit]]) { std::construct_at(&(p[0]), 1); }
-void e4_destroy_before(int *p [[ref_to_uninit]]) { std::destroy_at(&(p[0])); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+void e4_destroy_before(int *p [[ref_to_uninit]]) { std::destroy_at(&(p[0])); }
 int e4_read_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); return p[0]; } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void e4_store_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); p[0] = 1; }
 void e4_bind_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); int *q_ = &(p[0]); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void e4_credit_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::construct_at(&(p[0]), 1); }
-void e4_destroy_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::destroy_at(&(p[0])); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+void e4_destroy_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::destroy_at(&(p[0])); }
 // e5, element: *(a + 1)
-int e5_read_before() { int a [[uninit]] [4]; return *(a + 1); }
-void e5_store_before() { int a [[uninit]] [4]; *(a + 1) = 1; }
-void e5_bind_before() { int a [[uninit]] [4]; int *q_ = &(*(a + 1)); (void)q_; }
+int e5_read_before() { int a [[uninit]] [4]; return *(a + 1); } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory}}
+void e5_store_before() { int a [[uninit]] [4]; *(a + 1) = 1; } // expected-error {{writing an element of an '[[uninit]]' object does not initialize it}}
+void e5_bind_before() { int a [[uninit]] [4]; int *q_ = &(*(a + 1)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void e5_credit_before() { int a [[uninit]] [4]; std::construct_at(&(*(a + 1)), 1); }
-void e5_destroy_before() { int a [[uninit]] [4]; std::destroy_at(&(*(a + 1))); }
+void e5_destroy_before() { int a [[uninit]] [4]; std::destroy_at(&(*(a + 1))); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
 int e5_read_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); return *(a + 1); }
 void e5_store_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); *(a + 1) = 1; }
 void e5_bind_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); int *q_ = &(*(a + 1)); (void)q_; }
-void e5_credit_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::construct_at(&(*(a + 1)), 1); }
+void e5_credit_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::construct_at(&(*(a + 1)), 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
 void e5_destroy_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::destroy_at(&(*(a + 1))); }
 // e6, element: *(1 + a)
-int e6_read_before() { int a [[uninit]] [4]; return *(1 + a); }
-void e6_store_before() { int a [[uninit]] [4]; *(1 + a) = 1; }
-void e6_bind_before() { int a [[uninit]] [4]; int *q_ = &(*(1 + a)); (void)q_; }
+int e6_read_before() { int a [[uninit]] [4]; return *(1 + a); } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory}}
+void e6_store_before() { int a [[uninit]] [4]; *(1 + a) = 1; } // expected-error {{writing an element of an '[[uninit]]' object does not initialize it}}
+void e6_bind_before() { int a [[uninit]] [4]; int *q_ = &(*(1 + a)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void e6_credit_before() { int a [[uninit]] [4]; std::construct_at(&(*(1 + a)), 1); }
-void e6_destroy_before() { int a [[uninit]] [4]; std::destroy_at(&(*(1 + a))); }
+void e6_destroy_before() { int a [[uninit]] [4]; std::destroy_at(&(*(1 + a))); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
 int e6_read_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); return *(1 + a); }
 void e6_store_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); *(1 + a) = 1; }
 void e6_bind_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); int *q_ = &(*(1 + a)); (void)q_; }
-void e6_credit_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::construct_at(&(*(1 + a)), 1); }
+void e6_credit_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::construct_at(&(*(1 + a)), 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
 void e6_destroy_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::destroy_at(&(*(1 + a))); }
 // e7, element: *(p + 1)
-int e7_read_before(int *p [[ref_to_uninit]]) { return *(p + 1); }
+int e7_read_before(int *p [[ref_to_uninit]]) { return *(p + 1); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void e7_store_before(int *p [[ref_to_uninit]]) { *(p + 1) = 1; }
-void e7_bind_before(int *p [[ref_to_uninit]]) { int *q_ = &(*(p + 1)); (void)q_; }
+void e7_bind_before(int *p [[ref_to_uninit]]) { int *q_ = &(*(p + 1)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void e7_credit_before(int *p [[ref_to_uninit]]) { std::construct_at(&(*(p + 1)), 1); }
 void e7_destroy_before(int *p [[ref_to_uninit]]) { std::destroy_at(&(*(p + 1))); }
-int e7_read_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); return *(p + 1); }
+int e7_read_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); return *(p + 1); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void e7_store_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); *(p + 1) = 1; }
-void e7_bind_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); int *q_ = &(*(p + 1)); (void)q_; }
+void e7_bind_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); int *q_ = &(*(p + 1)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void e7_credit_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::construct_at(&(*(p + 1)), 1); }
 void e7_destroy_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::destroy_at(&(*(p + 1))); }
 // e8, element: *(2 + p - 1)
-int e8_read_before(int *p [[ref_to_uninit]]) { return *(2 + p - 1); }
+int e8_read_before(int *p [[ref_to_uninit]]) { return *(2 + p - 1); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void e8_store_before(int *p [[ref_to_uninit]]) { *(2 + p - 1) = 1; }
-void e8_bind_before(int *p [[ref_to_uninit]]) { int *q_ = &(*(2 + p - 1)); (void)q_; }
+void e8_bind_before(int *p [[ref_to_uninit]]) { int *q_ = &(*(2 + p - 1)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void e8_credit_before(int *p [[ref_to_uninit]]) { std::construct_at(&(*(2 + p - 1)), 1); }
 void e8_destroy_before(int *p [[ref_to_uninit]]) { std::destroy_at(&(*(2 + p - 1))); }
-int e8_read_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); return *(2 + p - 1); }
+int e8_read_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); return *(2 + p - 1); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void e8_store_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); *(2 + p - 1) = 1; }
-void e8_bind_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); int *q_ = &(*(2 + p - 1)); (void)q_; }
+void e8_bind_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); int *q_ = &(*(2 + p - 1)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void e8_credit_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::construct_at(&(*(2 + p - 1)), 1); }
 void e8_destroy_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::destroy_at(&(*(2 + p - 1))); }
+// e9, deref: *(p + 0)
+int e9_read_before(int *p [[ref_to_uninit]]) { return *(p + 0); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
+void e9_store_before(int *p [[ref_to_uninit]]) { *(p + 0) = 1; }
+void e9_bind_before(int *p [[ref_to_uninit]]) { int *q_ = &(*(p + 0)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
+void e9_credit_before(int *p [[ref_to_uninit]]) { std::construct_at(&(*(p + 0)), 1); }
+void e9_destroy_before(int *p [[ref_to_uninit]]) { std::destroy_at(&(*(p + 0))); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+int e9_read_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); return *(p + 0); }
+void e9_store_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); *(p + 0) = 1; }
+void e9_bind_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); int *q_ = &(*(p + 0)); (void)q_; }
+void e9_credit_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::construct_at(&(*(p + 0)), 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
+void e9_destroy_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::destroy_at(&(*(p + 0))); }
+// e10, element: *(a + 0)
+int e10_read_before() { int a [[uninit]] [4]; return *(a + 0); } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory}}
+void e10_store_before() { int a [[uninit]] [4]; *(a + 0) = 1; } // expected-error {{writing an element of an '[[uninit]]' object does not initialize it}}
+void e10_bind_before() { int a [[uninit]] [4]; int *q_ = &(*(a + 0)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
+void e10_credit_before() { int a [[uninit]] [4]; std::construct_at(&(*(a + 0)), 1); }
+void e10_destroy_before() { int a [[uninit]] [4]; std::destroy_at(&(*(a + 0))); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+int e10_read_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); return *(a + 0); }
+void e10_store_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); *(a + 0) = 1; }
+void e10_bind_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); int *q_ = &(*(a + 0)); (void)q_; }
+void e10_credit_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::construct_at(&(*(a + 0)), 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
+void e10_destroy_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::destroy_at(&(*(a + 0))); }
 // d1, deref: *p
 int d1_read_before(int *p [[ref_to_uninit]]) { return *p; } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void d1_store_before(int *p [[ref_to_uninit]]) { *p = 1; }
@@ -347,11 +370,11 @@ void d2_store_before() { int a [[uninit]] [4]; *a = 1; } // expected-error {{wri
 void d2_bind_before() { int a [[uninit]] [4]; int *q_ = &(*a); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void d2_credit_before() { int a [[uninit]] [4]; std::construct_at(&(*a), 1); }
 void d2_destroy_before() { int a [[uninit]] [4]; std::destroy_at(&(*a)); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
-int d2_read_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); return *a; } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory}}
-void d2_store_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); *a = 1; } // expected-error {{writing an element of an '[[uninit]]' object does not initialize it}}
-void d2_bind_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); int *q_ = &(*a); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
-void d2_credit_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::construct_at(&(*a), 1); }
-void d2_destroy_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::destroy_at(&(*a)); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+int d2_read_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); return *a; }
+void d2_store_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); *a = 1; }
+void d2_bind_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); int *q_ = &(*a); (void)q_; }
+void d2_credit_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::construct_at(&(*a), 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
+void d2_destroy_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::destroy_at(&(*a)); }
 // d3, deref: *u
 int d3_read_before(std::unique_ptr<int> u [[ref_to_uninit]]) { return *u; } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void d3_store_before(std::unique_ptr<int> u [[ref_to_uninit]]) { *u = 1; }
@@ -473,15 +496,15 @@ void v4_bind_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0
 void v4_credit_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::construct_at(&(*std::next(std::begin(a))), 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
 void v4_destroy_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::destroy_at(&(*std::next(std::begin(a)))); }
 // v5, derive: *(std::begin(a) + 1)
-int v5_read_before() { int a [[uninit]] [4]; return *(std::begin(a) + 1); }
-void v5_store_before() { int a [[uninit]] [4]; *(std::begin(a) + 1) = 1; }
-void v5_bind_before() { int a [[uninit]] [4]; int *q_ = &(*(std::begin(a) + 1)); (void)q_; }
+int v5_read_before() { int a [[uninit]] [4]; return *(std::begin(a) + 1); } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory}}
+void v5_store_before() { int a [[uninit]] [4]; *(std::begin(a) + 1) = 1; } // expected-error {{writing an element of an '[[uninit]]' object does not initialize it}}
+void v5_bind_before() { int a [[uninit]] [4]; int *q_ = &(*(std::begin(a) + 1)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void v5_credit_before() { int a [[uninit]] [4]; std::construct_at(&(*(std::begin(a) + 1)), 1); }
-void v5_destroy_before() { int a [[uninit]] [4]; std::destroy_at(&(*(std::begin(a) + 1))); }
+void v5_destroy_before() { int a [[uninit]] [4]; std::destroy_at(&(*(std::begin(a) + 1))); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
 int v5_read_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); return *(std::begin(a) + 1); }
 void v5_store_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); *(std::begin(a) + 1) = 1; }
 void v5_bind_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); int *q_ = &(*(std::begin(a) + 1)); (void)q_; }
-void v5_credit_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::construct_at(&(*(std::begin(a) + 1)), 1); }
+void v5_credit_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::construct_at(&(*(std::begin(a) + 1)), 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
 void v5_destroy_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::destroy_at(&(*(std::begin(a) + 1))); }
 // v6, derive: *std::to_address(p)
 int v6_read_before(int *p [[ref_to_uninit]]) { return *std::to_address(p); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
@@ -499,12 +522,12 @@ int v7_read_before(int *p [[ref_to_uninit]]) { return *std::next(p); } // expect
 void v7_store_before(int *p [[ref_to_uninit]]) { *std::next(p) = 1; }
 void v7_bind_before(int *p [[ref_to_uninit]]) { int *q_ = &(*std::next(p)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void v7_credit_before(int *p [[ref_to_uninit]]) { std::construct_at(&(*std::next(p)), 1); }
-void v7_destroy_before(int *p [[ref_to_uninit]]) { std::destroy_at(&(*std::next(p))); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+void v7_destroy_before(int *p [[ref_to_uninit]]) { std::destroy_at(&(*std::next(p))); }
 int v7_read_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); return *std::next(p); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void v7_store_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); *std::next(p) = 1; }
 void v7_bind_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); int *q_ = &(*std::next(p)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void v7_credit_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::construct_at(&(*std::next(p)), 1); }
-void v7_destroy_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::destroy_at(&(*std::next(p))); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+void v7_destroy_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::destroy_at(&(*std::next(p))); }
 // v8, derive: *std::begin(s)
 int v8_read_before(std::span<int> s [[ref_to_uninit]]) { return *std::begin(s); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void v8_store_before(std::span<int> s [[ref_to_uninit]]) { *std::begin(s) = 1; }
@@ -554,43 +577,43 @@ int h3_read_before(std::span<int> s [[ref_to_uninit]]) { return s.front(); } // 
 void h3_store_before(std::span<int> s [[ref_to_uninit]]) { s.front() = 1; }
 void h3_bind_before(std::span<int> s [[ref_to_uninit]]) { int *q_ = &(s.front()); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void h3_credit_before(std::span<int> s [[ref_to_uninit]]) { std::construct_at(&(s.front()), 1); }
-void h3_destroy_before(std::span<int> s [[ref_to_uninit]]) { std::destroy_at(&(s.front())); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+void h3_destroy_before(std::span<int> s [[ref_to_uninit]]) { std::destroy_at(&(s.front())); }
 int h3_read_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); return s.front(); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void h3_store_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); s.front() = 1; }
 void h3_bind_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); int *q_ = &(s.front()); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void h3_credit_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); std::construct_at(&(s.front()), 1); }
-void h3_destroy_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); std::destroy_at(&(s.front())); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+void h3_destroy_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); std::destroy_at(&(s.front())); }
 // h4, handle accessor: s[1]
 int h4_read_before(std::span<int> s [[ref_to_uninit]]) { return s[1]; } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void h4_store_before(std::span<int> s [[ref_to_uninit]]) { s[1] = 1; }
 void h4_bind_before(std::span<int> s [[ref_to_uninit]]) { int *q_ = &(s[1]); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void h4_credit_before(std::span<int> s [[ref_to_uninit]]) { std::construct_at(&(s[1]), 1); }
-void h4_destroy_before(std::span<int> s [[ref_to_uninit]]) { std::destroy_at(&(s[1])); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+void h4_destroy_before(std::span<int> s [[ref_to_uninit]]) { std::destroy_at(&(s[1])); }
 int h4_read_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); return s[1]; } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void h4_store_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); s[1] = 1; }
 void h4_bind_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); int *q_ = &(s[1]); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void h4_credit_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); std::construct_at(&(s[1]), 1); }
-void h4_destroy_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); std::destroy_at(&(s[1])); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+void h4_destroy_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); std::destroy_at(&(s[1])); }
 // h5, handle accessor: *(s.begin() + 1)
 int h5_read_before(std::span<int> s [[ref_to_uninit]]) { return *(s.begin() + 1); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void h5_store_before(std::span<int> s [[ref_to_uninit]]) { *(s.begin() + 1) = 1; }
 void h5_bind_before(std::span<int> s [[ref_to_uninit]]) { int *q_ = &(*(s.begin() + 1)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void h5_credit_before(std::span<int> s [[ref_to_uninit]]) { std::construct_at(&(*(s.begin() + 1)), 1); }
-void h5_destroy_before(std::span<int> s [[ref_to_uninit]]) { std::destroy_at(&(*(s.begin() + 1))); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+void h5_destroy_before(std::span<int> s [[ref_to_uninit]]) { std::destroy_at(&(*(s.begin() + 1))); }
 int h5_read_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); return *(s.begin() + 1); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void h5_store_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); *(s.begin() + 1) = 1; }
 void h5_bind_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); int *q_ = &(*(s.begin() + 1)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void h5_credit_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); std::construct_at(&(*(s.begin() + 1)), 1); }
-void h5_destroy_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); std::destroy_at(&(*(s.begin() + 1))); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+void h5_destroy_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); std::destroy_at(&(*(s.begin() + 1))); }
 // h6, handle accessor: *(s.data() + 1)
-int h6_read_before(std::span<int> s [[ref_to_uninit]]) { return *(s.data() + 1); }
+int h6_read_before(std::span<int> s [[ref_to_uninit]]) { return *(s.data() + 1); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void h6_store_before(std::span<int> s [[ref_to_uninit]]) { *(s.data() + 1) = 1; }
-void h6_bind_before(std::span<int> s [[ref_to_uninit]]) { int *q_ = &(*(s.data() + 1)); (void)q_; }
+void h6_bind_before(std::span<int> s [[ref_to_uninit]]) { int *q_ = &(*(s.data() + 1)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void h6_credit_before(std::span<int> s [[ref_to_uninit]]) { std::construct_at(&(*(s.data() + 1)), 1); }
 void h6_destroy_before(std::span<int> s [[ref_to_uninit]]) { std::destroy_at(&(*(s.data() + 1))); }
-int h6_read_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); return *(s.data() + 1); }
+int h6_read_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); return *(s.data() + 1); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void h6_store_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); *(s.data() + 1) = 1; }
-void h6_bind_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); int *q_ = &(*(s.data() + 1)); (void)q_; }
+void h6_bind_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); int *q_ = &(*(s.data() + 1)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void h6_credit_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); std::construct_at(&(*(s.data() + 1)), 1); }
 void h6_destroy_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); std::destroy_at(&(*(s.data() + 1))); }
 // h7, handle accessor: *u.get()
@@ -605,14 +628,14 @@ void h7_bind_after(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at
 void h7_credit_after(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(u.get(), 0); std::construct_at(&(*u.get()), 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
 void h7_destroy_after(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(u.get(), 0); std::destroy_at(&(*u.get())); } // expected-error {{storage already destroyed by its scope-exit destructor is destroyed again}} expected-note {{'u' is destroyed at the end of its scope}}
 // h8, handle accessor: *(u.get() + 1)
-int h8_read_before(std::unique_ptr<int> u [[ref_to_uninit]]) { return *(u.get() + 1); }
+int h8_read_before(std::unique_ptr<int> u [[ref_to_uninit]]) { return *(u.get() + 1); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void h8_store_before(std::unique_ptr<int> u [[ref_to_uninit]]) { *(u.get() + 1) = 1; }
-void h8_bind_before(std::unique_ptr<int> u [[ref_to_uninit]]) { int *q_ = &(*(u.get() + 1)); (void)q_; }
+void h8_bind_before(std::unique_ptr<int> u [[ref_to_uninit]]) { int *q_ = &(*(u.get() + 1)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void h8_credit_before(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(&(*(u.get() + 1)), 1); }
 void h8_destroy_before(std::unique_ptr<int> u [[ref_to_uninit]]) { std::destroy_at(&(*(u.get() + 1))); }
-int h8_read_after(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(u.get(), 0); return *(u.get() + 1); }
+int h8_read_after(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(u.get(), 0); return *(u.get() + 1); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void h8_store_after(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(u.get(), 0); *(u.get() + 1) = 1; }
-void h8_bind_after(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(u.get(), 0); int *q_ = &(*(u.get() + 1)); (void)q_; }
+void h8_bind_after(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(u.get(), 0); int *q_ = &(*(u.get() + 1)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void h8_credit_after(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(u.get(), 0); std::construct_at(&(*(u.get() + 1)), 1); }
 void h8_destroy_after(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(u.get(), 0); std::destroy_at(&(*(u.get() + 1))); }
 // t1, temporary handle: std::span<int>(p, 4)[1]
@@ -620,12 +643,12 @@ int t1_read_before(int *p [[ref_to_uninit]]) { return std::span<int>(p, 4)[1]; }
 void t1_store_before(int *p [[ref_to_uninit]]) { std::span<int>(p, 4)[1] = 1; }
 void t1_bind_before(int *p [[ref_to_uninit]]) { int *q_ = &(std::span<int>(p, 4)[1]); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void t1_credit_before(int *p [[ref_to_uninit]]) { std::construct_at(&(std::span<int>(p, 4)[1]), 1); }
-void t1_destroy_before(int *p [[ref_to_uninit]]) { std::destroy_at(&(std::span<int>(p, 4)[1])); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+void t1_destroy_before(int *p [[ref_to_uninit]]) { std::destroy_at(&(std::span<int>(p, 4)[1])); }
 int t1_read_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); return std::span<int>(p, 4)[1]; } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void t1_store_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::span<int>(p, 4)[1] = 1; }
 void t1_bind_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); int *q_ = &(std::span<int>(p, 4)[1]); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void t1_credit_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::construct_at(&(std::span<int>(p, 4)[1]), 1); }
-void t1_destroy_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::destroy_at(&(std::span<int>(p, 4)[1])); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+void t1_destroy_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::destroy_at(&(std::span<int>(p, 4)[1])); }
 // t2, temporary handle: *std::span<int>(p, 4).data()
 int t2_read_before(int *p [[ref_to_uninit]]) { return *std::span<int>(p, 4).data(); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void t2_store_before(int *p [[ref_to_uninit]]) { *std::span<int>(p, 4).data() = 1; }
@@ -682,26 +705,26 @@ void r4_bind_after() { std::array<int, 4> r [[uninit]]; std::uninitialized_fill(
 void r4_credit_after() { std::array<int, 4> r [[uninit]]; std::uninitialized_fill(r.begin(), r.end(), 0); std::construct_at(&(r.data()[1]), 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
 void r4_destroy_after() { std::array<int, 4> r [[uninit]]; std::uninitialized_fill(r.begin(), r.end(), 0); std::destroy_at(&(r.data()[1])); }
 // r5, std::array member: *(r.data() + 1)
-int r5_read_before() { std::array<int, 4> r [[uninit]]; return *(r.data() + 1); }
-void r5_store_before() { std::array<int, 4> r [[uninit]]; *(r.data() + 1) = 1; }
-void r5_bind_before() { std::array<int, 4> r [[uninit]]; int *q_ = &(*(r.data() + 1)); (void)q_; }
+int r5_read_before() { std::array<int, 4> r [[uninit]]; return *(r.data() + 1); } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory}}
+void r5_store_before() { std::array<int, 4> r [[uninit]]; *(r.data() + 1) = 1; } // expected-error {{writing an element of an '[[uninit]]' object does not initialize it}}
+void r5_bind_before() { std::array<int, 4> r [[uninit]]; int *q_ = &(*(r.data() + 1)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void r5_credit_before() { std::array<int, 4> r [[uninit]]; std::construct_at(&(*(r.data() + 1)), 1); }
-void r5_destroy_before() { std::array<int, 4> r [[uninit]]; std::destroy_at(&(*(r.data() + 1))); }
+void r5_destroy_before() { std::array<int, 4> r [[uninit]]; std::destroy_at(&(*(r.data() + 1))); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
 int r5_read_after() { std::array<int, 4> r [[uninit]]; std::uninitialized_fill(r.begin(), r.end(), 0); return *(r.data() + 1); }
 void r5_store_after() { std::array<int, 4> r [[uninit]]; std::uninitialized_fill(r.begin(), r.end(), 0); *(r.data() + 1) = 1; }
 void r5_bind_after() { std::array<int, 4> r [[uninit]]; std::uninitialized_fill(r.begin(), r.end(), 0); int *q_ = &(*(r.data() + 1)); (void)q_; }
-void r5_credit_after() { std::array<int, 4> r [[uninit]]; std::uninitialized_fill(r.begin(), r.end(), 0); std::construct_at(&(*(r.data() + 1)), 1); }
+void r5_credit_after() { std::array<int, 4> r [[uninit]]; std::uninitialized_fill(r.begin(), r.end(), 0); std::construct_at(&(*(r.data() + 1)), 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
 void r5_destroy_after() { std::array<int, 4> r [[uninit]]; std::uninitialized_fill(r.begin(), r.end(), 0); std::destroy_at(&(*(r.data() + 1))); }
 // r6, std::array member: *(r.begin() + 1)
-int r6_read_before() { std::array<int, 4> r [[uninit]]; return *(r.begin() + 1); }
-void r6_store_before() { std::array<int, 4> r [[uninit]]; *(r.begin() + 1) = 1; }
-void r6_bind_before() { std::array<int, 4> r [[uninit]]; int *q_ = &(*(r.begin() + 1)); (void)q_; }
+int r6_read_before() { std::array<int, 4> r [[uninit]]; return *(r.begin() + 1); } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory}}
+void r6_store_before() { std::array<int, 4> r [[uninit]]; *(r.begin() + 1) = 1; } // expected-error {{writing an element of an '[[uninit]]' object does not initialize it}}
+void r6_bind_before() { std::array<int, 4> r [[uninit]]; int *q_ = &(*(r.begin() + 1)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void r6_credit_before() { std::array<int, 4> r [[uninit]]; std::construct_at(&(*(r.begin() + 1)), 1); }
-void r6_destroy_before() { std::array<int, 4> r [[uninit]]; std::destroy_at(&(*(r.begin() + 1))); }
+void r6_destroy_before() { std::array<int, 4> r [[uninit]]; std::destroy_at(&(*(r.begin() + 1))); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
 int r6_read_after() { std::array<int, 4> r [[uninit]]; std::uninitialized_fill(r.begin(), r.end(), 0); return *(r.begin() + 1); }
 void r6_store_after() { std::array<int, 4> r [[uninit]]; std::uninitialized_fill(r.begin(), r.end(), 0); *(r.begin() + 1) = 1; }
 void r6_bind_after() { std::array<int, 4> r [[uninit]]; std::uninitialized_fill(r.begin(), r.end(), 0); int *q_ = &(*(r.begin() + 1)); (void)q_; }
-void r6_credit_after() { std::array<int, 4> r [[uninit]]; std::uninitialized_fill(r.begin(), r.end(), 0); std::construct_at(&(*(r.begin() + 1)), 1); }
+void r6_credit_after() { std::array<int, 4> r [[uninit]]; std::uninitialized_fill(r.begin(), r.end(), 0); std::construct_at(&(*(r.begin() + 1)), 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
 void r6_destroy_after() { std::array<int, 4> r [[uninit]]; std::uninitialized_fill(r.begin(), r.end(), 0); std::destroy_at(&(*(r.begin() + 1))); }
 // c1, conditional: (c ? a : b)[1]
 int c1_read_before(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; return (c ? a : b)[1]; } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory}}
@@ -737,16 +760,16 @@ void c3_bind_after(bool c) { Agg g [[uninit]]; Agg h [[uninit]]; std::construct_
 void c3_credit_after(bool c) { Agg g [[uninit]]; Agg h [[uninit]]; std::construct_at(&g); std::construct_at(&h); std::construct_at(&((c ? g : h).x), 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
 void c3_destroy_after(bool c) { Agg g [[uninit]]; Agg h [[uninit]]; std::construct_at(&g); std::construct_at(&h); std::destroy_at(&((c ? g : h).x)); }
 // c4, conditional: *(c ? a : b)
-int c4_read_before(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; return *(c ? a : b); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
-void c4_store_before(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; *(c ? a : b) = 1; } // expected-error {{writing an element of uninitialized storage does not initialize it}}
+int c4_read_before(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; return *(c ? a : b); } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory}}
+void c4_store_before(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; *(c ? a : b) = 1; } // expected-error {{writing an element of an '[[uninit]]' object does not initialize it}}
 void c4_bind_before(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; int *q_ = &(*(c ? a : b)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void c4_credit_before(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; std::construct_at(&(*(c ? a : b)), 1); }
 void c4_destroy_before(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; std::destroy_at(&(*(c ? a : b))); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
-int c4_read_after(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::uninitialized_fill(b, b + 4, 0); return *(c ? a : b); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
-void c4_store_after(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::uninitialized_fill(b, b + 4, 0); *(c ? a : b) = 1; } // expected-error {{writing an element of uninitialized storage does not initialize it}}
-void c4_bind_after(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::uninitialized_fill(b, b + 4, 0); int *q_ = &(*(c ? a : b)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
-void c4_credit_after(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::uninitialized_fill(b, b + 4, 0); std::construct_at(&(*(c ? a : b)), 1); }
-void c4_destroy_after(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::uninitialized_fill(b, b + 4, 0); std::destroy_at(&(*(c ? a : b))); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+int c4_read_after(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::uninitialized_fill(b, b + 4, 0); return *(c ? a : b); }
+void c4_store_after(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::uninitialized_fill(b, b + 4, 0); *(c ? a : b) = 1; }
+void c4_bind_after(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::uninitialized_fill(b, b + 4, 0); int *q_ = &(*(c ? a : b)); (void)q_; }
+void c4_credit_after(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::uninitialized_fill(b, b + 4, 0); std::construct_at(&(*(c ? a : b)), 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
+void c4_destroy_after(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::uninitialized_fill(b, b + 4, 0); std::destroy_at(&(*(c ? a : b))); }
 // q1, pointer to data member: g.*pm
 int q1_read_before(int Agg::*pm) { Agg g [[uninit]]; return g.*pm; } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory}}
 void q1_store_before(int Agg::*pm) { Agg g [[uninit]]; g.*pm = 1; } // expected-error {{writing a member of an '[[uninit]]' object does not initialize it}}
@@ -802,6 +825,158 @@ void z2_store_after(bool c, int *r [[ref_to_uninit]], int *r1 [[ref_to_uninit]],
 void z2_bind_after(bool c, int *r [[ref_to_uninit]], int *r1 [[ref_to_uninit]], int *r2 [[ref_to_uninit]]) { std::construct_at(r1, 0); std::construct_at(r2, 0); (c ? r1 : r2) = r; int *q_ = &(*r1); (void)q_; }
 void z2_credit_after(bool c, int *r [[ref_to_uninit]], int *r1 [[ref_to_uninit]], int *r2 [[ref_to_uninit]]) { std::construct_at(r1, 0); std::construct_at(r2, 0); (c ? r1 : r2) = r; std::construct_at(&(*r1), 1); }
 void z2_destroy_after(bool c, int *r [[ref_to_uninit]], int *r1 [[ref_to_uninit]], int *r2 [[ref_to_uninit]]) { std::construct_at(r1, 0); std::construct_at(r2, 0); (c ? r1 : r2) = r; std::destroy_at(&(*r1)); }
+// w1, pointer arithmetic: a + 1
+int w1_read_before() { int a [[uninit]] [4]; return *(a + 1); } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory}}
+void w1_store_before() { int a [[uninit]] [4]; *(a + 1) = 1; } // expected-error {{writing an element of an '[[uninit]]' object does not initialize it}}
+void w1_bind_before() { int a [[uninit]] [4]; int *q_ = a + 1; (void)q_; }
+void w1_credit_before() { int a [[uninit]] [4]; std::construct_at(a + 1, 1); }
+void w1_destroy_before() { int a [[uninit]] [4]; std::destroy_at(a + 1); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+int w1_read_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); return *(a + 1); }
+void w1_store_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); *(a + 1) = 1; }
+void w1_bind_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); int *q_ = a + 1; (void)q_; }
+void w1_credit_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::construct_at(a + 1, 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
+void w1_destroy_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::destroy_at(a + 1); }
+// w2, pointer arithmetic: 1 + a
+int w2_read_before() { int a [[uninit]] [4]; return *(1 + a); } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory}}
+void w2_store_before() { int a [[uninit]] [4]; *(1 + a) = 1; } // expected-error {{writing an element of an '[[uninit]]' object does not initialize it}}
+void w2_bind_before() { int a [[uninit]] [4]; int *q_ = 1 + a; (void)q_; }
+void w2_credit_before() { int a [[uninit]] [4]; std::construct_at(1 + a, 1); }
+void w2_destroy_before() { int a [[uninit]] [4]; std::destroy_at(1 + a); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+int w2_read_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); return *(1 + a); }
+void w2_store_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); *(1 + a) = 1; }
+void w2_bind_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); int *q_ = 1 + a; (void)q_; }
+void w2_credit_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::construct_at(1 + a, 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
+void w2_destroy_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::destroy_at(1 + a); }
+// w3, pointer arithmetic: p + 1
+int w3_read_before(int *p [[ref_to_uninit]]) { return *(p + 1); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
+void w3_store_before(int *p [[ref_to_uninit]]) { *(p + 1) = 1; }
+void w3_bind_before(int *p [[ref_to_uninit]]) { int *q_ = p + 1; (void)q_; }
+void w3_credit_before(int *p [[ref_to_uninit]]) { std::construct_at(p + 1, 1); }
+void w3_destroy_before(int *p [[ref_to_uninit]]) { std::destroy_at(p + 1); }
+int w3_read_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); return *(p + 1); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
+void w3_store_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); *(p + 1) = 1; }
+void w3_bind_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); int *q_ = p + 1; (void)q_; }
+void w3_credit_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::construct_at(p + 1, 1); }
+void w3_destroy_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::destroy_at(p + 1); }
+// w4, pointer arithmetic: std::begin(a) + 1
+int w4_read_before() { int a [[uninit]] [4]; return *(std::begin(a) + 1); } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory}}
+void w4_store_before() { int a [[uninit]] [4]; *(std::begin(a) + 1) = 1; } // expected-error {{writing an element of an '[[uninit]]' object does not initialize it}}
+void w4_bind_before() { int a [[uninit]] [4]; int *q_ = std::begin(a) + 1; (void)q_; }
+void w4_credit_before() { int a [[uninit]] [4]; std::construct_at(std::begin(a) + 1, 1); }
+void w4_destroy_before() { int a [[uninit]] [4]; std::destroy_at(std::begin(a) + 1); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+int w4_read_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); return *(std::begin(a) + 1); }
+void w4_store_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); *(std::begin(a) + 1) = 1; }
+void w4_bind_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); int *q_ = std::begin(a) + 1; (void)q_; }
+void w4_credit_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::construct_at(std::begin(a) + 1, 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
+void w4_destroy_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::destroy_at(std::begin(a) + 1); }
+// w5, pointer arithmetic: s.data() + 1
+int w5_read_before(std::span<int> s [[ref_to_uninit]]) { return *(s.data() + 1); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
+void w5_store_before(std::span<int> s [[ref_to_uninit]]) { *(s.data() + 1) = 1; }
+void w5_bind_before(std::span<int> s [[ref_to_uninit]]) { int *q_ = s.data() + 1; (void)q_; }
+void w5_credit_before(std::span<int> s [[ref_to_uninit]]) { std::construct_at(s.data() + 1, 1); }
+void w5_destroy_before(std::span<int> s [[ref_to_uninit]]) { std::destroy_at(s.data() + 1); }
+int w5_read_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); return *(s.data() + 1); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
+void w5_store_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); *(s.data() + 1) = 1; }
+void w5_bind_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); int *q_ = s.data() + 1; (void)q_; }
+void w5_credit_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); std::construct_at(s.data() + 1, 1); }
+void w5_destroy_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); std::destroy_at(s.data() + 1); }
+// w6, pointer arithmetic: r.data() + 1
+int w6_read_before() { std::array<int, 4> r [[uninit]]; return *(r.data() + 1); } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory}}
+void w6_store_before() { std::array<int, 4> r [[uninit]]; *(r.data() + 1) = 1; } // expected-error {{writing an element of an '[[uninit]]' object does not initialize it}}
+void w6_bind_before() { std::array<int, 4> r [[uninit]]; int *q_ = r.data() + 1; (void)q_; }
+void w6_credit_before() { std::array<int, 4> r [[uninit]]; std::construct_at(r.data() + 1, 1); }
+void w6_destroy_before() { std::array<int, 4> r [[uninit]]; std::destroy_at(r.data() + 1); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+int w6_read_after() { std::array<int, 4> r [[uninit]]; std::uninitialized_fill(r.begin(), r.end(), 0); return *(r.data() + 1); }
+void w6_store_after() { std::array<int, 4> r [[uninit]]; std::uninitialized_fill(r.begin(), r.end(), 0); *(r.data() + 1) = 1; }
+void w6_bind_after() { std::array<int, 4> r [[uninit]]; std::uninitialized_fill(r.begin(), r.end(), 0); int *q_ = r.data() + 1; (void)q_; }
+void w6_credit_after() { std::array<int, 4> r [[uninit]]; std::uninitialized_fill(r.begin(), r.end(), 0); std::construct_at(r.data() + 1, 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
+void w6_destroy_after() { std::array<int, 4> r [[uninit]]; std::uninitialized_fill(r.begin(), r.end(), 0); std::destroy_at(r.data() + 1); }
+// w7, pointer arithmetic: (c ? a : b) + 1
+int w7_read_before(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; return *((c ? a : b) + 1); } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory}}
+void w7_store_before(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; *((c ? a : b) + 1) = 1; } // expected-error {{writing an element of an '[[uninit]]' object does not initialize it}}
+void w7_bind_before(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; int *q_ = (c ? a : b) + 1; (void)q_; }
+void w7_credit_before(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; std::construct_at((c ? a : b) + 1, 1); }
+void w7_destroy_before(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; std::destroy_at((c ? a : b) + 1); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+int w7_read_after(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::uninitialized_fill(b, b + 4, 0); return *((c ? a : b) + 1); }
+void w7_store_after(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::uninitialized_fill(b, b + 4, 0); *((c ? a : b) + 1) = 1; }
+void w7_bind_after(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::uninitialized_fill(b, b + 4, 0); int *q_ = (c ? a : b) + 1; (void)q_; }
+void w7_credit_after(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::uninitialized_fill(b, b + 4, 0); std::construct_at((c ? a : b) + 1, 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
+void w7_destroy_after(bool c) { int a [[uninit]] [4]; int b [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::uninitialized_fill(b, b + 4, 0); std::destroy_at((c ? a : b) + 1); }
+// w8, element address: &a[1]
+int w8_read_before() { int a [[uninit]] [4]; return *(&a[1]); } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory}}
+void w8_store_before() { int a [[uninit]] [4]; *(&a[1]) = 1; } // expected-error {{writing an element of an '[[uninit]]' object does not initialize it}}
+void w8_bind_before() { int a [[uninit]] [4]; int *q_ = &a[1]; (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
+void w8_credit_before() { int a [[uninit]] [4]; std::construct_at(&a[1], 1); }
+void w8_destroy_before() { int a [[uninit]] [4]; std::destroy_at(&a[1]); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+int w8_read_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); return *(&a[1]); }
+void w8_store_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); *(&a[1]) = 1; }
+void w8_bind_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); int *q_ = &a[1]; (void)q_; }
+void w8_credit_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::construct_at(&a[1], 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
+void w8_destroy_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::destroy_at(&a[1]); }
+// w9, element address: &p[1]
+int w9_read_before(int *p [[ref_to_uninit]]) { return *(&p[1]); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
+void w9_store_before(int *p [[ref_to_uninit]]) { *(&p[1]) = 1; }
+void w9_bind_before(int *p [[ref_to_uninit]]) { int *q_ = &p[1]; (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
+void w9_credit_before(int *p [[ref_to_uninit]]) { std::construct_at(&p[1], 1); }
+void w9_destroy_before(int *p [[ref_to_uninit]]) { std::destroy_at(&p[1]); }
+int w9_read_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); return *(&p[1]); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
+void w9_store_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); *(&p[1]) = 1; }
+void w9_bind_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); int *q_ = &p[1]; (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
+void w9_credit_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::construct_at(&p[1], 1); }
+void w9_destroy_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::destroy_at(&p[1]); }
+// w10, derive: std::next(std::begin(a))
+int w10_read_before() { int a [[uninit]] [4]; return *(std::next(std::begin(a))); } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory}}
+void w10_store_before() { int a [[uninit]] [4]; *(std::next(std::begin(a))) = 1; } // expected-error {{writing an element of an '[[uninit]]' object does not initialize it}}
+void w10_bind_before() { int a [[uninit]] [4]; int *q_ = std::next(std::begin(a)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
+void w10_credit_before() { int a [[uninit]] [4]; std::construct_at(std::next(std::begin(a)), 1); }
+void w10_destroy_before() { int a [[uninit]] [4]; std::destroy_at(std::next(std::begin(a))); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+int w10_read_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); return *(std::next(std::begin(a))); }
+void w10_store_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); *(std::next(std::begin(a))) = 1; }
+void w10_bind_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); int *q_ = std::next(std::begin(a)); (void)q_; }
+void w10_credit_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::construct_at(std::next(std::begin(a)), 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
+void w10_destroy_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::destroy_at(std::next(std::begin(a))); }
+// w11, derive: std::next(p)
+int w11_read_before(int *p [[ref_to_uninit]]) { return *(std::next(p)); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
+void w11_store_before(int *p [[ref_to_uninit]]) { *(std::next(p)) = 1; }
+void w11_bind_before(int *p [[ref_to_uninit]]) { int *q_ = std::next(p); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
+void w11_credit_before(int *p [[ref_to_uninit]]) { std::construct_at(std::next(p), 1); }
+void w11_destroy_before(int *p [[ref_to_uninit]]) { std::destroy_at(std::next(p)); }
+int w11_read_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); return *(std::next(p)); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
+void w11_store_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); *(std::next(p)) = 1; }
+void w11_bind_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); int *q_ = std::next(p); (void)q_; }
+void w11_credit_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::construct_at(std::next(p), 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
+void w11_destroy_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::destroy_at(std::next(p)); }
+// w12, pointer arithmetic: p + 0
+int w12_read_before(int *p [[ref_to_uninit]]) { return *(p + 0); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
+void w12_store_before(int *p [[ref_to_uninit]]) { *(p + 0) = 1; }
+void w12_bind_before(int *p [[ref_to_uninit]]) { int *q_ = p + 0; (void)q_; }
+void w12_credit_before(int *p [[ref_to_uninit]]) { std::construct_at(p + 0, 1); }
+void w12_destroy_before(int *p [[ref_to_uninit]]) { std::destroy_at(p + 0); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+int w12_read_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); return *(p + 0); }
+void w12_store_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); *(p + 0) = 1; }
+void w12_bind_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); int *q_ = p + 0; (void)q_; }
+void w12_credit_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::construct_at(p + 0, 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
+void w12_destroy_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::destroy_at(p + 0); }
+// x1, range: [a, a + 4)
+void x1_credit_before() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); }
+void x1_destroy_before() { int a [[uninit]] [4]; std::destroy(a, a + 4); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+void x1_credit_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::uninitialized_fill(a, a + 4, 0); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
+void x1_destroy_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::destroy(a, a + 4); }
+// x2, range: [p, p + 4)
+void x2_credit_before(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); }
+void x2_destroy_before(int *p [[ref_to_uninit]]) { std::destroy(p, p + 4); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+void x2_credit_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::uninitialized_fill(p, p + 4, 0); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
+void x2_destroy_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::destroy(p, p + 4); }
+// x3, range: [a + 1, a + 4)
+void x3_credit_before() { int a [[uninit]] [4]; std::uninitialized_fill(a + 1, a + 4, 0); }
+void x3_destroy_before() { int a [[uninit]] [4]; std::destroy(a + 1, a + 4); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+void x3_credit_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::uninitialized_fill(a + 1, a + 4, 0); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
+void x3_destroy_after() { int a [[uninit]] [4]; std::uninitialized_fill(a, a + 4, 0); std::destroy(a + 1, a + 4); }
+// x4, range: [p + 1, p + 4)
+void x4_credit_before(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p + 1, p + 4, 0); }
+void x4_destroy_before(int *p [[ref_to_uninit]]) { std::destroy(p + 1, p + 4); }
+void x4_credit_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::uninitialized_fill(p + 1, p + 4, 0); }
+void x4_destroy_after(int *p [[ref_to_uninit]]) { std::uninitialized_fill(p, p + 4, 0); std::destroy(p + 1, p + 4); }
 // f1, range-for: for (... : a)
 int f1_read_before() { int a [[uninit]] [4]; int t = 0; for (int x : a) t += x; return t; } // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void f1_store_before() { int a [[uninit]] [4]; for (int &x : a) x = 1; } // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]'}}
@@ -967,3 +1142,58 @@ struct K5_store_after { Der2 m; int k = 0; K5_store_after(Der2 K5_store_after::*
 struct K5_bind_after { Der2 m; int k = 0; K5_bind_after(Der2 K5_bind_after::*pm) { std::construct_at(&m); int *q_ = &(static_cast<Base2 &>(this->*pm).b); (void)q_; } }; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 struct K5_credit_after { Der2 m; int k = 0; K5_credit_after(Der2 K5_credit_after::*pm) { std::construct_at(&m); std::construct_at(&(static_cast<Base2 &>(this->*pm).b), 1); } };
 struct K5_destroy_after { Der2 m; int k = 0; K5_destroy_after(Der2 K5_destroy_after::*pm) { std::construct_at(&m); std::destroy_at(&(static_cast<Base2 &>(this->*pm).b)); } }; // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+// y1, marked pointer member: *elem
+struct Y1_read_before { int *elem [[ref_to_uninit]]; int f() { return *elem; } }; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
+struct Y1_store_before { int *elem [[ref_to_uninit]]; void f() { *elem = 1; } };
+struct Y1_bind_before { int *elem [[ref_to_uninit]]; void f() { int *q_ = &(*elem); (void)q_; } }; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
+struct Y1_credit_before { int *elem [[ref_to_uninit]]; void f() { std::construct_at(&(*elem), 1); } };
+struct Y1_destroy_before { int *elem [[ref_to_uninit]]; void f() { std::destroy_at(&(*elem)); } };
+struct Y1_read_after { int *elem [[ref_to_uninit]]; int f() { std::uninitialized_fill(elem, elem + 4, 0); return *elem; } };
+struct Y1_store_after { int *elem [[ref_to_uninit]]; void f() { std::uninitialized_fill(elem, elem + 4, 0); *elem = 1; } };
+struct Y1_bind_after { int *elem [[ref_to_uninit]]; void f() { std::uninitialized_fill(elem, elem + 4, 0); int *q_ = &(*elem); (void)q_; } };
+struct Y1_credit_after { int *elem [[ref_to_uninit]]; void f() { std::uninitialized_fill(elem, elem + 4, 0); std::construct_at(&(*elem), 1); } }; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
+struct Y1_destroy_after { int *elem [[ref_to_uninit]]; void f() { std::uninitialized_fill(elem, elem + 4, 0); std::destroy_at(&(*elem)); } };
+// y2, marked pointer member: elem[1]
+struct Y2_read_before { int *elem [[ref_to_uninit]]; int f() { return elem[1]; } }; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
+struct Y2_store_before { int *elem [[ref_to_uninit]]; void f() { elem[1] = 1; } };
+struct Y2_bind_before { int *elem [[ref_to_uninit]]; void f() { int *q_ = &(elem[1]); (void)q_; } }; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
+struct Y2_credit_before { int *elem [[ref_to_uninit]]; void f() { std::construct_at(&(elem[1]), 1); } };
+struct Y2_destroy_before { int *elem [[ref_to_uninit]]; void f() { std::destroy_at(&(elem[1])); } };
+struct Y2_read_after { int *elem [[ref_to_uninit]]; int f() { std::uninitialized_fill(elem, elem + 4, 0); return elem[1]; } }; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
+struct Y2_store_after { int *elem [[ref_to_uninit]]; void f() { std::uninitialized_fill(elem, elem + 4, 0); elem[1] = 1; } };
+struct Y2_bind_after { int *elem [[ref_to_uninit]]; void f() { std::uninitialized_fill(elem, elem + 4, 0); int *q_ = &(elem[1]); (void)q_; } }; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
+struct Y2_credit_after { int *elem [[ref_to_uninit]]; void f() { std::uninitialized_fill(elem, elem + 4, 0); std::construct_at(&(elem[1]), 1); } };
+struct Y2_destroy_after { int *elem [[ref_to_uninit]]; void f() { std::uninitialized_fill(elem, elem + 4, 0); std::destroy_at(&(elem[1])); } };
+// y3, marked pointer member: *(elem + 1)
+struct Y3_read_before { int *elem [[ref_to_uninit]]; int f() { return *(elem + 1); } }; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
+struct Y3_store_before { int *elem [[ref_to_uninit]]; void f() { *(elem + 1) = 1; } };
+struct Y3_bind_before { int *elem [[ref_to_uninit]]; void f() { int *q_ = &(*(elem + 1)); (void)q_; } }; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
+struct Y3_credit_before { int *elem [[ref_to_uninit]]; void f() { std::construct_at(&(*(elem + 1)), 1); } };
+struct Y3_destroy_before { int *elem [[ref_to_uninit]]; void f() { std::destroy_at(&(*(elem + 1))); } };
+struct Y3_read_after { int *elem [[ref_to_uninit]]; int f() { std::uninitialized_fill(elem, elem + 4, 0); return *(elem + 1); } }; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
+struct Y3_store_after { int *elem [[ref_to_uninit]]; void f() { std::uninitialized_fill(elem, elem + 4, 0); *(elem + 1) = 1; } };
+struct Y3_bind_after { int *elem [[ref_to_uninit]]; void f() { std::uninitialized_fill(elem, elem + 4, 0); int *q_ = &(*(elem + 1)); (void)q_; } }; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
+struct Y3_credit_after { int *elem [[ref_to_uninit]]; void f() { std::uninitialized_fill(elem, elem + 4, 0); std::construct_at(&(*(elem + 1)), 1); } };
+struct Y3_destroy_after { int *elem [[ref_to_uninit]]; void f() { std::uninitialized_fill(elem, elem + 4, 0); std::destroy_at(&(*(elem + 1))); } };
+// y4, marked pointer member value: elem + 1
+struct Y4_read_before { int *elem [[ref_to_uninit]]; int f() { return *(elem + 1); } }; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
+struct Y4_store_before { int *elem [[ref_to_uninit]]; void f() { *(elem + 1) = 1; } };
+struct Y4_bind_before { int *elem [[ref_to_uninit]]; void f() { int *q_ = elem + 1; (void)q_; } };
+struct Y4_credit_before { int *elem [[ref_to_uninit]]; void f() { std::construct_at(elem + 1, 1); } };
+struct Y4_destroy_before { int *elem [[ref_to_uninit]]; void f() { std::destroy_at(elem + 1); } };
+struct Y4_read_after { int *elem [[ref_to_uninit]]; int f() { std::uninitialized_fill(elem, elem + 4, 0); return *(elem + 1); } }; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
+struct Y4_store_after { int *elem [[ref_to_uninit]]; void f() { std::uninitialized_fill(elem, elem + 4, 0); *(elem + 1) = 1; } };
+struct Y4_bind_after { int *elem [[ref_to_uninit]]; void f() { std::uninitialized_fill(elem, elem + 4, 0); int *q_ = elem + 1; (void)q_; } };
+struct Y4_credit_after { int *elem [[ref_to_uninit]]; void f() { std::uninitialized_fill(elem, elem + 4, 0); std::construct_at(elem + 1, 1); } };
+struct Y4_destroy_after { int *elem [[ref_to_uninit]]; void f() { std::uninitialized_fill(elem, elem + 4, 0); std::destroy_at(elem + 1); } };
+// y5, marked pointer member value: elem + 0
+struct Y5_read_before { int *elem [[ref_to_uninit]]; int f() { return *(elem + 0); } }; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
+struct Y5_store_before { int *elem [[ref_to_uninit]]; void f() { *(elem + 0) = 1; } };
+struct Y5_bind_before { int *elem [[ref_to_uninit]]; void f() { int *q_ = elem + 0; (void)q_; } };
+struct Y5_credit_before { int *elem [[ref_to_uninit]]; void f() { std::construct_at(elem + 0, 1); } };
+struct Y5_destroy_before { int *elem [[ref_to_uninit]]; void f() { std::destroy_at(elem + 0); } };
+struct Y5_read_after { int *elem [[ref_to_uninit]]; int f() { std::uninitialized_fill(elem, elem + 4, 0); return *(elem + 0); } };
+struct Y5_store_after { int *elem [[ref_to_uninit]]; void f() { std::uninitialized_fill(elem, elem + 4, 0); *(elem + 0) = 1; } };
+struct Y5_bind_after { int *elem [[ref_to_uninit]]; void f() { std::uninitialized_fill(elem, elem + 4, 0); int *q_ = elem + 0; (void)q_; } };
+struct Y5_credit_after { int *elem [[ref_to_uninit]]; void f() { std::uninitialized_fill(elem, elem + 4, 0); std::construct_at(elem + 0, 1); } }; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
+struct Y5_destroy_after { int *elem [[ref_to_uninit]]; void f() { std::uninitialized_fill(elem, elem + 4, 0); std::destroy_at(elem + 0); } };

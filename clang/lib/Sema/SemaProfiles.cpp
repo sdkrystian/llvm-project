@@ -1200,11 +1200,11 @@ void SemaProfiles::checkNowInitVacuity(FunctionDecl *FD) {
 // introduced by an explicit [[uninit]] / [[ref_to_uninit]] marker.
 //
 // A recognized form is Initialized or Uninitialized; an unrecognized one
-// (pointer arithmetic, an integer-to-pointer cast, a call through a function
-// pointer) is Unknown rather than assumed Initialized; and a conditional whose
-// arms are Initialized and Uninitialized is Mixed (P4222R2 §4.9: mixing
-// initialized and uninitialized memory in one expression requires
-// suppression), which both binding directions reject and which the
+// (a pointer arithmetic value, an integer-to-pointer cast, a call through a
+// function pointer) is Unknown rather than assumed Initialized; and a
+// conditional whose arms are Initialized and Uninitialized is Mixed
+// (P4222R2 §4.9: mixing initialized and uninitialized memory in one expression
+// requires suppression), which both binding directions reject and which the
 // read-through, subobject-write, and destroy checks treat as Uninitialized.
 // Callers wanting a plain "is it uninitialized?" answer treat Unknown as not
 // uninitialized.
@@ -1433,6 +1433,24 @@ const Expr *SemaProfiles::addressOfOperand(const Expr *E) {
     }
   }
   return nullptr;
+}
+
+const Expr *SemaProfiles::pointerArithmeticBase(const Expr *E) {
+  const auto *BO = dyn_cast<BinaryOperator>(E);
+  if (!BO || !BO->isAdditiveOp() || !BO->getType()->isPointerType())
+    return nullptr;
+  if (BO->getLHS()->getType()->isPointerType())
+    return BO->getLHS();
+  return BO->getOpcode() == BO_Add ? BO->getRHS() : nullptr;
+}
+
+/// True if the pointer arithmetic \p BO (SemaProfiles::pointerArithmeticBase)
+/// offsets by the integer literal 0: \c p + 0 is \c p.
+static bool hasZeroLiteralOffset(const BinaryOperator *BO) {
+  const Expr *Offset =
+      BO->getLHS()->getType()->isPointerType() ? BO->getRHS() : BO->getLHS();
+  const auto *Lit = dyn_cast<IntegerLiteral>(Offset->IgnoreParenImpCasts());
+  return Lit && Lit->getValue().isZero();
 }
 
 const BinaryOperator *SemaProfiles::asDataMemberPointerAccess(const Expr *E) {
@@ -3365,6 +3383,16 @@ static const Expr *ignoreParenImpCastsKeepMTE(const Expr *E) {
   });
 }
 
+/// The pointer operand at the bottom of the pointer arithmetic \p E
+/// (SemaProfiles::pointerArithmeticBase), or \p E itself when it is none:
+/// storage accessed through p + n is classified by p's form, as through p[n].
+static const Expr *ignorePointerArithmetic(const Expr *E) {
+  while (const Expr *Ptr =
+             SemaProfiles::pointerArithmeticBase(E->IgnoreParenImpCasts()))
+    E = Ptr;
+  return E;
+}
+
 /// A glvalue of pointer type bound as a read-only alias (T *const &, T *&&,
 /// or a materialized pointer temporary) denotes whatever its value points
 /// to, so it classifies as that value; a mutable alias (T *&) denotes the
@@ -3475,7 +3503,7 @@ static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
     if (!isa<FieldDecl, IndirectFieldDecl>(MD))
       return UninitStorage::Initialized;
     return ME->isArrow() ? pointerRefersToUninitStorage(
-                               Ctx, ME->getBase(),
+                               Ctx, ignorePointerArithmetic(ME->getBase()),
                                Opts.withoutTopLevelDrop().withoutMarkerTrust())
                          : glvalueDenotesUninitStorage(
                                Ctx, ME->getBase(),
@@ -3486,7 +3514,7 @@ static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
   if (const BinaryOperator *BO = SemaProfiles::asDataMemberPointerAccess(E))
     return BO->getOpcode() == BO_PtrMemI
                ? pointerRefersToUninitStorage(
-                     Ctx, BO->getLHS(),
+                     Ctx, ignorePointerArithmetic(BO->getLHS()),
                      Opts.withoutTopLevelDrop().withoutMarkerTrust())
                : glvalueDenotesUninitStorage(
                      Ctx, BO->getLHS(),
@@ -3500,12 +3528,14 @@ static UninitStorage glvalueDenotesUninitStorage(ASTContext &Ctx, const Expr *E,
   // array with only element 0 written, and element-wise state is
   // untrackable by design, paper §5.4/§5.5).
   if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(E))
-    return pointerRefersToUninitStorage(Ctx, ASE->getBase(), Opts);
+    return pointerRefersToUninitStorage(
+        Ctx, ignorePointerArithmetic(ASE->getBase()), Opts);
 
-  // *p, where p points to uninitialized storage.
+  // *p, where p points to uninitialized storage; *(p + n) is p[n].
   if (const auto *UO = dyn_cast<UnaryOperator>(E))
     if (UO->getOpcode() == UO_Deref)
-      return pointerRefersToUninitStorage(Ctx, UO->getSubExpr(), Opts);
+      return pointerRefersToUninitStorage(
+          Ctx, ignorePointerArithmetic(UO->getSubExpr()), Opts);
 
   // A reference cast (an explicit cast yielding a glvalue) denotes the same
   // storage as its operand; propagate. Symmetric to the pointer-cast arm.
@@ -4067,7 +4097,8 @@ const Expr *SemaProfiles::peelBaseCasts(const Expr *E, BasePath &Path,
 }
 
 std::optional<SemaProfiles::FlowLeafShape>
-SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
+SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms,
+                            bool Pointee) {
   FlowLeafShape S;
   // The named steps, leaf first, and how many of them lie on the leaf side
   // of the outermost element step seen so far.
@@ -4078,7 +4109,7 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
   auto Bases = [&]() -> BasePath & {
     return LeafFirst.empty() ? S.LeafBases : LeafFirst.back().Bases;
   };
-  const Expr *Cur = peelBaseCasts(E, Bases(), Arms);
+  const Expr *Cur = Pointee ? E : peelBaseCasts(E, Bases(), Arms);
   // Step through a member call deriving a pointer or reference from a
   // handle (isHandleDerefCall) to the variable its chain bottoms out at
   // (handleChainBase): a handle reaches its referent, a pointer -- a
@@ -4118,14 +4149,29 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
     Cur = peelBaseCasts(Arr, Bases(), Arms);
     return true;
   };
-  // Step through the pointer value Cur: a std::array's begin or data, or a
-  // Derive call (std::begin, std::data, std::next) on an array, continues the
-  // chain at an element (true); a Derive call on a pointer stands for the
-  // pointer, on a handle for the handle's referent, and an offsetting one
-  // names an element; any other pointer reaches its storage through the
-  // pointer, which ends the chain.
+  // Step through the pointer value Cur: a decayed array, a std::array's begin
+  // or data, or a Derive call (std::begin, std::data, std::next) on an array,
+  // continues the chain at an element (true); pointer arithmetic names an
+  // element of what its pointer operand points into (by a literal 0, what
+  // the operand points to), a Derive call on a
+  // pointer stands for the pointer, on a handle for the handle's referent,
+  // and an offsetting one names an element; any other pointer reaches its
+  // storage through the pointer, which ends the chain.
   auto StepPointerValue = [&]() {
     while (true) {
+      if (Cur->getType()->isArrayType()) {
+        S.Subscript = true;
+        NamedBelowElement = LeafFirst.size();
+        return true;
+      }
+      if (const Expr *Ptr = pointerArithmeticBase(Cur)) {
+        if (!hasZeroLiteralOffset(cast<BinaryOperator>(Cur))) {
+          S.Subscript = true;
+          NamedBelowElement = LeafFirst.size();
+        }
+        Cur = peelBaseCasts(Ptr, Bases(), Arms);
+        continue;
+      }
       if (StepThroughArray(Cur))
         return true;
       bool Partial = false;
@@ -4168,7 +4214,8 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
     }
     return StepPointerValue();
   };
-  while (true) {
+  bool Walk = !Pointee || StepThroughPointer(E);
+  while (Walk) {
     if (const auto *ME = dyn_cast<MemberExpr>(Cur)) {
       const auto *F = dyn_cast<FieldDecl>(ME->getMemberDecl());
       if (!F)
@@ -4245,6 +4292,36 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms) {
       return S;
     }
   return std::nullopt;
+}
+
+bool SemaProfiles::designatesReferentElement(const Expr *E, bool AsPointerValue,
+                                             ArrayRef<const Expr *> Arms) {
+  // The element step applies to the referent itself, before any member step
+  // (this->arr[1] is an element of a member, not of what this points to).
+  if (std::optional<FlowLeafShape> S = flowLeafShape(E, Arms, AsPointerValue))
+    return S->Subscript && S->ElementFreePrefix == 0 &&
+           (S->ThroughPointer || S->ThroughHandle ||
+            !S->PointerMembers.empty());
+  // A chain the shape walk does not follow -- another object's pointer
+  // member, a call's result -- names an element by a subscript or pointer
+  // arithmetic on a pointer.
+  const Expr *Cur = ignoreTransparentCasts(E, Arms);
+  if (AsPointerValue) {
+    if (const Expr *Ptr = pointerArithmeticBase(Cur))
+      return !hasZeroLiteralOffset(cast<BinaryOperator>(Cur)) ||
+             designatesReferentElement(Ptr, /*AsPointerValue=*/true, Arms);
+    const Expr *Op = addressOfOperand(Cur);
+    if (!Op)
+      return false;
+    Cur = ignoreTransparentCasts(Op, Arms);
+  }
+  if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(Cur))
+    return ASE->getBase()->IgnoreParenImpCasts()->getType()->isPointerType();
+  if (const auto *UO = dyn_cast<UnaryOperator>(Cur);
+      UO && UO->getOpcode() == UO_Deref)
+    return designatesReferentElement(UO->getSubExpr(),
+                                     /*AsPointerValue=*/true, Arms);
+  return false;
 }
 
 bool SemaProfiles::hasUserProvidedCtor(const CXXRecordDecl *RD) {
@@ -4617,7 +4694,14 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
     return Use != FlowLeafUse::Plain && MD && !isa<CXXConstructorDecl>(MD);
   };
   const Expr *E = ignoreTransparentCasts(Leaf.E, Leaf.Arms);
-  if (AsPointerValue) {
+  // Pointer arithmetic bound to a marked target or destroyed points to an
+  // element, tracked as &p[n] is; an unmarked binding of it, such as an end
+  // iterator's, is unclassified.
+  bool Pointee =
+      AsPointerValue &&
+      (Use == FlowLeafUse::MarkedTarget || Use == FlowLeafUse::Destroy) &&
+      pointerArithmeticBase(E);
+  if (AsPointerValue && !Pointee) {
     if (const Expr *Op = addressOfOperand(E))
       return isFlowTrackedLeaf(ShapeLeaf(Op, Leaf.Arms),
                                /*AsPointerValue=*/false, CurContext, Use);
@@ -4677,7 +4761,7 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
     return VD && VD->hasLocalStorage() && VD->getType()->isPointerType() &&
            VD->hasAttr<RefToUninitAttr>();
   }
-  std::optional<FlowLeafShape> Shape = flowLeafShape(E, Leaf.Arms);
+  std::optional<FlowLeafShape> Shape = flowLeafShape(E, Leaf.Arms, Pointee);
   if (!Shape)
     return false;
   if (Shape->IsThis) {
@@ -4989,13 +5073,25 @@ void SemaProfiles::judgeDestroyUninitByForm(SourceLocation Loc, QualType T,
                                             const Decl *AfterFlowPass,
                                             InitDestroyer Destroyer,
                                             bool AsRange) {
+  // An element of what a pointer or handle refers to is not judged
+  // (designatesReferentElement).
+  if (isHandleType(T) || AsRange) {
+    bool Partial = false;
+    forEachHandleSourceLeaf(Src,
+                            [&](const HandleLeaf &L) { Partial |= L.Partial; });
+    if (Partial)
+      return;
+  } else if (designatesReferentElement(Src, T->isPointerType())) {
+    return;
+  }
   if (shouldEmitProfileViolation("std::init", diag::err_init_destroy_uninit,
                                  Loc, D, /*PostParse=*/AfterFlowPass) &&
-      isUninitializedOrMixed(
-          classifyUninitSource(getASTContext(), Src, T,
-                               UninitBindAccess.withThisUnderConstruction(
-                                   thisIsUnderConstruction(AfterFlowPass)),
-                               AsRange)))
+      isUninitializedOrMixed(classifyUninitSource(
+          getASTContext(),
+          T->isPointerType() ? ignorePointerArithmetic(Src) : Src, T,
+          UninitBindAccess.withThisUnderConstruction(
+              thisIsUnderConstruction(AfterFlowPass)),
+          AsRange)))
     Diag(Loc, diag::err_init_destroy_uninit)
         << "std::init" << static_cast<unsigned>(Destroyer);
 }
@@ -5072,22 +5168,26 @@ static bool isMemberChainOfUninitObject(const Expr *E) {
       E = BO->getLHS()->IgnoreParenImpCasts();
       continue;
     }
-    // a[i] and *a on an array glvalue (decay stripped below) are subobject
-    // accesses like a dot member access; on a pointer base they reach the
-    // object through the pointer.
+    // a[i], *a, and *(a + i) on an array glvalue (decay stripped below) are
+    // subobject accesses like a dot member access; on a pointer base they
+    // reach the object through the pointer.
+    auto ArrayOperand = [](const Expr *Ptr) -> const Expr * {
+      Ptr = Ptr->IgnoreParenImpCasts();
+      while (const Expr *Base = SemaProfiles::pointerArithmeticBase(Ptr))
+        Ptr = Base->IgnoreParenImpCasts();
+      return Ptr->getType()->isArrayType() ? Ptr : nullptr;
+    };
     if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(E)) {
-      const Expr *Base = ASE->getBase()->IgnoreParenImpCasts();
-      if (!Base->getType()->isArrayType())
+      E = ArrayOperand(ASE->getBase());
+      if (!E)
         return false;
-      E = Base;
       continue;
     }
     if (const auto *UO = dyn_cast<UnaryOperator>(E);
         UO && UO->getOpcode() == UO_Deref) {
-      const Expr *Sub = UO->getSubExpr()->IgnoreParenImpCasts();
-      if (!Sub->getType()->isArrayType())
+      E = ArrayOperand(UO->getSubExpr());
+      if (!E)
         return false;
-      E = Sub;
       continue;
     }
     break;
@@ -5124,6 +5224,10 @@ static bool uninitWriteChainSeesMarker(const Expr *E) {
     if (const auto *UO = dyn_cast<UnaryOperator>(E);
         UO && UO->getOpcode() == UO_Deref) {
       E = UO->getSubExpr();
+      continue;
+    }
+    if (const Expr *Ptr = SemaProfiles::pointerArithmeticBase(E)) {
+      E = Ptr;
       continue;
     }
     if (const auto *CE = dyn_cast<CallExpr>(E)) {
@@ -5431,9 +5535,9 @@ void SemaProfiles::checkInitProfileHandleReseat(const FunctionDecl *FD,
                             handleReseatType(Obj), Src, /*D=*/nullptr);
 }
 
-/// The operand of the member, element, indirection, or address-of step
-/// \p E whose conditionals forEachTargetLeaf distributes, or null. A
-/// non-field member names storage independent of its base.
+/// The operand of the member, element, indirection, pointer arithmetic, or
+/// address-of step \p E whose conditionals forEachTargetLeaf distributes, or
+/// null. A non-field member names storage independent of its base.
 static const Expr *shapeChainOperand(const Expr *E) {
   if (const auto *ME = dyn_cast<MemberExpr>(E))
     return isa<FieldDecl, IndirectFieldDecl>(ME->getMemberDecl())
@@ -5446,6 +5550,8 @@ static const Expr *shapeChainOperand(const Expr *E) {
   if (const auto *UO = dyn_cast<UnaryOperator>(E);
       UO && UO->getOpcode() == UO_Deref)
     return UO->getSubExpr();
+  if (const Expr *Ptr = SemaProfiles::pointerArithmeticBase(E))
+    return Ptr;
   // A handle's member call deriving a pointer or reference, or returning the
   // handle itself, steps to its object (SemaProfiles::handleChainBase).
   if (const auto *CE = dyn_cast<CallExpr>(E)) {

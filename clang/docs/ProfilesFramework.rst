@@ -840,8 +840,13 @@ redeclaration still see the marker.  A null pointer source -- ``nullptr``,
 so it is accepted for marked and unmarked targets alike (§4.3, §8: the marker
 means "zero or more uninitialized objects"); a *parameter* with a null default
 argument is not a null source (callers may pass any pointer).  A source whose
-form the recognizer cannot classify (pointer arithmetic, an integer-to-pointer
-cast) is likewise accepted for either target.  A GNU statement expression yields
+form the recognizer cannot classify (an integer-to-pointer cast) is likewise
+accepted for either target, and so is the value of pointer arithmetic
+(``p + n``, ``n + p``, ``p - n``) bound to an unmarked target, so that an end
+iterator binds in any state.  Read or written through, constructed into,
+destroyed, or bound to a marked target, ``p + n`` is ``&p[n]``, an element of
+what ``p`` points into, ``p + 0`` is ``p``, and ``*a`` of an array is
+``a[0]``.  A GNU statement expression yields
 its last expression and a pointer compound literal its initializer:
 ``int *q = ({ &u; })`` and ``int *q = (int *){&u}`` bind ``&u``.  ``this``
 outside a constructor is initialized, so a marked pointer or reference to an

@@ -2262,14 +2262,17 @@ struct TrackedStorage {
   /// or a designation that does not cover it is a subobject. A marked pointer's
   /// or reference's referent is checked against its anonymous referent's type
   /// here and against the storage it refers to by the transfer function
-  /// (DefAssignEvent::Designated).
+  /// (DefAssignEvent::Designated). With \p Pointee, \p E is a pointer value
+  /// and the glvalue resolved is what it points to
+  /// (SemaProfiles::flowLeafShape).
   Resolution resolve(const SemaProfiles::ShapeLeaf &Leaf,
-                     QualType Designated = QualType(),
-                     bool RawExempt = false) const;
+                     QualType Designated = QualType(), bool RawExempt = false,
+                     bool Pointee = false) const;
 
   /// Resolve a binding or argument leaf: the glvalue \p E (resolve), or --
   /// with \p AsPointerValue, a leaf used as a pointer value -- the storage
-  /// `&x` names, the array a decayed array decays from, or a marked local
+  /// \c &x names, the element pointer arithmetic points to (as \c &p[n]
+  /// does), the array a decayed array decays from, or a marked local
   /// pointer's referent (its value). \p Designated and \p RawExempt are
   /// resolve's; for a pointer value, the designated type is the pointee's.
   Resolution resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
@@ -2518,9 +2521,10 @@ TrackedStorage::partRange(std::pair<unsigned, unsigned> Range,
 
 TrackedStorage::Resolution
 TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
-                        QualType Designated, bool RawExempt) const {
+                        QualType Designated, bool RawExempt,
+                        bool Pointee) const {
   std::optional<SemaProfiles::FlowLeafShape> Shape =
-      SemaProfiles::flowLeafShape(Leaf.E, Leaf.Arms);
+      SemaProfiles::flowLeafShape(Leaf.E, Leaf.Arms, Pointee);
   if (!Shape)
     return {};
   // A designation of a whole entity names a subobject when it takes a
@@ -2678,6 +2682,8 @@ TrackedStorage::resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
   const Expr *E = SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms);
   if (const Expr *Op = SemaProfiles::addressOfOperand(E))
     return resolve({Op, Leaf.Arms}, Designated, RawExempt);
+  if (SemaProfiles::pointerArithmeticBase(E))
+    return resolve({E, Leaf.Arms}, Designated, RawExempt, /*Pointee=*/true);
   // A decayed array is the array it decays from.
   if (E->getType()->isArrayType())
     return resolve({E, Leaf.Arms}, Designated, RawExempt);
@@ -3299,11 +3305,13 @@ static void judgeBindingSite(const BindingSite &Site, const FlowState &St,
 static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
                              const TrackedStorage &Storage,
                              SmallVectorImpl<PendingViolation> &Out) {
-  if (Site.Leaves.empty())
-    return;
   bool AllDestroyed = true;
   std::optional<LeafState> Acc;
   for (const BindingLeaf &L : Site.Leaves) {
+    // Through an offset handle the destroy reaches an element, which is not
+    // judged (SemaProfiles::designatesReferentElement).
+    if (L.Entity && St.Offset.test(*L.Entity))
+      continue;
     if (L.Range.first != L.Range.second) {
       for (unsigned I = L.Range.first; I != L.Range.second; ++I)
         AllDestroyed &= St.MayDestroyed.test(I);
@@ -3333,6 +3341,8 @@ static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
   // An owner null on some path destroys nothing on it (FlowState::MayNull).
   if (Site.Owner && St.MayNull.test(*Site.Owner))
     AllDestroyed = false;
+  if (!Acc && AllDestroyed)
+    return;
   auto Push = [&](unsigned DiagID) {
     PendingViolation V{DiagID, Site.Loc, static_cast<unsigned>(Site.Destroyer)};
     V.ScopeExitVar = Site.ScopeExitVar;
@@ -3519,8 +3529,11 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
         std::optional<unsigned> R = referent(A, St, Storage);
         if (!R)
           continue;
-        // Through an offset handle a destroy reaches part of the referent.
-        bool Partial = Site.Conditional || St.Offset.test(A);
+        // Through an offset handle a destroy reaches an element, which
+        // destroys nothing tracked.
+        if (St.Offset.test(A))
+          continue;
+        bool Partial = Site.Conditional;
         WithSubs(*R, [&](unsigned I) {
           St.Must.reset(I);
           St.MayUnassigned.set(I);
@@ -4024,6 +4037,9 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
     std::pair<unsigned, unsigned> Part{0, 0};
     /// The form state of a leaf no entity tracks.
     LeafState Form = LeafState::Unknown;
+    /// The leaf names an element of what a pointer or handle refers to
+    /// (SemaProfiles::designatesReferentElement, or an offset handle leaf).
+    bool Element = false;
   };
   // Resolve the leaves of \p Arg; a credit passes its \p Designated type and
   // RawExempt (TrackedStorage::resolve). A credit of an object passed as a
@@ -4055,6 +4071,8 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
         }
       }
       L.Tracked = S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC, Use);
+      L.Element = SemaProfiles::designatesReferentElement(
+          Leaf.E, AsPointerValue, Leaf.Arms);
       if (L.Tracked && Use == SemaProfiles::FlowLeafUse::MarkedTarget &&
           !L.R.Entity)
         L.Part = Storage.objectPart(Leaf, AsPointerValue, OuterPath);
@@ -4089,6 +4107,7 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
         if (HL.M == HandleLeaf::Mode::Handle) {
           ArgLeaf L{HL.E, Storage.resolveHandleLeaf(HL, Designated, RawExempt)};
           L.Tracked = S.Profiles().isFlowTrackedHandleLeaf(HL, DC);
+          L.Element = HL.Partial;
           AnyTracked |= L.Tracked;
           if (!L.R.Entity)
             L.Form = FormOf(HL.E);
@@ -4100,6 +4119,7 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
               AddLeaf(Leaf, HL.M == HandleLeaf::Mode::PointerValue, {},
                       [&] { return FormOf(Leaf); });
               ArgLeaf &L = Leaves.back();
+              L.Element |= HL.Partial;
               if (HL.Partial && L.R.Entity) {
                 L.R.Subobject = true;
                 L.R.Sub = SubKey();
@@ -4215,6 +4235,10 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
     for (const ArgLeaf &L : Leaves) {
       if (L.Tracked)
         JudgedLeaves.insert(L.E);
+      // An element of what a pointer or handle refers to is not judged and
+      // destroys nothing tracked (SemaProfiles::designatesReferentElement).
+      if (L.Element)
+        continue;
       BindingLeaf Leaf;
       if (L.R.Entity) {
         Leaf.Entity = L.R.Entity;
@@ -4230,7 +4254,7 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
             Site.Affected.push_back(Idx);
       Site.Leaves.push_back(Leaf);
     }
-    if (!Site.Judged && Site.Affected.empty())
+    if ((!Site.Judged || Site.Leaves.empty()) && Site.Affected.empty())
       return;
     DSites.push_back(std::move(Site));
     BlockEvents.push_back({DefAssignEventKind::Destroy, 0, CallLike,

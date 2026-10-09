@@ -1015,6 +1015,20 @@ void destroy_unconstructed(std::span<WD> s [[ref_to_uninit]],
   std::ranges::destroy(t); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
+// A destroy of an element of the referent -- through an offset iterator, an
+// element accessor, or pointer arithmetic -- is not judged and kills nothing
+void destroy_elements(std::span<WD> s [[ref_to_uninit]]) {
+  std::destroy(s.begin() + 1, s.end());
+  auto it [[ref_to_uninit]] = s.begin();
+  ++it;
+  std::destroy_at(&*it);
+  std::destroy_at(&s[1]);
+  std::destroy_at(s.data() + 1);
+  std::uninitialized_value_construct(s.begin(), s.end());
+  std::destroy(s.begin() + 1, s.end());
+  std::destroy(s.begin(), s.end());
+}
+
 // [[now_uninit]] takes a handle parameter
 [[now_uninit]] void drop(std::span<WD> s);
 void drop_twice(std::span<WD> s [[ref_to_uninit]]) {

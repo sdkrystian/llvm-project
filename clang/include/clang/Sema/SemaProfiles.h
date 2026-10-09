@@ -330,14 +330,17 @@ public:
     /// at storage \c Subscript alone.
     bool ThroughHandle = false;
   };
-  /// The shape of the glvalue \p E, taking the arms listed in \p Arms, or
-  /// none when its chain bottoms out at anything but a directly named local,
-  /// a parameter, or \c this (a global, a call, a member reached through
-  /// another member's pointer). An indirection of an address-of step
-  /// (\c *&x, \c (&x)->m, \c std::addressof(x)->m) continues from its
-  /// operand.
+  /// The shape of the glvalue \p E -- with \p Pointee, of \c *E for the
+  /// pointer value \p E -- taking the arms listed in \p Arms, or none when its
+  /// chain bottoms out at anything but a directly named local, a parameter, or
+  /// \c this (a global, a call, a member reached through another member's
+  /// pointer). An indirection of an address-of step (\c *&x, \c (&x)->m,
+  /// \c std::addressof(x)->m) continues from its operand; one of pointer
+  /// arithmetic (pointerArithmeticBase) or of a decayed array is an element
+  /// step, as \c p[n] and \c arr[0] are.
   static std::optional<FlowLeafShape>
-  flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms = {});
+  flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms = {},
+                bool Pointee = false);
 
   /// A class with a user-provided constructor is trusted (P4222R2 §5.1): its
   /// constructor body may have assigned a member, which local analysis
@@ -629,6 +632,21 @@ public:
   /// \c &, or the argument of std::addressof, std::__addressof, or
   /// __builtin_addressof -- or null.
   static const Expr *addressOfOperand(const Expr *E);
+
+  /// The pointer operand of the pointer arithmetic \p E -- \c p + n,
+  /// \c n + p, or \c p - n -- or null. A read, store, credit, or destroy
+  /// through the result, and its binding to a marked target, is one of
+  /// \c &p[n]; any other binding of it is unclassified, as an end iterator's.
+  static const Expr *pointerArithmeticBase(const Expr *E);
+
+  /// True if the pointer value (with \p AsPointerValue) or glvalue \p E names
+  /// an element of what a pointer or handle refers to rather than the whole
+  /// referent: a subscript, pointer arithmetic (but by a literal 0), an
+  /// offsetting Derive call, or a handle's element accessor or offset handle,
+  /// taking the arms listed in \p Arms. A destroy of such an element is not
+  /// judged, as a credit of it earns nothing.
+  static bool designatesReferentElement(const Expr *E, bool AsPointerValue,
+                                        ArrayRef<const Expr *> Arms = {});
 
   /// The \c .* or \c ->* access through a pointer to data member that \p E
   /// is, or null: a member step the checks cannot name (P4222R2 §5.4 treats
