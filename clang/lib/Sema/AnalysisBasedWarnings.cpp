@@ -1865,7 +1865,7 @@ using MemberPath = SemaProfiles::MemberPath;
 /// state every event on that storage carries along except a
 /// default-initialization's credit.
 struct TrackedEntity {
-  enum class Kind {
+  enum class Kind : uint8_t {
     CurrentObjectMember,
     LocalMember,
     WholeLocal,
@@ -1875,11 +1875,21 @@ struct TrackedEntity {
     SubMember
   };
   Kind K;
-  /// The member path from the object (member kinds; its key in the object's
-  /// SemaProfiles::flowTrackedMembers table); empty otherwise.
-  MemberPath Steps;
   /// The member is tracked as a whole object (member kinds).
   bool Whole = false;
+  /// Read events are extracted for this entity (a constructor body's or a
+  /// default-initialized constructor-less local's members).
+  bool TrackReads = true;
+  /// The entity belongs to an enclosing function (a variable a lambda body
+  /// reaches by capture): its entry state is unknown -- possibly assigned,
+  /// on no path definitely, and on no path known unassigned -- rather than
+  /// unassigned.
+  bool UnknownEntry = false;
+  /// The member path from the object (member kinds; its key in the object's
+  /// SemaProfiles::flowTrackedMembers table) or to a MemberPointee's pointer
+  /// member (SemaProfiles::markedPointerMembers), referring into that cached
+  /// table; empty otherwise.
+  ArrayRef<MemberStep> Steps;
   /// WholeLocal and Pointee: the SubMember entities of the storage's
   /// flow-tracked members, in SubClass's flow-tracked member table order.
   std::pair<unsigned, unsigned> Subs{0, 0};
@@ -1889,14 +1899,6 @@ struct TrackedEntity {
   /// reference (its anonymous referent). A credit or store covers the entity
   /// only through a designation of this type (designationCovers).
   QualType Type;
-  /// Read events are extracted for this entity (a constructor body's or a
-  /// default-initialized constructor-less local's members).
-  bool TrackReads = true;
-  /// The entity belongs to an enclosing function (a variable a lambda body
-  /// reaches by capture): its entry state is unknown -- possibly assigned,
-  /// on no path definitely, and on no path known unassigned -- rather than
-  /// unassigned.
-  bool UnknownEntry = false;
 
   /// The member a member entity stands for; null otherwise.
   const FieldDecl *field() const {
@@ -2447,7 +2449,7 @@ std::optional<unsigned> TrackedStorage::find(const VarDecl *Base,
                                              ArrayRef<MemberStep> Steps) const {
   std::pair<unsigned, unsigned> Range = objectRange(Base).first;
   for (unsigned I = Range.first; I != Range.second; ++I)
-    if (ArrayRef(Entities[I].Steps) == Steps)
+    if (Entities[I].Steps == Steps)
       return I;
   return std::nullopt;
 }
@@ -5693,7 +5695,7 @@ static void extractStdInitEvents(
         // initializer constructs refer to what that construction set.
         for (unsigned Idx = Storage.MemberPointerRange.first;
              Idx != Storage.MemberPointerRange.second; ++Idx) {
-          const MemberPath &Steps = Storage.Entities[Idx].Steps;
+          ArrayRef<MemberStep> Steps = Storage.Entities[Idx].Steps;
           const MemberStep &First = Steps.front();
           bool Below =
               CI->isAnyMemberInitializer()
@@ -5708,11 +5710,10 @@ static void extractStdInitEvents(
           if (!Below)
             continue;
           std::pair<ReseatTarget, unsigned> RT{ReseatTarget::Unknown, 0};
-          if (const Expr *Elem =
-                  CI->isAnyMemberInitializer()
-                      ? aggregateInitializerFor(CI->getInit(),
-                                                ArrayRef(Steps).drop_front())
-                      : nullptr)
+          if (const Expr *Elem = CI->isAnyMemberInitializer()
+                                     ? aggregateInitializerFor(
+                                           CI->getInit(), Steps.drop_front())
+                                     : nullptr)
             RT = ReseatTargetFor(Elem, Steps.back().Field->getType());
           AppendReseat(Idx, CI->getInit(), RT.first, RT.second);
         }
