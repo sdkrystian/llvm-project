@@ -779,19 +779,19 @@ to a function pointer is accepted while a call to it stays a marked source:
 
 .. code-block:: c++
 
-   int i = 7;
-   int u [[uninit]];
-
-   int *p1 = &i;                         // OK
-   int *p2 = &u;                         // error: needs [[ref_to_uninit]]
-   int *p3 [[ref_to_uninit]] = &u;       // OK
-   int *p4 [[ref_to_uninit]] = &i;       // error: 'i' is initialized
-   int *p5 [[ref_to_uninit]] = new int;  // OK: uninitialized new (§1.2)
-
    void sink(int *q);
    void fill(int *q [[ref_to_uninit]]);
 
    void f() {
+     int i = 7;
+     int u [[uninit]];
+
+     int *p1 = &i;                         // OK
+     int *p2 = &u;                         // error: needs [[ref_to_uninit]]
+     int *p3 [[ref_to_uninit]] = &u;       // OK
+     int *p4 [[ref_to_uninit]] = &i;       // error: 'i' is initialized
+     int *p5 [[ref_to_uninit]] = new int;  // OK: uninitialized new (§1.2)
+
      sink(p3);  // error: 'sink' expects initialized memory
      fill(p3);  // OK
    }
