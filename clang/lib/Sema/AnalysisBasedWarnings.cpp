@@ -68,6 +68,7 @@
 #include <array>
 #include <deque>
 #include <iterator>
+#include <map>
 #include <optional>
 
 using namespace clang;
@@ -3595,6 +3596,11 @@ static void judgeAccessSite(const AccessSite &Site, bool IsWrite,
     Out.push_back({diag::err_init_uninit_read_through, Site.Loc, Site.Select});
 }
 
+/// The reads of each read-tracked entity at program points where it is not
+/// definitely assigned nor escaped, by entity: only entities with such a read
+/// have an entry.
+using OffendingReads = std::map<unsigned, SmallVector<const Expr *, 2>>;
+
 /// Replay a block's events over \p St: the engine's one block-level transfer
 /// function, shared by the fixpoint and the reporting replay so the two can
 /// never disagree. An event or site leaf on a Pointee entity is resolved to
@@ -3608,8 +3614,7 @@ static void
 applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
                      ArrayRef<BindingSite> Sites, ArrayRef<DestroySite> DSites,
                      ArrayRef<AccessSite> ASites, const TrackedStorage &Storage,
-                     FlowState &St,
-                     std::vector<SmallVector<const Expr *, 2>> *Offending,
+                     FlowState &St, OffendingReads *Offending,
                      SmallVectorImpl<PendingViolation> *Violations) {
   // Apply \p F to the storage entity \p R and to its SubMembers.
   auto WithSubs = [&](unsigned R, auto F) {
@@ -3857,7 +3862,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
 /// read-tracked entity, the reads at program points where the entity is not
 /// definitely assigned nor escaped, and appends every other rule's violations
 /// to \p Violations.
-static std::vector<SmallVector<const Expr *, 2>>
+static OffendingReads
 runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
                       const TrackedStorage &Storage,
                       ArrayRef<SmallVector<DefAssignEvent, 4>> Events,
@@ -3934,7 +3939,7 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
   // Replay each visited (reachable) block from its fixpoint entry state and
   // collect the reads of a not-yet-assigned entity and every judged event's
   // verdict at its program point.
-  std::vector<SmallVector<const Expr *, 2>> Offending(NumTracked);
+  OffendingReads Offending;
   for (const CFGBlock *B : cfg) {
     if (!Visited[B->getBlockID()])
       continue;
@@ -3949,17 +3954,15 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
 /// suppressed, once per read-tracked entity, mirroring the local-variable
 /// reporter. The profile name and rule arrive from the std::init CFGProfiles
 /// row.
-static void reportMemberReadsBeforeInit(
-    Sema &S, MutableArrayRef<SmallVector<const Expr *, 2>> Offending,
-    const TrackedStorage &Storage, StringRef Name) {
-  for (unsigned I = 0, N = Offending.size(); I != N; ++I) {
-    if (Offending[I].empty())
-      continue;
-    llvm::sort(Offending[I], [&](const Expr *A, const Expr *B) {
+static void reportMemberReadsBeforeInit(Sema &S, OffendingReads &Offending,
+                                        const TrackedStorage &Storage,
+                                        StringRef Name) {
+  for (auto &[I, Reads] : Offending) {
+    llvm::sort(Reads, [&](const Expr *A, const Expr *B) {
       return S.SourceMgr.isBeforeInTranslationUnit(A->getBeginLoc(),
                                                    B->getBeginLoc());
     });
-    for (const Expr *R : Offending[I]) {
+    for (const Expr *R : Reads) {
       if (!S.Profiles().shouldEmitProfileViolation(
               Name, diag::err_init_member_read_before_init, R->getBeginLoc(),
               /*D=*/nullptr, /*PostParse=*/true))
@@ -6707,7 +6710,7 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
   // before its DeclStmt, a by-value parameter starts unassigned by design,
   // and a marked local's marker asserts it.
   SmallVector<PendingViolation, 8> Violations;
-  std::vector<SmallVector<const Expr *, 2>> Offending = runDefiniteAssignment(
+  OffendingReads Offending = runDefiniteAssignment(
       *cfg, InitAC, Storage, Events, Sites, DSites, ASites, Violations);
   reportMemberReadsBeforeInit(S, Offending, Storage, Entry.Name);
   reportFlowViolations(S, Violations, Entry.Name);
