@@ -14536,9 +14536,9 @@ def err_init_member_call_on_uninit : ProfileRule<
   "uninitialized memory under profile '%0'",
   ProfileStdInitRefToUninit>;
 def err_init_double_destroy : ProfileRule<
-  "storage already destroyed by %select{a '[[now_uninit]]' function|"
-  "a destructor call|its scope-exit destructor|its owner's reset or "
-  "reassignment}1 is destroyed again under profile '%0'",
+  "storage already destroyed is destroyed again by %select{a '[[now_uninit]]' "
+  "function|a destructor call|its scope-exit destructor|its owner's reset or "
+  "reassignment}1 under profile '%0'",
   ProfileStdInitDoubleDestroy>;
 def err_init_destroy_uninit : ProfileRule<
   "uninitialized storage is destroyed by %select{a '[[now_uninit]]' function|"

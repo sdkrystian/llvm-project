@@ -228,8 +228,8 @@ void test_delete_ternary_one_pointer(int *p [[ref_to_uninit]], bool c) {
 void test_destroy_then_destroy(int *p [[ref_to_uninit]]) {
   *p = 5;
   destroy_at(p);
-  destroy_at(p); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}} \
-                 // nobuiltin-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  destroy_at(p); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}} \
+                 // nobuiltin-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
 // Destroying a trusted allocator's raw result is destroying storage where

@@ -2746,7 +2746,7 @@ void test_double_destroy() {
   int u [[uninit]];
   now_init_fill(&u);
   nu_wipe(&u); // OK
-  nu_wipe(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  nu_wipe(&u); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
 // A marked binding keeps its referent's destroyed state: a destroy through the pointer is a double destroy
@@ -2755,7 +2755,7 @@ void test_assert_keeps_destroyed() {
   u = 1;
   nu_wipe(&u);
   int *p [[ref_to_uninit]] = &u; // OK: destroyed storage is uninitialized
-  nu_wipe(p); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  nu_wipe(p); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 void test_assert_conditional_destroy(bool c) {
   int u [[uninit]];
@@ -2763,7 +2763,7 @@ void test_assert_conditional_destroy(bool c) {
   if (c)
     nu_wipe(&u);
   int *p [[ref_to_uninit]] = &u; // OK: destroyed on one path
-  nu_wipe(p); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  nu_wipe(p); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
 // Destroying storage that was never initialized is rejected: destruction
@@ -2793,13 +2793,13 @@ void test_store_retires_destroyed() {
 void test_double_destroy_pointee(int *p [[ref_to_uninit]]) {
   *p = 5;
   nu_wipe(p);
-  nu_wipe(p); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  nu_wipe(p); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 void test_double_destroy_member() {
   struct M { int m [[uninit]]; } a;
   a.m = 5;
   nu_wipe(&a.m);
-  nu_wipe(&a.m); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  nu_wipe(&a.m); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
 // After a reseat the pointer refers to q's referent, whose state is its own:
@@ -2833,7 +2833,7 @@ void test_destroy_ternary_one_pointer(int *p [[ref_to_uninit]], bool c) {
   nu_wipe(c ? p : p);
   take_uninit_ptr(p); // OK
   int *u2 = p; // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
-  nu_wipe(p); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  nu_wipe(p); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
   (void)u2;
 }
 
@@ -2843,7 +2843,7 @@ void test_destroy_comma(int *p [[ref_to_uninit]]) {
   *p = 1;
   nu_wipe(((void)0, p));
   take_uninit_ptr(p); // OK: uninitialized again
-  nu_wipe(p); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  nu_wipe(p); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
 // double_destroy stays definite by construction: a two-leaf destroy fires it
@@ -2927,7 +2927,7 @@ void test_conditional_store_then_destroy(bool c) {
 void test_destroy_uninit_then_double_destroy() {
   int u [[uninit]];
   nu_wipe(&u); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
-  nu_wipe(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  nu_wipe(&u); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
 // Each rule suppresses under its own name...
@@ -3015,7 +3015,7 @@ void test_destroy_after_conditional_destroy(bool c) {
   u = 5;
   if (c)
     nu_wipe(&u);
-  nu_wipe(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  nu_wipe(&u); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
 void test_use_after_destroy_binding() {
@@ -3166,7 +3166,7 @@ void test_reinit_on_destroyed() {
   int u [[uninit]];
   u = 5;
   nu_wipe(&u);
-  nu_reinit(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  nu_reinit(&u); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
 // The reinitializer exemption is call-wide: a dual-attributed callee's
@@ -3479,7 +3479,7 @@ void test_destroy_after_goto(bool c) {
     goto skip;
   nu_wipe(&u);
 skip:;
-  nu_wipe(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  nu_wipe(&u); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 // A switch cannot skip a later store: the store is on every path and the
 // marked binding is rejected.
@@ -4292,7 +4292,7 @@ void test_member_call_silent_forms() {
 void test_destructor_call_destroys() {
   WithDtor d [[uninit]]; // expected-note {{'d' is destroyed at the end of its scope}}
   d.~WithDtor(); // expected-error {{uninitialized storage is destroyed by a destructor call under profile 'std::init'}}
-} // expected-error {{storage already destroyed by its scope-exit destructor is destroyed again under profile 'std::init'}}
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
 
 // A call through a pointer-to-member resolves no method at the call and
 // bypasses the object-argument conversion -- the pointer-to-member analog of

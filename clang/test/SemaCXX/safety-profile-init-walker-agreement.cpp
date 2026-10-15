@@ -380,12 +380,12 @@ int d3_read_before(std::unique_ptr<int> u [[ref_to_uninit]]) { return *u; } // e
 void d3_store_before(std::unique_ptr<int> u [[ref_to_uninit]]) { *u = 1; }
 void d3_bind_before(std::unique_ptr<int> u [[ref_to_uninit]]) { int *q_ = &(*u); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void d3_credit_before(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(&(*u), 1); }
-void d3_destroy_before(std::unique_ptr<int> u [[ref_to_uninit]]) { std::destroy_at(&(*u)); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}} expected-error {{storage already destroyed by its scope-exit destructor is destroyed again}} expected-note {{'u' is destroyed at the end of its scope}}
+void d3_destroy_before(std::unique_ptr<int> u [[ref_to_uninit]]) { std::destroy_at(&(*u)); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}} expected-error {{storage already destroyed is destroyed again by its scope-exit destructor}} expected-note {{'u' is destroyed at the end of its scope}}
 int d3_read_after(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(u.get(), 0); return *u; }
 void d3_store_after(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(u.get(), 0); *u = 1; }
 void d3_bind_after(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(u.get(), 0); int *q_ = &(*u); (void)q_; }
 void d3_credit_after(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(u.get(), 0); std::construct_at(&(*u), 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
-void d3_destroy_after(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(u.get(), 0); std::destroy_at(&(*u)); } // expected-error {{storage already destroyed by its scope-exit destructor is destroyed again}} expected-note {{'u' is destroyed at the end of its scope}}
+void d3_destroy_after(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(u.get(), 0); std::destroy_at(&(*u)); } // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor}} expected-note {{'u' is destroyed at the end of its scope}}
 // a1, address-of: *&a[1]
 int a1_read_before() { int a [[uninit]] [4]; return *&a[1]; } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory}}
 void a1_store_before() { int a [[uninit]] [4]; *&a[1] = 1; } // expected-error {{writing an element of an '[[uninit]]' object does not initialize it}}
@@ -621,12 +621,12 @@ int h7_read_before(std::unique_ptr<int> u [[ref_to_uninit]]) { return *u.get(); 
 void h7_store_before(std::unique_ptr<int> u [[ref_to_uninit]]) { *u.get() = 1; }
 void h7_bind_before(std::unique_ptr<int> u [[ref_to_uninit]]) { int *q_ = &(*u.get()); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void h7_credit_before(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(&(*u.get()), 1); }
-void h7_destroy_before(std::unique_ptr<int> u [[ref_to_uninit]]) { std::destroy_at(&(*u.get())); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}} expected-error {{storage already destroyed by its scope-exit destructor is destroyed again}} expected-note {{'u' is destroyed at the end of its scope}}
+void h7_destroy_before(std::unique_ptr<int> u [[ref_to_uninit]]) { std::destroy_at(&(*u.get())); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}} expected-error {{storage already destroyed is destroyed again by its scope-exit destructor}} expected-note {{'u' is destroyed at the end of its scope}}
 int h7_read_after(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(u.get(), 0); return *u.get(); }
 void h7_store_after(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(u.get(), 0); *u.get() = 1; }
 void h7_bind_after(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(u.get(), 0); int *q_ = &(*u.get()); (void)q_; }
 void h7_credit_after(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(u.get(), 0); std::construct_at(&(*u.get()), 1); } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
-void h7_destroy_after(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(u.get(), 0); std::destroy_at(&(*u.get())); } // expected-error {{storage already destroyed by its scope-exit destructor is destroyed again}} expected-note {{'u' is destroyed at the end of its scope}}
+void h7_destroy_after(std::unique_ptr<int> u [[ref_to_uninit]]) { std::construct_at(u.get(), 0); std::destroy_at(&(*u.get())); } // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor}} expected-note {{'u' is destroyed at the end of its scope}}
 // h8, handle accessor: *(u.get() + 1)
 int h8_read_before(std::unique_ptr<int> u [[ref_to_uninit]]) { return *(u.get() + 1); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
 void h8_store_before(std::unique_ptr<int> u [[ref_to_uninit]]) { *(u.get() + 1) = 1; }

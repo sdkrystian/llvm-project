@@ -1007,7 +1007,7 @@ struct WD {
 void destroy_through_span(std::span<WD> s [[ref_to_uninit]]) {
   std::uninitialized_value_construct(s.begin(), s.end());
   std::destroy(s.begin(), s.end());
-  std::destroy(s.begin(), s.end()); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  std::destroy(s.begin(), s.end()); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 void destroy_unconstructed(std::span<WD> s [[ref_to_uninit]],
                            std::span<WD> t [[ref_to_uninit]]) {
@@ -1034,7 +1034,7 @@ void destroy_elements(std::span<WD> s [[ref_to_uninit]]) {
 void drop_twice(std::span<WD> s [[ref_to_uninit]]) {
   std::uninitialized_value_construct(s.begin(), s.end());
   drop(s);
-  drop(s); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  drop(s); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
 // A marked std::unique_ptr destroys what it owns at the end of its scope,

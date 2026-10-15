@@ -125,7 +125,7 @@ void lifecycle_addressof() {
   std::construct_at(std::addressof(u), 5);
   int v = u; // OK
   std::destroy_at(std::addressof(u));
-  std::destroy_at(std::addressof(u)); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  std::destroy_at(std::addressof(u)); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
   (void)v;
 }
 
@@ -148,7 +148,7 @@ void double_destroy() {
   int u [[uninit]];
   std::construct_at(&u, 5);
   std::destroy_at(&u);
-  std::destroy_at(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  std::destroy_at(&u); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
 // A destroy_at after a destroy_at on one path is a double destruction
@@ -157,7 +157,7 @@ void double_destroy_one_path(bool c) {
   std::construct_at(&u, 5);
   if (c)
     std::destroy_at(&u);
-  std::destroy_at(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  std::destroy_at(&u); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
 // A destroy_at after a destroy_at and a reconstruction on one path is accepted
@@ -178,7 +178,7 @@ void double_destroy_after_conditional(bool c) {
   std::construct_at(&a, 1);
   std::construct_at(&b, 2);
   std::destroy_at(c ? &a : &b);
-  std::destroy_at(&a); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  std::destroy_at(&a); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
 // A conditional destroy_at keeps an earlier destroy on every path
@@ -188,7 +188,7 @@ void double_destroy_across_conditional(bool c) {
   std::construct_at(&b, 2);
   std::destroy_at(&a);
   std::destroy_at(c ? &a : &b); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
-  std::destroy_at(&a); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  std::destroy_at(&a); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
 // Binding the destroyed storage is the unmarked-direction violation.
@@ -581,7 +581,7 @@ int ranges_destroy() {
   int a [[uninit]] [3];
   std::ranges::uninitialized_fill(a, 1);
   std::ranges::destroy(a);
-  std::ranges::destroy(a); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  std::ranges::destroy(a); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
   return a[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
 }
 
@@ -597,7 +597,7 @@ int ranges_construct_destroy_at() {
   std::ranges::construct_at(&u, 5);
   int v = u; // OK
   std::ranges::destroy_at(&u);
-  std::ranges::destroy_at(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  std::ranges::destroy_at(&u); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
   return v;
 }
 
@@ -695,7 +695,7 @@ void destroy_twice() {
   int arr [[uninit]] [4];
   std::uninitialized_fill(arr, arr + 4, 0);
   std::destroy(arr, arr + 4);
-  std::destroy(arr, arr + 4); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  std::destroy(arr, arr + 4); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
 // destroy_n through a marked pointer
@@ -871,7 +871,7 @@ void scope_exit_after_destroy_at() {
   ScopedDtor w [[uninit]]; // expected-note {{'w' is destroyed at the end of its scope}}
   std::construct_at(&w);
   std::destroy_at(&w);
-} // expected-error {{storage already destroyed by its scope-exit destructor is destroyed again under profile 'std::init'}}
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
 
 // A construct_at on one path is enough for the scope-exit destructor
 void scope_exit_one_path(bool c) {
@@ -910,7 +910,7 @@ void scope_exit_after_one_path_destroy(bool c) {
   std::construct_at(&w);
   if (c)
     std::destroy_at(&w);
-} // expected-error {{storage already destroyed by its scope-exit destructor is destroyed again under profile 'std::init'}}
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
 
 // The scope-exit destructor of an array constructed element by element is accepted
 void scope_exit_array_elements() {
@@ -927,7 +927,7 @@ void scope_exit_array_elements_after_destroy() {
   std::destroy(arr, arr + 2);
   for (int i = 0; i != 2; ++i)
     std::construct_at(&arr[i]);
-} // expected-error {{storage already destroyed by its scope-exit destructor is destroyed again under profile 'std::init'}}
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
 
 // A whole-range construction after a whole destroy is accepted at scope exit
 void scope_exit_array_reconstructed_after_destroy() {
@@ -951,7 +951,7 @@ void scope_exit_out_of_line_default_destroyed() {
   ScopedOutOfLine w [[uninit]]; // expected-note {{'w' is destroyed at the end of its scope}}
   std::construct_at(&w);
   std::destroy_at(&w);
-} // expected-error {{storage already destroyed by its scope-exit destructor is destroyed again under profile 'std::init'}}
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
 
 // A marker rejected for its initializer is not judged at scope exit
 void scope_exit_marker_with_initializer() {
@@ -1024,7 +1024,7 @@ void double_destroy_across_names() {
   int *p [[ref_to_uninit]] = &u;
   std::construct_at(&u, 5);
   std::destroy_at(p);
-  std::destroy_at(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  std::destroy_at(&u); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
 // A destroy_at through the pointer after one on one path is a double destruction
@@ -1032,7 +1032,7 @@ void double_destroy_one_path(bool c, int *p [[ref_to_uninit]]) {
   std::construct_at(p, 5);
   if (c)
     std::destroy_at(p);
-  std::destroy_at(p); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  std::destroy_at(p); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
 // destroy_at through the pointer destroys the local: never-constructed
@@ -1325,7 +1325,7 @@ int read_after_destructor_call(DtorPayload *p [[ref_to_uninit]]) {
 void double_destructor_call(DtorPayload *p [[ref_to_uninit]]) {
   std::construct_at(p);
   p->~DtorPayload();
-  p->~DtorPayload(); // expected-error {{storage already destroyed by a destructor call is destroyed again under profile 'std::init'}}
+  p->~DtorPayload(); // expected-error {{storage already destroyed is destroyed again by a destructor call under profile 'std::init'}}
 }
 
 // An explicit destructor call on never-constructed storage destroys uninitialized storage
@@ -1353,7 +1353,7 @@ using Int = int;
 void double_pseudo_destructor_call(Int *p [[ref_to_uninit]]) {
   std::construct_at(p, 1);
   p->~Int();
-  p->~Int(); // expected-error {{storage already destroyed by a destructor call is destroyed again under profile 'std::init'}}
+  p->~Int(); // expected-error {{storage already destroyed is destroyed again by a destructor call under profile 'std::init'}}
 }
 
 // A delete-expression runs the destructor of never-constructed storage
@@ -1377,7 +1377,7 @@ struct DestroysMarkedMember {
   }
   void reset_twice() {
     p->~DtorPayload();
-    p->~DtorPayload(); // expected-error {{storage already destroyed by a destructor call is destroyed again under profile 'std::init'}}
+    p->~DtorPayload(); // expected-error {{storage already destroyed is destroyed again by a destructor call under profile 'std::init'}}
   }
 };
 
@@ -1409,7 +1409,7 @@ void user() {
   std::construct_at(&u, 5);
   int v = u; // OK: initialized
   std::destroy_at(&u);
-  std::destroy_at(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  std::destroy_at(&u); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
   (void)v;
 }
 

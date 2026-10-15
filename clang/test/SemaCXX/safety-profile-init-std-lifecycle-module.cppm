@@ -64,7 +64,7 @@ void destroy_twice() {
   int u [[uninit]];
   std::construct_at(&u, 1);
   std::destroy_at(&u);
-  std::destroy_at(&u); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  std::destroy_at(&u); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
 // uninitialized_fill initializes the range

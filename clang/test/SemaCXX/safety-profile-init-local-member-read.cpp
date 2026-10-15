@@ -1041,7 +1041,7 @@ void drop_whole_twice() {
   Pair c;
   std::construct_at(&c, 1, 2);
   drop_pair(&c);
-  drop_pair(&c); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+  drop_pair(&c); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
 // An unmarked binding of the whole aggregate is judged by its form

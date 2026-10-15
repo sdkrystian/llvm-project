@@ -126,7 +126,7 @@ struct DestroyTwice {
   DestroyTwice() {
     std::construct_at(&s, 1, 2);
     std::destroy_at(&s);
-    std::destroy_at(&s); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+    std::destroy_at(&s); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
   }
 };
 
@@ -239,7 +239,7 @@ void local_scope_exit_destroyed() {
   DtorHolder h; // expected-note {{'h' is destroyed at the end of its scope}}
   std::construct_at(&h.m);
   std::destroy_at(&h.m);
-} // expected-error {{storage already destroyed by its scope-exit destructor is destroyed again under profile 'std::init'}}
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
 void local_scope_exit_constructed() {
   DtorHolder h;
   std::construct_at(&h.m); // OK
@@ -492,7 +492,7 @@ struct Lifetime {
   }
   void destroy_twice() {
     this->~Lifetime();
-    this->~Lifetime(); // expected-error {{storage already destroyed by a destructor call is destroyed again under profile 'std::init'}}
+    this->~Lifetime(); // expected-error {{storage already destroyed is destroyed again by a destructor call under profile 'std::init'}}
   }
   void construct_live() {
     std::construct_at(this); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
@@ -547,7 +547,7 @@ struct Vector {
   }
   void destroy_twice() {
     std::destroy_at(mem.elem);
-    std::destroy_at(mem.elem); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+    std::destroy_at(mem.elem); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
   }
   S &front() { return *mem.elem; } // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 };
@@ -616,7 +616,7 @@ template <class T> struct TVector {
   }
   void destroy_twice() {
     std::destroy_at(mem.elem);
-    std::destroy_at(mem.elem); // expected-error {{storage already destroyed by a '[[now_uninit]]' function is destroyed again under profile 'std::init'}}
+    std::destroy_at(mem.elem); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
   }
 };
 template struct TVector<S>; // expected-note {{in instantiation of member function 'TVector<S>::destroy_twice' requested here}}
