@@ -4939,20 +4939,20 @@ CFGBlock *CFGBuilder::VisitCXXForRangeStmt(CXXForRangeStmt *S) {
   CFGBlock *ConditionBlock = createBlock(false);
   ConditionBlock->setTerminator(S);
 
-  // Now add the actual condition to the condition block.
+  // Now add the actual condition to the condition block.  With exception
+  // edges, a call that may throw ends a block of its own, so the condition can
+  // span several blocks and the loop is entered at the first of them.
+  CFGBlock *EntryConditionBlock = ConditionBlock;
   if (Expr *C = S->getCond()) {
     Block = ConditionBlock;
-    CFGBlock *BeginConditionBlock = addStmt(C);
+    EntryConditionBlock = addStmt(C);
     if (badCFG)
       return nullptr;
-    assert(BeginConditionBlock == ConditionBlock &&
-           "condition block in for-range was unexpectedly complex");
-    (void)BeginConditionBlock;
   }
 
-  // The condition block is the implicit successor for the loop body as well as
-  // any code above the loop.
-  Succ = ConditionBlock;
+  // The entry condition block is the implicit successor for the loop body as
+  // well as any code above the loop.
+  Succ = EntryConditionBlock;
 
   // See if this is a known constant.
   TryResult KnownVal(true);

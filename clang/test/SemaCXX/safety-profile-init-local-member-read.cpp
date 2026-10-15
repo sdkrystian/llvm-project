@@ -834,6 +834,48 @@ void cond_read(bool c) {
   (void)r;
 }
 
+// A range-for whose iterator comparison may throw.
+struct ThrowingIt {
+  int v;
+  int operator*() const;
+  ThrowingIt &operator++();
+  bool operator!=(const ThrowingIt &) const;
+};
+struct ThrowingRange {
+  ThrowingIt begin() const;
+  ThrowingIt end() const;
+};
+struct RangeBuf {
+  int n [[uninit]]; // expected-note {{member 'n' declared here}}
+};
+void range_for_local() {
+  RangeBuf b;
+  for (int v : ThrowingRange{})
+    b.n = v;
+  int y = b.n; // expected-error {{member 'n' is read before initialization under profile 'std::init'}}
+  (void)y;
+}
+void range_for_local_ok() {
+  RangeBuf b;
+  b.n = 0;
+  for (int v : ThrowingRange{})
+    b.n += v;
+  int y = b.n; // OK
+  (void)y;
+}
+
+// A member function without markers that copies *this and has such a loop.
+struct RangeSelfCopy {
+  int d = 0;
+  int sum() const {
+    RangeSelfCopy c = *this;
+    int r = 0;
+    for (int v : ThrowingRange{})
+      r += v;
+    return r + c.d;
+  }
+};
+
 // A call inside a try block may transfer to the handler before the
 // assignment after it.
 int try_source();
