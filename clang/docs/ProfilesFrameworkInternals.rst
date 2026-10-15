@@ -1114,7 +1114,10 @@ The memory of a body's flow states is therefore linear in its events, not in
 its blocks times its entities.  The join identity, the state of a
 predecessor not yet reached, is a state without nodes
 (``FlowState::Reached``), so a flag or a ``Target`` has no top value of its
-own: a ``Target`` joins to itself or to unidentified.
+own: a ``Target`` joins to itself or to unidentified.  A block joins its
+predecessors' exit states as a balanced tree, so P predecessors that each
+change different nodes cost on the order of P log P leaf joins rather than P
+squared.
 
 The transfer function resolves every event and site leaf on a marked
 pointer's or reference's entity through ``Target`` before applying

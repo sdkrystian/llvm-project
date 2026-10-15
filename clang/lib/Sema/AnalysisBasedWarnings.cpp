@@ -3051,6 +3051,9 @@ struct AccessSite {
 };
 
 #define DEBUG_TYPE "std-init-flow"
+/// The leaves two flow states' joins combine cell by cell (SharedArray::meet).
+STATISTIC(NumFlowStateLeafJoins,
+          "Number of std::init flow-state leaves joined cell by cell");
 /// The trie nodes the flow states allocate (SharedArray).
 STATISTIC(NumFlowStateNodes, "Number of std::init flow-state nodes allocated");
 /// The pointers a reseat to a fresh or escaped referent checks for an alias
@@ -3131,6 +3134,7 @@ template <typename T> class SharedArray {
       return A;
     bool SameA = true, SameB = true;
     if (Level == 0) {
+      ++NumFlowStateLeafJoins;
       const Leaf &LA = leaf(A.get()), &LB = leaf(B.get());
       std::array<T, Fan> Cells;
       for (unsigned I = 0; I != Fan; ++I) {
@@ -3874,9 +3878,24 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
     if (B == &CFGEntry) {
       In = FunctionEntry;
     } else {
-      for (const CFGBlock *Pred : B->preds())
-        if (Pred)
-          In.meet(ExitState[Pred->getBlockID()]);
+      // Join the reached predecessors' exits as a balanced tree, the way a
+      // binary counter carries: neighbouring predecessors share all but
+      // their own changes, so a join at rank R combines states that differ
+      // in about 2^R nodes, and at most one partial join per rank is alive.
+      SmallVector<std::pair<FlowState, unsigned>, 8> Ranks;
+      for (const CFGBlock *Pred : B->preds()) {
+        if (!Pred || !ExitState[Pred->getBlockID()].Reached)
+          continue;
+        FlowState Cur = ExitState[Pred->getBlockID()];
+        unsigned Rank = 0;
+        for (; !Ranks.empty() && Ranks.back().second == Rank; ++Rank) {
+          Cur.meet(Ranks.back().first);
+          Ranks.pop_back();
+        }
+        Ranks.push_back({std::move(Cur), Rank});
+      }
+      for (; !Ranks.empty(); Ranks.pop_back())
+        In.meet(Ranks.back().first);
     }
     assert(In.Reached && "a dequeued block has a reached predecessor");
     EntryState[B->getBlockID()] = In;

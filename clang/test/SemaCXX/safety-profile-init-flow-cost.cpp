@@ -7,9 +7,9 @@
 // expected-no-diagnostics
 
 // The std::init flow engine's cost grows linearly with the body: each block's
-// state shares every node but the path to the entities its events change, and
-// a reseat checks only the pointers that can have copied the replaced
-// referent.
+// state shares every node but the path to the entities its events change, a
+// block joins its predecessors pairwise, and a reseat checks only the pointers
+// that can have copied the replaced referent.
 
 [[profiles::enforce(std::init)]];
 
@@ -30,7 +30,9 @@ struct Out {
 
 // Locals of 64 tracked members each, one written per block; the exit block
 // joins every block
+// LOCALS32: 155 std-init-flow - Number of std::init flow-state leaves joined cell by cell
 // LOCALS32: 194 std-init-flow - Number of std::init flow-state nodes allocated
+// LOCALS64: 378 std-init-flow - Number of std::init flow-state leaves joined cell by cell
 // LOCALS64: 386 std-init-flow - Number of std::init flow-state nodes allocated
 #ifdef LOCALS
 #define LOCAL(n) Out o##n; o##n.i0.m0 = n; r += use(o##n.i0.m0);
@@ -47,9 +49,9 @@ int locals() {
 #endif
 
 // Marked pointers, each copied once and reseated to a fresh allocation
-// POINTERS64: 266 std-init-flow - Number of std::init flow-state nodes allocated
+// POINTERS64: 328 std-init-flow - Number of std::init flow-state nodes allocated
 // POINTERS64: 256 std-init-flow - Number of std::init pointers checked for a replaced referent
-// POINTERS128: 526 std-init-flow - Number of std::init flow-state nodes allocated
+// POINTERS128: 652 std-init-flow - Number of std::init flow-state nodes allocated
 // POINTERS128: 512 std-init-flow - Number of std::init pointers checked for a replaced referent
 #ifdef POINTERS
 #define POINTER(n)                                                             \
