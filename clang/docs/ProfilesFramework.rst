@@ -371,7 +371,7 @@ The ``std::init`` Profile
 =========================
 
 ``std::init`` is an initial slice of the proposed initialization profile from
-Bjarne Stroustrup's "An initialization profile" (P4222R1.1; the ``§``
+Bjarne Stroustrup's "An initialization profile" (P4222R2; the ``§``
 references below are to that paper).  Its guarantee: **no object is read or
 written before it is initialized**, enforced entirely at compile time.
 Following the paper:
@@ -393,7 +393,7 @@ Following the paper:
 recognized regardless of ``-fprofiles`` (see the :doc:`AttributeReference`
 entries for their placement rules); the rules below carry weight only while
 ``std::init`` is enforced.  Reads and writes of ``std::byte`` objects are
-exempt from all of them (§4.5), and a read of a ``std::nullptr_t`` object,
+exempt from all of them (§4.6), and a read of a ``std::nullptr_t`` object,
 which accesses no storage ([conv.lval]p3), is never a read of uninitialized
 memory.
 
@@ -412,7 +412,8 @@ is validated against the deduced type: a variable's at its initializer, a
 function's or lambda's return type at the end of its body.  A structured
 binding cannot carry ``[[ref_to_uninit]]``, whatever its type: the members it
 names carry their own markers.  The markers' exact placement and spelling
-track an open committee question (P4222R2 §4.7).
+track an open committee question (P4222R2 §4.1 and its appendix
+"Attribute placement").
 
 Each rule has a name, so it can be suppressed individually with
 ``[[profiles::suppress(std::init, rule: "name")]]`` (see `Suppressing
@@ -479,7 +480,7 @@ genuine no-op.  A union whose default-initialization activates a variant
 through a default member initializer -- including initializers written on
 the leaves of an anonymous-record variant, provided they initialize the
 variant completely -- counts as initialized, and a union of only unnamed
-bit-fields or only ``std::byte`` members has nothing to acknowledge (§4.5).
+bit-fields or only ``std::byte`` members has nothing to acknowledge (§4.6).
 
 
 Where ``[[uninit]]`` May Not Go
@@ -517,7 +518,7 @@ duration or initializer), then static or thread storage duration, then a
 contradicting initializer.  A no-op initialization -- the trivial
 default-initialization of a scalar or aggregate that leaves a scalar subobject
 indeterminate -- is consistent with the marker; any other synthesized
-initialization contradicts it and is rejected (§5.3): a member or base with a
+initialization contradicts it and is rejected (§5.4): a member or base with a
 user-provided default constructor, a default member initializer, a virtual table
 pointer, or a value-initialization (``= P()``), all of which initialize
 something.  ``uninit_with_initializer`` reports the two cases differently: a
@@ -536,7 +537,7 @@ default-initialization is not a no-op:
    void g() {
      S s4 [[uninit]];   // error: default-initialization of 'S' does not leave
                         // it uninitialized -- 's4.s' is default-constructed
-                        // (uninit_with_initializer, §5.3)
+                        // (uninit_with_initializer, §5.4)
    }
 
    struct Buf {
@@ -592,7 +593,7 @@ unknown, does not count against the read (see
      int e = arr[0]; // error: array elements are not tracked; only a
                      // whole-object initialization can give 'arr' a value
 
-     return *p;      // error: read through [[ref_to_uninit]] (§4.5)
+     return *p;      // error: read through [[ref_to_uninit]] (§4.6)
    }
 
    struct T {
@@ -600,7 +601,7 @@ unknown, does not count against the read (see
      T(int v) {
        int r = m;    // error: 'm' is read before the body assigns it
        m = v;        // OK: for a built-in type, a write is its
-     }               // initialization (§4.5)
+     }               // initialization (§4.6)
    };
 
 An ``[[uninit]]`` member of a class type is initialized only as a whole --
@@ -723,7 +724,7 @@ destroys such a member whose destructor is non-trivial, judged like an
 ``[[uninit]]`` local's scope exit (`Binding Pointers and References`_).
 
 Subobject writes below the marker are rejected like the named twin: a
-write below a member step initializes nothing (§5.4's piecemeal ban; §4.5
+write below a member step initializes nothing (§5.4's piecemeal ban; §4.6
 makes only the whole scalar write an initialization), whether the storage
 is reached through a marked pointer, reference, member, or callee return,
 through a recognized allocator's raw result, or through a raw ``new``
@@ -817,11 +818,11 @@ object out of one; a copy out of an ``[[uninit]]`` member reads it, so it is
 trusted where its reads are (see `Reads of Uninitialized Objects`_).  A
 structured binding names the member or element it decomposes, marker included,
 so after ``auto [a, b] = s;`` a use of ``b`` is judged by the marking of the
-field it names.  For the copy, the escape is the
-paper's own (§7.2): declare the copy constructor's parameter
-``[[ref_to_uninit]]``.  Positions that cannot carry the marker -- a variadic
-argument, a parameter of a function called through a function pointer or a
-pointer to member function, the implicit object parameter, a pointer element of
+field it names.  For the copy, the escape is to declare the copy
+constructor's parameter ``[[ref_to_uninit]]``.  Positions that cannot carry
+the marker -- a variadic argument, a parameter of a function called through a
+function pointer or a pointer to member function, the implicit object
+parameter, a pointer element of
 an array in aggregate initialization -- are checked as unmarked targets;
 suppress at the call site if the flow is intended.  A reference to a *const*
 pointer, or an rvalue reference to a pointer, is bound by the pointer's value:
@@ -838,13 +839,14 @@ target (P4222R2 §4.9: mixing requires suppression).  The same holds below a
 member access, subscript, indirection, or ``&``: ``*(c ? p : q)`` is judged as
 ``c ? *p : *q``.  A parameter's marker written on any declaration of the
 function is inherited by the parameter's later redeclarations, so a header's
-marker carries to the source file's definition (the §7.2 header/source split);
+marker carries to the source file's definition (a header/source split);
 the definition keeps its read-through checking and call sites after the
 redeclaration still see the marker.  A null pointer source -- ``nullptr``,
 ``0``, ``{}``, or a local variable initialized to null -- refers to no object,
-so it is accepted for marked and unmarked targets alike (§4.3, §8: the marker
-means "zero or more uninitialized objects"); a *parameter* with a null default
-argument is not a null source (callers may pass any pointer).  A source whose
+so it is accepted for marked and unmarked targets alike (§4.3, §9.3: the
+marker means "zero or more uninitialized objects"); a *parameter* with a null
+default argument is not a null source (callers may pass any pointer).  A
+source whose
 form the recognizer cannot classify (an integer-to-pointer cast) is likewise
 accepted for either target, and so is the value of pointer arithmetic
 (``p + n``, ``n + p``, ``p - n``) bound to an unmarked target, so that an end
@@ -941,10 +943,11 @@ address-of step names the object: ``*&x``, ``(&x)->m``, and
 class-type referent never initializes: it is a member ``operator=`` call on
 uninitialized storage, rejected as above.
 
-One kind of call *does* count as initialization: §6.2's ``[[now_init]]``
-attribute (its placement and spelling track an open committee question)
-declares that a function initializes the storage passed to each of its
-``[[ref_to_uninit]]`` parameters, and it requires at least one such
+One kind of call *does* count as initialization: the ``[[now_init]]``
+attribute (§6; §6.2 spells it ``[[must_init]]``, and its placement and
+spelling track an open committee question) declares that a function
+initializes the storage passed to each of its ``[[ref_to_uninit]]``
+parameters, and it requires at least one such
 parameter.  A call to a ``[[now_init]]`` function initializes the
 argument's storage exactly as the equivalent direct store would --
 ``fill(&u)`` initializes ``u`` whole, ``fill(p)`` the storage ``p`` refers
@@ -1027,10 +1030,10 @@ rule -- in a system header the `System Headers`_ exemption covers it, under
 diagnosed per instantiation -- while an unmarked definition is judged as
 written.
 
-The lifecycle *end* is the mirror attribute ``[[now_uninit]]`` -- the
-recording §4.4 notes is missing for ``destroy_at`` ("the object subjected to
-``destroy_at()`` should be considered uninitialized, but there is no way of
-recording that in the code").  It declares that a function ends the lifetime
+The lifecycle *end* is the mirror attribute ``[[now_uninit]]``, which records
+what §4.4 asks of ``destroy_at`` ("the object subjected to ``destroy_at()``
+should be considered uninitialized") and the paper has no attribute for.  It
+declares that a function ends the lifetime
 of the storage passed to each of its pointer or reference parameters (which
 are unmarked; apply the attribute only to functions that destroy *every*
 such argument's storage): after the call the storage is uninitialized again
@@ -1039,7 +1042,7 @@ reference is the unmarked-direction violation -- and destroyed.  The
 parameters themselves take storage that is initialized: destruction makes an
 object uninitialized (§1), so destroying storage that is still -- or again
 -- uninitialized on every path reaching the call is itself an access to raw
-memory, rejected as rule ``destroy_uninit`` (§4.4: it is an error to
+memory, rejected as rule ``destroy_uninit`` (§4.6: it is an error to
 uninitialize an object twice); storage initialized on some path is
 accepted, and so is storage of unknown state.  A storage-release callee
 keeps any-state acceptance (``free`` takes storage that may never have been
