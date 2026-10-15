@@ -62,6 +62,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/TimeProfiler.h"
 #include <algorithm>
+#include <array>
 #include <deque>
 #include <iterator>
 #include <optional>
@@ -3052,68 +3053,104 @@ static constexpr unsigned TopTarget = ~0u;
 /// marked binding to it asserts nothing.
 static constexpr unsigned UnknownTarget = ~1u;
 
-/// The dataflow state of every tracked entity at a program point: assigned
-/// on every path (Must), on some path (May), unassigned on some path that knows
-/// its state (MayUnassigned: a path entering from an enclosing function, or
-/// past a mutable alias of a marked pointer, does not), escaped as a local
-/// aggregate on every path (Esc: the read leniency for locals,
-/// ProfilesFrameworkInternals.rst, "Known Gaps (std::init)"), destroyed on
-/// some path and not stored since (MayDestroyed), and, for a Pointee entity,
-/// the entity the marked pointer or reference refers to (Target). The join of
-/// predecessors intersects Must and Esc, unites May, MayUnassigned, and
-/// MayDestroyed, and keeps a Target the predecessors agree on.
+/// The dataflow state of every tracked entity at a program point: one word of
+/// flags per entity (Bit) and, for a Pointee entity, the entity the marked
+/// pointer or reference refers to (Target). The join of predecessors
+/// intersects the JoinIntersects flags, unites the others, and keeps a Target
+/// the predecessors agree on.
 struct FlowState {
-  llvm::BitVector Must, May, MayUnassigned, Esc, MayDestroyed;
-  /// Uninitialized on some path only by a marked pointer member's entry
-  /// assertion: a MemberPointee's own referent at entry, until a store,
-  /// credit, destroy, release, or reseat gives evidence. Joined by union.
-  llvm::BitVector EntryAsserted;
-  /// Storage whose latest credit, on some path, was a default-initialization
-  /// (DefAssignEvent::SkipUninitMembers): its [[uninit]] members it has no
-  /// SubMembers for are indeterminate until a store names one. Joined by
-  /// union.
-  llvm::BitVector MembersPending;
-  /// A marked handle positioned past its referent's start on some path
-  /// (ReseatTarget::Offset). Joined by union.
-  llvm::BitVector Offset;
-  /// A marked std::unique_ptr null on every path (ReseatTarget::Null).
-  /// Joined by intersection.
-  llvm::BitVector Null;
-  /// A marked std::unique_ptr null on some path: its destroys are no
-  /// double_destroy, as the nulling path destroys nothing there. Joined by
-  /// union.
-  llvm::BitVector MayNull;
+  /// The per-entity flags.
+  enum Bit : uint16_t {
+    /// Assigned on every path.
+    Must = 1u << 0,
+    /// Assigned on some path.
+    May = 1u << 1,
+    /// Unassigned on some path that knows its state: a path entering from an
+    /// enclosing function, or past a mutable alias of a marked pointer, does
+    /// not.
+    MayUnassigned = 1u << 2,
+    /// Escaped as a local aggregate on every path: the read leniency for
+    /// locals (ProfilesFrameworkInternals.rst, "Known Gaps (std::init)").
+    Esc = 1u << 3,
+    /// Destroyed on some path and not stored since.
+    MayDestroyed = 1u << 4,
+    /// Uninitialized on some path only by a marked pointer member's entry
+    /// assertion: a MemberPointee's own referent at entry, until a store,
+    /// credit, destroy, release, or reseat gives evidence.
+    EntryAsserted = 1u << 5,
+    /// Storage whose latest credit, on some path, was a
+    /// default-initialization (DefAssignEvent::SkipUninitMembers): its
+    /// [[uninit]] members it has no SubMembers for are indeterminate until a
+    /// store names one.
+    MembersPending = 1u << 6,
+    /// A marked handle positioned past its referent's start on some path
+    /// (ReseatTarget::Offset).
+    Offset = 1u << 7,
+    /// A marked std::unique_ptr null on every path (ReseatTarget::Null).
+    Null = 1u << 8,
+    /// A marked std::unique_ptr null on some path: its destroys are no
+    /// double_destroy, as the nulling path destroys nothing there.
+    MayNull = 1u << 9,
+  };
+  /// The number of flags.
+  static constexpr unsigned NumBits = 10;
+  /// The flags the join intersects; it unites the others.
+  static constexpr uint16_t JoinIntersects = Must | Esc | Null;
+
+  /// Per flag, by bit position, the entities that have it.
+  std::array<llvm::BitVector, NumBits> Flags;
   /// Per entity, meaningful for a Pointee: the entity's own index when the
   /// pointer refers to an anonymous referent whose state is the entity's
-  /// bits, another entity's index when it refers to that entity's storage
+  /// flags, another entity's index when it refers to that entity's storage
   /// (an [[uninit]] local, a tracked member, or another pointer's anonymous
   /// referent), UnknownTarget, or TopTarget.
   SmallVector<unsigned, 8> Target;
-  /// \p Top is the identity of the join: all-assigned, escaped, may-assigned,
-  /// unassigned, and destroyed on no path, and referring to nothing yet -- the
-  /// state of an unreached predecessor. Otherwise every entity is
-  /// unassigned and every marked pointer or reference refers to its own
-  /// anonymous referent.
-  FlowState(unsigned N, bool Top)
-      : Must(N, Top), May(N, false), MayUnassigned(N, !Top), Esc(N, Top),
-        MayDestroyed(N, false), EntryAsserted(N, false),
-        MembersPending(N, false), Offset(N, false), Null(N, Top),
-        MayNull(N, false), Target(N, TopTarget) {
+
+  /// \p Top is the identity of the join: the JoinIntersects flags set, the
+  /// others clear, and referring to nothing yet -- the state of an unreached
+  /// predecessor. Otherwise every entity is unassigned (MayUnassigned only)
+  /// and every marked pointer or reference refers to its own anonymous
+  /// referent.
+  FlowState(unsigned N, bool Top) : Target(N, TopTarget) {
+    uint16_t Fill = Top ? JoinIntersects : uint16_t(MayUnassigned);
+    for (unsigned B = 0; B != NumBits; ++B)
+      Flags[B].resize(N, (Fill >> B) & 1);
     if (!Top)
       for (unsigned I = 0; I != N; ++I)
         Target[I] = I;
   }
+
+  /// True if entity \p I has the flag \p B.
+  bool has(unsigned I, Bit B) const {
+    return Flags[llvm::countr_zero(unsigned(B))].test(I);
+  }
+  /// The flags of entity \p I.
+  uint16_t bits(unsigned I) const {
+    uint16_t W = 0;
+    for (unsigned B = 0; B != NumBits; ++B)
+      if (Flags[B].test(I))
+        W |= 1u << B;
+    return W;
+  }
+  /// Give entity \p I the flags \p Set and clear its other flags of \p Clear.
+  void update(unsigned I, uint16_t Set, uint16_t Clear = 0) {
+    for (unsigned M = Set | Clear; M; M &= M - 1) {
+      unsigned B = llvm::countr_zero(M);
+      Flags[B][I] = (Set >> B) & 1;
+    }
+  }
+  /// What the Pointee entity \p I refers to (Target).
+  unsigned target(unsigned I) const { return Target[I]; }
+  /// Make the Pointee entity \p I refer to \p T.
+  void setTarget(unsigned I, unsigned T) { Target[I] = T; }
+  /// Join the predecessor state \p O into this one.
   void meet(const FlowState &O) {
-    Must &= O.Must;
-    May |= O.May;
-    MayUnassigned |= O.MayUnassigned;
-    Esc &= O.Esc;
-    MayDestroyed |= O.MayDestroyed;
-    EntryAsserted |= O.EntryAsserted;
-    MembersPending |= O.MembersPending;
-    Offset |= O.Offset;
-    Null &= O.Null;
-    MayNull |= O.MayNull;
+    for (unsigned B = 0; B != NumBits; ++B) {
+      if ((JoinIntersects >> B) & 1)
+        Flags[B] &= O.Flags[B];
+      else
+        Flags[B] |= O.Flags[B];
+    }
     for (unsigned I = 0, N = Target.size(); I != N; ++I) {
       if (Target[I] == TopTarget)
         Target[I] = O.Target[I];
@@ -3122,11 +3159,7 @@ struct FlowState {
     }
   }
   bool operator==(const FlowState &O) const {
-    return Must == O.Must && May == O.May && MayUnassigned == O.MayUnassigned &&
-           Esc == O.Esc && MayDestroyed == O.MayDestroyed &&
-           EntryAsserted == O.EntryAsserted &&
-           MembersPending == O.MembersPending && Offset == O.Offset &&
-           Null == O.Null && MayNull == O.MayNull && Target == O.Target;
+    return Flags == O.Flags && Target == O.Target;
   }
   bool operator!=(const FlowState &O) const { return !(*this == O); }
 };
@@ -3159,7 +3192,7 @@ static std::optional<unsigned> referent(unsigned Idx, const FlowState &St,
                                         const TrackedStorage &Storage) {
   if (!Storage.Entities[Idx].isPointee())
     return Idx;
-  unsigned T = St.Target[Idx];
+  unsigned T = St.target(Idx);
   if (T == UnknownTarget || T == TopTarget)
     return std::nullopt;
   return T;
@@ -3179,11 +3212,11 @@ static LeafState leafState(const BindingLeaf &L, const FlowState &St,
   if (L.Range.first != L.Range.second) {
     bool AllMust = true, AnyMay = false, AnyUnassigned = false;
     for (unsigned I = L.Range.first; I != L.Range.second; ++I) {
-      bool Must =
-          St.Must.test(I) || (EveryPath && !Storage.Entities[I].TrackReads);
+      bool Must = St.has(I, FlowState::Must) ||
+                  (EveryPath && !Storage.Entities[I].TrackReads);
       AllMust &= Must;
-      AnyMay |= St.May.test(I);
-      AnyUnassigned |= !Must && St.MayUnassigned.test(I);
+      AnyMay |= St.has(I, FlowState::May);
+      AnyUnassigned |= !Must && St.has(I, FlowState::MayUnassigned);
     }
     if (AllMust)
       return LeafState::Initialized;
@@ -3197,9 +3230,10 @@ static LeafState leafState(const BindingLeaf &L, const FlowState &St,
   if (!R)
     return LeafState::Unknown;
   auto StateOf = [&](unsigned I) {
-    if (St.Must.test(I))
+    if (St.has(I, FlowState::Must))
       return LeafState::Initialized;
-    if (EveryPath ? St.MayUnassigned.test(I) : !St.May.test(I))
+    if (EveryPath ? St.has(I, FlowState::MayUnassigned)
+                  : !St.has(I, FlowState::May))
       return LeafState::Uninitialized;
     return LeafState::Unknown;
   };
@@ -3223,7 +3257,7 @@ static LeafState leafState(const BindingLeaf &L, const FlowState &St,
       S = Worse(S, StateOf(I));
   } else if (std::optional<unsigned> Sub = Storage.subEntity(*R, L.Sub)) {
     S = Worse(S, StateOf(*Sub));
-  } else if (L.Sub.Class && St.MembersPending.test(*R)) {
+  } else if (L.Sub.Class && St.has(*R, FlowState::MembersPending)) {
     // An [[uninit]] member the storage has no SubMember for, which a
     // default-initialization left indeterminate.
     S = Worse(S, LeafState::Uninitialized);
@@ -3310,11 +3344,11 @@ static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
   for (const BindingLeaf &L : Site.Leaves) {
     // Through an offset handle the destroy reaches an element, which is not
     // judged (SemaProfiles::designatesReferentElement).
-    if (L.Entity && St.Offset.test(*L.Entity))
+    if (L.Entity && St.has(*L.Entity, FlowState::Offset))
       continue;
     if (L.Range.first != L.Range.second) {
       for (unsigned I = L.Range.first; I != L.Range.second; ++I)
-        AllDestroyed &= St.MayDestroyed.test(I);
+        AllDestroyed &= St.has(I, FlowState::MayDestroyed);
     } else {
       std::optional<unsigned> R =
           L.Entity ? referent(*L.Entity, St, Storage) : std::nullopt;
@@ -3322,13 +3356,14 @@ static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
       // member's destroy may have been reconstructed since. (An explicit
       // destroy's own argument escapes the local just before the destroy.)
       AllDestroyed &=
-          R && St.MayDestroyed.test(*R) &&
+          R && St.has(*R, FlowState::MayDestroyed) &&
           !(Site.Destroyer == SemaProfiles::InitDestroyer::ScopeExit &&
-            St.Esc.test(*R));
+            St.has(*R, FlowState::Esc));
       // A marked pointer member's entry assertion alone is no evidence that
       // a destroy takes uninitialized storage, nor is the state of a member
       // of an escaped local.
-      if (R && (St.EntryAsserted.test(*R) || St.Esc.test(*R))) {
+      if (R && (St.has(*R, FlowState::EntryAsserted) ||
+                St.has(*R, FlowState::Esc))) {
         Acc = Acc ? combineLeafStates(*Acc, LeafState::Unknown)
                   : LeafState::Unknown;
         continue;
@@ -3339,7 +3374,7 @@ static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
     Acc = Acc ? combineLeafStates(*Acc, S) : S;
   }
   // An owner null on some path destroys nothing on it (FlowState::MayNull).
-  if (Site.Owner && St.MayNull.test(*Site.Owner))
+  if (Site.Owner && St.has(*Site.Owner, FlowState::MayNull))
     AllDestroyed = false;
   if (!Acc && AllDestroyed)
     return;
@@ -3378,7 +3413,7 @@ static void judgeAccessSite(const AccessSite &Site, bool IsWrite,
     // access, as it trusts a read of a scalar member (Read).
     if (L.Entity && Storage.Entities[*L.Entity].Whole &&
         Storage.Entities[*L.Entity].K == TrackedEntity::Kind::LocalMember &&
-        St.Esc.test(*L.Entity))
+        St.has(*L.Entity, FlowState::Esc))
       continue;
     // A store below the storage is judged by the storage alone; a read
     // needs the SubMember it reads too.
@@ -3420,12 +3455,9 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       F(I);
   };
   auto Write = [&](unsigned I) {
-    St.Must.set(I);
-    St.May.set(I);
-    St.MayUnassigned.reset(I);
-    St.MayDestroyed.reset(I);
-    St.EntryAsserted.reset(I);
-    St.MembersPending.reset(I);
+    St.update(I, FlowState::Must | FlowState::May,
+              FlowState::MayUnassigned | FlowState::MayDestroyed |
+                  FlowState::EntryAsserted | FlowState::MembersPending);
   };
   // The storage a Write or MayWrite reaches: Idx's referent, when the
   // designation covers it (a Pointee's own anonymous referent was checked at
@@ -3463,35 +3495,36 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       WithSubs(R, F);
   };
   auto MayWrite = [&](unsigned I) {
-    St.May.set(I);
-    St.EntryAsserted.reset(I);
+    St.update(I, FlowState::May, FlowState::EntryAsserted);
   };
   for (const DefAssignEvent &Ev : BlockEvents) {
     switch (Ev.Kind) {
     case DefAssignEventKind::Read:
-      if (Offending && !St.Must.test(Ev.Idx) && !St.Esc.test(Ev.Idx))
+      if (Offending && !St.has(Ev.Idx, FlowState::Must) &&
+          !St.has(Ev.Idx, FlowState::Esc))
         (*Offending)[Ev.Idx].push_back(Ev.E);
       break;
     case DefAssignEventKind::Write:
       if (std::optional<unsigned> R = WriteTarget(Ev)) {
         // Through an offset handle a credit reaches part of the referent.
-        if (St.Offset.test(Ev.Idx)) {
+        if (St.has(Ev.Idx, FlowState::Offset)) {
           WriteStorage(Ev, *R, MayWrite);
           break;
         }
         WriteStorage(Ev, *R, Write);
         if (Ev.SkipUninitMembers)
-          St.MembersPending.set(*R);
+          St.update(*R, FlowState::MembersPending);
       } else if (Ev.Sub.Class && Ev.Sub.Exact) {
         // A store naming one member of storage with no SubMember for it (a
         // void referent viewed as a class) ends its pending members.
         if (std::optional<unsigned> R = referent(Ev.Idx, St, Storage);
             R && !Storage.subEntity(*R, Ev.Sub))
-          St.MembersPending.reset(*R);
+          St.update(*R, 0, FlowState::MembersPending);
       }
       break;
     case DefAssignEventKind::ReadWrite:
-      if (Offending && !St.Must.test(Ev.Idx) && !St.Esc.test(Ev.Idx))
+      if (Offending && !St.has(Ev.Idx, FlowState::Must) &&
+          !St.has(Ev.Idx, FlowState::Esc))
         (*Offending)[Ev.Idx].push_back(Ev.E);
       Write(Ev.Idx);
       break;
@@ -3499,29 +3532,25 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       if (std::optional<unsigned> R = WriteTarget(Ev))
         WriteStorage(Ev, *R, MayWrite);
       break;
-    case DefAssignEventKind::Copy:
-      St.Must[Ev.Idx] = St.Must.test(Ev.Aux);
-      St.May[Ev.Idx] = St.May.test(Ev.Aux);
-      St.MayUnassigned[Ev.Idx] = St.MayUnassigned.test(Ev.Aux);
-      St.Esc[Ev.Idx] = St.Esc.test(Ev.Aux);
-      St.MayDestroyed[Ev.Idx] = St.MayDestroyed.test(Ev.Aux);
-      St.EntryAsserted[Ev.Idx] = St.EntryAsserted.test(Ev.Aux);
-      St.MembersPending[Ev.Idx] = St.MembersPending.test(Ev.Aux);
+    case DefAssignEventKind::Copy: {
+      constexpr uint16_t Copied =
+          FlowState::Must | FlowState::May | FlowState::MayUnassigned |
+          FlowState::Esc | FlowState::MayDestroyed | FlowState::EntryAsserted |
+          FlowState::MembersPending;
+      St.update(Ev.Idx, St.bits(Ev.Aux) & Copied, Copied);
       break;
+    }
     case DefAssignEventKind::Kill:
       if (std::optional<unsigned> R = referent(Ev.Idx, St, Storage))
         WithSubs(*R, [&](unsigned I) {
-          St.Must.reset(I);
-          St.May.reset(I);
-          St.MayUnassigned.set(I);
-          St.Esc.reset(I);
-          St.EntryAsserted.reset(I);
-          St.MembersPending.reset(I);
+          St.update(I, FlowState::MayUnassigned,
+                    FlowState::Must | FlowState::May | FlowState::Esc |
+                        FlowState::EntryAsserted | FlowState::MembersPending);
         });
       break;
     case DefAssignEventKind::Destroy: {
       const DestroySite &Site = DSites[Ev.Aux];
-      if (Site.Owner && St.Null.test(*Site.Owner))
+      if (Site.Owner && St.has(*Site.Owner, FlowState::Null))
         break;
       if (Violations && Site.Judged)
         judgeDestroySite(Site, St, Storage, *Violations);
@@ -3531,23 +3560,16 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
           continue;
         // Through an offset handle a destroy reaches an element, which
         // destroys nothing tracked.
-        if (St.Offset.test(A))
+        if (St.has(A, FlowState::Offset))
           continue;
-        bool Partial = Site.Conditional;
-        WithSubs(*R, [&](unsigned I) {
-          St.Must.reset(I);
-          St.MayUnassigned.set(I);
-          St.EntryAsserted.reset(I);
-          St.MembersPending.reset(I);
-          if (Partial) {
-            St.May.set(I);
-            St.MayDestroyed.set(I);
-          } else {
-            St.May.reset(I);
-            St.Esc.reset(I);
-            St.MayDestroyed.set(I);
-          }
-        });
+        uint16_t Set = FlowState::MayUnassigned | FlowState::MayDestroyed;
+        uint16_t Clear = FlowState::Must | FlowState::EntryAsserted |
+                         FlowState::MembersPending;
+        if (Site.Conditional)
+          Set |= FlowState::May;
+        else
+          Clear |= FlowState::May | FlowState::Esc;
+        WithSubs(*R, [&](unsigned I) { St.update(I, Set, Clear); });
       }
       break;
     }
@@ -3556,33 +3578,33 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       switch (Ev.RT) {
       case ReseatTarget::Fresh:
       case ReseatTarget::Escaped:
-        // The entity's bits describe the new anonymous referent from here,
+        // The entity's flags describe the new anonymous referent from here,
         // so a pointer that copied this one while it referred to the old one
         // loses its referent.
-        for (unsigned K = 0, N = St.Target.size(); K != N; ++K)
-          if (K != Ev.Idx && St.Target[K] == Ev.Idx)
-            St.Target[K] = UnknownTarget;
+        for (unsigned K = 0, N = Storage.Entities.size(); K != N; ++K)
+          if (K != Ev.Idx && St.target(K) == Ev.Idx)
+            St.setTarget(K, UnknownTarget);
         WithSubs(Ev.Idx, [&](unsigned I) {
-          St.Must.reset(I);
-          St.May[I] = Ev.RT == ReseatTarget::Escaped;
-          St.MayUnassigned[I] = Ev.RT != ReseatTarget::Escaped;
-          St.MayDestroyed.reset(I);
-          St.EntryAsserted.reset(I);
-          St.MembersPending.reset(I);
+          St.update(I,
+                    Ev.RT == ReseatTarget::Escaped ? FlowState::May
+                                                   : FlowState::MayUnassigned,
+                    FlowState::Must | FlowState::May |
+                        FlowState::MayUnassigned | FlowState::MayDestroyed |
+                        FlowState::EntryAsserted | FlowState::MembersPending);
         });
         break;
       case ReseatTarget::Entity:
         NewTarget = Ev.Aux;
         break;
       case ReseatTarget::ViaPointer:
-        NewTarget = St.Target[Ev.Aux];
+        NewTarget = St.target(Ev.Aux);
         break;
       case ReseatTarget::Unknown:
         NewTarget = UnknownTarget;
         break;
       case ReseatTarget::Offset:
       case ReseatTarget::Null:
-        NewTarget = St.Target[Ev.Idx];
+        NewTarget = St.target(Ev.Idx);
         break;
       }
       // The binding's marker asserts the referent uninitialized; see
@@ -3591,44 +3613,40 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
            Ev.RT == ReseatTarget::ViaPointer) &&
           NewTarget != UnknownTarget && NewTarget != TopTarget)
         WithSubs(NewTarget, [&](unsigned I) {
-          St.Must.reset(I);
-          St.May.reset(I);
-          St.MayUnassigned.set(I);
-          St.MembersPending.reset(I);
+          St.update(I, FlowState::MayUnassigned,
+                    FlowState::Must | FlowState::May |
+                        FlowState::MembersPending);
         });
-      St.Target[Ev.Idx] = NewTarget;
+      St.setTarget(Ev.Idx, NewTarget);
       // A copy of an offset handle is offset too.
-      St.Offset[Ev.Idx] =
-          Ev.RT == ReseatTarget::Offset ||
-          (Ev.RT == ReseatTarget::ViaPointer && St.Offset.test(Ev.Aux));
-      St.Null[Ev.Idx] = Ev.RT == ReseatTarget::Null;
-      St.MayNull[Ev.Idx] = Ev.RT == ReseatTarget::Null;
+      uint16_t Own = 0;
+      if (Ev.RT == ReseatTarget::Offset || (Ev.RT == ReseatTarget::ViaPointer &&
+                                            St.has(Ev.Aux, FlowState::Offset)))
+        Own |= FlowState::Offset;
+      if (Ev.RT == ReseatTarget::Null)
+        Own |= FlowState::Null | FlowState::MayNull;
+      St.update(Ev.Idx, Own,
+                FlowState::Offset | FlowState::Null | FlowState::MayNull);
       break;
     }
     case DefAssignEventKind::Escape:
       if (std::optional<unsigned> R = referent(Ev.Idx, St, Storage))
         WithSubs(*R, [&](unsigned I) {
-          St.Must.reset(I);
-          St.May.set(I);
-          St.MayUnassigned.set(I);
-          St.MayDestroyed.reset(I);
-          St.EntryAsserted.reset(I);
-          St.MembersPending.reset(I);
+          St.update(I, FlowState::May | FlowState::MayUnassigned,
+                    FlowState::Must | FlowState::MayDestroyed |
+                        FlowState::EntryAsserted | FlowState::MembersPending);
         });
       break;
     case DefAssignEventKind::Reset:
       WithSubs(Ev.Idx, [&](unsigned I) {
-        St.Must.reset(I);
-        St.May.reset(I);
-        St.MayUnassigned.set(I);
-        St.Esc.reset(I);
-        St.MayDestroyed.reset(I);
-        St.EntryAsserted.reset(I);
-        St.MembersPending.reset(I);
+        St.update(I, FlowState::MayUnassigned,
+                  FlowState::Must | FlowState::May | FlowState::Esc |
+                      FlowState::MayDestroyed | FlowState::EntryAsserted |
+                      FlowState::MembersPending);
       });
       break;
     case DefAssignEventKind::AggregateEscape:
-      St.Esc.set(Ev.Idx);
+      St.update(Ev.Idx, FlowState::Esc);
       break;
     case DefAssignEventKind::Binding:
       if (Violations)
@@ -3680,16 +3698,13 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
   std::vector<FlowState> ExitState(NumBlocks, FlowState(NumTracked, true));
   FlowState FunctionEntry(NumTracked, false);
   for (unsigned I = 0; I != NumTracked; ++I) {
-    if (Storage.Entities[I].UnknownEntry) {
-      FunctionEntry.May.set(I);
-      FunctionEntry.MayUnassigned.reset(I);
-    } else if (Storage.Entities[I].K == TrackedEntity::Kind::CurrentObject) {
-      FunctionEntry.Must.set(I);
-      FunctionEntry.May.set(I);
-      FunctionEntry.MayUnassigned.reset(I);
-    } else if (Storage.Entities[I].K == TrackedEntity::Kind::MemberPointee) {
-      FunctionEntry.EntryAsserted.set(I);
-    }
+    if (Storage.Entities[I].UnknownEntry)
+      FunctionEntry.update(I, FlowState::May, FlowState::MayUnassigned);
+    else if (Storage.Entities[I].K == TrackedEntity::Kind::CurrentObject)
+      FunctionEntry.update(I, FlowState::Must | FlowState::May,
+                           FlowState::MayUnassigned);
+    else if (Storage.Entities[I].K == TrackedEntity::Kind::MemberPointee)
+      FunctionEntry.update(I, FlowState::EntryAsserted);
   }
   const CFGBlock &CFGEntry = cfg.getEntry();
   ForwardDataflowWorklist Worklist(cfg, AC);
