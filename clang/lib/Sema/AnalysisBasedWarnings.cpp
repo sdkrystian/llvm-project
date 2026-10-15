@@ -54,6 +54,7 @@
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/EquivalenceClasses.h"
+#include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/ADT/STLFunctionalExtras.h"
@@ -3050,25 +3051,176 @@ struct AccessSite {
 };
 
 #define DEBUG_TYPE "std-init-flow"
+/// The trie nodes the flow states allocate (SharedArray).
+STATISTIC(NumFlowStateNodes, "Number of std::init flow-state nodes allocated");
 /// The pointers a reseat to a fresh or escaped referent checks for an alias
 /// of the referent it replaces (TrackedStorage::AliasClasses).
 STATISTIC(NumReseatAliasChecks,
           "Number of std::init pointers checked for a replaced referent");
 #undef DEBUG_TYPE
 
-/// FlowState::Target of a marked pointer or reference in the join identity:
-/// yields to any other value.
-static constexpr unsigned TopTarget = ~0u;
 /// FlowState::Target of a marked pointer or reference whose referent is not
 /// identified: paths bind it differently, or the anonymous referent it
 /// copied from another pointer was replaced. Nothing fires through such a
 /// pointer in either direction, a store through it credits nothing, and a
 /// marked binding to it asserts nothing.
 static constexpr unsigned UnknownTarget = ~1u;
+/// The stored FlowState::Target of a marked pointer or reference that refers
+/// to its own anonymous referent: one value for every entity, so the initial
+/// targets share their nodes.
+static constexpr unsigned SelfTarget = ~2u;
 
-/// The dataflow state of every tracked entity at a program point: one word of
-/// flags per entity (Bit) and, for a Pointee entity, the entity the marked
-/// pointer or reference refers to (Target). The join of predecessors
+/// A fixed-size array of \p T whose copies share structure: a 64-ary trie of
+/// reference-counted nodes, copied on write. A copy costs one pointer and a
+/// write the nodes on one path; a comparison or a join of two arrays visits
+/// only the nodes they do not share.
+template <typename T> class SharedArray {
+  /// The index bits one level of the trie consumes.
+  static constexpr unsigned Shift = 6;
+  /// The children of an inner node, and the cells of a leaf.
+  static constexpr unsigned Fan = 1u << Shift;
+
+  /// A trie node; its destructor is virtual so that RefCountedBase deletes
+  /// either kind.
+  struct Node : llvm::RefCountedBase<Node> {
+    Node() { ++NumFlowStateNodes; }
+    Node(const Node &) : Node() {}
+    virtual ~Node() = default;
+  };
+  using NodePtr = llvm::IntrusiveRefCntPtr<Node>;
+  /// The cells of Fan consecutive indices.
+  struct Leaf final : Node {
+    std::array<T, Fan> Cells;
+  };
+  /// The subtries of Fan consecutive index ranges.
+  struct Inner final : Node {
+    std::array<NodePtr, Fan> Kids;
+  };
+
+  /// The root; null for a default-constructed array.
+  NodePtr Root;
+  /// The number of inner levels above the leaves: at most 5 for 32-bit
+  /// indices, which bounds every recursion below.
+  unsigned Height = 0;
+
+  /// The node \p N as a leaf.
+  static Leaf &leaf(Node *N) { return *static_cast<Leaf *>(N); }
+  /// The node \p N as an inner node.
+  static Inner &inner(Node *N) { return *static_cast<Inner *>(N); }
+  /// The child of an inner node at level \p Level whose subtrie holds the
+  /// index \p I.
+  static unsigned slot(unsigned I, unsigned Level) {
+    return (I >> (Shift * Level)) & (Fan - 1);
+  }
+  /// Make the node \p P points to, at level \p Level, unshared.
+  static void own(NodePtr &P, unsigned Level) {
+    if (P->UseCount() == 1)
+      return;
+    if (Level == 0)
+      P = NodePtr(new Leaf(leaf(P.get())));
+    else
+      P = NodePtr(new Inner(inner(P.get())));
+  }
+  /// The join of the subtries \p A and \p B at level \p Level, cell by cell
+  /// with \p Fn: shared subtries are the join's own, and a node equal to an
+  /// operand's is that operand's.
+  template <typename F>
+  static NodePtr meetNode(const NodePtr &A, const NodePtr &B, unsigned Level,
+                          F &Fn) {
+    if (A == B)
+      return A;
+    bool SameA = true, SameB = true;
+    if (Level == 0) {
+      const Leaf &LA = leaf(A.get()), &LB = leaf(B.get());
+      std::array<T, Fan> Cells;
+      for (unsigned I = 0; I != Fan; ++I) {
+        Cells[I] = Fn(LA.Cells[I], LB.Cells[I]);
+        SameA &= Cells[I] == LA.Cells[I];
+        SameB &= Cells[I] == LB.Cells[I];
+      }
+      if (SameA)
+        return A;
+      if (SameB)
+        return B;
+      auto *N = new Leaf();
+      N->Cells = Cells;
+      return NodePtr(N);
+    }
+    const Inner &IA = inner(A.get()), &IB = inner(B.get());
+    std::array<NodePtr, Fan> Kids;
+    for (unsigned I = 0; I != Fan; ++I) {
+      Kids[I] = meetNode(IA.Kids[I], IB.Kids[I], Level - 1, Fn);
+      SameA &= Kids[I] == IA.Kids[I];
+      SameB &= Kids[I] == IB.Kids[I];
+    }
+    if (SameA)
+      return A;
+    if (SameB)
+      return B;
+    auto *N = new Inner();
+    N->Kids = std::move(Kids);
+    return NodePtr(N);
+  }
+  /// True if the subtries \p A and \p B at level \p Level hold equal cells.
+  static bool equalNode(const NodePtr &A, const NodePtr &B, unsigned Level) {
+    if (A == B)
+      return true;
+    if (Level == 0)
+      return leaf(A.get()).Cells == leaf(B.get()).Cells;
+    for (unsigned I = 0; I != Fan; ++I)
+      if (!equalNode(inner(A.get()).Kids[I], inner(B.get()).Kids[I], Level - 1))
+        return false;
+    return true;
+  }
+
+public:
+  /// An array without nodes, which only an assignment gives cells.
+  SharedArray() = default;
+  /// \p N copies of \p Fill, in one node per level.
+  SharedArray(unsigned N, T Fill) {
+    auto *L = new Leaf();
+    L->Cells.fill(Fill);
+    Root = NodePtr(L);
+    for (uint64_t Cap = Fan; Cap < N; Cap <<= Shift, ++Height) {
+      auto *I = new Inner();
+      I->Kids.fill(Root);
+      Root = NodePtr(I);
+    }
+  }
+  /// The cell \p I.
+  T get(unsigned I) const {
+    Node *N = Root.get();
+    for (unsigned L = Height; L; --L)
+      N = inner(N).Kids[slot(I, L)].get();
+    return leaf(N).Cells[I & (Fan - 1)];
+  }
+  /// Store \p V in the cell \p I, copying the shared nodes on its path; a
+  /// store of the value already there copies nothing.
+  void set(unsigned I, T V) {
+    if (get(I) == V)
+      return;
+    own(Root, Height);
+    NodePtr *P = &Root;
+    for (unsigned L = Height; L; --L) {
+      P = &inner(P->get()).Kids[slot(I, L)];
+      own(*P, L - 1);
+    }
+    leaf(P->get()).Cells[I & (Fan - 1)] = V;
+  }
+  /// Join the array \p O, of the same size, into this one cell by cell with
+  /// \p Fn.
+  template <typename F> void meet(const SharedArray &O, F Fn) {
+    Root = meetNode(Root, O.Root, Height, Fn);
+  }
+  bool operator==(const SharedArray &O) const {
+    return equalNode(Root, O.Root, Height);
+  }
+};
+
+/// The dataflow state of every tracked entity at a program point -- one word
+/// of flags per entity (Bit) and, for a Pointee entity, the entity the marked
+/// pointer or reference refers to (Target) -- or the identity of the join:
+/// the state of a predecessor not yet reached, which has no nodes. The join
 /// intersects the JoinIntersects flags, unites the others, and keeps a Target
 /// the predecessors agree on.
 struct FlowState {
@@ -3105,74 +3257,63 @@ struct FlowState {
     /// double_destroy, as the nulling path destroys nothing there.
     MayNull = 1u << 9,
   };
-  /// The number of flags.
-  static constexpr unsigned NumBits = 10;
   /// The flags the join intersects; it unites the others.
   static constexpr uint16_t JoinIntersects = Must | Esc | Null;
 
-  /// Per flag, by bit position, the entities that have it.
-  std::array<llvm::BitVector, NumBits> Flags;
-  /// Per entity, meaningful for a Pointee: the entity's own index when the
-  /// pointer refers to an anonymous referent whose state is the entity's
-  /// flags, another entity's index when it refers to that entity's storage
-  /// (an [[uninit]] local, a tracked member, or another pointer's anonymous
-  /// referent), UnknownTarget, or TopTarget.
-  SmallVector<unsigned, 8> Target;
+  /// False for the identity of the join.
+  bool Reached = false;
+  /// The flags of each entity.
+  SharedArray<uint16_t> Bits;
+  /// Per entity, meaningful for a Pointee: SelfTarget when the pointer refers
+  /// to an anonymous referent whose state is the entity's flags, another
+  /// entity's index when it refers to that entity's storage (an [[uninit]]
+  /// local, a tracked member, or another pointer's anonymous referent), or
+  /// UnknownTarget.
+  SharedArray<unsigned> Target;
 
-  /// \p Top is the identity of the join: the JoinIntersects flags set, the
-  /// others clear, and referring to nothing yet -- the state of an unreached
-  /// predecessor. Otherwise every entity is unassigned (MayUnassigned only)
-  /// and every marked pointer or reference refers to its own anonymous
-  /// referent.
-  FlowState(unsigned N, bool Top) : Target(N, TopTarget) {
-    uint16_t Fill = Top ? JoinIntersects : uint16_t(MayUnassigned);
-    for (unsigned B = 0; B != NumBits; ++B)
-      Flags[B].resize(N, (Fill >> B) & 1);
-    if (!Top)
-      for (unsigned I = 0; I != N; ++I)
-        Target[I] = I;
-  }
+  /// The identity of the join.
+  FlowState() = default;
+  /// Every one of \p N entities unassigned (MayUnassigned only), and every
+  /// marked pointer or reference referring to its own anonymous referent.
+  explicit FlowState(unsigned N)
+      : Reached(true), Bits(N, MayUnassigned), Target(N, SelfTarget) {}
 
   /// True if entity \p I has the flag \p B.
-  bool has(unsigned I, Bit B) const {
-    return Flags[llvm::countr_zero(unsigned(B))].test(I);
-  }
+  bool has(unsigned I, Bit B) const { return Bits.get(I) & B; }
   /// The flags of entity \p I.
-  uint16_t bits(unsigned I) const {
-    uint16_t W = 0;
-    for (unsigned B = 0; B != NumBits; ++B)
-      if (Flags[B].test(I))
-        W |= 1u << B;
-    return W;
-  }
+  uint16_t bits(unsigned I) const { return Bits.get(I); }
   /// Give entity \p I the flags \p Set and clear its other flags of \p Clear.
   void update(unsigned I, uint16_t Set, uint16_t Clear = 0) {
-    for (unsigned M = Set | Clear; M; M &= M - 1) {
-      unsigned B = llvm::countr_zero(M);
-      Flags[B][I] = (Set >> B) & 1;
-    }
+    Bits.set(I, uint16_t((Bits.get(I) & ~Clear) | Set));
   }
   /// What the Pointee entity \p I refers to (Target).
-  unsigned target(unsigned I) const { return Target[I]; }
+  unsigned target(unsigned I) const {
+    unsigned T = Target.get(I);
+    return T == SelfTarget ? I : T;
+  }
   /// Make the Pointee entity \p I refer to \p T.
-  void setTarget(unsigned I, unsigned T) { Target[I] = T; }
-  /// Join the predecessor state \p O into this one.
+  void setTarget(unsigned I, unsigned T) {
+    Target.set(I, T == I ? SelfTarget : T);
+  }
+  /// Join the predecessor state \p O into this one: an unreached state is
+  /// skipped, and a reached one copied into an unreached one.
   void meet(const FlowState &O) {
-    for (unsigned B = 0; B != NumBits; ++B) {
-      if ((JoinIntersects >> B) & 1)
-        Flags[B] &= O.Flags[B];
-      else
-        Flags[B] |= O.Flags[B];
+    if (!O.Reached)
+      return;
+    if (!Reached) {
+      *this = O;
+      return;
     }
-    for (unsigned I = 0, N = Target.size(); I != N; ++I) {
-      if (Target[I] == TopTarget)
-        Target[I] = O.Target[I];
-      else if (O.Target[I] != TopTarget && O.Target[I] != Target[I])
-        Target[I] = UnknownTarget;
-    }
+    Bits.meet(O.Bits, [](uint16_t A, uint16_t B) -> uint16_t {
+      return ((A & B) & JoinIntersects) | ((A | B) & ~JoinIntersects);
+    });
+    Target.meet(O.Target, [](unsigned A, unsigned B) {
+      return A == B ? A : UnknownTarget;
+    });
   }
   bool operator==(const FlowState &O) const {
-    return Flags == O.Flags && Target == O.Target;
+    return Reached == O.Reached &&
+           (!Reached || (Bits == O.Bits && Target == O.Target));
   }
   bool operator!=(const FlowState &O) const { return !(*this == O); }
 };
@@ -3206,7 +3347,7 @@ static std::optional<unsigned> referent(unsigned Idx, const FlowState &St,
   if (!Storage.Entities[Idx].isPointee())
     return Idx;
   unsigned T = St.target(Idx);
-  if (T == UnknownTarget || T == TopTarget)
+  if (T == UnknownTarget)
     return std::nullopt;
   return T;
 }
@@ -3628,7 +3769,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       // ReseatTarget.
       if ((Ev.RT == ReseatTarget::Entity ||
            Ev.RT == ReseatTarget::ViaPointer) &&
-          NewTarget != UnknownTarget && NewTarget != TopTarget)
+          NewTarget != UnknownTarget)
         WithSubs(NewTarget, [&](unsigned I) {
           St.update(I, FlowState::MayUnassigned,
                     FlowState::Must | FlowState::May |
@@ -3692,13 +3833,14 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
 /// Escape, and Reset are constant functions of their bits -- a Reseat's
 /// assertion clears its referent's Must and May like Kill), so a block's exit
 /// only ever descends from the join identity in a finite lattice and the
-/// iteration terminates. A pointer's Target lattice is flat -- TopTarget below
-/// every value, UnknownTarget above -- and meet only moves toward
-/// UnknownTarget; a Reseat is a constant function of its ReseatTarget,
-/// ViaPointer a projection of another pointer's Target, and the invalidation of
-/// a replaced anonymous referent's aliases maps one value to UnknownTarget, so
-/// the same argument covers Target. Unprocessed (unreachable) predecessors keep
-/// the join identity, so unreachable code is never flagged. Returns, per
+/// iteration terminates. A pointer's Target lattice is flat, UnknownTarget its
+/// top, and meet only moves toward UnknownTarget; a Reseat is a constant
+/// function of its ReseatTarget, ViaPointer a projection of another pointer's
+/// Target, and the invalidation of a replaced anonymous referent's aliases
+/// maps one value to UnknownTarget, so the same argument covers Target. The
+/// join identity is the unreached state (FlowState::Reached), which the join
+/// skips; unprocessed (unreachable) predecessors keep it, so unreachable code
+/// is never flagged. Returns, per
 /// read-tracked entity, the reads at program points where the entity is not
 /// definitely assigned nor escaped, and appends every other rule's violations
 /// to \p Violations.
@@ -3711,9 +3853,9 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
                       SmallVectorImpl<PendingViolation> &Violations) {
   const unsigned NumTracked = Storage.Entities.size();
   const unsigned NumBlocks = cfg.getNumBlockIDs();
-  std::vector<FlowState> EntryState(NumBlocks, FlowState(NumTracked, true));
-  std::vector<FlowState> ExitState(NumBlocks, FlowState(NumTracked, true));
-  FlowState FunctionEntry(NumTracked, false);
+  std::vector<FlowState> EntryState(NumBlocks);
+  std::vector<FlowState> ExitState(NumBlocks);
+  FlowState FunctionEntry(NumTracked);
   for (unsigned I = 0; I != NumTracked; ++I) {
     if (Storage.Entities[I].UnknownEntry)
       FunctionEntry.update(I, FlowState::May, FlowState::MayUnassigned);
@@ -3728,41 +3870,31 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
   Worklist.enqueueBlock(&CFGEntry);
   llvm::BitVector Visited(NumBlocks, false);
   while (const CFGBlock *B = Worklist.dequeue()) {
-    FlowState In(NumTracked, true);
+    FlowState In;
     if (B == &CFGEntry) {
       In = FunctionEntry;
     } else {
-      bool First = true;
-      for (const CFGBlock *Pred : B->preds()) {
-        if (!Pred)
-          continue;
-        if (First) {
-          In = ExitState[Pred->getBlockID()];
-          First = false;
-        } else {
+      for (const CFGBlock *Pred : B->preds())
+        if (Pred)
           In.meet(ExitState[Pred->getBlockID()]);
-        }
-      }
     }
+    assert(In.Reached && "a dequeued block has a reached predecessor");
     EntryState[B->getBlockID()] = In;
     applyDefAssignEvents(Events[B->getBlockID()], Sites, DSites, ASites,
                          Storage, In, /*Offending=*/nullptr,
                          /*Violations=*/nullptr);
-    // Enqueue-skip subtlety: ExitState starts at the join identity, and a
-    // block whose computed exit *equals* its stored exit enqueues no
-    // successors. A transfer that drops a bit (Kill, Destroy, Reseat,
-    // Escape, Reset) makes a block entered at the identity exit *below* it, so
-    // a reachable block's first visit must propagate even when its computed
-    // exit equals the stored identity (the Visited disjunct below) -- which
-    // also makes Visited mean exactly "reachable from the entry".
-    // Unreachable blocks are never enqueued (only successors of dequeued
-    // blocks are), so they keep the identity: an unreachable destroy spoils
-    // no reachable join. The reporting replay below walks only the visited
-    // blocks: a destroy followed by a read inside an unreachable block would
-    // otherwise flag unreachable code. Lowering the initial ExitState,
-    // seeding EntryState differently, or replaying unvisited blocks would
-    // each break the others' assumption; change them together or not at
-    // all.
+    // Enqueue-skip subtlety: a block whose computed exit *equals* its stored
+    // exit enqueues no successors. ExitState starts as the unreached state,
+    // which no computed exit equals (FlowState::Reached), so a block's first
+    // visit always propagates; the FirstVisit disjunct below still defines
+    // Visited, exactly the blocks reachable from the entry. Unreachable blocks
+    // are never enqueued (only successors of dequeued blocks are), so they
+    // keep the unreached state: an unreachable destroy spoils no reachable
+    // join. The reporting replay below walks only the visited blocks: a
+    // destroy followed by a read inside an unreachable block would otherwise
+    // flag unreachable code. Seeding ExitState or EntryState differently, or
+    // replaying unvisited blocks, would each break the others' assumption;
+    // change them together or not at all.
     bool FirstVisit = !Visited[B->getBlockID()];
     Visited[B->getBlockID()] = true;
     if (FirstVisit || In != ExitState[B->getBlockID()]) {

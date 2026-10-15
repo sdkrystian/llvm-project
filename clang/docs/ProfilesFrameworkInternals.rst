@@ -1094,17 +1094,30 @@ entities (``TrackedEntity``: ``[[uninit]]`` locals, the referents of marked
 local pointers and references, and marked scalar members of locals and of
 the current object, also inside member subobjects), extracts one event stream
 from a CFG of its own
-(exception edges, fully linearized), runs a forward dataflow over bit
-vectors per entity -- ``Must`` (assigned on every path), ``May`` (assigned
-on some path), ``MayUnassigned`` (unassigned on some path that knows the
-entity's state), ``Esc`` (escaped; read leniency for local aggregates),
-``MayDestroyed`` (destroyed on some path and not stored since), and the ones
-described where they are used (``FlowState``) -- plus, per marked pointer or
-reference, ``Target``, the entity it refers to at that
+(exception edges, fully linearized), runs a forward dataflow over one word
+of flags per entity (``FlowState::Bit``) -- ``Must`` (assigned on every
+path), ``May`` (assigned on some path), ``MayUnassigned`` (unassigned on
+some path that knows the entity's state), ``Esc`` (escaped; read leniency
+for local aggregates), ``MayDestroyed`` (destroyed on some path and not
+stored since), and the ones described where they are used -- plus, per
+marked pointer or reference, ``Target``, the entity it refers to at that
 point: an ``[[uninit]]`` local, a tracked member, another pointer's
 anonymous referent, itself (an anonymous referent whose state is the
-entity's own bits), or unidentified.  The transfer function resolves every
-event and site leaf on such an entity through ``Target`` before applying
+entity's own flags), or unidentified.
+
+The states of a body's blocks share structure.  ``FlowState`` keeps the flag
+words and the targets in two ``SharedArray`` tries of reference-counted
+nodes, 64 entries wide and copied on write: a block's entry and exit states
+store only the nodes its events change, a comparison of two states skips the
+nodes they share, and a join builds nodes only where its operands differ.
+The memory of a body's flow states is therefore linear in its events, not in
+its blocks times its entities.  The join identity, the state of a
+predecessor not yet reached, is a state without nodes
+(``FlowState::Reached``), so a flag or a ``Target`` has no top value of its
+own: a ``Target`` joins to itself or to unidentified.
+
+The transfer function resolves every event and site leaf on a marked
+pointer's or reference's entity through ``Target`` before applying
 it, and a ``Reseat`` event carries the new referent (``ReseatTarget``): the
 entity a single-leaf source names, what another marked pointer refers to,
 a fresh anonymous referent for an untracked source, the target every arm of the
