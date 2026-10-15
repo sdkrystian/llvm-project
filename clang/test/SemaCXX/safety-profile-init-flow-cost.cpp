@@ -28,10 +28,12 @@ struct Out {
 #define REPEAT4(M, n) M(n##0) M(n##1) M(n##2) M(n##3)
 #define REPEAT16(M, n) REPEAT4(M, n##0) REPEAT4(M, n##1) REPEAT4(M, n##2) REPEAT4(M, n##3)
 
-// Locals of 64 tracked members each, one written per block; the exit block
-// joins every block
+// Locals of 64 tracked members each, reset by one event and written once per
+// block; the exit block joins every block
+// LOCALS32: 160 std-init-flow - Number of std::init flow events extracted
 // LOCALS32: 155 std-init-flow - Number of std::init flow-state leaves joined cell by cell
 // LOCALS32: 194 std-init-flow - Number of std::init flow-state nodes allocated
+// LOCALS64: 320 std-init-flow - Number of std::init flow events extracted
 // LOCALS64: 378 std-init-flow - Number of std::init flow-state leaves joined cell by cell
 // LOCALS64: 386 std-init-flow - Number of std::init flow-state nodes allocated
 #ifdef LOCALS

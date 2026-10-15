@@ -2855,7 +2855,9 @@ TrackedStorage::markedPointerObject(const SemaProfiles::ShapeLeaf &Leaf) const {
 /// (AccessSites[Aux]), judged by uninit_read / uninit_write. An event on a
 /// Pointee entity acts on the storage the pointer refers to at its program
 /// point (referent). Every event but a Reset and a scope-exit Destroy carries
-/// the anchor expression the diagnostic and the suppression walk use.
+/// the anchor expression the diagnostic and the suppression walk use. A Reset
+/// or AggregateEscape whose Aux is above Idx acts on each entity of the range
+/// [Idx, Aux).
 enum class DefAssignEventKind {
   Read,
   Write,
@@ -2908,7 +2910,8 @@ struct DefAssignEvent {
   const Expr *E;
   /// Copy: the source entity. Reseat: the entity or pointer RT names.
   /// Binding: the BindingSite index. Destroy: the DestroySite index.
-  /// ReadThrough and SubobjectWrite: the AccessSite index.
+  /// ReadThrough and SubobjectWrite: the AccessSite index. Reset and
+  /// AggregateEscape: the end of the entity range, when above Idx.
   unsigned Aux = 0;
   /// Reseat: what Idx refers to from here.
   ReseatTarget RT = ReseatTarget::Fresh;
@@ -3053,6 +3056,8 @@ struct AccessSite {
 };
 
 #define DEBUG_TYPE "std-init-flow"
+/// The events extracted from the analyzed bodies (DefAssignEvent).
+STATISTIC(NumFlowEvents, "Number of std::init flow events extracted");
 /// The leaves two flow states' joins combine cell by cell (SharedArray::meet).
 STATISTIC(NumFlowStateLeafJoins,
           "Number of std::init flow-state leaves joined cell by cell");
@@ -3802,15 +3807,17 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
         });
       break;
     case DefAssignEventKind::Reset:
-      WithSubs(Ev.Idx, [&](unsigned I) {
-        St.update(I, FlowState::MayUnassigned,
-                  FlowState::Must | FlowState::May | FlowState::Esc |
-                      FlowState::MayDestroyed | FlowState::EntryAsserted |
-                      FlowState::MembersPending);
-      });
+      for (unsigned R = Ev.Idx, E = std::max(Ev.Idx + 1, Ev.Aux); R != E; ++R)
+        WithSubs(R, [&](unsigned I) {
+          St.update(I, FlowState::MayUnassigned,
+                    FlowState::Must | FlowState::May | FlowState::Esc |
+                        FlowState::MayDestroyed | FlowState::EntryAsserted |
+                        FlowState::MembersPending);
+        });
       break;
     case DefAssignEventKind::AggregateEscape:
-      St.update(Ev.Idx, FlowState::Esc);
+      for (unsigned I = Ev.Idx, E = std::max(Ev.Idx + 1, Ev.Aux); I != E; ++I)
+        St.update(I, FlowState::Esc);
       break;
     case DefAssignEventKind::Binding:
       if (Violations)
@@ -6112,9 +6119,9 @@ static void extractStdInitEvents(
         if (Benign.count(DRE))
           continue;
         std::pair<unsigned, unsigned> Range = Storage.wholeObject(DRE);
-        for (unsigned Idx = Range.first; Idx != Range.second; ++Idx)
-          BlockEvents.push_back(
-              {DefAssignEventKind::AggregateEscape, Idx, DRE});
+        if (Range.first != Range.second)
+          BlockEvents.push_back({DefAssignEventKind::AggregateEscape,
+                                 Range.first, DRE, Range.second});
       } else if (const auto *DS = dyn_cast<DeclStmt>(St)) {
         for (const Decl *Dcl : DS->decls()) {
           const auto *V = dyn_cast<VarDecl>(Dcl);
@@ -6129,9 +6136,8 @@ static void extractStdInitEvents(
                 {DefAssignEventKind::Reset, It->second, nullptr});
           if (auto It = Storage.LocalRange.find(V);
               It != Storage.LocalRange.end())
-            for (unsigned Idx = It->second.first; Idx != It->second.second;
-                 ++Idx)
-              BlockEvents.push_back({DefAssignEventKind::Reset, Idx, nullptr});
+            BlockEvents.push_back({DefAssignEventKind::Reset, It->second.first,
+                                   nullptr, It->second.second});
           // The variable's own binding (a decomposition's hidden variable
           // included); the DeclStmt element follows its initializer's
           // subexpression elements, so the judgment sees their effects. An
@@ -6689,11 +6695,13 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
   extractStdInitEvents(S, D, *cfg, Storage, Ctor, StarThisCopyTrusted, Events,
                        Sites, DSites, ASites, JudgedLeaves);
   verifyDeferredInitSites(S, D, Deferred, cfg, JudgedLeaves);
-  for (const SmallVector<DefAssignEvent, 4> &BlockEvents : Events)
+  for (const SmallVector<DefAssignEvent, 4> &BlockEvents : Events) {
+    NumFlowEvents += BlockEvents.size();
     for (const DefAssignEvent &Ev : BlockEvents)
       if (Ev.Kind == DefAssignEventKind::Reseat &&
           Ev.RT == ReseatTarget::ViaPointer)
         Storage.AliasClasses.unionSets(Ev.Idx, Ev.Aux);
+  }
   // Nothing is assigned at function entry: written initializers write at
   // their CFGInitializer elements, a tracked local cannot be referenced
   // before its DeclStmt, a by-value parameter starts unassigned by design,

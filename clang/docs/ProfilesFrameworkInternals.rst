@@ -1133,9 +1133,9 @@ identified referent named by a marked binding is asserted unassigned (``Must``,
 ``MayDestroyed`` and ``Esc`` kept); the ``Reseat`` follows the binding's
 ``Binding`` event in block order, so the judgment sees the pre-assertion
 state.  A binding to a marked parameter is a ``Binding`` event only and
-asserts nothing.  A tracked local's DeclStmt emits a
-``Reset`` of its ``[[uninit]]`` entity and of its member entities ahead of the
-declaration's own binding and copy events, clearing every bit but
+asserts nothing.  A tracked local's DeclStmt emits a ``Reset`` of its
+``[[uninit]]`` entity and one over its member entities ahead of the
+declaration's own binding and copy events, clearing every flag but
 ``MayUnassigned``, which it sets: each execution of the declaration starts a
 new, unassigned object.  A marked pointer or reference is reseated by its
 initializer instead.  The pass reports the ``ref_to_uninit`` judgments of
