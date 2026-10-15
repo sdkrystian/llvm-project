@@ -425,8 +425,10 @@ the parser recorded after it, and in the states a ``push`` saved, which a
 ``pop`` can bring back.  The second set is bounded by the parser's
 frontier, the last position its tokens were lexed to: unbounded in an
 in-order parse, where every state recorded after the location was lexed
-ahead, and, while a token-cached body, default argument, member
-initializer, or delayed template is parsed late, that region's last token
+ahead, and, while a token-cached region is parsed late -- an inline member
+function body, default argument, exception specification, member
+initializer, late-parsed attribute, delayed template, or a method or
+function body in an ``@implementation`` -- that region's last token
 (``Parser::LateParsedRegionEnd``).  The region's tokens were lexed when it
 was cached, so a pragma among them is one the parser lexed ahead: a
 dominion that begins in the region covers it from the begin on, before the
@@ -576,7 +578,8 @@ Known Gaps
 ==========
 
 Each entry is a place where the framework misses a check that P3589R2 or
-:doc:`ProfilesFramework` calls for, or applies one that they exempt.
+:doc:`ProfilesFramework` calls for, or applies one that they exempt, or
+(`Compile-Time Cost`_) a shape whose cost grows faster than its input.
 
 Templates
 ---------
@@ -598,6 +601,30 @@ Where the recorded dominion departs from the construct's token range:
   command-line enforcement plus whatever enforcement or suppression was most
   recently recorded anywhere in the unit -- an over- or under-check
   depending on what was last recorded.
+- A function or Objective-C method defined inside an ``@implementation`` has
+  its body token-cached (``StashAwayMethodOrFunctionBodyTokens``) without a
+  Decl-keyed guard, so a suppression on its declarator-id, or on the
+  method's declaration, covers none of the body.  The prefix form
+  (``[[profiles::suppress(...)]] void g() { ... }``) covers it.
+- An in-class OpenMP ``declare reduction`` or ``declare mapper`` directive
+  (``Parser::ParseLexedPragma``) and a late-parsed C attribute
+  (``Parser::ParseLexedCAttribute``) are parsed from cached tokens without a
+  region bound, so a dominion that begins inside one replaces the states
+  recorded after it as in an in-order parse.  Its end then restores the rule
+  inside the dominions of the class's later members: a check site there
+  judged after the class is complete (a template instantiation) is not
+  suppressed.
+
+Compile-Time Cost
+-----------------
+
+- Inside one token-cached region parsed late, every suppression's begin and
+  end replace, by copying, each ``#pragma clang diagnostic`` state recorded
+  after it in the region (`Enforcement and Suppression State`_).  A region
+  with *N* suppressions and *N* such states -- an inline member function
+  body that repeats a suppressed statement beside a ``_Pragma``-spelled
+  ``push``/``ignored``/``pop`` -- takes time and memory quadratic in *N*;
+  the same body parsed in order is linear.
 
 Analysis-Based Rules
 --------------------
