@@ -1108,7 +1108,10 @@ event and site leaf on such an entity through ``Target`` before applying
 it, and a ``Reseat`` event carries the new referent (``ReseatTarget``): the
 entity a single-leaf source names, what another marked pointer refers to,
 a fresh anonymous referent for an untracked source, the target every arm of the
-source agrees on, or unidentified when the arms disagree and one is tracked.  An
+source agrees on, or unidentified when the arms disagree and one is tracked.
+A reseat to a fresh or escaped referent leaves every pointer that refers to
+the replaced one unidentified; only a pointer that a chain of ``ViaPointer``
+reseats connects to it can (``TrackedStorage::AliasClasses``).  An
 identified referent named by a marked binding is asserted unassigned (``Must``,
 ``May``, and ``MembersPending`` cleared, ``MayUnassigned`` set,
 ``MayDestroyed`` and ``Esc`` kept); the ``Reseat`` follows the binding's

@@ -53,10 +53,12 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/EquivalenceClasses.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Debug.h"
@@ -2115,6 +2117,10 @@ struct TrackedStorage {
     BasePath Path;
   };
   llvm::DenseMap<const VarDecl *, CopyOrigin> CopySource;
+  /// The marked pointers, references, and handles each ViaPointer reseat of
+  /// the body connects (runStdInitMemberReadChecks): only a pointer in
+  /// another's class can refer to that one's anonymous referent.
+  llvm::EquivalenceClasses<unsigned> AliasClasses;
 
   /// Append one entity per entry of \p RD's flow-tracked member table
   /// (SemaProfiles::flowTrackedMembers, including the members of its
@@ -3043,6 +3049,13 @@ struct AccessSite {
   SmallVector<BindingLeaf, 2> Leaves;
 };
 
+#define DEBUG_TYPE "std-init-flow"
+/// The pointers a reseat to a fresh or escaped referent checks for an alias
+/// of the referent it replaces (TrackedStorage::AliasClasses).
+STATISTIC(NumReseatAliasChecks,
+          "Number of std::init pointers checked for a replaced referent");
+#undef DEBUG_TYPE
+
 /// FlowState::Target of a marked pointer or reference in the join identity:
 /// yields to any other value.
 static constexpr unsigned TopTarget = ~0u;
@@ -3580,10 +3593,14 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       case ReseatTarget::Escaped:
         // The entity's flags describe the new anonymous referent from here,
         // so a pointer that copied this one while it referred to the old one
-        // loses its referent.
-        for (unsigned K = 0, N = Storage.Entities.size(); K != N; ++K)
-          if (K != Ev.Idx && St.target(K) == Ev.Idx)
+        // loses its referent; only one in its alias class can have.
+        for (unsigned K : Storage.AliasClasses.members(Ev.Idx)) {
+          if (K == Ev.Idx)
+            continue;
+          ++NumReseatAliasChecks;
+          if (St.target(K) == Ev.Idx)
             St.setTarget(K, UnknownTarget);
+        }
         WithSubs(Ev.Idx, [&](unsigned I) {
           St.update(I,
                     Ev.RT == ReseatTarget::Escaped ? FlowState::May
@@ -6520,6 +6537,11 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
   extractStdInitEvents(S, D, *cfg, Storage, Ctor, StarThisCopyTrusted, Events,
                        Sites, DSites, ASites, JudgedLeaves);
   verifyDeferredInitSites(S, D, Deferred, cfg, JudgedLeaves);
+  for (const SmallVector<DefAssignEvent, 4> &BlockEvents : Events)
+    for (const DefAssignEvent &Ev : BlockEvents)
+      if (Ev.Kind == DefAssignEventKind::Reseat &&
+          Ev.RT == ReseatTarget::ViaPointer)
+        Storage.AliasClasses.unionSets(Ev.Idx, Ev.Aux);
   // Nothing is assigned at function entry: written initializers write at
   // their CFGInitializer elements, a tracked local cannot be referenced
   // before its DeclStmt, a by-value parameter starts unassigned by design,
