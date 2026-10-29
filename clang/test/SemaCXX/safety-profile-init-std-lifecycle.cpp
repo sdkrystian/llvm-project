@@ -1439,8 +1439,11 @@ struct DestroysMarkedMember {
 [[now_init]] void free_fill(DtorPayload *p [[ref_to_uninit]]);
 struct MemberLifecycleCalls {
   DtorPayload *elem [[ref_to_uninit]];
+  DtorPayload *other [[ref_to_uninit]];
   [[now_uninit]] void drop(DtorPayload *p);
+  [[now_uninit]] void drop_variadic(DtorPayload *p, ...);
   [[now_init]] void fill(DtorPayload *p [[ref_to_uninit]]);
+  void plain();
   // A [[now_uninit]] member call judges its argument before it escapes the marked pointer members
   void member_drop_after_free_drop() {
     free_fill(elem);
@@ -1452,10 +1455,35 @@ struct MemberLifecycleCalls {
     free_fill(elem);
     fill(elem); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   }
-  // A member call after a member call sees the marked pointer members the first one escaped
+  // A [[now_uninit]] member call keeps the referent of the marked pointer member it destroys
   void member_drop_after_member_drop() {
     fill(elem);
     drop(elem);
+    drop(elem); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
+  }
+  // A [[now_init]] member call keeps the referent of the marked pointer member it initializes
+  void member_fill_after_member_fill() {
+    fill(elem);
+    fill(elem); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  }
+  // An ordinary member call between the lifecycle calls escapes the marked pointer members
+  void member_drop_after_plain_member_call() {
+    fill(elem);
+    drop(elem);
+    plain();
+    drop(elem);
+  }
+  // A lifecycle member call escapes the marked pointer members it is not passed
+  void member_drop_after_drop_of_other_member() {
+    fill(elem);
+    drop(elem);
+    drop(other);
+    drop(elem);
+  }
+  // A lifecycle member call that also passes the member to a non-role parameter escapes it
+  void member_drop_after_variadic_pass() {
+    fill(elem);
+    drop_variadic(elem, elem);
     drop(elem);
   }
 };

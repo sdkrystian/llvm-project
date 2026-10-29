@@ -870,7 +870,9 @@ marker asserts uninitialized when the function is entered -- so the
 destructor's ``std::destroy(elem, elem + n)`` is accepted, while a read through
 ``elem`` is rejected until the same function stores or constructs the
 referent; a member call on the object holding the member, a pointer or
-reference to that object, or a ``this`` capture leaves the referent unknown.  A
+reference to that object, or a ``this`` capture leaves the referent unknown,
+except a member call that passes the member only to parameters it destroys or
+initializes, which acts on the referent as a free function's call does.  A
 marked pointer's or
 reference's referent is, at each point, the storage its latest binding
 names: after ``int *p [[ref_to_uninit]] = &u;`` the local ``u``, after

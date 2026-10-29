@@ -5272,8 +5272,10 @@ static void extractStdInitEvents(
     // A member call on, or an alias of, the object \p Object -- the current
     // object (also when null) or a member of it, by value -- at \p At may
     // reseat the marked pointer members below it or destroy their pointees:
-    // their referents become unknown.
-    auto EscapeMemberPointers = [&](const Expr *Object, const Expr *At) {
+    // their referents become unknown, except the MemberPointee entities in
+    // \p Keep.
+    auto EscapeMemberPointers = [&](const Expr *Object, const Expr *At,
+                                    ArrayRef<unsigned> Keep = {}) {
       ArrayRef<MemberStep> Prefix;
       std::optional<SemaProfiles::FlowLeafShape> Shape;
       if (Object && !isCurrentObjectBase(Object)) {
@@ -5289,9 +5291,64 @@ static void extractStdInitEvents(
            I != Storage.MemberPointerRange.second; ++I) {
         ArrayRef<MemberStep> Steps = Storage.Entities[I].Steps;
         if (Steps.size() > Prefix.size() &&
-            Steps.take_front(Prefix.size()) == Prefix)
+            Steps.take_front(Prefix.size()) == Prefix &&
+            !llvm::is_contained(Keep, I))
           AppendReseat(I, At, ReseatTarget::Escaped);
       }
+    };
+    // The MemberPointee entities whose referents a lifecycle-role argument of
+    // the member call \p CE names whole (a destroying or initializing
+    // parameter's: its event judges and updates the referent), less those
+    // another argument of the call also reaches.
+    auto RoleMemberPointees = [&](const CallExpr *CE) {
+      SmallVector<unsigned, 2> Keep, Passed;
+      const FunctionDecl *Callee = CE->getDirectCallee();
+      if (!Callee ||
+          Storage.MemberPointerRange.first == Storage.MemberPointerRange.second)
+        return Keep;
+      SemaProfiles::CalleeLifecycleRoles Roles =
+          SemaProfiles::getCalleeLifecycleRoles(Callee);
+      auto IsMemberPointee = [&](std::optional<unsigned> Idx) {
+        return Idx && *Idx >= Storage.MemberPointerRange.first &&
+               *Idx < Storage.MemberPointerRange.second;
+      };
+      forEachArgumentBinding(
+          Ctx, CE,
+          [&](const ParmVarDecl *P, QualType PT, const Expr *Arg,
+              bool Variadic) {
+            bool Role = P && !Variadic &&
+                        (Roles.destroysParam(P) || Roles.initializesParam(P));
+            bool AsPointerValue;
+            const Expr *Operand =
+                SemaProfiles::bindingSourceOperand(Arg, PT, AsPointerValue);
+            if (!Operand)
+              return;
+            SemaProfiles::forEachTargetLeaf(
+                Operand, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+                  TrackedStorage::Resolution R =
+                      Storage.resolveFlowLeaf(Leaf, AsPointerValue);
+                  if (Role) {
+                    if (IsMemberPointee(R.Entity) && !R.Subobject)
+                      Keep.push_back(*R.Entity);
+                    return;
+                  }
+                  if (IsMemberPointee(R.Entity))
+                    Passed.push_back(*R.Entity);
+                  // The pointer member itself, by reference or address.
+                  const Expr *G =
+                      SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms);
+                  if (AsPointerValue)
+                    G = SemaProfiles::addressOfOperand(G);
+                  if (std::optional<unsigned> Idx =
+                          G ? Storage.markedPointerObject({G, Leaf.Arms})
+                            : std::nullopt;
+                      IsMemberPointee(Idx))
+                    Passed.push_back(*Idx);
+                });
+          });
+      llvm::erase_if(
+          Keep, [&](unsigned Idx) { return llvm::is_contained(Passed, Idx); });
+      return Keep;
     };
     // A store to \p G: one Write (or ReadWrite) when every leaf names the
     // same whole entity; otherwise the chosen arm is unknown, so each named
@@ -6162,7 +6219,7 @@ static void extractStdInitEvents(
                        nullptr, CE);
         AppendCallEvents(CE, Callee, DestroyedObject);
         if (EscapesMemberPointers)
-          EscapeMemberPointers(Object, CE);
+          EscapeMemberPointers(Object, CE, RoleMemberPointees(CE));
         // A member call on a marked local handle changes what it refers to:
         // a reseat names its source's referent, a reset or an assignment of
         // anything but a class an anonymous one, an offset (++, --, +=, -=)

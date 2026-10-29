@@ -1231,7 +1231,10 @@ reseats it -- its written initializer, its default member initializer, or the
 written initializer of a member subobject or base holding it, by the braced
 element naming it or else to an unidentified referent; a store to the member
 reseats it; and a member call on the object holding it, a pointer or
-reference binding of that object, and a ``this`` capture escape it.  A
+reference binding of that object, and a ``this`` capture escape it.  A member
+call whose destroying or initializing argument names the referent whole does
+not escape that member unless another of its arguments reaches it: the call's
+lifecycle event judges and updates the referent, as a free function's does.  A
 class-type ``[[uninit]]`` local's storage, and a marked local pointer's,
 reference's, or pointer member's referent, carries one ``SubMember`` entity
 per flow-tracked member of its class (the same table), when its
@@ -1473,6 +1476,11 @@ Deliberate Strictnesses
   constructs it (``std::now_init`` is the remedy for a referent another
   member function initialized), and a member call on the object (a const one
   too: its pointee is not const) leaves it unknown.
+- A ``[[now_uninit]]`` or ``[[now_init]]`` member function called with a
+  marked pointer member (``drop(elem)``) is judged against the member's
+  referent and keeps it: a function that also reseats the member is judged
+  against the old referent, so a later lifecycle call or read through the
+  member is judged against it too.  The remedy is ``[[profiles::suppress]]``.
 - Placement ``new`` into marked storage (``new (&u) T``) is rejected while the
   storage is uninitialized on every path reaching it -- the address binds an
   unmarked placement parameter, judged by flow like any binding, so a store on
