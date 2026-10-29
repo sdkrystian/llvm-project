@@ -767,17 +767,13 @@ int test_destroy_then_reassign() {
   return a.m; // OK: reassigned after the destroy
 }
 
-// Sibling leniency: the destroy call's base DeclRefExpr is still a
-// non-benign escape of `a`, whose whole-range credit precedes the call
-// element in block order -- the destroyed member nets to killed while its
-// siblings keep the escape credit (the locals' documented leniency; the
-// ctor-body pass has no such credit).
-int test_destroy_sibling_keeps_escape_credit() {
+// The destroy of a member does not escape the local: an assigned sibling stays assigned
+int test_destroy_sibling_stays_assigned() {
   DestroyAgg a;
   a.m = 1;
   a.sm = 1;
   destroy_at(&a.m);
-  return a.sm; // OK: the sibling keeps the escape credit
+  return a.sm; // OK
 }
 
 // Passing the whole object destroys every tracked member.

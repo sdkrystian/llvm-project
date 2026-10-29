@@ -970,6 +970,60 @@ void scope_exit_rejected_marker() {
                            // expected-note {{default-initialization of 'ScopedCtor' runs a constructor}}
 }
 
+struct LocalAgg {
+  int m [[uninit]];
+  int k [[uninit]]; // expected-note 2 {{member 'k' declared here}}
+};
+struct LocalHolder { ScopedDtor w [[uninit]]; int n = 0; };
+[[now_uninit]] void drop_int(int *p);
+int use_two(int *p, int v);
+
+// std::destroy_at of a never-constructed member of an aggregate local destroys uninitialized storage
+void member_destroy_never_constructed() {
+  LocalAgg a;
+  std::destroy_at(&a.m); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+}
+
+// A [[now_uninit]] call on a never-constructed member destroys uninitialized storage
+void member_drop_never_constructed() {
+  LocalAgg a;
+  drop_int(&a.m); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+}
+
+// std::destroy_at of a never-constructed class-type member destroys uninitialized storage, and the scope exit destroys it again
+void class_member_destroy_never_constructed() {
+  LocalHolder h; // expected-note {{'h' is destroyed at the end of its scope}}
+  std::destroy_at(&h.w); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+
+// An explicit destructor call on a never-constructed class-type member destroys uninitialized storage, and the scope exit destroys it again
+void class_member_destructor_call_never_constructed() {
+  LocalHolder h; // expected-note {{'h' is destroyed at the end of its scope}}
+  h.w.~ScopedDtor(); // expected-error {{uninitialized storage is destroyed by a destructor call under profile 'std::init'}}
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+
+// std::construct_at of one member does not escape the local, so its unassigned sibling is read uninitialized
+int member_construct_then_sibling_read() {
+  LocalAgg a;
+  std::construct_at(&a.m, 1);
+  return a.k; // expected-error {{member 'k' is read before initialization under profile 'std::init'}}
+}
+
+// An argument of a call reads its sibling member before the call hands the local out
+int sibling_argument_read() {
+  LocalAgg a;
+  a.m = 1;
+  return use_two(&a.m, a.k); // expected-error {{member 'k' is read before initialization under profile 'std::init'}}
+}
+
+// A read after the call that hands the local out is trusted
+int read_after_handing_out() {
+  LocalAgg a;
+  a.m = 1;
+  use_two(&a.m, 0);
+  return a.k;
+}
+
 //--- referent.cpp
 // A marked local pointer or reference refers to the storage its latest
 // binding names (ProfilesFramework.rst, "Binding Pointers and References"),
@@ -1378,6 +1432,31 @@ struct DestroysMarkedMember {
   void reset_twice() {
     p->~DtorPayload();
     p->~DtorPayload(); // expected-error {{storage already destroyed is destroyed again by a destructor call under profile 'std::init'}}
+  }
+};
+
+[[now_uninit]] void free_drop(DtorPayload *p);
+[[now_init]] void free_fill(DtorPayload *p [[ref_to_uninit]]);
+struct MemberLifecycleCalls {
+  DtorPayload *elem [[ref_to_uninit]];
+  [[now_uninit]] void drop(DtorPayload *p);
+  [[now_init]] void fill(DtorPayload *p [[ref_to_uninit]]);
+  // A [[now_uninit]] member call judges its argument before it escapes the marked pointer members
+  void member_drop_after_free_drop() {
+    free_fill(elem);
+    free_drop(elem);
+    drop(elem); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
+  }
+  // A [[now_init]] member call judges its marked binding before it escapes the marked pointer members
+  void member_fill_after_free_fill() {
+    free_fill(elem);
+    fill(elem); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  }
+  // A member call after a member call sees the marked pointer members the first one escaped
+  void member_drop_after_member_drop() {
+    fill(elem);
+    drop(elem);
+    drop(elem);
   }
 };
 

@@ -3519,8 +3519,7 @@ static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
       std::optional<unsigned> R =
           L.Entity ? referent(*L.Entity, St, Storage) : std::nullopt;
       // At its scope exit, a member of a local that escaped after the
-      // member's destroy may have been reconstructed since. (An explicit
-      // destroy's own argument escapes the local just before the destroy.)
+      // member's destroy may have been reconstructed since.
       AllDestroyed &=
           R && St.has(*R, FlowState::MayDestroyed) &&
           !(Site.Destroyer == SemaProfiles::InitDestroyer::ScopeExit &&
@@ -4819,6 +4818,44 @@ static const Expr *aggregateInitializerFor(const Expr *Init,
   return Init;
 }
 
+/// The DeclRefExpr at the bottom of the call argument \p E -- through
+/// parentheses, casts, temporaries, member and element accesses, pointers to
+/// data members, address-of, indirection, pointer arithmetic, commas, and
+/// identity calls -- or null: the variable the argument hands to its call.
+static const DeclRefExpr *argumentBaseRef(const Expr *E) {
+  while (E) {
+    E = E->IgnoreParens();
+    if (const auto *DRE = dyn_cast<DeclRefExpr>(E))
+      return DRE;
+    if (const Expr *Op = SemaProfiles::addressOfOperand(E))
+      E = Op;
+    else if (const Expr *Base = SemaProfiles::pointerArithmeticBase(E))
+      E = Base;
+    else if (const auto *Cast = dyn_cast<CastExpr>(E))
+      E = Cast->getSubExpr();
+    else if (const auto *ME = dyn_cast<MemberExpr>(E))
+      E = ME->getBase();
+    else if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(E))
+      E = ASE->getBase();
+    else if (const auto *UO = dyn_cast<UnaryOperator>(E);
+             UO && UO->getOpcode() == UO_Deref)
+      E = UO->getSubExpr();
+    else if (const auto *BO = dyn_cast<BinaryOperator>(E);
+             BO && (BO->isPtrMemOp() || BO->isCommaOp()))
+      E = BO->isCommaOp() ? BO->getRHS() : BO->getLHS();
+    else if (const auto *MTE = dyn_cast<MaterializeTemporaryExpr>(E))
+      E = MTE->getSubExpr();
+    else if (const auto *FE = dyn_cast<FullExpr>(E))
+      E = FE->getSubExpr();
+    else if (const auto *CE = dyn_cast<CallExpr>(E);
+             CE && SemaProfiles::isIdentityCall(CE))
+      E = CE->getArg(0);
+    else
+      return nullptr;
+  }
+  return nullptr;
+}
+
 /// Recover the per-block std::init events of \p cfg over \p Storage: the one
 /// extraction loop of the engine. Every store arm resolves through
 /// TrackedStorage::resolve and distributes a comma, conditional, or GNU ?:
@@ -4831,7 +4868,10 @@ static const Expr *aggregateInitializerFor(const Expr *Init,
 /// (appendLifecycleCallEvents); a this-capturing lambda reads members at its
 /// creation; a non-benign DeclRefExpr of a tracked aggregate local is an escape
 /// (the read leniency for locals, ProfilesFrameworkInternals.rst,
-/// "Known Gaps (std::init)"); a tracked local's DeclStmt resets its storage
+/// "Known Gaps (std::init)") -- for a read-tracked local, after the call's own
+/// events when it is the base of a call's argument (argumentBaseRef), and none
+/// for a lifecycle-role argument naming its tracked storage, whose event judges
+/// and updates it; a tracked local's DeclStmt resets its storage
 /// (Reset), after which a tracked copy's copies each member's state. Every
 /// pointer, reference, or handle binding the body performs -- a variable,
 /// member, or base initializer, an aggregate element, a call or constructor
@@ -4891,13 +4931,97 @@ static void extractStdInitEvents(
         Benign.insert(R.LocalBase);
     });
   };
+  // A lifecycle-role argument \p Arg bound as \p T -- a destroying or
+  // initializing parameter's, or an explicit destructor call's object --
+  // naming a tracked member of a read-tracked local whole, or the local or a
+  // subobject enclosing tracked members, does not escape the local: the
+  // role's event judges and updates that storage (appendLifecycleCallEvents).
+  // A local tracked for bindings only escapes as any other argument does.
+  auto NoteRoleArgument = [&](const Expr *Arg, QualType T) {
+    if (T.isNull() || (!T->isPointerType() && !T->isReferenceType()))
+      return;
+    bool AsPointerValue;
+    const Expr *Operand =
+        SemaProfiles::bindingSourceOperand(Arg, T, AsPointerValue);
+    if (!Operand)
+      return;
+    SemaProfiles::forEachTargetLeaf(
+        Operand, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+          TrackedStorage::Resolution R =
+              Storage.resolveFlowLeaf(Leaf, AsPointerValue);
+          if (R.Entity) {
+            if (R.LocalBase && !R.Subobject &&
+                Storage.Entities[*R.Entity].TrackReads)
+              Benign.insert(R.LocalBase);
+            return;
+          }
+          const Expr *G =
+              SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms);
+          if (AsPointerValue) {
+            G = SemaProfiles::addressOfOperand(G);
+            if (!G)
+              return;
+            G = SemaProfiles::ignoreTransparentCasts(G, Leaf.Arms);
+          }
+          std::pair<unsigned, unsigned> Whole =
+              Storage.wholeObject(G, Leaf.Arms);
+          std::optional<SemaProfiles::FlowLeafShape> Shape =
+              SemaProfiles::flowLeafShape(G, Leaf.Arms);
+          if (Whole.first != Whole.second && Shape && Shape->LocalRef &&
+              Storage.Entities[Whole.first].TrackReads)
+            Benign.insert(Shape->LocalRef);
+        });
+  };
+  // The call each argument's base DeclRefExpr is handed to
+  // (argumentBaseRef). Within a block a call follows the calls nested in its
+  // arguments, so an identity call's argument belongs to the call enclosing
+  // it.
+  llvm::DenseMap<const DeclRefExpr *, const Expr *> HandedTo;
+  auto NoteHandedTo = [&](const Expr *Call, const Expr *Arg) {
+    if (const DeclRefExpr *Ref = Arg ? argumentBaseRef(Arg) : nullptr)
+      HandedTo[Ref] = Call;
+  };
   for (const CFGBlock *B : cfg) {
     for (const CFGElement &Elem : *B) {
       auto CS = Elem.getAs<CFGStmt>();
       if (!CS)
         continue;
       const Stmt *St = CS->getStmt();
-      if (const auto *ICE = dyn_cast<ImplicitCastExpr>(St)) {
+      if (const auto *CE = dyn_cast<CallExpr>(St)) {
+        NoteHandedTo(CE, CE->getCallee());
+        for (const Expr *Arg : CE->arguments())
+          NoteHandedTo(CE, Arg);
+        const Expr *Destroyed = nullptr;
+        if (const auto *MCE = dyn_cast<CXXMemberCallExpr>(CE);
+            MCE && isa_and_nonnull<CXXDestructorDecl>(MCE->getMethodDecl()))
+          Destroyed = MCE->getImplicitObjectArgument();
+        else if (const auto *PDE = dyn_cast<CXXPseudoDestructorExpr>(
+                     CE->getCallee()->IgnoreParens()))
+          Destroyed = PDE->getBase();
+        if (Destroyed) {
+          QualType OT = Destroyed->getType();
+          NoteRoleArgument(Destroyed, OT->isPointerType()
+                                          ? OT
+                                          : Ctx.getLValueReferenceType(OT));
+        }
+        if (const FunctionDecl *Callee = CE->getDirectCallee()) {
+          SemaProfiles::CalleeLifecycleRoles Roles =
+              SemaProfiles::getCalleeLifecycleRoles(Callee);
+          if (Roles.DestroysParams || Roles.InitializesRefToUninitParams ||
+              Roles.KnownParam)
+            forEachArgumentBinding(
+                Ctx, CE,
+                [&](const ParmVarDecl *P, QualType PT, const Expr *Arg,
+                    bool Variadic) {
+                  if (P && !Variadic &&
+                      (Roles.destroysParam(P) || Roles.initializesParam(P)))
+                    NoteRoleArgument(Arg, PT);
+                });
+        }
+      } else if (const auto *CCE = dyn_cast<CXXConstructExpr>(St)) {
+        for (const Expr *Arg : CCE->arguments())
+          NoteHandedTo(CCE, Arg);
+      } else if (const auto *ICE = dyn_cast<ImplicitCastExpr>(St)) {
         if (ICE->getCastKind() == CK_LValueToRValue)
           NoteBenign(ICE->getSubExpr());
       } else if (const auto *BBC = dyn_cast<BuiltinBitCastExpr>(St)) {
@@ -4938,6 +5062,22 @@ static void extractStdInitEvents(
   // Pass two: the events, in CFG element order.
   for (const CFGBlock *B : cfg) {
     auto &BlockEvents = Events[B->getBlockID()];
+    // The escapes of the locals an argument hands to a call of this block,
+    // appended after that call's own events (FlushEscapes).
+    llvm::SmallPtrSet<const Stmt *, 8> BlockCalls;
+    for (const CFGElement &Elem : *B)
+      if (auto CS = Elem.getAs<CFGStmt>();
+          CS && isa<CallExpr, CXXConstructExpr>(CS->getStmt()))
+        BlockCalls.insert(CS->getStmt());
+    llvm::MapVector<const Expr *, SmallVector<DefAssignEvent, 1>>
+        PendingEscapes;
+    auto FlushEscapes = [&](const Expr *Call) {
+      auto It = PendingEscapes.find(Call);
+      if (It == PendingEscapes.end())
+        return;
+      llvm::append_range(BlockEvents, It->second);
+      PendingEscapes.erase(It);
+    };
     // The resolutions of a glvalue's leaves, one per leaf, with the access's
     // \p Designated type (TrackedStorage::resolve).
     SmallVector<TrackedStorage::Resolution, 4> Leaves;
@@ -5580,14 +5720,21 @@ static void extractStdInitEvents(
                                      : DefAssignEventKind::ReadThrough,
                              0, At, (unsigned)(ASites.size() - 1)});
     };
+    // A role parameter \p Parm taking a class-type range by reference as
+    // \p T judges the range, and hands out no alias of it.
+    auto TakesRange = [](const ParmVarDecl *Parm, QualType T,
+                         const SemaProfiles::CalleeLifecycleRoles &Roles) {
+      return Parm && T->isReferenceType() &&
+             SemaProfiles::isHandleType(T.getNonReferenceType()) &&
+             Roles.roleOf(Parm) != SemaProfiles::KnownParamRole::None;
+    };
     // The argument bindings of the call-like \p CallLike
     // (forEachArgumentBinding) of a callee with \p Roles: a VariadicArgument
     // binding per variadic argument, a Parameter binding per declared
     // parameter other than an initializing one, a range's end iterator, a
     // transfer parameter, or a handle an assignment takes by value --
     // none for a [[now_uninit]] or storage-release callee, whose parameters
-    // run the destroy rules instead -- and the mutable aliases each argument
-    // hands out.
+    // run the destroy rules instead.
     auto AppendArgumentBindings =
         [&](const Expr *CallLike,
             const SemaProfiles::CalleeLifecycleRoles &Roles) {
@@ -5596,12 +5743,7 @@ static void extractStdInitEvents(
               [&](const ParmVarDecl *Parm, QualType T, const Expr *Arg,
                   bool Variadic) {
                 SourceLocation Loc = Arg->IgnoreImplicit()->getExprLoc();
-                // A role parameter taking a class-type range by reference
-                // judges the range, and hands out no alias of it.
-                bool AsRange =
-                    Parm && T->isReferenceType() &&
-                    SemaProfiles::isHandleType(T.getNonReferenceType()) &&
-                    Roles.roleOf(Parm) != SemaProfiles::KnownParamRole::None;
+                bool AsRange = TakesRange(Parm, T, Roles);
                 if (Variadic)
                   AddBinding(K::VariadicArgument, Loc, /*TargetMarked=*/false,
                              T, Arg, nullptr, CallLike);
@@ -5617,14 +5759,25 @@ static void extractStdInitEvents(
                              Parm && Roles.isMarkedParam(Parm), T, Arg, nullptr,
                              CallLike, SemaProfiles::isValueCopySource(Parm),
                              AsRange, Parm);
-                if (!AsRange)
+              });
+        };
+    // The mutable aliases the arguments of the call-like \p CallLike of a
+    // callee with \p Roles hand out (AppendAliasEscapes).
+    auto AppendArgumentAliasEscapes =
+        [&](const Expr *CallLike,
+            const SemaProfiles::CalleeLifecycleRoles &Roles) {
+          forEachArgumentBinding(
+              Ctx, CallLike,
+              [&](const ParmVarDecl *Parm, QualType T, const Expr *Arg, bool) {
+                if (!TakesRange(Parm, T, Roles))
                   AppendAliasEscapes(Arg, T, CallLike, Parm);
               });
         };
     // A call of \p Callee (null when there is no declared callee) through
-    // the call-like \p CallLike: its argument bindings and its lifecycle
+    // the call-like \p CallLike: its argument bindings, its lifecycle
     // effects, \p DestroyedObject's destruction included
-    // (appendLifecycleCallEvents).
+    // (appendLifecycleCallEvents), and then the aliases its arguments hand
+    // out, so the call's own judgments see the state before the call.
     auto AppendCallEvents = [&](const Expr *CallLike,
                                 const FunctionDecl *Callee,
                                 const Expr *DestroyedObject = nullptr) {
@@ -5635,6 +5788,7 @@ static void extractStdInitEvents(
       appendLifecycleCallEvents(S, D, CallLike, Roles, Storage, BlockEvents,
                                 DSites, JudgedLeaves, UnresolvedLeaves,
                                 DestroyedObject);
+      AppendArgumentAliasEscapes(CallLike, Roles);
     };
     // The element bindings of an aggregate initializer of type \p T: each
     // base and field of a record (unnamed bit-fields consume no initializer)
@@ -5956,6 +6110,9 @@ static void extractStdInitEvents(
         // a pseudo-destructor call, destroys its object instead
         // (SemaProfiles::checkInitProfileDestructorCall).
         const Expr *DestroyedObject = nullptr;
+        // The marked pointer members below the object of a member call
+        // escape after the call's own events (EscapeMemberPointers).
+        bool EscapesMemberPointers = false;
         if (ObjectMethod && Object && isa<CXXDestructorDecl>(ObjectMethod)) {
           DestroyedObject = Object;
         } else if (ObjectMethod && Object &&
@@ -5972,7 +6129,7 @@ static void extractStdInitEvents(
                      /*TargetMarked=*/false, T, Object, ObjectMethod, CE,
                      SemaProfiles::isDefaultedComparison(ObjectMethod) ||
                          SemaProfiles::isStdArrayElementMember(ObjectMethod));
-          EscapeMemberPointers(Object, CE);
+          EscapesMemberPointers = true;
         }
         if (const auto *PDE = dyn_cast<CXXPseudoDestructorExpr>(
                 CE->getCallee()->IgnoreParens()))
@@ -6004,6 +6161,8 @@ static void extractStdInitEvents(
                        SemaProfiles::handleReseatType(ReseatObj), ReseatSrc,
                        nullptr, CE);
         AppendCallEvents(CE, Callee, DestroyedObject);
+        if (EscapesMemberPointers)
+          EscapeMemberPointers(Object, CE);
         // A member call on a marked local handle changes what it refers to:
         // a reseat names its source's referent, a reset or an assignment of
         // anything but a class an anonymous one, an offset (++, --, +=, -=)
@@ -6070,12 +6229,16 @@ static void extractStdInitEvents(
             }
           }
         }
+        FlushEscapes(CE);
       } else if (const auto *CCE = dyn_cast<CXXConstructExpr>(St)) {
         // A constructor call's parameter bindings, the copy of a class object
         // out of tracked storage included; a std-table construction's transfer
         // arguments are judged where the handle lands.
-        AppendArgumentBindings(
-            CCE, SemaProfiles::getCalleeLifecycleRoles(CCE->getConstructor()));
+        SemaProfiles::CalleeLifecycleRoles Roles =
+            SemaProfiles::getCalleeLifecycleRoles(CCE->getConstructor());
+        AppendArgumentBindings(CCE, Roles);
+        AppendArgumentAliasEscapes(CCE, Roles);
+        FlushEscapes(CCE);
       } else if (const auto *BBC = dyn_cast<BuiltinBitCastExpr>(St)) {
         // __builtin_bit_cast reads its operand whole, with no
         // lvalue-to-rvalue node.
@@ -6088,6 +6251,7 @@ static void extractStdInitEvents(
         // A message's parameter bindings; a method carries no lifecycle
         // attribute.
         AppendArgumentBindings(ME, SemaProfiles::CalleeLifecycleRoles());
+        AppendArgumentAliasEscapes(ME, SemaProfiles::CalleeLifecycleRoles());
       } else if (const auto *VAE = dyn_cast<VAArgExpr>(St)) {
         // A class-type va_list is bound to a reference parameter in C++
         // (Sema::BuildVAArgExpr).
@@ -6147,9 +6311,19 @@ static void extractStdInitEvents(
         if (Benign.count(DRE))
           continue;
         std::pair<unsigned, unsigned> Range = Storage.wholeObject(DRE);
-        if (Range.first != Range.second)
-          BlockEvents.push_back({DefAssignEventKind::AggregateEscape,
-                                 Range.first, DRE, Range.second});
+        if (Range.first == Range.second)
+          continue;
+        DefAssignEvent Ev{DefAssignEventKind::AggregateEscape, Range.first, DRE,
+                          Range.second};
+        // A read-tracked local handed to a call of this block escapes after
+        // the call's own events; one tracked for bindings only, whose
+        // members' state does not follow its initializer, where it is named.
+        if (auto It = HandedTo.find(DRE);
+            It != HandedTo.end() && BlockCalls.count(It->second) &&
+            Storage.Entities[Range.first].TrackReads)
+          PendingEscapes[It->second].push_back(Ev);
+        else
+          BlockEvents.push_back(Ev);
       } else if (const auto *DS = dyn_cast<DeclStmt>(St)) {
         for (const Decl *Dcl : DS->decls()) {
           const auto *V = dyn_cast<VarDecl>(Dcl);
@@ -6322,6 +6496,8 @@ static void extractStdInitEvents(
                                 PLIE->getInitializedFieldInUnion());
       }
     }
+    for (auto &[Call, Escapes] : PendingEscapes)
+      llvm::append_range(BlockEvents, Escapes);
   }
 }
 

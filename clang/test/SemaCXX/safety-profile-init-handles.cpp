@@ -1037,6 +1037,18 @@ void drop_twice(std::span<WD> s [[ref_to_uninit]]) {
   drop(s); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
 }
 
+// [[now_uninit]] taking a handle by reference destroys its referent before the reference escapes the handle
+[[now_uninit]] void drop_by_reference(std::span<WD> &s);
+void drop_by_reference_uninitialized(std::span<WD> s [[ref_to_uninit]]) {
+  drop_by_reference(s); // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function under profile 'std::init'}}
+  drop_by_reference(s);
+}
+void drop_then_drop_by_reference(std::span<WD> s [[ref_to_uninit]]) {
+  std::uninitialized_value_construct(s.begin(), s.end());
+  drop(s);
+  drop_by_reference(s); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
+}
+
 // A marked std::unique_ptr destroys what it owns at the end of its scope,
 // and at a reset
 void owner_scope_exit() {
