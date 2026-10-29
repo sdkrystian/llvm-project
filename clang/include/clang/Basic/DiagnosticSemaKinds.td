@@ -14548,4 +14548,6 @@ def err_init_destroy_uninit : ProfileRule<
 def err_init_deferred_check_unjudged : Error<
   "std::init %select{binding|destroy|read|store}0 check deferred to the flow "
   "analysis was never judged">;
+def err_init_flow_leaf_unresolved : Error<
+  "std::init flow-tracked leaf resolves to no storage">;
 } // end of sema component.

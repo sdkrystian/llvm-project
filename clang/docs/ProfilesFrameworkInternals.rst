@@ -1192,7 +1192,10 @@ skip it as they skip a rebuilt default argument or initializer
 One walk enumerates the leaves of a shape
 (``SemaProfiles::forEachTargetLeaf``) and one chain resolver interprets each
 (``SemaProfiles::flowLeafShape``, shared by ``TrackedStorage::resolve`` and the
-predicate), so no binding falls between the two.  Pointer arithmetic is an
+predicate), so no binding falls between the two; under
+``-fprofiles-verify-deferred-checks``, a leaf the predicate tracks that the
+resolver resolves to no entity and no member range is an error.  Pointer
+arithmetic is an
 element step there but by a literal 0, and so is the indirection of a
 decayed array (``*(a + 1)`` is ``a[1]``, ``*(p + 0)`` is ``*p``, ``*a`` is
 ``a[0]``); a pointer arithmetic value

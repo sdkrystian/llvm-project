@@ -4177,6 +4177,15 @@ static bool constructsOneObject(const SemaProfiles::CalleeLifecycleRoles &Roles,
                              });
 }
 
+/// Add \p Leaf to \p Unresolved once: a leaf SemaProfiles::isFlowTrackedLeaf
+/// reports tracked whose resolution names no entity and no member range, on
+/// which the predicate and the resolver disagree.
+static void noteUnresolvedFlowLeaf(SmallVectorImpl<const Expr *> &Unresolved,
+                                   const Expr *Leaf) {
+  if (!llvm::is_contained(Unresolved, Leaf))
+    Unresolved.push_back(Leaf);
+}
+
 /// The lifecycle effects of the call-like \p CallLike on the storage bound to
 /// its parameters (\p Roles, derived by the caller; the pairs come from
 /// forEachArgumentBinding). A [[now_init]] callee writes the storage
@@ -4203,11 +4212,12 @@ static bool constructsOneObject(const SemaProfiles::CalleeLifecycleRoles &Roles,
 /// storage of its argument as an argument naming several storages does. A
 /// plain callee earns nothing. The bindings judged at this call precede
 /// these effects in the block, so they see the pre-call state. A judged
-/// destroy site's flow-tracked leaves are added to \p JudgedLeaves. A
-/// non-null \p DestroyedObject -- the object of an explicit destructor call or
-/// the operand of a delete-expression that runs a destructor (a pointer, or a
-/// glvalue bound by reference) -- is destroyed first, like std::destroy_at's
-/// argument (P4222R2 §4.6).
+/// destroy site's flow-tracked leaves are added to \p JudgedLeaves, and a
+/// flow-tracked leaf that resolves to no storage to \p UnresolvedLeaves
+/// (noteUnresolvedFlowLeaf). A non-null \p DestroyedObject -- the object of
+/// an explicit destructor call or the operand of a delete-expression that
+/// runs a destructor (a pointer, or a glvalue bound by reference) -- is
+/// destroyed first, like std::destroy_at's argument (P4222R2 §4.6).
 static void
 appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
                           const SemaProfiles::CalleeLifecycleRoles &Roles,
@@ -4215,6 +4225,7 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
                           SmallVectorImpl<DefAssignEvent> &BlockEvents,
                           SmallVectorImpl<DestroySite> &DSites,
                           llvm::SmallPtrSetImpl<const Expr *> &JudgedLeaves,
+                          SmallVectorImpl<const Expr *> &UnresolvedLeaves,
                           const Expr *DestroyedObject = nullptr) {
   const auto *DC = cast<DeclContext>(D);
   // Resolve the leaves of \p Arg, bound to a parameter of type \p ParamTy
@@ -4279,6 +4290,9 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
             AsPointerValue && Op)
           G = SemaProfiles::ignoreTransparentCasts(Op, Leaf.Arms);
         L.Whole = Storage.wholeObject(G, Leaf.Arms);
+        if (L.Tracked && !L.R.Entity && L.Part.first == L.Part.second &&
+            L.Whole.first == L.Whole.second)
+          noteUnresolvedFlowLeaf(UnresolvedLeaves, Leaf.E);
         if (!Designated.isNull())
           L.Whole =
               designatedWholeRange(Storage, Leaf, AsPointerValue, G, L.Whole,
@@ -4304,6 +4318,8 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
           L.Tracked = S.Profiles().isFlowTrackedHandleLeaf(HL, DC);
           L.Element = HL.Partial;
           AnyTracked |= L.Tracked;
+          if (L.Tracked && !L.R.Entity)
+            noteUnresolvedFlowLeaf(UnresolvedLeaves, HL.E);
           if (!L.R.Entity)
             L.Form = FormOf(HL.E);
           Leaves.push_back(L);
@@ -4835,14 +4851,17 @@ static const Expr *aggregateInitializerFor(const Expr *Init,
 /// constructor body and its written initializers only. \p cfg is the engine's
 /// own, fully linearized CFG (runStdInitMemberReadChecks), so every statement
 /// class has an element. The flow-tracked leaves of every Binding, Destroy,
-/// ReadThrough, and SubobjectWrite site go to \p JudgedLeaves.
+/// ReadThrough, and SubobjectWrite site go to \p JudgedLeaves, and a
+/// flow-tracked leaf that resolves to no storage to \p UnresolvedLeaves
+/// (noteUnresolvedFlowLeaf).
 static void extractStdInitEvents(
     Sema &S, const Decl *D, const CFG &cfg, const TrackedStorage &Storage,
     const CXXConstructorDecl *Ctor, bool StarThisCopyTrusted,
     std::vector<SmallVector<DefAssignEvent, 4>> &Events,
     SmallVectorImpl<BindingSite> &Sites, SmallVectorImpl<DestroySite> &DSites,
     SmallVectorImpl<AccessSite> &ASites,
-    llvm::SmallPtrSetImpl<const Expr *> &JudgedLeaves) {
+    llvm::SmallPtrSetImpl<const Expr *> &JudgedLeaves,
+    SmallVectorImpl<const Expr *> &UnresolvedLeaves) {
   using K = SemaProfiles::InitBindingKind;
   ASTContext &Ctx = S.Context;
   const auto *DC = cast<DeclContext>(D);
@@ -5350,6 +5369,8 @@ static void extractStdInitEvents(
             L.Range = R.Opaque;
           else if (!L.Entity && Use != SemaProfiles::FlowLeafUse::Plain)
             L.Range = Storage.objectPart(Leaf, AsPointerValue, OuterPath, Use);
+          if (!L.Entity && L.Range.first == L.Range.second)
+            noteUnresolvedFlowLeaf(UnresolvedLeaves, Leaf.E);
         }
         if (!L.Entity)
           L.State = Form();
@@ -5375,6 +5396,8 @@ static void extractStdInitEvents(
               TrackedStorage::Resolution R = Storage.resolveHandleLeaf(HL);
               L.Entity = R.Entity;
               L.WholeLeaf = !R.Subobject;
+              if (!L.Entity)
+                noteUnresolvedFlowLeaf(UnresolvedLeaves, HL.E);
             }
             if (!L.Entity)
               L.State = FormOf(HL.E, HL.M);
@@ -5528,6 +5551,7 @@ static void extractStdInitEvents(
                 Site.Leaves.push_back(L);
                 return;
               }
+              noteUnresolvedFlowLeaf(UnresolvedLeaves, Leaf.E);
             }
             L.State = formState(S.Profiles().classifyInitAccessLeaf(
                 Leaf,
@@ -5609,7 +5633,8 @@ static void extractStdInitEvents(
                  : SemaProfiles::CalleeLifecycleRoles();
       AppendArgumentBindings(CallLike, Roles);
       appendLifecycleCallEvents(S, D, CallLike, Roles, Storage, BlockEvents,
-                                DSites, JudgedLeaves, DestroyedObject);
+                                DSites, JudgedLeaves, UnresolvedLeaves,
+                                DestroyedObject);
     };
     // The element bindings of an aggregate initializer of type \p T: each
     // base and field of a record (unnamed bit-fields consume no initializer)
@@ -6269,9 +6294,10 @@ static void extractStdInitEvents(
         if (const auto *RD = Ctx.getBaseElementType(DE->getDestroyedType())
                                  ->getAsCXXRecordDecl();
             RD && RD->hasDefinition() && !RD->hasTrivialDestructor())
-          appendLifecycleCallEvents(
-              S, D, DE, SemaProfiles::CalleeLifecycleRoles(), Storage,
-              BlockEvents, DSites, JudgedLeaves, DE->getArgument());
+          appendLifecycleCallEvents(S, D, DE,
+                                    SemaProfiles::CalleeLifecycleRoles(),
+                                    Storage, BlockEvents, DSites, JudgedLeaves,
+                                    UnresolvedLeaves, DE->getArgument());
         SmallVector<TrackedStorage::Resolution, 2> Operands;
         SemaProfiles::forEachTargetLeaf(
             DE->getArgument(), [&](const SemaProfiles::ShapeLeaf &Leaf) {
@@ -6695,9 +6721,15 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
   SmallVector<BindingSite, 8> Sites;
   SmallVector<DestroySite, 4> DSites;
   SmallVector<AccessSite, 8> ASites;
+  SmallVector<const Expr *, 2> UnresolvedLeaves;
   extractStdInitEvents(S, D, *cfg, Storage, Ctor, StarThisCopyTrusted, Events,
-                       Sites, DSites, ASites, JudgedLeaves);
+                       Sites, DSites, ASites, JudgedLeaves, UnresolvedLeaves);
   verifyDeferredInitSites(S, D, Deferred, cfg, JudgedLeaves);
+  // A leaf the predicate tracks and the resolver drops falls between the two
+  // (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage (std::init)").
+  if (S.getLangOpts().ProfilesVerifyDeferredChecks)
+    for (const Expr *Leaf : UnresolvedLeaves)
+      S.Diag(Leaf->getExprLoc(), diag::err_init_flow_leaf_unresolved);
   for (const SmallVector<DefAssignEvent, 4> &BlockEvents : Events) {
     NumFlowEvents += BlockEvents.size();
     for (const DefAssignEvent &Ev : BlockEvents)
