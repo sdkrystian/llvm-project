@@ -1486,12 +1486,19 @@ static const Expr *chosenArm(const Expr *E, ArrayRef<const Expr *> Arms) {
 /// null: a comma's right operand, a single-element braced list's element, a
 /// GNU statement expression's result, a pointer compound literal's
 /// initializer, an opaque value's source, an identity call's argument
-/// (SemaProfiles::isIdentityCall), and the arm of a conditional listed in
+/// (SemaProfiles::isIdentityCall), the operand of an address-of step
+/// (SemaProfiles::addressOfOperand) under a built-in indirection (\c *&x and
+/// \c *std::addressof(x) are \c x), and the arm of a conditional listed in
 /// \p Arms.
 static const Expr *passThroughOperand(const Expr *E,
                                       ArrayRef<const Expr *> Arms) {
   if (const auto *BO = dyn_cast<BinaryOperator>(E); BO && BO->isCommaOp())
     return BO->getRHS();
+  if (const auto *UO = dyn_cast<UnaryOperator>(E);
+      UO && UO->getOpcode() == UO_Deref)
+    if (const Expr *Op = SemaProfiles::addressOfOperand(
+            UO->getSubExpr()->IgnoreParenImpCasts()))
+      return Op;
   if (const auto *ILE = dyn_cast<InitListExpr>(E);
       ILE && ILE->getNumInits() == 1)
     return ILE->getInit(0);

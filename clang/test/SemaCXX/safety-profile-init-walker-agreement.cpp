@@ -443,6 +443,31 @@ void a5_store_after() { Agg g [[uninit]]; std::construct_at(&g); *std::to_addres
 void a5_bind_after() { Agg g [[uninit]]; std::construct_at(&g); int *q_ = &(*std::to_address(&g.x)); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
 void a5_credit_after() { Agg g [[uninit]]; std::construct_at(&g); std::construct_at(&(*std::to_address(&g.x)), 1); }
 void a5_destroy_after() { Agg g [[uninit]]; std::construct_at(&g); std::destroy_at(&(*std::to_address(&g.x))); } // expected-error {{uninitialized storage is destroyed by a '[[now_uninit]]' function}}
+// a6, address-of of a marked pointer: *&p
+void a6_bind_before(int *p [[ref_to_uninit]]) { int *q_ = *&p; (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
+void a6_bind_after(int *p [[ref_to_uninit]]) { *p = 1; int *q_ = *&p; (void)q_; }
+int a6_read_before(int *p [[ref_to_uninit]]) { return **&p; } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
+int a6_read_after(int *p [[ref_to_uninit]]) { *p = 1; return **&p; }
+void a6_void_bind_before(int *p [[ref_to_uninit]]) { void *v_ = *&p; (void)v_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
+void a6_void_bind_after(int *p [[ref_to_uninit]]) { *p = 1; void *v_ = *&p; (void)v_; }
+void a6_marked_bind_before(int *p [[ref_to_uninit]]) { int *m_ [[ref_to_uninit]] = *&p; (void)m_; }
+void a6_marked_bind_after(int *p [[ref_to_uninit]]) { *p = 1; int *m_ [[ref_to_uninit]] = *&p; (void)m_; } // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
+// a7, address-of of a marked pointer: *std::addressof(p)
+void a7_bind_before(int *p [[ref_to_uninit]]) { int *q_ = *std::addressof(p); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
+void a7_bind_after(int *p [[ref_to_uninit]]) { *p = 1; int *q_ = *std::addressof(p); (void)q_; }
+int a7_read_before(int *p [[ref_to_uninit]]) { return **std::addressof(p); } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
+int a7_read_after(int *p [[ref_to_uninit]]) { *p = 1; return **std::addressof(p); }
+// a8, address-of of a marked pointer below an identity call: std::move(*&p)
+void a8_bind_before(int *p [[ref_to_uninit]]) { int *q_ = std::move(*&p); (void)q_; } // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]'}}
+void a8_bind_after(int *p [[ref_to_uninit]]) { *p = 1; int *q_ = std::move(*&p); (void)q_; }
+// a9, address-of of a marked handle: *&s (an element read is rejected after the fill too, as s[1] is)
+void a9_sink(std::span<int>);
+int a9_read_before(std::span<int> s [[ref_to_uninit]]) { return (*&s)[0]; } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
+int a9_read_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); return (*&s)[0]; } // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory}}
+void a9_bind_before(std::span<int> s [[ref_to_uninit]]) { a9_sink(*&s); } // expected-error {{handle of type 'std::span<int>' to uninitialized memory must be marked '[[ref_to_uninit]]'}}
+void a9_bind_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); a9_sink(*&s); }
+void a9_marked_bind_before(std::span<int> s [[ref_to_uninit]]) { std::span<int> t_ [[ref_to_uninit]] = *&s; (void)t_; }
+void a9_marked_bind_after(std::span<int> s [[ref_to_uninit]]) { std::uninitialized_fill(s.begin(), s.end(), 0); std::span<int> t_ [[ref_to_uninit]] = *&s; (void)t_; } // expected-error {{handle of type 'std::span<int>' marked '[[ref_to_uninit]]' must refer to uninitialized memory}}
 // i1, identity call: *std::addressof(g.x)
 int i1_read_before() { Agg g [[uninit]]; return *std::addressof(g.x); } // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory}}
 void i1_store_before() { Agg g [[uninit]]; *std::addressof(g.x) = 1; } // expected-error {{writing an element of an '[[uninit]]' object does not initialize it}}
