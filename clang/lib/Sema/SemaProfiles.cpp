@@ -3972,17 +3972,8 @@ bool SemaProfiles::isValueCopySource(const ParmVarDecl *P) {
   if (FD->isInStdNamespace() && FD->getIdentifier() &&
       FD->getName() == "bit_cast")
     return Index == 0;
-  switch (FD->getBuiltinID()) {
-  case Builtin::BImemcpy:
-  case Builtin::BI__builtin_memcpy:
-  case Builtin::BI__builtin___memcpy_chk:
-  case Builtin::BImemmove:
-  case Builtin::BI__builtin_memmove:
-  case Builtin::BI__builtin___memmove_chk:
+  if (isByteCopyCallee(FD))
     return Index == 1;
-  default:
-    break;
-  }
   // A Construct row's argument of the constructed class type is copied into
   // the constructed object.
   CalleeLifecycleRoles Roles = getCalleeLifecycleRoles(FD);
@@ -5548,6 +5539,70 @@ void SemaProfiles::checkInitProfileHandleReseat(const FunctionDecl *FD,
   if (std::optional<bool> Marked = resolveHandleReseatMarking(Obj))
     judgeInitProfileBinding(InitBindingKind::PointerAssignment, Loc, *Marked,
                             handleReseatType(Obj), Src, /*D=*/nullptr);
+}
+
+bool SemaProfiles::isByteCopyCallee(const FunctionDecl *FD) {
+  if (!FD)
+    return false;
+  switch (FD->getBuiltinID()) {
+  case Builtin::BImemcpy:
+  case Builtin::BI__builtin_memcpy:
+  case Builtin::BI__builtin___memcpy_chk:
+  case Builtin::BImemmove:
+  case Builtin::BI__builtin_memmove:
+  case Builtin::BI__builtin___memmove_chk:
+    return true;
+  default:
+    return false;
+  }
+}
+
+bool SemaProfiles::getPointerByteCopy(const CallExpr *CE, const Expr *&Dst,
+                                      const Expr *&Src, SourceLocation &Loc) {
+  if (!isByteCopyCallee(CE->getDirectCallee()) || CE->getNumArgs() < 2)
+    return false;
+  // The pointer object an argument's address-of step names, through its
+  // conversions to a void pointer.
+  auto PointerObject = [](const Expr *Arg) -> const Expr * {
+    const Expr *E = Arg->IgnoreParenImpCasts();
+    while (const auto *Cast = dyn_cast<ExplicitCastExpr>(E)) {
+      if (!Cast->getType()->isVoidPointerType())
+        break;
+      E = Cast->getSubExpr()->IgnoreParenImpCasts();
+    }
+    const Expr *Obj = addressOfOperand(E);
+    if (!Obj || !Obj->getType()->isPointerType() ||
+        Obj->getType()->isFunctionPointerType())
+      return nullptr;
+    return Obj;
+  };
+  auto PointeeKey = [](const Expr *Obj) {
+    return Obj->getType()
+        ->getPointeeType()
+        .getCanonicalType()
+        .getUnqualifiedType();
+  };
+  const Expr *D = PointerObject(CE->getArg(0));
+  const Expr *S = PointerObject(CE->getArg(1));
+  if (!D || !S || PointeeKey(D) != PointeeKey(S))
+    return false;
+  Dst = D;
+  Src = S;
+  Loc = CE->getArg(0)->getExprLoc();
+  return true;
+}
+
+void SemaProfiles::checkInitProfileByteCopy(const FunctionDecl *FD,
+                                            const CallExpr *CE) {
+  if (!isProfileLive("std::init") || !isByteCopyCallee(FD))
+    return;
+  const Expr *Dst, *Src;
+  SourceLocation Loc;
+  if (!getPointerByteCopy(CE, Dst, Src, Loc) || Dst->isInstantiationDependent())
+    return;
+  if (std::optional<bool> Marked = resolveAssignTargetMarking(Dst))
+    judgeInitProfileBinding(InitBindingKind::PointerAssignment, Loc, *Marked,
+                            Dst->getType(), Src, /*D=*/nullptr);
 }
 
 /// The operand of the member, element, indirection, pointer arithmetic, or

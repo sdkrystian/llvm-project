@@ -4487,3 +4487,56 @@ int test_every_path_copy_through_marker(PmPayload *p [[ref_to_uninit]]) {
   PmPayload t = *p;
   return t.x;
 }
+
+extern "C" void *memcpy(void *, const void *, __SIZE_TYPE__);
+extern "C" void *memmove(void *, const void *, __SIZE_TYPE__);
+namespace std {
+template <class T> class span {
+  T *_M_ptr;
+  __SIZE_TYPE__ _M_extent;
+
+public:
+  using element_type = T;
+  constexpr T *data() const noexcept;
+};
+template <class In, class Out> Out copy(In first, In last, Out result);
+} // namespace std
+
+// A byte copy of a marked pointer into an unmarked pointer object is their assignment
+void test_byte_copy_into_unmarked(int *p [[ref_to_uninit]]) {
+  int *q = nullptr;
+  memcpy(&q, &p, sizeof q);                             // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  memmove(&q, &p, sizeof q);                            // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  __builtin_memcpy(&q, &p, sizeof q);                   // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  __builtin___memcpy_chk(&q, &p, sizeof q, sizeof q);   // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// A byte copy of a marked pointer to initialized storage into an unmarked pointer object is accepted
+void test_byte_copy_after_store(int *p [[ref_to_uninit]]) {
+  *p = 1;
+  int *q = nullptr;
+  memcpy(&q, &p, sizeof q);
+}
+
+// A byte copy into a marked pointer object reseats it to the source's referent
+int test_byte_copy_into_marked(int *p [[ref_to_uninit]], int *q2 [[ref_to_uninit]]) {
+  *q2 = 1;
+  memcpy(&q2, &p, sizeof q2);
+  return *q2; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A byte copy of a pointer to initialized storage into a marked pointer object is rejected
+void test_byte_copy_initialized_into_marked(int *p [[ref_to_uninit]]) {
+  int i = 0;
+  int *q = &i;
+  memcpy(&p, &q, sizeof p); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A byte copy between pointers of different types, of a handle into a pointer, and std::copy of a pointer object are not judged
+void test_byte_copy_not_judged(int *p [[ref_to_uninit]], std::span<int> s [[ref_to_uninit]]) {
+  long *l = nullptr;
+  memcpy(&l, &p, sizeof l);
+  int *q = nullptr;
+  memcpy(&q, &s, sizeof q);
+  std::copy(&p, &p + 1, &q);
+}

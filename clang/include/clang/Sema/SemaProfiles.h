@@ -929,6 +929,23 @@ public:
   /// beside checkAssignmentLifetime, and from Sema::CheckFunctionCall.
   void checkInitProfileHandleReseat(const FunctionDecl *FD, const CallExpr *CE);
 
+  /// True if \p FD is a byte copy by its builtin ID: memcpy or memmove, their
+  /// __builtin_ spellings, or their fortified _chk forms.
+  static bool isByteCopyCallee(const FunctionDecl *FD);
+  /// If \p CE is a byte copy (isByteCopyCallee) between two pointer objects
+  /// -- its destination and source arguments, through their conversions to
+  /// void pointers, are address-of steps (addressOfOperand) naming glvalues
+  /// of object pointer type whose pointee types agree but for qualifiers --
+  /// set \p Dst and \p Src to those glvalues and \p Loc to the destination
+  /// argument, and return true: the call assigns \p Src to \p Dst.
+  static bool getPointerByteCopy(const CallExpr *CE, const Expr *&Dst,
+                                 const Expr *&Src, SourceLocation &Loc);
+  /// std::init / ref_to_uninit: a byte copy between two pointer objects
+  /// (getPointerByteCopy) is judged as the pointer assignment of its source to
+  /// its destination (checkInitProfilePointerAssignment). Called with the
+  /// call \p CE of \p FD from Sema::CheckFunctionCall.
+  void checkInitProfileByteCopy(const FunctionDecl *FD, const CallExpr *CE);
+
   /// What a known callee does to the storage bound to its role parameter
   /// (KnownCallees in SemaProfiles.cpp; see ProfilesFrameworkInternals.rst,
   /// "The std::init Implementation Map").

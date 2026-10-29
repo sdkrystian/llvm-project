@@ -1673,6 +1673,18 @@ Missed Diagnostics
   whatever the byte count and the type: after ``memset(arr, 0, sizeof(int))`` a
   read of ``arr[3]`` is accepted, and a class object written by ``memcpy`` is
   credited although P4222R2 §6 asks for ``construct_at``.
+- Copies of a marked pointer's or handle's object representation other than a
+  byte copy between two pointer objects of the same type --
+  ``std::copy``/``std::ranges::copy`` of pointer objects, a byte copy or
+  ``std::bit_cast`` of an object holding a marked pointer member into an
+  object of another class, a copy into an integer -- do not carry the marker;
+  reads through the copy are trusted.
+- A member access through a cast to another class
+  (``reinterpret_cast<U &>(h).p``, a reference bound to such a cast) is
+  classified by the marker of the member it names, and a
+  pointer-to-data-member access (``h.*pm``) as an unmarked member, so neither
+  carries a marked member's marker: a pointer copied out of either, and a read
+  through it, are trusted.
 - ``va_arg`` on an array or pointer ``va_list`` (x86-64, i386, Windows) binds
   nothing, so a ``va_arg`` before ``va_start`` is accepted there.
 - An argument of a builtin that Clang type-checks itself (other than

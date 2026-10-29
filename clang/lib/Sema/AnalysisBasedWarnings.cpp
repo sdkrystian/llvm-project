@@ -6217,7 +6217,23 @@ static void extractStdInitEvents(
             AddBinding(K::PointerAssignment, ReseatLoc, *Marked,
                        SemaProfiles::handleReseatType(ReseatObj), ReseatSrc,
                        nullptr, CE);
+        // A byte copy between two pointer objects is their assignment
+        // (SemaProfiles::checkInitProfileByteCopy): its binding is judged
+        // before the call's effects, and its store follows them.
+        const Expr *CopyDst = nullptr, *CopySrc = nullptr;
+        SourceLocation CopyLoc;
+        bool IsPointerCopy =
+            SemaProfiles::getPointerByteCopy(CE, CopyDst, CopySrc, CopyLoc);
+        if (IsPointerCopy) {
+          if (std::optional<bool> Marked =
+                  SemaProfiles::resolveAssignTargetMarking(CopyDst))
+            AddBinding(K::PointerAssignment, CopyLoc, *Marked,
+                       CopyDst->getType(), CopySrc, nullptr, CE);
+          AppendAliasEscapes(CopySrc, CopyDst->getType(), CE);
+        }
         AppendCallEvents(CE, Callee, DestroyedObject);
+        if (IsPointerCopy)
+          AppendStore(CopyDst, CE, /*ReadsFirst=*/false, CopySrc);
         if (EscapesMemberPointers)
           EscapeMemberPointers(Object, CE, RoleMemberPointees(CE));
         // A member call on a marked local handle changes what it refers to:

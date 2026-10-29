@@ -4790,6 +4790,7 @@ bool Sema::CheckFunctionCall(FunctionDecl *FDecl, CallExpr *TheCall,
             TheCall->getCallee()->getSourceRange(), CallType);
 
   Profiles().checkInitProfileHandleReseat(FDecl, TheCall);
+  Profiles().checkInitProfileByteCopy(FDecl, TheCall);
 
   IdentifierInfo *FnInfo = FDecl->getIdentifier();
   // None of the checks below are needed for functions that don't have

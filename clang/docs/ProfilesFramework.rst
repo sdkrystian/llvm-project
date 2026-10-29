@@ -1133,7 +1133,11 @@ pointer refers to (not its further elements: ``p[1]`` stays a read through
 the marker) -- and a second call on the same storage is no double
 initialization.  The returned destination is initialized memory.  The
 source of ``memcpy`` and ``memmove`` is an ordinary unmarked parameter, so
-an uninitialized source is rejected.  Recognition keys on Clang's builtin
+an uninitialized source is rejected.  A copy between two pointer objects whose
+pointee types agree but for qualifiers (``memcpy(&q, &p, sizeof q)``) is also
+judged as their assignment ``q = p``: a marked ``p`` copied into an unmarked
+``q`` is rejected, and a marked ``q`` then refers to what ``p`` refers to.
+Recognition keys on Clang's builtin
 IDs, and the fortified ``__builtin___memset_chk``, ``__builtin___memcpy_chk``,
 and ``__builtin___memmove_chk`` that ``_FORTIFY_SOURCE`` headers expand to
 are recognized the same way; by name (``-fno-builtin``, ``-ffreestanding``)
