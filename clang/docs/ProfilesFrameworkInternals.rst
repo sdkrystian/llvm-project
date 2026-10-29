@@ -1137,7 +1137,12 @@ asserts nothing.  A tracked local's DeclStmt emits a ``Reset`` of its
 ``[[uninit]]`` entity and one over its member entities ahead of the
 declaration's own binding and copy events, clearing every flag but
 ``MayUnassigned``, which it sets: each execution of the declaration starts a
-new, unassigned object.  A marked pointer or reference is reseated by its
+new, unassigned object.  A constructor-less aggregate local is read-tracked
+when its declaration is a plain default-initialization or its initializer gives
+every member a value (``initializesEveryMember``: a braced or parenthesized
+list, a value-initialization); for the latter
+(``TrackedStorage::InitializedLocals``) a ``Write`` of each member entity
+follows the ``Reset``.  A marked pointer or reference is reseated by its
 initializer instead.  The pass reports the ``ref_to_uninit`` judgments of
 the body's bindings, the ``double_destroy`` / ``destroy_uninit`` judgments of
 its ``[[now_uninit]]`` calls, and the ``uninit_read`` / ``uninit_write``

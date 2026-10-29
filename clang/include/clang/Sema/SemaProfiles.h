@@ -240,9 +240,8 @@ public:
   /// defaultInitNonVacuityReason, so a written initializer and a non-no-op
   /// default-initialization get different diagnostics), and whether a local
   /// aggregate's declaration ran nothing before flow-tracking starts
-  /// (getTrackedLocalAggregate in AnalysisBasedWarnings.cpp, where a
-  /// zero-initializing construction gives every member a value -- excluding
-  /// it keeps the untracked, FP-safe direction).
+  /// (getTrackedLocalAggregate in AnalysisBasedWarnings.cpp, which tracks
+  /// such a local from unassigned members).
   static bool isDefaultInitShape(const Expr *Init);
 
   /// A derived-to-base path: the canonical class of each base step from an

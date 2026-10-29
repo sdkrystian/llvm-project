@@ -2121,6 +2121,10 @@ struct TrackedStorage {
     BasePath Path;
   };
   llvm::DenseMap<const VarDecl *, CopyOrigin> CopySource;
+  /// The read-tracked locals whose declaration gives every member a value
+  /// (initializesEveryMember): their members are written right after the
+  /// declaration's Reset.
+  llvm::SmallPtrSet<const VarDecl *, 4> InitializedLocals;
   /// The marked pointers, references, and handles each ViaPointer reseat of
   /// the body connects (runStdInitMemberReadChecks): only a pointer in
   /// another's class can refer to that one's anonymous referent.
@@ -4872,7 +4876,8 @@ static const DeclRefExpr *argumentBaseRef(const Expr *E) {
 /// events when it is the base of a call's argument (argumentBaseRef), and none
 /// for a lifecycle-role argument naming its tracked storage, whose event judges
 /// and updates it; a tracked local's DeclStmt resets its storage
-/// (Reset), after which a tracked copy's copies each member's state. Every
+/// (Reset), after which a tracked copy's copies each member's state and an
+/// initializer giving every member a value writes each. Every
 /// pointer, reference, or handle binding the body performs -- a variable,
 /// member, or base initializer, an aggregate element, a call or constructor
 /// argument (declared, variadic, or the implicit object argument), a placement
@@ -6410,9 +6415,15 @@ static void extractStdInitEvents(
             BlockEvents.push_back(
                 {DefAssignEventKind::Reset, It->second, nullptr});
           if (auto It = Storage.LocalRange.find(V);
-              It != Storage.LocalRange.end())
+              It != Storage.LocalRange.end()) {
             BlockEvents.push_back({DefAssignEventKind::Reset, It->second.first,
                                    nullptr, It->second.second});
+            if (Storage.InitializedLocals.contains(V))
+              for (unsigned Idx = It->second.first; Idx != It->second.second;
+                   ++Idx)
+                BlockEvents.push_back(
+                    {DefAssignEventKind::Write, Idx, V->getInit()});
+          }
           // The variable's own binding (a decomposition's hidden variable
           // included); the DeclStmt element follows its initializer's
           // subexpression elements, so the judgment sees their effects. An
@@ -6574,28 +6585,47 @@ static void extractStdInitEvents(
   }
 }
 
-// If V is a local whose [[uninit]] members this pass may soundly flow-track
-// from an all-unassigned start, return its class definition; null otherwise.
-// Sound means nothing can have assigned the members before V's declaration:
-// the class shape qualifies (above) and the declaration ran nothing but the
-// implicit no-op default-construction.
-static const CXXRecordDecl *getTrackedLocalAggregate(const VarDecl *V) {
+/// True if \p Init, a local's initializer, gives every member a value: a
+/// braced list that is not a copy (also as a functional cast's operand,
+/// \c S{1, 2}), a parenthesized aggregate list, a value-initialization, or a
+/// default constructor's call that value- or zero-initializes.
+static bool initializesEveryMember(const Expr *Init) {
+  if (!Init)
+    return false;
+  Init = Init->IgnoreImplicit();
+  if (const auto *FC = dyn_cast<CXXFunctionalCastExpr>(Init))
+    Init = FC->getSubExpr()->IgnoreImplicit();
+  if (const auto *ILE = dyn_cast<InitListExpr>(Init))
+    return !ILE->isTransparent();
+  if (isa<CXXParenListInitExpr, ImplicitValueInitExpr>(Init))
+    return true;
+  const auto *CCE = dyn_cast<CXXConstructExpr>(Init);
+  return CCE && CCE->getConstructor()->isDefaultConstructor() &&
+         (isa<CXXTemporaryObjectExpr>(CCE) ||
+          CCE->requiresZeroInitialization() || CCE->isListInitialization());
+}
+
+/// If \p V is a local whose [[uninit]] members this pass may soundly
+/// flow-track from its declaration, return its class definition; null
+/// otherwise. Sound means the class shape qualifies
+/// (SemaProfiles::getTrackableLocalClass) and the declaration's effect on the
+/// members is known: it ran nothing but the implicit no-op
+/// default-construction (SemaProfiles::isDefaultInitShape), which leaves them
+/// unassigned, or it gave every member a value (initializesEveryMember), which
+/// sets \p InitializedAtDecl. A copy from an untracked source copies a state
+/// the pass cannot know and is not read-tracked; a copy from a read-tracked
+/// local is harvestTrackedLocals' copy harvest.
+static const CXXRecordDecl *getTrackedLocalAggregate(const VarDecl *V,
+                                                     bool &InitializedAtDecl) {
+  InitializedAtDecl = false;
   const CXXRecordDecl *RD = SemaProfiles::getTrackableLocalClass(V);
   if (!RD)
     return nullptr;
-  // Declared without a real initializer: for a record local that is the
-  // synthesized call to the implicit default constructor (`Agg a;`), the
-  // shared plain-default-init shape. A value-initializing form -- `Agg a{}`
-  // / `= {}` (an InitListExpr), `Agg a = Agg()` (a CXXTemporaryObjectExpr),
-  // any zero-initializing construction -- gives every member a value and
-  // leaves nothing to track. A *copy* does not: it copies indeterminate
-  // bits, and a copy does not inherit initialization (paper §5.2). A copy
-  // from a *tracked* local inherits the source's per-member state through
-  // the copy harvest in harvestTrackedLocals; for an arbitrary
-  // untracked source that state is unknowable, so those copies stay
-  // untracked -- a missed diagnostic, never a false positive.
-  if (!SemaProfiles::isDefaultInitShape(V->getInit()))
+  if (SemaProfiles::isDefaultInitShape(V->getInit()))
+    return RD;
+  if (!initializesEveryMember(V->getInit()))
     return nullptr;
+  InitializedAtDecl = true;
   return RD;
 }
 
@@ -6748,8 +6778,14 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
     Storage.addCurrentObjectRoot(Method->getParent());
   for (const VarDecl *V : Locals) {
     HarvestMarked(V, /*UnknownEntry=*/false);
-    if (const CXXRecordDecl *RD = getTrackedLocalAggregate(V))
-      Storage.addObject(V, RD, /*TrackReads=*/true, /*UnknownEntry=*/false);
+    bool InitializedAtDecl;
+    if (const CXXRecordDecl *RD =
+            getTrackedLocalAggregate(V, InitializedAtDecl)) {
+      std::pair<unsigned, unsigned> Range =
+          Storage.addObject(V, RD, /*TrackReads=*/true, /*UnknownEntry=*/false);
+      if (InitializedAtDecl && Range.first != Range.second)
+        Storage.InitializedLocals.insert(V);
+    }
   }
   // The copy harvest chains from a read-tracked local only, so it runs
   // before the binding-only objects are added.

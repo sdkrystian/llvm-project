@@ -366,8 +366,8 @@ int test_trusted_base_member() {
   return d.tm; // OK: trusted
 }
 
-// A value-initializing written form gives every member a value; only the
-// bare `Agg a;` form (the implicit no-op default-construction) is tracked.
+// A value-initializing written form gives every member a value at the
+// declaration.
 int test_value_initialized_forms() {
   Agg a{};
   Agg b = {};
@@ -375,10 +375,10 @@ int test_value_initialized_forms() {
   return a.m + b.m + c.m; // OK
 }
 
-// The written `= T()` form stays untracked when a template rebuilds it: the
-// rebuilt initializer is still a zero-initializing value-construction, not
-// the plain default-init shape, in the pattern and in the instantiation
-// alike (pinning the shared default-init shape predicate).
+// The written `= T()` form gives every member a value when a template
+// rebuilds it too: the rebuilt initializer is still a zero-initializing
+// value-construction, not the plain default-init shape, in the pattern and in
+// the instantiation alike.
 int test_value_init_zeroing_shape() {
   Agg z = Agg();
   return z.m; // OK
@@ -386,7 +386,7 @@ int test_value_init_zeroing_shape() {
 template <typename T>
 int template_value_init_zeroing_shape() {
   T z = T();
-  return z.m; // OK: rebuilt as a zeroing construction, untracked
+  return z.m; // OK: rebuilt as a zeroing construction
 }
 template int template_value_init_zeroing_shape<Agg>();
 
@@ -1047,6 +1047,93 @@ void unmarked_whole() {
   take_pair(a); // OK
   Pair b = a;   // OK
   (void)b;
+}
+
+namespace std {
+template <class T> void destroy_at(T *p);
+} // namespace std
+struct BraceD {
+  int v;
+  ~BraceD();
+};
+struct BraceAgg {
+  BraceD d [[uninit]];
+  int k [[uninit]];
+};
+struct BracePair {
+  int x [[uninit]];
+  int y [[uninit]];
+};
+BraceAgg make_brace_agg();
+
+// Constructing a member of a value-initialized aggregate constructs it twice
+void brace_value_init_construct() {
+  BraceAgg a{};
+  std::construct_at(&a.d); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// Constructing a member a braced list initializes constructs it twice
+void brace_list_construct() {
+  BraceAgg a{BraceD{1}, 2};
+  std::construct_at(&a.d); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A designated initializer value-initializes the members it omits
+void brace_designated_construct() {
+  BraceAgg a{.k = 1};
+  std::construct_at(&a.d); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A marked binding of a member a braced list initializes is rejected
+void brace_list_marked_binding() {
+  BracePair s{1, 2};
+  int *p [[ref_to_uninit]] = &s.x; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)p;
+}
+
+// A functional cast of a braced list initializes every member
+void brace_functional_cast_construct() {
+  BracePair s = BracePair{1, 2};
+  std::construct_at(&s.x, 3); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A parenthesized aggregate list initializes every member
+void brace_paren_list_construct() {
+  BracePair s(1, 2);
+  std::construct_at(&s.y, 3); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// The scope exit destroys again a member destroyed after a braced list initialized it
+void brace_list_destroy() {
+  BraceAgg a{BraceD{1}, 2}; // expected-note {{'a' is destroyed at the end of its scope}}
+  std::destroy_at(&a.d);
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+
+// Reconstructing a destroyed member of a value-initialized aggregate is accepted
+void brace_value_init_destroy_reconstruct() {
+  BraceAgg a{};
+  std::destroy_at(&a.d);
+  std::construct_at(&a.d);
+}
+
+// A member a braced list omits is value-initialized
+int brace_list_omitted_read() {
+  BracePair s{1};
+  return s.y; // OK
+}
+
+// A store to a member of a value-initialized aggregate is read back
+int brace_value_init_store_read() {
+  BraceAgg a{};
+  a.k = 2;
+  return a.k; // OK
+}
+
+// The members of a local initialized from a call result are not read-tracked
+int brace_call_result_untracked() {
+  BraceAgg b = make_brace_agg();
+  std::construct_at(&b.d); // OK
+  return b.k;              // OK
 }
 
 // An [[uninit]] member of a member subobject is tracked like a direct member
