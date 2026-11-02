@@ -14538,12 +14538,12 @@ def err_init_member_call_on_uninit : ProfileRule<
 def err_init_double_destroy : ProfileRule<
   "storage already destroyed is destroyed again by %select{a '[[now_uninit]]' "
   "function|a destructor call|its scope-exit destructor|its owner's reset or "
-  "reassignment}1 under profile '%0'",
+  "reassignment|the destructor's member teardown}1 under profile '%0'",
   ProfileStdInitDoubleDestroy>;
 def err_init_destroy_uninit : ProfileRule<
   "uninitialized storage is destroyed by %select{a '[[now_uninit]]' function|"
   "a destructor call|its scope-exit destructor|its owner's reset or "
-  "reassignment}1 under profile '%0'",
+  "reassignment|the destructor's member teardown}1 under profile '%0'",
   ProfileStdInitDestroyUninit>;
 def err_init_deferred_check_unjudged : Error<
   "std::init %select{binding|destroy|read|store}0 check deferred to the flow "

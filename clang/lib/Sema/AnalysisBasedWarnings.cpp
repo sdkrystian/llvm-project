@@ -1920,6 +1920,11 @@ struct TrackedEntity {
   /// its start (an element at index zero), not whole: a destroy through it
   /// ends the object there alone, as a destroy of the argument does.
   bool AtStart = false;
+  /// A lifecycle entity: storage tracked only because a lifecycle leaf of the
+  /// body names it (collectLifecycleNames) -- a member of the current object
+  /// (SemaProfiles::lifecycleMember), tracked whole. It is never read-tracked,
+  /// and every binding or access below or naming it is judged against it.
+  bool Lifecycle = false;
 
   /// The member a member entity stands for; null otherwise.
   const FieldDecl *field() const {
@@ -2130,6 +2135,11 @@ struct TrackedStorage {
   /// The CurrentObject entity, when the body binds the current object to a
   /// lifecycle role or destroys it.
   std::optional<unsigned> CurrentObjectRoot;
+  /// The lifecycle entity of each lifecycle member of the current object
+  /// (SemaProfiles::lifecycleMember), by canonical declaration, and the member
+  /// steps those entities refer to.
+  llvm::DenseMap<const FieldDecl *, unsigned> LifecycleMembers;
+  std::deque<MemberStep> LifecycleSteps;
   /// The MemberPointee entities, in markedPointerMembers order, and the
   /// current object's class they belong to.
   std::pair<unsigned, unsigned> MemberPointerRange{0, 0};
@@ -2233,6 +2243,40 @@ struct TrackedStorage {
     if (!I)
       return std::nullopt;
     return MemberPointerRange.first + *I;
+  }
+
+  /// Append the lifecycle entity of the member \p F of the current object of
+  /// class \p RD, entering in \p Entry (once).
+  void addLifecycleMember(const CXXRecordDecl *RD, const FieldDecl *F,
+                          EntryState Entry) {
+    F = F->getCanonicalDecl();
+    if (LifecycleMembers.count(F))
+      return;
+    MemberStep Step{BasePath(), F};
+    if (const auto *Parent = dyn_cast<CXXRecordDecl>(F->getParent());
+        Parent && Parent->getCanonicalDecl() != RD->getCanonicalDecl())
+      if (std::optional<BasePath> Path = uniqueBasePath(RD, Parent))
+        Step.Bases = std::move(*Path);
+    LifecycleSteps.push_back(std::move(Step));
+    TrackedEntity E;
+    E.K = TrackedEntity::Kind::CurrentObjectMember;
+    E.Whole = true;
+    E.TrackReads = false;
+    E.Lifecycle = true;
+    E.Entry = Entry;
+    E.Steps = ArrayRef(LifecycleSteps.back());
+    E.Type = F->getType();
+    LifecycleMembers[F] = Entities.size();
+    Entities.push_back(std::move(E));
+  }
+  /// The lifecycle entity of the member \p F, if tracked.
+  std::optional<unsigned> lifecycleMember(const FieldDecl *F) const {
+    if (!F)
+      return std::nullopt;
+    auto It = LifecycleMembers.find(F->getCanonicalDecl());
+    if (It == LifecycleMembers.end())
+      return std::nullopt;
+    return It->second;
   }
 
   /// Append the CurrentObject entity of class \p RD.
@@ -2644,6 +2688,14 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
     }
     if (Steps.empty() || ResolveMember(CurrentObjectRange, CurrentObjectClass))
       return R;
+    // A lifecycle member, or storage below it.
+    if (std::optional<unsigned> Idx = lifecycleMember(Steps.front().Field)) {
+      R.Entity = Idx;
+      R.Subobject =
+          Steps.size() > 1 || Shape->Subscript || DesignatesPart(*Idx);
+      R.AtStart = Steps.size() == 1 && !Shape->OffsetElement;
+      return R;
+    }
     // An access at any depth below the step may reach any of them.
     if (OpaqueStep != Steps.size())
       R.Opaque = OpaqueRange(CurrentObjectRange, CurrentObjectClass,
@@ -3555,7 +3607,7 @@ static void judgeBindingSite(const BindingSite &Site, const FlowState &St,
   auto State = [&](const BindingLeaf &L) {
     if (EveryPath && L.Entity) {
       const TrackedEntity &Ent = Storage.Entities[*L.Entity];
-      if (Ent.field() && !Ent.TrackReads)
+      if (Ent.field() && !Ent.TrackReads && !Ent.Lifecycle)
         return LeafState::Initialized;
     }
     // A marked target is judged by the storage alone -- a default-initialized
@@ -5844,6 +5896,10 @@ static void extractStdInitEvents(
       if (IsHandle || AsRange)
         Site.HandleType = T.getNonReferenceType();
       bool AnyTracked = false;
+      // A leaf below or naming a lifecycle entity, which the parse-time
+      // funnel judged by form: storage live at entry, which the form never
+      // rejects for an unmarked target (TrackedEntity::Lifecycle).
+      bool AnyLifecycle = false;
       // The derived-to-base casts above the leaves, which the leaf walk peels.
       BasePath OuterPath;
       // One leaf of the source, used as a pointer value or a glvalue; a leaf
@@ -5875,6 +5931,17 @@ static void extractStdInitEvents(
             L.Range = Storage.objectPart(Leaf, AsPointerValue, OuterPath, Use);
           if (!L.Entity && L.Range.first == L.Range.second)
             noteUnresolvedFlowLeaf(UnresolvedLeaves, Leaf.E);
+        } else if (!Storage.LifecycleMembers.empty()) {
+          TrackedStorage::Resolution R =
+              Storage.resolveFlowLeaf(Leaf, AsPointerValue);
+          if (R.Entity && Storage.Entities[*R.Entity].Lifecycle) {
+            AnyLifecycle = true;
+            L.Entity = R.Entity;
+            L.Sub = R.Sub;
+            L.WholeLeaf = !R.Subobject;
+            L.AtStart = R.AtStart;
+            L.ViaHandle = R.ViaHandle;
+          }
         }
         if (!L.Entity)
           L.State = Form();
@@ -5961,8 +6028,14 @@ static void extractStdInitEvents(
               });
             });
       }
-      if (!AnyTracked)
+      if (!AnyTracked && !AnyLifecycle)
         return;
+      // The parse-time funnel judged every leaf of a binding with no
+      // flow-tracked leaf.
+      if (!AnyTracked)
+        for (BindingLeaf &L : Site.Leaves)
+          if (!L.Entity)
+            L.State = LeafState::Initialized;
       Sites.push_back(std::move(Site));
       BlockEvents.push_back(
           {DefAssignEventKind::Binding, 0, At, (unsigned)(Sites.size() - 1)});
@@ -6011,6 +6084,20 @@ static void extractStdInitEvents(
       QualType Designated = G->getType();
       SemaProfiles::forEachTargetLeaf(
           G, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+            // A read below or naming a lifecycle member, and a store below
+            // one, is one of its lifetime, judged on every path; a store
+            // naming it whole initializes it.
+            if (!Storage.LifecycleMembers.empty()) {
+              TrackedStorage::Resolution R = Storage.resolve(Leaf);
+              if (R.Entity && Storage.Entities[*R.Entity].Lifecycle &&
+                  (!IsWrite || R.Subobject)) {
+                BindingLeaf Life;
+                Life.Entity = R.Entity;
+                Life.WholeLeaf = !R.Subobject;
+                Site.Leaves.push_back(Life);
+                AnyCurrentObject = true;
+              }
+            }
             // An access below the current object is also one of its
             // lifetime, when that is tracked, judged on every path.
             if (Storage.CurrentObjectRoot) {
@@ -6345,6 +6432,40 @@ static void extractStdInitEvents(
           AppendCallEvents(NE, OpNew, /*DestroyedObject=*/nullptr,
                            /*Effects=*/!OpNew ||
                                !SemaProfiles::isReservedPlacementNew(OpNew));
+        continue;
+      }
+      if (auto MemberDtor = Elem.getAs<CFGMemberDtor>()) {
+        // A destructor's member teardown destroys a lifecycle member and a
+        // tracked whole [[uninit]] member whose type has a non-trivial
+        // destructor: a double_destroy when the body left it destroyed; its
+        // never-constructed half is not judged.
+        const FieldDecl *F = MemberDtor->getFieldDecl();
+        const auto *RD =
+            Ctx.getBaseElementType(F->getType())->getAsCXXRecordDecl();
+        if (!RD || !RD->hasDefinition() || RD->hasTrivialDestructor())
+          continue;
+        std::optional<unsigned> Idx = Storage.lifecycleMember(F);
+        if (!Idx) {
+          MemberStep Step{BasePath(), F};
+          Idx = Storage.find(/*Base=*/nullptr, ArrayRef(Step));
+          if (Idx && !Storage.Entities[*Idx].Whole)
+            Idx.reset();
+        }
+        const auto *FD = dyn_cast<FunctionDecl>(D);
+        if (!Idx || !FD || !FD->getBody())
+          continue;
+        DestroySite Site;
+        Site.Loc = FD->getBody()->getEndLoc();
+        Site.Judged = true;
+        Site.Exempt = true;
+        Site.Destroyer = SemaProfiles::InitDestroyer::MemberTeardown;
+        BindingLeaf Leaf;
+        Leaf.Entity = Idx;
+        Site.Leaves.push_back(Leaf);
+        Site.Affected.push_back(*Idx);
+        DSites.push_back(std::move(Site));
+        BlockEvents.push_back({DefAssignEventKind::Destroy, 0, nullptr,
+                               (unsigned)(DSites.size() - 1)});
         continue;
       }
       if (auto Dtor = Elem.getAs<CFGAutomaticObjDtor>()) {
@@ -7038,6 +7159,175 @@ static bool isCurrentObjectLifecycleUse(Sema &S, const Stmt *St) {
   return Found;
 }
 
+/// Add to \p Out the lifecycle members of the analyzed body \p D: the members
+/// of the current object (SemaProfiles::lifecycleMember) that a lifecycle leaf
+/// names -- a leaf SemaProfiles::isFlowTrackedLeaf checks for a marked target
+/// or a destroy: an argument bound to a marked, Construct-role, or destroying
+/// parameter (a reserved placement new's address included), an explicit or
+/// pseudo-destructor call's object, a delete operand, and the source of a
+/// marked variable, init-capture, return, member initializer, aggregate
+/// element, pointer assignment, handle reseat, or byte copy. The predicate
+/// classifies each leaf, so the deferred sites and the engine's own judged
+/// leaves find their members harvested.
+static void collectLifecycleNames(Sema &S, const Decl *D,
+                                  llvm::SetVector<const FieldDecl *> &Out) {
+  using HandleLeaf = SemaProfiles::HandleLeaf;
+  const auto *DC = cast<DeclContext>(D);
+  auto Check = [&](const SemaProfiles::ShapeLeaf &Leaf, bool AsPointerValue) {
+    const FieldDecl *F = nullptr;
+    if (S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC,
+                                       SemaProfiles::FlowLeafUse::MarkedTarget,
+                                       &F) &&
+        F)
+      Out.insert(F);
+  };
+  // The leaves of \p Src bound as \p T, through the handle walk for a handle.
+  auto Leaves = [&](const Expr *Src, QualType T) {
+    if (!Src || T.isNull() || T->isDependentType())
+      return;
+    if (SemaProfiles::isHandleType(T.getNonReferenceType())) {
+      SemaProfiles::HandleWalkMemo Memo;
+      auto Visit = [&](auto &Self, const HandleLeaf &HL) -> void {
+        if (HL.M == HandleLeaf::Mode::Handle)
+          return;
+        SemaProfiles::forEachTargetLeaf(
+            HL.E, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+              Check(Leaf, HL.M == HandleLeaf::Mode::PointerValue);
+              if (HL.M == HandleLeaf::Mode::Range)
+                SemaProfiles::forEachHandleSourceLeaf(
+                    Leaf.E, [&](const HandleLeaf &Inner) { Self(Self, Inner); },
+                    &Memo);
+            });
+      };
+      if (T->isReferenceType())
+        Visit(Visit, HandleLeaf{Src, HandleLeaf::Mode::Range});
+      else
+        SemaProfiles::forEachHandleSourceLeaf(
+            Src, [&](const HandleLeaf &HL) { Visit(Visit, HL); }, &Memo);
+      return;
+    }
+    bool AsPointerValue;
+    if (const Expr *Operand =
+            SemaProfiles::bindingSourceOperand(Src, T, AsPointerValue))
+      SemaProfiles::forEachTargetLeaf(Operand,
+                                      [&](const SemaProfiles::ShapeLeaf &Leaf) {
+                                        Check(Leaf, AsPointerValue);
+                                      });
+  };
+  auto ObjectLeaves = [&](const Expr *Obj) {
+    QualType OT = Obj->getType();
+    Leaves(Obj,
+           OT->isPointerType() ? OT : S.Context.getLValueReferenceType(OT));
+  };
+  // The arguments a call-like binds to a marked or destroying parameter.
+  auto Arguments = [&](const Expr *CallLike, const FunctionDecl *Callee) {
+    SemaProfiles::CalleeLifecycleRoles Roles =
+        Callee ? SemaProfiles::getCalleeLifecycleRoles(Callee)
+               : SemaProfiles::CalleeLifecycleRoles();
+    forEachArgumentBinding(
+        S.Context, CallLike,
+        [&](const ParmVarDecl *P, QualType PT, const Expr *Arg, bool Variadic) {
+          if (P && !Variadic &&
+              (Roles.isMarkedParam(P) || Roles.destroysParam(P)))
+            Leaves(Arg, PT);
+        });
+  };
+  // The elements of an aggregate initializer of type \p T bound to marked
+  // fields; a base subobject consumes each leading initializer.
+  auto Aggregate = [&](QualType T, ArrayRef<Expr *> Inits,
+                       const FieldDecl *UnionField) {
+    const RecordDecl *RD = T->getAsRecordDecl();
+    if (!RD || !(RD = RD->getDefinition()))
+      return;
+    if (RD->isUnion()) {
+      if (UnionField && !Inits.empty() &&
+          UnionField->hasAttr<RefToUninitAttr>())
+        Leaves(Inits[0], UnionField->getType());
+      return;
+    }
+    unsigned I = 0;
+    if (const auto *CRD = dyn_cast<CXXRecordDecl>(RD))
+      I = std::min<unsigned>(CRD->getNumBases(), Inits.size());
+    for (const FieldDecl *F : RD->fields()) {
+      if (F->isUnnamedBitField())
+        continue;
+      if (I >= Inits.size())
+        break;
+      const Expr *Init = Inits[I++];
+      if (F->hasAttr<RefToUninitAttr>())
+        Leaves(Init, F->getType());
+    }
+  };
+  if (const auto *Ctor = dyn_cast<CXXConstructorDecl>(D))
+    for (const CXXCtorInitializer *Init : Ctor->inits())
+      if (const FieldDecl *F =
+              Init->isWritten() && Init->isAnyMemberInitializer()
+                  ? Init->getAnyMember()
+                  : nullptr;
+          F && F->hasAttr<RefToUninitAttr>())
+        Leaves(Init->getInit(), F->getType());
+  const auto *MarkedReturn = dyn_cast<FunctionDecl>(D);
+  if (MarkedReturn && !MarkedReturn->hasAttr<RefToUninitAttr>())
+    MarkedReturn = nullptr;
+  forEachAnalyzedStmt(D, [&](const Stmt *St) {
+    if (const auto *CE = dyn_cast<CallExpr>(St)) {
+      if (const auto *MCE = dyn_cast<CXXMemberCallExpr>(CE);
+          MCE && isa_and_nonnull<CXXDestructorDecl>(MCE->getMethodDecl()))
+        ObjectLeaves(MCE->getImplicitObjectArgument());
+      else if (const auto *PDE = dyn_cast<CXXPseudoDestructorExpr>(
+                   CE->getCallee()->IgnoreParens()))
+        ObjectLeaves(PDE->getBase());
+      Arguments(CE, CE->getDirectCallee());
+      const Expr *Obj, *Src;
+      SourceLocation Loc;
+      if (SemaProfiles::getHandleReseat(CE, Obj, Src, Loc) &&
+          SemaProfiles::resolveHandleReseatMarking(Obj).value_or(false))
+        Leaves(Src, SemaProfiles::handleReseatType(Obj));
+      if (SemaProfiles::getPointerByteCopy(CE, Obj, Src, Loc) &&
+          SemaProfiles::resolveAssignTargetMarking(Obj).value_or(false))
+        Leaves(Src, Obj->getType());
+    } else if (const auto *CCE = dyn_cast<CXXConstructExpr>(St)) {
+      Arguments(CCE, CCE->getConstructor());
+    } else if (const auto *NE = dyn_cast<CXXNewExpr>(St)) {
+      Arguments(NE, NE->getOperatorNew());
+    } else if (const auto *ME = dyn_cast<ObjCMessageExpr>(St)) {
+      if (const ObjCMethodDecl *MD = ME->getMethodDecl())
+        for (auto [Parm, Arg] : llvm::zip(MD->parameters(), ME->arguments()))
+          if (Parm->hasAttr<RefToUninitAttr>())
+            Leaves(Arg, Parm->getType());
+    } else if (const auto *DE = dyn_cast<CXXDeleteExpr>(St)) {
+      ObjectLeaves(DE->getArgument());
+    } else if (const auto *DS = dyn_cast<DeclStmt>(St)) {
+      for (const Decl *Dcl : DS->decls())
+        if (const auto *V = dyn_cast<VarDecl>(Dcl);
+            V && V->hasAttr<RefToUninitAttr>())
+          Leaves(V->getInit(), V->getType());
+    } else if (const auto *LE = dyn_cast<LambdaExpr>(St)) {
+      for (const LambdaCapture &C : LE->captures())
+        if (const auto *V = dyn_cast_or_null<VarDecl>(
+                C.capturesVariable() ? C.getCapturedVar() : nullptr);
+            V && V->isInitCapture() && V->hasAttr<RefToUninitAttr>())
+          Leaves(V->getInit(), V->getType());
+    } else if (const auto *RS = dyn_cast<ReturnStmt>(St)) {
+      if (MarkedReturn)
+        Leaves(RS->getRetValue(), MarkedReturn->getReturnType());
+    } else if (const auto *BO = dyn_cast<BinaryOperator>(St)) {
+      if (BO->getOpcode() == BO_Assign &&
+          BO->getLHS()->getType()->isPointerType() &&
+          SemaProfiles::resolveAssignTargetMarking(BO->getLHS())
+              .value_or(false))
+        Leaves(BO->getRHS(), BO->getLHS()->getType());
+    } else if (const auto *ILE = dyn_cast<InitListExpr>(St)) {
+      if (!ILE->isTransparent())
+        Aggregate(ILE->getType(), ILE->inits(),
+                  ILE->getInitializedFieldInUnion());
+    } else if (const auto *PLIE = dyn_cast<CXXParenListInitExpr>(St)) {
+      Aggregate(PLIE->getType(), PLIE->getInitExprs(),
+                PLIE->getInitializedFieldInUnion());
+    }
+  });
+}
+
 /// Harvest the tracked storage of the analyzed body \p D into \p Storage.
 /// Read-tracked (TrackedEntity::TrackReads) are the members of by-value
 /// parameters of a trackable class without a default argument, of
@@ -7126,6 +7416,16 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
   });
   if (CurrentObjectUsed)
     Storage.addCurrentObjectRoot(Method->getParent());
+  // The current object's lifecycle members, live at the method's entry and in
+  // an unknown state in a lambda's or block's body inside it.
+  if (Method) {
+    llvm::SetVector<const FieldDecl *> Members;
+    collectLifecycleNames(S, D, Members);
+    for (const FieldDecl *F : Members)
+      Storage.addLifecycleMember(Method->getParent(), F,
+                                 D == Method ? EntryState::Initialized
+                                             : EntryState::Unknown);
+  }
   for (const VarDecl *V : Locals) {
     HarvestMarked(V, EntryState::Unassigned);
     bool InitializedAtDecl;

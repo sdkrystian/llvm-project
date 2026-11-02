@@ -1142,7 +1142,19 @@ function that destroys the current object (``std::destroy_at(this)``,
 ``this->~T()``, ``delete this``) or binds it to a lifecycle parameter ends and
 restarts its lifetime: after the destroy, an access to a member is rejected
 until ``std::construct_at(this)`` reconstructs it, and ``construct_at(this)``
-on the live object is rejected.  A function may carry both
+on the live object is rejected.  Likewise a member of the current object that
+such a member function destroys, constructs, or binds to a marked target has a
+lifetime of its own there, starting initialized: a second destroy, a member
+call, copy, binding, or read after a destroy, and a construction over the live
+member are rejected, while destroying and then reconstructing it
+(``std::destroy_at(&s); std::construct_at(&s, v);``,
+``s.~T(); new (&s) T(v);``) is accepted.  A lambda's or block's body starts
+with such a member in an unknown state.  At the end of a destructor, the
+member teardown destroys again a member of a type with a non-trivial
+destructor that the body left destroyed on some path.  References, bit-fields,
+members of a union or an anonymous union, members of union type or of raw
+storage, and members marked ``[[uninit]]`` or ``[[ref_to_uninit]]`` have no
+such lifetime.  A function may carry both
 attributes -- a reinitializer that destroys and then reconstructs its
 argument's storage -- and models destroy-then-construct: the storage bound to
 its ``[[ref_to_uninit]]`` parameters is initialized after the call, and calling

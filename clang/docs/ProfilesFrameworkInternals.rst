@@ -839,7 +839,9 @@ follows:
        (``appendLifecycleCallEvents``), the non-trivial scope-exit
        destructor of an ``[[uninit]]`` local (its ``CFGAutomaticObjDtor``,
        gated at the declaration, unless a marker rule rejects the marker) or
-       of a read-tracked aggregate local's whole member,
+       of a read-tracked aggregate local's whole member, a destructor's member
+       teardown of a lifecycle member or a tracked whole ``[[uninit]]``
+       member (its ``CFGMemberDtor``, ``double_destroy`` only),
        and the scope exit (a by-value parameter's at the function's exit),
        ``reset``, reassignment, and destructor call of a marked
        ``std::unique_ptr``, which destroy its referent unless the owner is
@@ -1244,7 +1246,31 @@ to a lifecycle parameter (``isCurrentObjectLifecycleUse``) or the parse-time
 funnel deferred a marked binding of it (a body with none builds no CFG for it):
 it enters initialized, its credits and destroys apply
 beside its members', and an access below it is judged against it on every
-path.  In every member function, each ``[[ref_to_uninit]]`` pointer member
+path.  A *lifecycle entity* is ordinary storage tracked only because a
+*lifecycle leaf* of the body names it -- a leaf the predicate checks for a
+marked target or a destroy: an argument bound to a marked, Construct-role, or
+destroying parameter (a reserved placement ``new``'s address included), an
+explicit destructor call's object, a ``delete`` operand, or the source of a
+marked variable, member, return, pointer assignment, aggregate element, handle
+reseat, or byte copy.  One walk (``collectLifecycleNames``) asks the predicate
+about every such leaf of the body and harvests what it reports
+(``TrackedEntity::Lifecycle``), so the deferred sites and the engine's own find
+their storage.  In an instance member function other than a constructor, a
+member of the current object the first step through ``this`` names is one
+(``SemaProfiles::lifecycleMember``): not a reference, a bit-field, a member of a
+union or an anonymous union, of union type or raw storage, an ``[[uninit]]`` or
+marked member, or a member holding tracked members.  It enters initialized
+(``EntryState::Initialized``, hence ``Constructed``), or unknown in a lambda's or
+block's body, is never read-tracked, and is judged by flow at every other
+binding below or naming it, at every read below or naming it, and at every
+store below it, through a lifecycle leaf the engine adds although the
+predicate did not defer that site: the parse-time funnel judged it by form,
+which never rejects live storage there, so no verdict repeats.  A store naming
+a scalar one whole initializes it.  A destructor's member teardown
+(``CFGMemberDtor``) destroys a lifecycle member and a tracked whole
+``[[uninit]]`` member of a type with a non-trivial destructor, judged for
+``double_destroy`` only (``InitDestroyer::MemberTeardown``).  In every member
+function, each ``[[ref_to_uninit]]`` pointer member
 reachable from the current object through members by value
 (``SemaProfiles::markedPointerMembers``) has a ``MemberPointee`` entity for
 its referent: it enters asserted uninitialized (``FlowState::EntryAsserted``,
@@ -1875,10 +1901,16 @@ Missed Diagnostics
   normal paths only: the CFG has no destructor elements on exception edges,
   so ``WD w [[uninit]]; mayThrow(); std::construct_at(&w);``, whose unwinding
   destroys the never-constructed ``w``, is accepted.
-- The implicit destruction of members and bases at the end of a destructor
-  is not judged: an ``[[uninit]]`` member of a class type with a non-trivial
-  destructor may be destroyed although it was never constructed, which only
-  the P4222R2 §5 exposure analysis, not implemented, could tell.
+- The implicit destruction of bases at the end of a destructor is not
+  judged, and the member teardown is judged for a double destruction only: an
+  ``[[uninit]]`` member of a class type with a non-trivial destructor may be
+  destroyed although it was never constructed, which only the P4222R2 §5
+  exposure analysis, not implemented, could tell.  A ``return`` before the end
+  of a destructor's body skips the teardown's judgment.
+- A member function that leaves a member of the current object destroyed is
+  not diagnosed: another member function may reconstruct it before the object
+  is destroyed.  A member call on the current object changes no member's
+  lifetime there.
 - A read of a tracked member inside another member's default initializer is
   not detected.
 - A store through an alias of a pointer object (``int *&r = p; r = &u;``,
@@ -1886,10 +1918,10 @@ Missed Diagnostics
 - An assignment through a conditional, comma, or GNU ``?:`` target whose
   arms differ in marking accepts either source: any single answer would
   reject a legal combination.
-- A second destroy of storage that is not flow-tracked -- an ordinary local
-  or member, the referent of an unmarked pointer that is not a construction
-  alias, the referent of another object's marked pointer member -- is not a
-  double destroy.
+- A second destroy of storage that is not flow-tracked -- an ordinary local, a
+  member the body names in no lifecycle leaf, the referent of an unmarked
+  pointer that is not a construction alias, the referent of another object's
+  marked pointer member -- is not a double destroy.
 - A destroy of tracked storage through an unmarked alias other than a
   construction alias -- ``D *p = &d``, a reference, a by-reference capture, a
   returned pointer the body assigns or binds to a reference -- records

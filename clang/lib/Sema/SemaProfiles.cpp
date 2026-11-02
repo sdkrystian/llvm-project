@@ -4793,7 +4793,8 @@ SemaProfiles::enclosingInstanceMethod(const DeclContext *DC) {
 
 bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
                                      const DeclContext *CurContext,
-                                     FlowLeafUse Use) const {
+                                     FlowLeafUse Use,
+                                     const FieldDecl **LifecycleMember) const {
   if (!insideFunctionBody(CurContext))
     return false;
   // The current object as a whole, outside its constructors.
@@ -4812,11 +4813,13 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
   if (AsPointerValue && !Pointee) {
     if (const Expr *Op = addressOfOperand(E))
       return isFlowTrackedLeaf(ShapeLeaf(Op, Leaf.Arms),
-                               /*AsPointerValue=*/false, CurContext, Use);
+                               /*AsPointerValue=*/false, CurContext, Use,
+                               LifecycleMember);
     // A decayed array is the array it decays from.
     if (E->getType()->isArrayType())
       return isFlowTrackedLeaf(ShapeLeaf(E, Leaf.Arms),
-                               /*AsPointerValue=*/false, CurContext, Use);
+                               /*AsPointerValue=*/false, CurContext, Use,
+                               LifecycleMember);
     if (isa<CXXThisExpr>(E))
       return CurrentObjectTracked();
     // A std::array's begin or data: the array it points into, or the
@@ -4824,8 +4827,8 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
     bool PastStart;
     if (const Expr *Arr = stdArrayAddressObject(E, PastStart))
       return isFlowTrackedLeaf(ShapeLeaf(Arr, Leaf.Arms),
-                               Arr->getType()->isPointerType(), CurContext,
-                               Use);
+                               Arr->getType()->isPointerType(), CurContext, Use,
+                               LifecycleMember);
     // A Derive call: its argument, an array or a range as storage, a
     // pointer as a value, or a range's handle state.
     if (const auto *CE = dyn_cast<CallExpr>(E)) {
@@ -4834,9 +4837,11 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
         QualType AT = Arg->getType();
         if (AT->isPointerType())
           return isFlowTrackedLeaf(ShapeLeaf(Arg, Leaf.Arms),
-                                   /*AsPointerValue=*/true, CurContext, Use);
+                                   /*AsPointerValue=*/true, CurContext, Use,
+                                   LifecycleMember);
         if (isFlowTrackedLeaf(ShapeLeaf(Arg, Leaf.Arms),
-                              /*AsPointerValue=*/false, CurContext, Use))
+                              /*AsPointerValue=*/false, CurContext, Use,
+                              LifecycleMember))
           return true;
         bool ChainPartial = false;
         const DeclRefExpr *Base = handleChainBase(Arg, Leaf.Arms, ChainPartial);
@@ -4885,6 +4890,15 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
       return false;
     if (matchFlowTrackedMember(MD->getParent(), *Shape))
       return true;
+    // Outside its constructors, a member of the current object a marked
+    // target or a destroy names.
+    if ((Use == FlowLeafUse::MarkedTarget || Use == FlowLeafUse::Destroy) &&
+        !isa<CXXConstructorDecl>(MD))
+      if (const FieldDecl *F = lifecycleMember(MD->getParent(), *Shape)) {
+        if (LifecycleMember)
+          *LifecycleMember = F;
+        return true;
+      }
     // In a constructor body, a subobject enclosing tracked members, as for a
     // local.
     const auto *Ctor =
@@ -4920,6 +4934,28 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
   if (matchFlowTrackedMember(RD, *Shape))
     return true;
   return isFlowTrackedSubobject(RD, E, *Shape, Use);
+}
+
+const FieldDecl *
+SemaProfiles::lifecycleMember(const CXXRecordDecl *RD,
+                              const FlowLeafShape &Shape) const {
+  if (!Shape.IsThis || !Shape.PointerMembers.empty() || Shape.Members.empty())
+    return nullptr;
+  const MemberStep &First = Shape.Members.front();
+  const FieldDecl *F = First.Field;
+  if (!F || F->isBitField() || F->getParent()->isUnion() ||
+      F->hasAttr<UninitAttr>() || F->hasAttr<RefToUninitAttr>())
+    return nullptr;
+  QualType T = F->getType();
+  if (T->isDependentType() || T->isReferenceType() ||
+      getASTContext().getBaseElementType(T)->isUnionType() ||
+      isRawStorageType(T))
+    return nullptr;
+  std::pair<unsigned, unsigned> Held =
+      flowTrackedMemberRange(RD, ArrayRef(First), {});
+  if (Held.first != Held.second)
+    return nullptr;
+  return F->getCanonicalDecl();
 }
 
 bool SemaProfiles::isFlowTrackedSubobject(const CXXRecordDecl *RD,

@@ -500,7 +500,8 @@ public:
   /// and judged by its members' state. For a MarkedTarget or a Destroy, the
   /// current object as a whole (\c this, \c *this) in an instance member
   /// function other than a constructor is tracked: the pass tracks its
-  /// lifetime when the body binds it so (P4222R2 §4.6). A [[ref_to_uninit]]
+  /// lifetime when the body binds it so (P4222R2 §4.6), and so is a member of
+  /// it a leaf names through \c this (lifecycleMember). A [[ref_to_uninit]]
   /// pointer member of the current object (markedPointerMembers) is tracked
   /// for every use, as a marked local pointer is. For a ValueCopy -- the
   /// source of an unmarked value copy (isValueCopySource) -- a subobject of
@@ -520,10 +521,22 @@ public:
   /// binding of a pointer) rather than as a glvalue. Some leaves are
   /// tracked only for some \p Use (FlowLeafUse). The parse-time checks leave
   /// such a source to the pass; a source with no tracked leaf, or one outside
-  /// any function body, is judged at parse time without flow state.
+  /// any function body, is judged at parse time without flow state. A leaf
+  /// tracked as a lifecycle member sets \p LifecycleMember, when non-null, to
+  /// that member.
   bool isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
                          const DeclContext *CurContext,
-                         FlowLeafUse Use = FlowLeafUse::Plain) const;
+                         FlowLeafUse Use = FlowLeafUse::Plain,
+                         const FieldDecl **LifecycleMember = nullptr) const;
+  /// The member of the current object, of class \p RD, whose lifetime the
+  /// flow analysis tracks for a marked target or a destroy of a leaf of shape
+  /// \p Shape: the member the first step through \c this names, unless it is
+  /// a reference, a bit-field, a member of a union or an anonymous union, of
+  /// union type or raw storage (isRawStorageType), marked [[uninit]] or
+  /// [[ref_to_uninit]], or a member holding tracked members
+  /// (flowTrackedMemberRange); null otherwise. Its canonical declaration.
+  const FieldDecl *lifecycleMember(const CXXRecordDecl *RD,
+                                   const FlowLeafShape &Shape) const;
   /// True if the glvalue \p E of shape \p Shape, the object of class \p RD
   /// or a subobject of it enclosing tracked members
   /// (flowTrackedMemberRange), is tracked whole for \p Use (FlowLeafUse).
@@ -767,7 +780,9 @@ public:
     /// The destructor that ends an [[uninit]] local's scope.
     ScopeExit,
     /// An owning smart pointer's reset or reassignment.
-    OwnerReset
+    OwnerReset,
+    /// The destruction of a member at the end of its class's destructor.
+    MemberTeardown
   };
 
   /// std::init / ref_to_uninit: a pointer promoted through a `...` parameter
