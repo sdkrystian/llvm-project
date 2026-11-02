@@ -1017,6 +1017,23 @@ void construct_at_result_assigned() {
   q = nullptr;
 }
 
+void *operator new(__SIZE_TYPE__, void *) noexcept;
+
+// A destroy through the pointer a placement new returned destroys the local, so its scope-exit destructor destroys it again
+void placement_result_destroy() {
+  ScopedDtor w [[uninit]]; // expected-note {{'w' is destroyed at the end of its scope}}
+  ScopedDtor *q = new (&w) ScopedDtor{};
+  std::destroy_at(q);
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+
+// A placement new after a destroy through the pointer a placement new returned is accepted
+void placement_result_destroy_reconstruct() {
+  ScopedDtor w [[uninit]];
+  ScopedDtor *q = new (&w) ScopedDtor{};
+  std::destroy_at(q);
+  new (&w) ScopedDtor{};
+}
+
 // A byte buffer constructed, destroyed through the returned pointer, and constructed again is accepted
 void construct_at_result_byte_buffer() {
   alignas(ScopedDtor) std::byte buf [[uninit]] [sizeof(ScopedDtor)];

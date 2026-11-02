@@ -1248,33 +1248,74 @@ void *operator new(__SIZE_TYPE__, void *) noexcept;
 void *operator new[](__SIZE_TYPE__, void *) noexcept;
 void *operator new(__SIZE_TYPE__, void *p [[ref_to_uninit]], int) noexcept;
 struct PlacedT { int x; PlacedT(int); };
+namespace std {
+template <class T, class... A> T *construct_at(T *p, A &&...args);
+template <class T> void destroy_at(T *p);
+} // namespace std
 
-// Placement new into flow-tracked storage binds the unmarked placement parameter
+// A reserved placement new constructs in uninitialized storage
 void test_placement_new_uninit() {
   int u [[uninit]];
-  new (&u) int(5); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
-  new (&u) int;    // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
-  alignas(PlacedT) unsigned char buf [[uninit]] [sizeof(PlacedT)];
-  new (buf) PlacedT(1); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
-  new (buf) int[2];     // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
-  int *p [[ref_to_uninit]] = (int *)malloc(4);
-  new (p) int(5); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
-}
-void test_placement_new_marked_param(int *p [[ref_to_uninit]]) {
-  new (p) int(5); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
-}
-
-// Stored storage is accepted, judged by flow like any binding
-void test_placement_new_stored() {
-  int u [[uninit]];
-  u = 1;
   new (&u) int(5); // OK
+  alignas(PlacedT) unsigned char buf [[uninit]] [sizeof(PlacedT)];
+  new (buf) PlacedT(1); // OK
   int *p [[ref_to_uninit]] = (int *)malloc(4);
-  *p = 1;
   new (p) int(5); // OK
 }
 
-// A marked placement parameter accepts uninitialized storage and rejects initialized storage
+// A second placement new into an [[uninit]] local constructs over the first one's object
+void test_placement_new_twice() {
+  int u [[uninit]];
+  new (&u) int(5);
+  new (&u) int; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A second placement new into an [[uninit]] byte buffer constructs over the first one's object
+void test_placement_new_buffer_twice() {
+  alignas(PlacedT) unsigned char buf [[uninit]] [sizeof(PlacedT)];
+  new (buf) PlacedT(1);
+  new (buf) int[2]; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A placement new through a marked parameter constructs its referent
+void test_placement_new_marked_param(int *p [[ref_to_uninit]]) {
+  new (p) int(5); // OK
+}
+
+// A placement new into stored storage constructs over a live object
+void test_placement_new_stored() {
+  int u [[uninit]];
+  u = 1;
+  new (&u) int(5); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int *p [[ref_to_uninit]] = (int *)malloc(4);
+  *p = 1;
+  new (p) int(5); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+struct IndetT { int x; };
+
+// A default-initializing placement new of a class with an indeterminate member initializes nothing
+int test_placement_new_default_init() {
+  IndetT q [[uninit]];
+  new (&q) IndetT;
+  return q.x; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A value-initializing placement new initializes its object
+int test_placement_new_value_init() {
+  IndetT q [[uninit]];
+  new (&q) IndetT{};
+  return q.x; // OK
+}
+
+// A placement new into an [[uninit]] local after std::construct_at constructs over a live object
+void test_placement_new_after_construct_at() {
+  int u [[uninit]];
+  std::construct_at(&u, 1);
+  new (&u) int(2); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A marked placement parameter of an allocation function that is not reserved accepts uninitialized storage and rejects initialized storage
 void test_placement_new_marked_operator() {
   int u [[uninit]];
   new (&u, 0) int(5); // OK
@@ -1285,14 +1326,88 @@ void test_placement_new_marked_operator() {
   new (&i, 0) int(5); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
 }
 
-// The allocation function runs before the initializer
+// The allocation function runs before the initializer, and a reserved placement new constructs after it
 [[now_init]] void *operator new(__SIZE_TYPE__, int *p [[ref_to_uninit]], int, int) noexcept;
 void test_placement_new_order() {
   int *p [[ref_to_uninit]] = (int *)malloc(4);
   int *q = new (p, 0, 0) int(*p); // OK: the allocation function initialized *p
   int u [[uninit]];
-  new (&u) int(u = 1); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  new (&u) int(u = 1); // OK: u is uninitialized where its address is bound
   (void)q;
+}
+
+struct LiveStr { LiveStr(const char *); ~LiveStr(); };
+
+// A placement new over a live local constructs over a live object
+void test_placement_new_live_local() {
+  LiveStr s("a");
+  new (&s) LiveStr("b"); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A placement new over a by-value parameter constructs over a live object
+void test_placement_new_parameter(LiveStr s) {
+  new (&s) LiveStr("b"); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A placement new over a live array constructs over live objects
+void test_placement_new_live_array() {
+  LiveStr a[2] = {"a", "b"};
+  new (a) LiveStr[2]{"c", "d"}; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  new (&a[1]) LiveStr("e");     // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+struct PlacedHolder {
+  LiveStr s;
+  void reset_member();
+  void reset_self();
+  void rebuild_self();
+};
+
+// A placement new over a member in a member function constructs over a live object
+void PlacedHolder::reset_member() {
+  new (&s) LiveStr("b"); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A placement new over the current object constructs over a live object
+void PlacedHolder::reset_self() {
+  new (this) PlacedHolder{LiveStr("b")}; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A placement new over the current object after destroying it is accepted
+void PlacedHolder::rebuild_self() {
+  std::destroy_at(this);
+  new (this) PlacedHolder{LiveStr("b")}; // OK
+}
+
+struct PlaceIt { LiveStr &operator*() const; };
+LiveStr *place_target();
+
+// A placement new through an unmarked pointer, an iterator, or a call's result is not judged
+void test_placement_new_unknown_address(LiveStr *p, PlaceIt it) {
+  new (p) LiveStr("b");              // OK
+  new (&*it) LiveStr("b");           // OK
+  new (place_target()) LiveStr("b"); // OK
+}
+
+// A placement new into an unmarked byte buffer is not judged
+void test_placement_new_raw_buffer() {
+  alignas(LiveStr) std::byte raw[sizeof(LiveStr)];
+  new (raw) LiveStr("a");
+  new (raw) LiveStr("b"); // OK
+}
+
+union PlaceUnion { int i; float f; };
+
+// A placement new into a union member is not judged
+void test_placement_new_union_member() {
+  PlaceUnion pu{1};
+  new (&pu.f) float(2.0f); // OK
+}
+
+// A placement fill loop through a marked pointer constructs each element
+void test_placement_new_fill_loop(LiveStr *f [[ref_to_uninit]], LiveStr *l) {
+  for (; f != l; ++f)
+    ::new ((void *)f) LiveStr("a"); // OK
 }
 
 // Suppression covers the placement argument

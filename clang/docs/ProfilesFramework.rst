@@ -1062,6 +1062,27 @@ rule -- in a system header the `System Headers`_ exemption covers it, under
 diagnosed per instantiation -- while an unmarked definition is judged as
 written.
 
+A placement ``new`` through a reserved placement ``operator new``
+(``::new (p) T(v)``, ``new (p) T[n]``) constructs as ``std::construct_at``
+does, with the new-expression's initialization, in storage the analysis
+knows: its address must refer to uninitialized memory -- by flow for
+flow-tracked storage, and by form for ``this`` and for the address of a named
+variable that is not a reference or a marked variable, or of a member or
+element of one, or of a member of the current object, reached without a
+pointer step -- and after the initializer runs the storage is initialized:
+whole by an array new of constant size or a new of one object, in part by
+any other array new, and, without an initializer, only where
+default-initialization leaves no scalar indeterminate, as for
+``uninitialized_default_construct``.  So constructing over a live object
+(``std::string s("a"); new (&s) std::string("b");``) is rejected until the
+object is destroyed, and constructing over an object a construction may
+already have constructed is rejected as for ``std::construct_at``.  An
+address the analysis does not know is not judged: a pointer of unknown
+provenance (an unmarked pointer, ``&*it``, a call's result), raw storage that
+is not flow-tracked, and a union member.  A direct call of that
+``operator new`` is judged like the new-expression's address and constructs
+nothing.
+
 The lifecycle *end* is the mirror attribute ``[[now_uninit]]``, which records
 what §4.4 asks of ``destroy_at`` ("the object subjected to ``destroy_at()``
 should be considered uninitialized") and the paper has no attribute for.  It
@@ -1102,9 +1123,10 @@ the construct/destroy/construct cycle is legal, a second destruction is
 rejected, a destroy of never-constructed storage is rejected too, and binding
 the destroyed storage to an ordinary pointer or reference is rejected as the
 unmarked-direction violation.  A local pointer initialized from the result of
-``std::construct_at`` or ``std::ranges::construct_at`` whose value the body
-only reads -- no assignment, increment, address, reference binding, or
-by-reference capture -- names the storage the call constructed whole: a
+``std::construct_at``, ``std::ranges::construct_at``, or a reserved placement
+``new`` whose value the body only reads -- no assignment, increment, address,
+reference binding, or by-reference capture -- names the storage the call
+constructed whole: a
 destroy through it destroys that storage, so after
 ``T *q = std::construct_at(&u); std::destroy_at(q);`` a construction of ``u``
 is accepted and a second destroy of it is rejected.  An

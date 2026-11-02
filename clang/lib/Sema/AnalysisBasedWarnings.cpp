@@ -1880,8 +1880,9 @@ enum class EntryState : uint8_t {
 /// [[uninit]] member of a WholeLocal's or Pointee's storage (SubMember), whose
 /// state every event on that storage carries along except a
 /// default-initialization's credit, or the storage an unmarked local pointer
-/// initialized from std::construct_at's result names (ConstructAlias;
-/// getConstructionAliasCall), identified per program point like a Pointee's.
+/// initialized from std::construct_at's or a reserved placement new's result
+/// names (ConstructAlias; getConstructionAliasCall), identified per program
+/// point like a Pointee's.
 struct TrackedEntity {
   enum class Kind : uint8_t {
     CurrentObjectMember,
@@ -4341,21 +4342,30 @@ static bool constructsOneObject(const SemaProfiles::CalleeLifecycleRoles &Roles,
 /// If \p V may be a construction alias -- an unmarked local pointer, not a
 /// parameter or a __block variable, whose initializer is, through transparent
 /// casts, a call that constructs one object and returns a pointer to it
-/// (std::construct_at, std::ranges::construct_at; constructsOneObject) --
-/// return that call and set \p Arg and \p ParamTy to its construct argument
-/// and the parameter that argument binds; null otherwise. harvestTrackedLocals
-/// also requires that every use of \p V loads its value.
-static const CallExpr *getConstructionAliasCall(const ASTContext &Ctx,
-                                                const VarDecl *V,
-                                                const Expr *&Arg,
-                                                QualType &ParamTy) {
+/// (std::construct_at, std::ranges::construct_at; constructsOneObject) or a
+/// reserved placement new (SemaProfiles::isReservedPlacementNew) -- return
+/// that call or new-expression and set \p Arg and \p ParamTy to its construct
+/// argument and the parameter that argument binds; null otherwise.
+/// harvestTrackedLocals also requires that every use of \p V loads its value.
+static const Expr *getConstructionAliasCall(const ASTContext &Ctx,
+                                            const VarDecl *V, const Expr *&Arg,
+                                            QualType &ParamTy) {
   Arg = nullptr;
   if (!V->hasLocalStorage() || isa<ParmVarDecl>(V) || V->isImplicit() ||
       !V->getType()->isPointerType() || !V->getInit() ||
       V->hasAttr<RefToUninitAttr>() || V->hasAttr<BlocksAttr>())
     return nullptr;
-  const auto *CE =
-      dyn_cast<CallExpr>(SemaProfiles::ignoreTransparentCasts(V->getInit()));
+  const Expr *Init = SemaProfiles::ignoreTransparentCasts(V->getInit());
+  if (const auto *NE = dyn_cast<CXXNewExpr>(Init)) {
+    const FunctionDecl *OpNew = NE->getOperatorNew();
+    if (!OpNew || !SemaProfiles::isReservedPlacementNew(OpNew) ||
+        NE->getNumPlacementArgs() != 1)
+      return nullptr;
+    Arg = NE->getPlacementArg(0);
+    ParamTy = OpNew->getParamDecl(1)->getType();
+    return NE;
+  }
+  const auto *CE = dyn_cast<CallExpr>(Init);
   const FunctionDecl *Callee = CE ? CE->getDirectCallee() : nullptr;
   if (!Callee || !Callee->getReturnType()->isPointerType())
     return nullptr;
@@ -4775,11 +4785,43 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
         Designated = S.Context.getConstantArrayType(
             Designated, llvm::APInt(64, 1), nullptr, ArraySizeModifier::Normal,
             0);
+      bool SkipUninitMembers =
+          Roles.DefaultInitCredit &&
+          Roles.roleOf(P) == SemaProfiles::KnownParamRole::Construct;
+      // A reserved placement new constructs its allocated type -- an array
+      // new of constant size the whole array, any other one element -- and
+      // without an initializer default-initializes it, which credits only
+      // where that leaves no scalar indeterminate (DefaultInitCredit); a
+      // direct call of its operator new constructs nothing.
+      const auto *FD = dyn_cast<FunctionDecl>(P->getDeclContext());
+      const auto *NE = dyn_cast<CXXNewExpr>(CallLike);
+      if (!NE && FD && SemaProfiles::isReservedPlacementNew(FD))
+        return;
+      if (NE) {
+        QualType A = NE->getAllocatedType();
+        if (A->isIncompleteType())
+          return;
+        uint64_t N = 1;
+        if (std::optional<const Expr *> Size = NE->getArraySize();
+            Size && *Size)
+          if (std::optional<llvm::APSInt> V =
+                  (*Size)->getIntegerConstantExpr(S.Context))
+            N = V->getZExtValue();
+        Designated =
+            NE->isArray()
+                ? S.Context.getConstantArrayType(A, llvm::APInt(64, N), nullptr,
+                                                 ArraySizeModifier::Normal, 0)
+                : A;
+        if (NE->getInitializationStyle() == CXXNewInitializationStyle::None) {
+          if (S.Profiles().defaultInitLeavesScalarIndeterminate(A))
+            return;
+          SkipUninitMembers = true;
+        }
+      }
       // A byte writer's credit takes storage in any state and constructs
       // nothing.
       AppendFor(Arg, PT, DefAssignEventKind::Write, Designated, RawExempt,
-                /*SkipUninitMembers=*/Roles.DefaultInitCredit &&
-                    Roles.roleOf(P) == SemaProfiles::KnownParamRole::Construct,
+                SkipUninitMembers,
                 /*Constructs=*/!Roles.isInitializingParam(P));
     });
 }
@@ -5273,6 +5315,16 @@ static void extractStdInitEvents(
       } else if (const auto *CCE = dyn_cast<CXXConstructExpr>(St)) {
         for (const Expr *Arg : CCE->arguments())
           NoteHandedTo(CCE, Arg);
+      } else if (const auto *NE = dyn_cast<CXXNewExpr>(St)) {
+        // A reserved placement new's address is a construction's argument.
+        if (const FunctionDecl *OpNew = NE->getOperatorNew();
+            OpNew && SemaProfiles::isReservedPlacementNew(OpNew))
+          forEachArgumentBinding(Ctx, NE,
+                                 [&](const ParmVarDecl *P, QualType PT,
+                                     const Expr *Arg, bool Variadic) {
+                                   if (P && !Variadic)
+                                     NoteRoleArgument(Arg, PT);
+                                 });
       } else if (const auto *ICE = dyn_cast<ImplicitCastExpr>(St)) {
         if (ICE->getCastKind() == CK_LValueToRValue)
           NoteBenign(ICE->getSubExpr());
@@ -5779,7 +5831,8 @@ static void extractStdInitEvents(
     auto AddBindingAs = [&](K Kind, SourceLocation Loc, bool TargetMarked,
                             QualType T, const Expr *Src,
                             const NamedDecl *Subject, const Expr *At,
-                            bool EveryPath, bool AsRange) {
+                            bool EveryPath, bool AsRange,
+                            bool Placement = false) {
       bool IsHandle = SemaProfiles::isHandleType(T);
       if (!Src || T.isNull() || T->isDependentType() ||
           (!T->isPointerType() && !T->isReferenceType() && !IsHandle) ||
@@ -5903,7 +5956,8 @@ static void extractStdInitEvents(
             Operand, [&](const SemaProfiles::ShapeLeaf &Leaf) {
               AddLeaf(Leaf, AsPointerValue, [&] {
                 return formState(S.Profiles().classifyInitBindingLeaf(
-                    Leaf, T, D, /*ValueCopy=*/EveryPath && !TargetMarked));
+                    Leaf, T, D, /*ValueCopy=*/EveryPath && !TargetMarked,
+                    Placement));
               });
             });
       }
@@ -5915,14 +5969,19 @@ static void extractStdInitEvents(
     };
     // AddBindingAs, and for an unmarked reference to a handle bound to
     // \p Target, the handle's binding too
-    // (SemaProfiles::bindsHandleByReference).
+    // (SemaProfiles::bindsHandleByReference). A reserved placement new's
+    // parameter takes its address (SemaProfiles::classifyInitBindingLeaf).
     auto AddBinding = [&](K Kind, SourceLocation Loc, bool TargetMarked,
                           QualType T, const Expr *Src, const NamedDecl *Subject,
                           const Expr *At, bool EveryPath = false,
                           bool AsRange = false,
                           const ValueDecl *Target = nullptr) {
+      const auto *Parm = dyn_cast_or_null<ParmVarDecl>(Target);
+      const auto *Callee =
+          Parm ? dyn_cast<FunctionDecl>(Parm->getDeclContext()) : nullptr;
       AddBindingAs(Kind, Loc, TargetMarked, T, Src, Subject, At, EveryPath,
-                   AsRange);
+                   AsRange,
+                   Callee && SemaProfiles::isReservedPlacementNew(Callee));
       if (!TargetMarked && !AsRange && !T.isNull() && !T->isDependentType() &&
           SemaProfiles::bindsHandleByReference(Kind, T, Target))
         AddBindingAs(Kind, Loc, /*TargetMarked=*/false,
@@ -6094,18 +6153,21 @@ static void extractStdInitEvents(
     // A call of \p Callee (null when there is no declared callee) through
     // the call-like \p CallLike: its argument bindings, its lifecycle
     // effects, \p DestroyedObject's destruction included
-    // (appendLifecycleCallEvents), and then the aliases its arguments hand
-    // out, so the call's own judgments see the state before the call.
+    // (appendLifecycleCallEvents) -- none with \p Effects false -- and then
+    // the aliases its arguments hand out, so the call's own judgments see the
+    // state before the call.
     auto AppendCallEvents = [&](const Expr *CallLike,
                                 const FunctionDecl *Callee,
-                                const Expr *DestroyedObject = nullptr) {
+                                const Expr *DestroyedObject = nullptr,
+                                bool Effects = true) {
       SemaProfiles::CalleeLifecycleRoles Roles =
           Callee ? SemaProfiles::getCalleeLifecycleRoles(Callee)
                  : SemaProfiles::CalleeLifecycleRoles();
       AppendArgumentBindings(CallLike, Roles);
-      appendLifecycleCallEvents(S, D, CallLike, Roles, Storage, BlockEvents,
-                                DSites, JudgedLeaves, UnresolvedLeaves,
-                                DestroyedObject);
+      if (Effects)
+        appendLifecycleCallEvents(S, D, CallLike, Roles, Storage, BlockEvents,
+                                  DSites, JudgedLeaves, UnresolvedLeaves,
+                                  DestroyedObject);
       AppendArgumentAliasEscapes(CallLike, Roles);
     };
     // The element bindings of an aggregate initializer of type \p T: each
@@ -6275,9 +6337,14 @@ static void extractStdInitEvents(
       if (auto Alloc = Elem.getAs<CFGNewAllocator>()) {
         // The allocation function runs after the placement arguments and
         // before the initializer: the placement arguments are a call of it.
+        // A reserved placement new constructs once its initializer ran (the
+        // CXXNewExpr arm).
         const CXXNewExpr *NE = Alloc->getAllocatorExpr();
+        const FunctionDecl *OpNew = NE->getOperatorNew();
         if (!Ctor || BodyStmts.count(NE))
-          AppendCallEvents(NE, NE->getOperatorNew());
+          AppendCallEvents(NE, OpNew, /*DestroyedObject=*/nullptr,
+                           /*Effects=*/!OpNew ||
+                               !SemaProfiles::isReservedPlacementNew(OpNew));
         continue;
       }
       if (auto Dtor = Elem.getAs<CFGAutomaticObjDtor>()) {
@@ -6806,6 +6873,12 @@ static void extractStdInitEvents(
                    /*TargetMarked=*/false, Sub->getType(), Sub, nullptr, TE);
         AppendAliasEscapes(Sub, Sub->getType(), TE);
       } else if (const auto *NE = dyn_cast<CXXNewExpr>(St)) {
+        // A reserved placement new's construction, after its initializer.
+        if (const FunctionDecl *OpNew = NE->getOperatorNew();
+            OpNew && SemaProfiles::isReservedPlacementNew(OpNew))
+          appendLifecycleCallEvents(
+              S, D, NE, SemaProfiles::getCalleeLifecycleRoles(OpNew), Storage,
+              BlockEvents, DSites, JudgedLeaves, UnresolvedLeaves);
         // The written initializer of a scalar allocation binds the allocated
         // pointer; an array's elements are the aggregate arm's.
         if (NE->isArray() || !NE->hasInitializer())
@@ -6932,27 +7005,29 @@ static bool isCurrentObjectOrAddress(const Expr *E) {
 
 /// True if \p St destroys the current object as a whole -- an explicit
 /// destructor call on it, delete this -- or binds it whole to a marked,
-/// initializing, destroying, or releasing parameter of a call: the uses for
-/// which the current object's lifetime is tracked
-/// (SemaProfiles::FlowLeafUse).
+/// initializing, destroying, or releasing parameter of a call or of a
+/// placement new's allocation function: the uses for which the current
+/// object's lifetime is tracked (SemaProfiles::FlowLeafUse).
 static bool isCurrentObjectLifecycleUse(Sema &S, const Stmt *St) {
   auto IsCurrentObject = isCurrentObjectOrAddress;
   if (const auto *DE = dyn_cast<CXXDeleteExpr>(St))
     return IsCurrentObject(DE->getArgument());
-  const auto *CE = dyn_cast<CallExpr>(St);
-  if (!CE)
-    return false;
-  if (const auto *MCE = dyn_cast<CXXMemberCallExpr>(CE);
-      MCE && isa_and_nonnull<CXXDestructorDecl>(MCE->getMethodDecl()))
-    return IsCurrentObject(MCE->getImplicitObjectArgument());
-  const FunctionDecl *Callee = CE->getDirectCallee();
+  const FunctionDecl *Callee = nullptr;
+  if (const auto *NE = dyn_cast<CXXNewExpr>(St)) {
+    Callee = NE->getOperatorNew();
+  } else if (const auto *CE = dyn_cast<CallExpr>(St)) {
+    if (const auto *MCE = dyn_cast<CXXMemberCallExpr>(CE);
+        MCE && isa_and_nonnull<CXXDestructorDecl>(MCE->getMethodDecl()))
+      return IsCurrentObject(MCE->getImplicitObjectArgument());
+    Callee = CE->getDirectCallee();
+  }
   if (!Callee)
     return false;
   SemaProfiles::CalleeLifecycleRoles Roles =
       SemaProfiles::getCalleeLifecycleRoles(Callee);
   bool Found = false;
   forEachArgumentBinding(
-      S.Context, CE,
+      S.Context, cast<Expr>(St),
       [&](const ParmVarDecl *P, QualType, const Expr *Arg, bool Variadic) {
         Found |= P && !Variadic && !SemaProfiles::isHandleType(P->getType()) &&
                  (Roles.isMarkedParam(P) || Roles.initializesParam(P) ||

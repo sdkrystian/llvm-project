@@ -812,7 +812,11 @@ follows:
        parameters (a placement argument with its allocation function's)
        through one walk,
        ``forEachArgumentBinding``, which the lifecycle arm
-       (``appendLifecycleCallEvents``) shares; a handle-typed target
+       (``appendLifecycleCallEvents``) shares; a reserved placement
+       ``operator new``'s address is a known-callee Construct role, judged by
+       form only where it names known storage
+       (``SemaProfiles::namesKnownStorage``) and credited by the
+       new-expression's own element after its initializer; a handle-typed target
        (``isHandleType``) classifies its source through the handle walk, and
        a std-table construction's transfer parameters
        (``CalleeLifecycleRoles::transfersParam``) are judged where the
@@ -1136,7 +1140,8 @@ the pre-assertion state.  A binding to a marked parameter is a ``Binding``
 event only and asserts nothing.  An unmarked local pointer initialized from
 the result of a
 call that constructs one object and returns a pointer to it
-(``std::construct_at``, ``std::ranges::construct_at``) and whose every use
+(``std::construct_at``, ``std::ranges::construct_at``) or of a reserved
+placement ``new`` (``SemaProfiles::isReservedPlacementNew``) and whose every use
 loads its value is a *construction alias* (``getConstructionAliasCall``) when
 the call's argument names tracked storage as a destroy of it would, whole or
 at its start: a ``ConstructAlias`` entity whose declaration reseats it to that
@@ -1285,9 +1290,9 @@ trivial, and the pass classifies that leaf from the member entities below it
 and below any base its casts convert it to (``TrackedStorage::objectPart``,
 ``BindingLeaf::Range``): Initialized when every one is ``Must``, Uninitialized
 when none is ``May``, and Unknown otherwise.  An unmarked binding of it keeps
-the form's answer: a copy, an escape, or a placement ``new`` of the object is
-judged by form.  A marked pointer or reference bound to it gets an
-unidentified referent (``ReseatTarget::Unknown``).
+the form's answer: a copy or an escape of the object is judged by form.  A
+marked pointer or reference bound to it gets an unidentified referent
+(``ReseatTarget::Unknown``).
 The walk distributes each
 conditional at every step of the chain, not only at the top -- also behind an
 implicit handle local or an unmarked local reference to a handle -- and
@@ -1522,13 +1527,6 @@ Deliberate Strictnesses
   referent and keeps it: a function that also reseats the member is judged
   against the old referent, so a later lifecycle call or read through the
   member is judged against it too.  The remedy is ``[[profiles::suppress]]``.
-- Placement ``new`` into marked storage (``new (&u) T``) is rejected while the
-  storage is uninitialized on every path reaching it -- the address binds an
-  unmarked placement parameter, judged by flow like any binding, so a store on
-  some path first makes it an ordinary placement -- and earns no credit;
-  ``std::construct_at`` is the sanctioned spelling for constructing into
-  ``[[uninit]]`` storage (Clang knows its lifecycle roles; see
-  "Binding Pointers and References" in :doc:`ProfilesFramework`).
 
 - A user-defined allocator's ``allocate`` called directly returns initialized
   memory (only ``std::allocator`` and ``std::allocator_traits`` are
@@ -1796,6 +1794,14 @@ Missed Diagnostics
   not judged and destroys nothing tracked, as an element credit initializes
   nothing: an element never constructed, or destroyed twice, is destroyed
   without a diagnostic (P4222R2 §5.4's element form).
+- A placement ``new`` through a pointer of unknown provenance (``new (p) T``
+  for an unmarked ``p``, ``new (&*it) T``, ``new (up.get()) T``), into raw
+  storage that is not flow-tracked (``SemaProfiles::isRawStorageType``), or
+  into a union member is not judged (``SemaProfiles::namesKnownStorage``):
+  constructing over a live object there is accepted.
+- Making another member of a union active -- a store, a placement ``new`` --
+  over a live member whose type has a non-trivial destructor is accepted:
+  union members' lifetimes are not tracked.
 - Constructing the same element past the first twice
   (``std::construct_at(&a[1])`` twice; an element through a marker) is not
   detected: elements are not tracked, only the storage's start.

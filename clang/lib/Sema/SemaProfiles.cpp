@@ -1608,6 +1608,12 @@ static bool isReplaceableGlobalOperatorDelete(const FunctionDecl *FD) {
          FD->isReplaceableGlobalAllocationFunction();
 }
 
+bool SemaProfiles::isReservedPlacementNew(const FunctionDecl *FD) {
+  OverloadedOperatorKind OO = FD->getDeclName().getCXXOverloadedOperator();
+  return (OO == OO_New || OO == OO_Array_New) &&
+         FD->isReservedGlobalPlacementOperator();
+}
+
 /// True for a member function named \p Name of a namespace-std class named
 /// \p Class (any specialization).
 static bool isStdClassMember(const FunctionDecl *FD, StringRef Class,
@@ -1929,6 +1935,8 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
             KnownCalleeReturn::ReturnsUninitialized),
     formRow(isReplaceableGlobalOperatorDelete,
             KnownCalleeReturn::ReturnsTrusted, KnownParamRole::Release),
+    formRow(SemaProfiles::isReservedPlacementNew,
+            KnownCalleeReturn::ReturnsTrusted, KnownParamRole::Construct, 1),
     builtinRow(Builtin::BImemset, KnownCalleeReturn::ReturnsInitialized,
                "memset", KnownParamRole::InitializeAnyState),
     builtinRow(Builtin::BI__builtin_memset,
@@ -3706,7 +3714,7 @@ void SemaProfiles::judgeDeferredInitSiteByForm(const DeferredInitSite &Site,
   case DeferredInitSite::Kind::Binding:
     judgeInitProfileBinding(Site.BindingKind, Site.Loc, Site.Flag, Site.T,
                             Site.Src, /*D=*/nullptr, Site.Subject, Body,
-                            Site.ValueCopy, Site.AsRange);
+                            Site.ValueCopy, Site.AsRange, Site.Placement);
     return;
   case DeferredInitSite::Kind::Destroy:
     if (Site.Flag)
@@ -3866,7 +3874,7 @@ void SemaProfiles::checkInitProfileBinding(const InitializedEntity &Entity,
 void SemaProfiles::judgeInitProfileBinding(
     InitBindingKind Kind, SourceLocation Loc, bool TargetMarked, QualType T,
     const Expr *Src, const Decl *D, const NamedDecl *Subject,
-    const Decl *AfterFlowPass, bool ValueCopy, bool AsRange) {
+    const Decl *AfterFlowPass, bool ValueCopy, bool AsRange, bool Placement) {
   // A RecoveryExpr is a placeholder for an initialization that already failed,
   // not a source the user wrote, so it must not drive this rule; see also
   // inRebuiltOrSynthesizedCode.
@@ -3893,6 +3901,7 @@ void SemaProfiles::judgeInitProfileBinding(
                           std::move(Leaves)};
     Site.ValueCopy = ValueCopy;
     Site.AsRange = AsRange;
+    Site.Placement = Placement;
     recordDeferredInitSite(std::move(Site));
     return;
   }
@@ -3910,10 +3919,25 @@ void SemaProfiles::judgeInitProfileBinding(
           .withThisUnderConstruction(thisIsUnderConstruction(AfterFlowPass))
           .withUninitMemberTrust(ValueCopy &&
                                  trustsUninitMembers(AfterFlowPass));
+  UninitStorage State;
+  if (Placement) {
+    // Each leaf of a placement address is judged where it names known
+    // storage (namesKnownStorage), and the arms combine.
+    std::optional<UninitStorage> Acc;
+    forEachTargetLeaf(Src, [&](const ShapeLeaf &Leaf) {
+      UninitStorage S = namesKnownStorage(Leaf)
+                            ? classifyUninitSource(getASTContext(), Leaf.E, T,
+                                                   Opts.withArms(Leaf.Arms))
+                            : UninitStorage::Unknown;
+      Acc = Acc ? combineArms(*Acc, S) : S;
+    });
+    State = Acc.value_or(UninitStorage::Unknown);
+  } else {
+    State = classifyUninitSource(getASTContext(), Src, T, Opts, AsRange);
+  }
   // A range is named as the handle it is.
-  diagnoseBindingVerdict(
-      *this, Kind, Loc, TargetMarked, AsRange ? T.getNonReferenceType() : T,
-      classifyUninitSource(getASTContext(), Src, T, Opts, AsRange), Subject);
+  diagnoseBindingVerdict(*this, Kind, Loc, TargetMarked,
+                         AsRange ? T.getNonReferenceType() : T, State, Subject);
 }
 
 bool SemaProfiles::bindsHandleByReference(InitBindingKind Kind, QualType T,
@@ -3991,7 +4015,10 @@ bool SemaProfiles::isValueCopySource(const ParmVarDecl *P) {
 
 SemaProfiles::InitSourceState
 SemaProfiles::classifyInitBindingLeaf(const ShapeLeaf &Leaf, QualType T,
-                                      const Decl *Body, bool ValueCopy) const {
+                                      const Decl *Body, bool ValueCopy,
+                                      bool Placement) const {
+  if (Placement && !namesKnownStorage(Leaf))
+    return InitSourceState::Unknown;
   const CXXMethodDecl *MD =
       enclosingInstanceMethod(dyn_cast_or_null<DeclContext>(Body));
   UninitAccessOpts Opts =
@@ -4673,6 +4700,47 @@ bool SemaProfiles::isRawStorageType(QualType T) {
   return AnyMember;
 }
 
+bool SemaProfiles::namesKnownStorage(const ShapeLeaf &Leaf) {
+  const Expr *E = ignoreTransparentCasts(Leaf.E, Leaf.Arms);
+  if (isa<CXXThisExpr>(E))
+    return true;
+  const Expr *G = addressOfOperand(E);
+  if (!G && E->getType()->isArrayType())
+    G = E;
+  // The member and element steps from the object named down to its variable
+  // or to the current object.
+  while (G) {
+    G = ignoreTransparentCasts(G, Leaf.Arms);
+    if (isRawStorageType(G->getType()))
+      return false;
+    if (const auto *ME = dyn_cast<MemberExpr>(G)) {
+      const auto *F = dyn_cast<FieldDecl>(ME->getMemberDecl());
+      if (!F || F->getParent()->isUnion())
+        return false;
+      if (ME->isArrow())
+        return isa<CXXThisExpr>(
+            ignoreTransparentCasts(ME->getBase(), Leaf.Arms));
+      G = ME->getBase();
+      continue;
+    }
+    if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(G)) {
+      G = ignoreTransparentCasts(ASE->getBase(), Leaf.Arms);
+      if (!G->getType()->isArrayType())
+        return false;
+      continue;
+    }
+    if (const auto *UO = dyn_cast<UnaryOperator>(G);
+        UO && UO->getOpcode() == UO_Deref)
+      return isa<CXXThisExpr>(
+          ignoreTransparentCasts(UO->getSubExpr(), Leaf.Arms));
+    const auto *DRE = dyn_cast<DeclRefExpr>(G);
+    const auto *V = DRE ? dyn_cast<VarDecl>(DRE->getDecl()) : nullptr;
+    return V && !V->getType()->isReferenceType() &&
+           !V->hasAttr<RefToUninitAttr>();
+  }
+  return false;
+}
+
 const CXXRecordDecl *SemaProfiles::getTrackableLocalClass(const VarDecl *V) {
   if (!V->hasLocalStorage() || isa<ParmVarDecl>(V) || isa<DecompositionDecl>(V))
     return nullptr;
@@ -5068,7 +5136,8 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
     judgeInitProfileBinding(
         Kind, Loc, TargetMarked, T, Src, D,
         /*Subject=*/nullptr, /*AfterFlowPass=*/nullptr,
-        /*ValueCopy=*/!TargetMarked && isValueCopySource(Parm), AsRange);
+        /*ValueCopy=*/!TargetMarked && isValueCopySource(Parm), AsRange,
+        /*Placement=*/Callee && isReservedPlacementNew(Callee));
     if (!TargetMarked && !AsRange && bindsHandleByReference(Kind, T, Target))
       judgeInitProfileBinding(Kind, Loc, /*TargetMarked=*/false,
                               T.getNonReferenceType().getUnqualifiedType(), Src,

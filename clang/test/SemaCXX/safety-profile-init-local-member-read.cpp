@@ -191,12 +191,12 @@ int test_escape_lambda_capture() {
   return a.m; // OK: the capture escapes the object
 }
 
-// Placement new takes the object's address -- the same escape as &a.
+// Placement new constructs the object, initializing its members.
 void *operator new(__SIZE_TYPE__, void *p) noexcept;
 int test_escape_placement_new() {
   Agg a;
   new (&a) Agg{1};
-  return a.m; // OK: escaped
+  return a.m; // OK: constructed
 }
 
 // A transparent reference cast denotes the same storage (paper §4.3), and

@@ -577,9 +577,27 @@ public:
   /// alone, for the CFG pass's judgment of a binding with tracked leaves;
   /// \p Body is the analyzed function, which decides whether `this` is under
   /// construction, and \p ValueCopy is judgeInitProfileBinding's.
+  /// With \p Placement, \p Leaf is the address a reserved placement new
+  /// constructs at (isReservedPlacementNew), judged only where it names known
+  /// storage (namesKnownStorage) and Unknown elsewhere.
   InitSourceState classifyInitBindingLeaf(const ShapeLeaf &Leaf, QualType T,
                                           const Decl *Body,
-                                          bool ValueCopy = false) const;
+                                          bool ValueCopy = false,
+                                          bool Placement = false) const;
+  /// True if \p FD is a reserved placement form of operator new or operator
+  /// new[] (\c operator new(size_t, void *)): a new-expression through it
+  /// constructs its object at the address its placement argument holds, as
+  /// std::construct_at does.
+  static bool isReservedPlacementNew(const FunctionDecl *FD);
+  /// True if the pointer leaf \p Leaf is the address of storage the analysis
+  /// knows by form: \c this, or the address of a named variable that is not a
+  /// reference and not marked [[ref_to_uninit]] -- or of a member or array
+  /// element of one, or of a member of the current object, reached without
+  /// a pointer step -- with no union member and no raw storage
+  /// (isRawStorageType) along the way. A reserved placement new at any other
+  /// address -- a pointer of unknown provenance, \c &*it, a call's result --
+  /// is not judged by form.
+  static bool namesKnownStorage(const ShapeLeaf &Leaf);
   /// The access a leaf is classified for: a value read (the top-level
   /// [[uninit]] marker is the flow-based read pass's) or a scalar store (the
   /// whole named entity's store is its initialization; storage reached
@@ -841,6 +859,9 @@ public:
     /// Binding and Destroy: the source is a range a role parameter takes by
     /// reference (judgeInitProfileBinding's \p AsRange).
     bool AsRange = false;
+    /// Binding: the source is a reserved placement new's address
+    /// (judgeInitProfileBinding's \p Placement).
+    bool Placement = false;
   };
 
   /// The body whose flow pass judges a check deferred in \p DC: the
@@ -1184,13 +1205,16 @@ private:
   /// (judgeDeferredInitSiteByForm). A \p ValueCopy (isValueCopySource) trusts
   /// [[uninit]] data members as a read does. An \p AsRange source is a range
   /// a known callee's role parameter takes by reference, classified as a
-  /// handle range (HandleLeaf::Mode::Range) rather than as a glvalue.
+  /// handle range (HandleLeaf::Mode::Range) rather than as a glvalue. A
+  /// \p Placement source is a reserved placement new's address, judged by
+  /// form only where it names known storage (classifyInitBindingLeaf).
   void judgeInitProfileBinding(InitBindingKind Kind, SourceLocation Loc,
                                bool TargetMarked, QualType T, const Expr *Src,
                                const Decl *D,
                                const NamedDecl *Subject = nullptr,
                                const Decl *AfterFlowPass = nullptr,
-                               bool ValueCopy = false, bool AsRange = false);
+                               bool ValueCopy = false, bool AsRange = false,
+                               bool Placement = false);
 
 public:
   /// Enumerate the leaves the store target, binding source, read, or lifecycle
