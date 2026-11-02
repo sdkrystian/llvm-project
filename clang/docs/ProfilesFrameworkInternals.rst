@@ -1495,10 +1495,11 @@ Deliberate Strictnesses
   after ``std::destroy_at(c ? &a : &b)``, ``std::construct_at(c ? &a : &b)``
   is rejected, as the storage not destroyed still holds its object, and leaves
   both destroyed on some path, so both scope-exit destructors are rejected.
-  Nor does a construction through another type than the storage's: a
-  ``std::byte`` buffer destroyed whole and constructed again as a class object
-  is still destroyed, so a second destroy of the object, by the cast or
-  through the pointer ``std::construct_at`` returned, is rejected.
+  Nor does a construction through another type than the storage's, except
+  over raw storage (``SemaProfiles::isRawStorageType``: an array of
+  ``std::byte``, ``char``, or ``unsigned char``, or a class of only such
+  arrays), where it begins a new object that may be destroyed again, though
+  its bytes stay uninitialized for a read.
 - Member-wise initialization of a class-type referent through
   ``[[ref_to_uninit]]`` is rejected even for trivially-copyable referents
   (``ptr->x = 5``): below a member step only whole-object ``construct_at``

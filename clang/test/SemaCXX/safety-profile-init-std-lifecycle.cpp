@@ -1051,6 +1051,70 @@ void construct_uchar_buffer_twice() {
   std::construct_at((ScopedDtor *)buf); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
 }
 
+// A byte buffer destroyed whole and constructed again through another type holds a new object, which may be destroyed
+void byte_buffer_reconstruct_destroy() {
+  alignas(ScopedDtor) std::byte buf [[uninit]] [sizeof(ScopedDtor)];
+  std::construct_at((ScopedDtor *)buf);
+  std::destroy_at((ScopedDtor *)buf);
+  std::construct_at((ScopedDtor *)buf);
+  std::destroy_at((ScopedDtor *)buf);
+}
+
+// A byte buffer reconstructed and destroyed through the pointers std::construct_at returns is accepted
+void byte_buffer_reconstruct_destroy_result() {
+  alignas(ScopedDtor) std::byte buf [[uninit]] [sizeof(ScopedDtor)];
+  ScopedDtor *p = std::construct_at((ScopedDtor *)buf);
+  std::destroy_at(p);
+  ScopedDtor *q = std::construct_at((ScopedDtor *)buf);
+  std::destroy_at(q);
+}
+
+// Constructing and destroying an object in a byte buffer in a loop is accepted
+void byte_buffer_construct_destroy_loop(int n) {
+  alignas(ScopedDtor) std::byte buf [[uninit]] [sizeof(ScopedDtor)];
+  for (int i = 0; i != n; ++i) {
+    ScopedDtor *p = std::construct_at((ScopedDtor *)buf);
+    std::destroy_at(p);
+  }
+}
+
+struct RawBuffer { alignas(ScopedDtor) unsigned char bytes[sizeof(ScopedDtor)]; };
+
+// A class of only byte arrays is raw storage too
+void raw_class_reconstruct_destroy() {
+  RawBuffer r [[uninit]];
+  std::construct_at((ScopedDtor *)&r);
+  std::destroy_at((ScopedDtor *)&r);
+  std::construct_at((ScopedDtor *)&r);
+  std::destroy_at((ScopedDtor *)&r);
+}
+
+// A second destroy of the object in a byte buffer is a double destruction
+void byte_buffer_destroy_twice() {
+  alignas(ScopedDtor) std::byte buf [[uninit]] [sizeof(ScopedDtor)];
+  std::construct_at((ScopedDtor *)buf);
+  std::destroy_at((ScopedDtor *)buf);
+  std::destroy_at((ScopedDtor *)buf); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
+}
+
+// An int buffer is not raw storage: constructing through another type leaves it destroyed
+void int_buffer_reconstruct_destroy() {
+  alignas(ScopedDtor) int buf [[uninit]] [sizeof(ScopedDtor) / sizeof(int)];
+  std::construct_at((ScopedDtor *)buf);
+  std::destroy_at((ScopedDtor *)buf);
+  std::construct_at((ScopedDtor *)buf);
+  std::destroy_at((ScopedDtor *)buf); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
+}
+
+// A construction through another type initializes none of a byte buffer's bytes
+int uchar_buffer_read_after_reconstruct() {
+  alignas(ScopedDtor) unsigned char buf [[uninit]] [sizeof(ScopedDtor)];
+  std::construct_at((ScopedDtor *)buf);
+  std::destroy_at((ScopedDtor *)buf);
+  std::construct_at((ScopedDtor *)buf);
+  return buf[0]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
 // Constructing an object whole after its base is a double construction
 void construct_base_then_whole() {
   ScopedDerived d [[uninit]];

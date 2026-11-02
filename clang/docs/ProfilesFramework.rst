@@ -937,7 +937,10 @@ initializes nothing, and as a store is rejected like ``s.x = 1``
 (``*(int *)&s = 1``, ``std::construct_at(static_cast<Base *>(&d))``).
 ``std::construct_at`` constructs one object, so on an array it constructs the
 first element and initializes nothing.
-Such a credit still constructs an object.  A construction --
+Such a credit still constructs an object.  In raw storage -- an array of
+``std::byte``, ``char``, or ``unsigned char``, or a class of only such arrays
+-- it begins a new object even after the storage was destroyed, so the
+object may be destroyed again.  A construction --
 ``construct_at``, the ``uninitialized_*`` family, a ``[[now_init]]`` call,
 not a store or a byte-writing callee (below) -- leaves the storage constructed
 until it is destroyed or released or a marked binding asserts it

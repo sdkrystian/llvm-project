@@ -3779,15 +3779,21 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
   // Mark the storage Idx refers to as a construction's credit left it,
   // whether or not its designation covers the storage: an object of another
   // type, or a base, constructed there is still an object. Through an offset
-  // handle the construction is at an offset.
+  // handle the construction is at an offset. Over raw storage
+  // (SemaProfiles::isRawStorageType) the construction begins a new object,
+  // which ends the storage's destroyed state.
   auto Construct = [&](const DefAssignEvent &Ev) {
     if (Ev.Constructs == ConstructExtent::None || Ev.Sub.Class)
       return;
     if (std::optional<unsigned> R = referent(Ev.Idx, St, Storage))
-      St.update(*R, Ev.Constructs == ConstructExtent::Offset ||
-                            St.has(Ev.Idx, FlowState::Offset)
-                        ? FlowState::PartConstructed
-                        : FlowState::Constructed);
+      St.update(*R,
+                Ev.Constructs == ConstructExtent::Offset ||
+                        St.has(Ev.Idx, FlowState::Offset)
+                    ? FlowState::PartConstructed
+                    : FlowState::Constructed,
+                SemaProfiles::isRawStorageType(Storage.Entities[*R].Type)
+                    ? FlowState::MayDestroyed
+                    : 0);
   };
   for (const DefAssignEvent &Ev : BlockEvents) {
     switch (Ev.Kind) {

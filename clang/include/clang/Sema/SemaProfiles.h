@@ -432,6 +432,12 @@ public:
   /// declares. The flow analysis enters a member of such a class as a
   /// container.
   static const CXXRecordDecl *getDefaultInitTrackableClass(QualType T);
+  /// True if \p T is raw storage, which provides storage for objects of other
+  /// types: an array of std::byte, char, or unsigned char, a class whose every
+  /// member is raw storage and whose every base is empty or raw storage
+  /// (std::aligned_storage, llvm::AlignedCharArrayUnion), or an array of such
+  /// a class.
+  static bool isRawStorageType(QualType T);
   /// The declaration-shape half of the read-tracking guards for a local:
   /// \p V is a non-parameter local, not itself [[uninit]]-marked, of a
   /// trackable class. How its declaration initializes the members is the

@@ -4639,6 +4639,40 @@ const CXXRecordDecl *SemaProfiles::getDefaultInitTrackableClass(QualType T) {
   return RD;
 }
 
+bool SemaProfiles::isRawStorageType(QualType T) {
+  if (T.isNull() || T->isDependentType())
+    return false;
+  const Type *Elem = T->getBaseElementTypeUnsafe();
+  if (T->isArrayType() && (Elem->isStdByteType() || Elem->isCharType() ||
+                           Elem->isSpecificBuiltinType(BuiltinType::UChar)))
+    return true;
+  const auto *RD = Elem->getAsCXXRecordDecl();
+  if (!RD || !RD->hasDefinition())
+    return false;
+  RD = RD->getDefinition();
+  if (RD->isDependentType())
+    return false;
+  bool AnyMember = false;
+  for (const CXXBaseSpecifier &B : RD->bases()) {
+    const CXXRecordDecl *BRD = B.getType()->getAsCXXRecordDecl();
+    if (B.isVirtual() || !BRD || !BRD->hasDefinition())
+      return false;
+    if (BRD->getDefinition()->isEmpty())
+      continue;
+    if (!isRawStorageType(B.getType()))
+      return false;
+    AnyMember = true;
+  }
+  for (const FieldDecl *F : RD->fields()) {
+    if (F->isUnnamedBitField())
+      continue;
+    if (!isRawStorageType(F->getType()))
+      return false;
+    AnyMember = true;
+  }
+  return AnyMember;
+}
+
 const CXXRecordDecl *SemaProfiles::getTrackableLocalClass(const VarDecl *V) {
   if (!V->hasLocalStorage() || isa<ParmVarDecl>(V) || isa<DecompositionDecl>(V))
     return nullptr;
