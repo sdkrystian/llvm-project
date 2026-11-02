@@ -3000,8 +3000,9 @@ struct DefAssignEvent {
   SubKey Sub;
   bool SkipUninitMembers = false;
   /// Write and MayWrite: what a construction's credit -- a Construct-role row
-  /// or a [[now_init]] parameter -- constructed of the storage the event
-  /// reaches; a SubMember's credit constructs nothing here.
+  /// or a [[now_init]] parameter -- or a declaration initializing a member
+  /// constructed of the storage the event reaches; a SubMember's credit
+  /// constructs nothing here.
   ConstructExtent Constructs = ConstructExtent::None;
 };
 
@@ -3356,9 +3357,11 @@ struct FlowState {
     /// A marked std::unique_ptr null on some path: its destroys are no
     /// double_destroy, as the nulling path destroys nothing there.
     MayNull = 1u << 9,
-    /// Constructed whole, or as an object at its start, by a construction on
-    /// some path (DefAssignEvent::Constructs), with no whole destroy, release,
-    /// reset, escape, or uninitialized assertion since.
+    /// Constructed whole, or as an object at its start, on some path -- by a
+    /// construction (DefAssignEvent::Constructs), or live from the function's
+    /// entry (EntryState::Initialized, the current object as a whole) -- with
+    /// no whole destroy, release, reset, escape, or uninitialized assertion
+    /// since.
     Constructed = 1u << 10,
     /// Constructed in part, at an offset, by a construction on some path,
     /// with no whole destroy, release, reset, escape, or uninitialized
@@ -4035,8 +4038,9 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
       FunctionEntry.update(I, FlowState::May, FlowState::MayUnassigned);
     else if (E.Entry == EntryState::Initialized ||
              E.K == TrackedEntity::Kind::CurrentObject)
-      FunctionEntry.update(I, FlowState::Must | FlowState::May,
-                           FlowState::MayUnassigned);
+      FunctionEntry.update(
+          I, FlowState::Must | FlowState::May | FlowState::Constructed,
+          FlowState::MayUnassigned);
     else if (E.K == TrackedEntity::Kind::MemberPointee)
       FunctionEntry.update(I, FlowState::EntryAsserted);
   }
@@ -6670,11 +6674,14 @@ static void extractStdInitEvents(
               It != Storage.LocalRange.end()) {
             BlockEvents.push_back({DefAssignEventKind::Reset, It->second.first,
                                    nullptr, It->second.second});
+            // The declaration constructs each member it gives a value.
             if (Storage.InitializedLocals.contains(V))
               for (unsigned Idx = It->second.first; Idx != It->second.second;
-                   ++Idx)
-                BlockEvents.push_back(
-                    {DefAssignEventKind::Write, Idx, V->getInit()});
+                   ++Idx) {
+                DefAssignEvent Ev{DefAssignEventKind::Write, Idx, V->getInit()};
+                Ev.Constructs = ConstructExtent::Start;
+                BlockEvents.push_back(Ev);
+              }
           }
           // The variable's own binding (a decomposition's hidden variable
           // included); the DeclStmt element follows its initializer's
@@ -6755,8 +6762,9 @@ static void extractStdInitEvents(
               BlockEvents.push_back({DefAssignEventKind::Binding, 0,
                                      V->getInit(),
                                      (unsigned)(Sites.size() - 1)});
-              BlockEvents.push_back(
-                  {DefAssignEventKind::Write, Idx, V->getInit()});
+              DefAssignEvent Ev{DefAssignEventKind::Write, Idx, V->getInit()};
+              Ev.Constructs = ConstructExtent::Start;
+              BlockEvents.push_back(Ev);
             } else if (SrcIdx)
               BlockEvents.push_back(
                   {DefAssignEventKind::Copy, Idx, V->getInit(), *SrcIdx});

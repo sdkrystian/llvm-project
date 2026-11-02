@@ -1187,6 +1187,51 @@ void construct_after_one_path(bool c) {
   std::construct_at(&w); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
 }
 
+struct DeclaredAgg { ScopedDtor d [[uninit]]; int k [[uninit]]; };
+
+// A construct_at after a destroy on one path of a member its declaration initialized is a double construction
+void construct_after_one_path_destroy_of_declared(bool c) {
+  DeclaredAgg a{ScopedDtor{1}, 2};
+  if (c)
+    std::destroy_at(&a.d);
+  std::construct_at(&a.d); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// Destroying and constructing a member its declaration initialized is accepted
+void destroy_construct_declared() {
+  DeclaredAgg a{ScopedDtor{1}, 2};
+  std::destroy_at(&a.d);
+  std::construct_at(&a.d);
+}
+
+// A copy's class-type member is constructed by the copy
+void construct_after_one_path_destroy_of_copy(bool c) {
+  DeclaredAgg a{ScopedDtor{1}, 2};
+  DeclaredAgg b = a;
+  if (c)
+    std::destroy_at(&b.d);
+  std::construct_at(&b.d); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+struct Resettable {
+  int v;
+  void reset_one_path(bool c);
+  void reset();
+};
+
+// A construct_at of the current object after destroying it on one path is a double construction
+void Resettable::reset_one_path(bool c) {
+  if (c)
+    std::destroy_at(this);
+  std::construct_at(this); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// Destroying and constructing the current object is accepted
+void Resettable::reset() {
+  std::destroy_at(this);
+  std::construct_at(this);
+}
+
 // A construct_at in a loop constructs over the previous iteration's object
 void construct_in_loop(int n) {
   ScopedDtor w [[uninit]];

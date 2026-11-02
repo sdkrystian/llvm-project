@@ -945,7 +945,10 @@ object may be destroyed again.  A construction --
 not a store or a byte-writing callee (below) -- leaves the storage constructed
 until it is destroyed or released or a marked binding asserts it
 uninitialized: whole or at its start (through another type or a base, or the
-element at index 0), or in part (an element past the first).  A marked binding
+element at index 0), or in part (an element past the first).  So is storage
+that begins initialized: the current object in a member function, and the
+members a braced or value-initializing declaration or a copy initializes.  A
+marked binding
 of storage a construction may have constructed on some path -- whole or at the
 same start, or any part of it for a binding naming the storage whole -- is
 rejected, a construction included:

@@ -1315,7 +1315,11 @@ on ``Must`` or on the *construction bits*: ``Constructed`` (a construction made
 an object whole or at the storage's start on some path) and
 ``PartConstructed`` (one at an offset), which the join unites.  A
 construction's credit sets them (``DefAssignEvent::Constructs``; a store or a
-byte writer's credit sets neither); a whole destroy, release, reset, escape, or
+byte writer's credit sets neither), and so does a declaration that gives a
+member its value -- a braced or value-initializing one, a tracked copy's
+copy of a class-type member -- while storage that enters initialized
+(``EntryState::Initialized``, the current object as a whole) enters
+``Constructed``; a whole destroy, release, reset, escape, or
 marked binding's assertion clears both, and a destroy at the storage's start
 (``DestroySite::StartAffected``) clears ``Constructed``.  A leaf naming the
 storage whole reads both, one at its start (``Resolution::AtStart``: no member
@@ -1797,11 +1801,7 @@ Missed Diagnostics
   detected: elements are not tracked, only the storage's start.
 - A marked binding of storage a plain store initialized on some path only is
   accepted (``if (c) u = 1; int *p [[ref_to_uninit]] = &u;``): only
-  constructions count against a marked binding on some path, so a
-  construction is also accepted after a destroy on one path of storage a
-  declaration or the function's entry initialized
-  (``Agg a{D{1}, 2}; if (c) std::destroy_at(&a.d); std::construct_at(&a.d);``,
-  ``if (c) std::destroy_at(this); std::construct_at(this);``).
+  constructions count against a marked binding on some path.
 - The value of pointer arithmetic bound to an unmarked target is not
   classified, so that an end iterator binds in any state:
   ``int *q = p + 1;`` through a marked ``p``, or ``int *q = a + 1;`` before an
