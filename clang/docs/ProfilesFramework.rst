@@ -863,7 +863,9 @@ its last expression and a pointer compound literal its initializer:
 ``int *q = ({ &u; })`` and ``int *q = (int *){&u}`` bind ``&u``.  ``this``
 outside a constructor is initialized, so a marked pointer or reference to an
 initialized member of the current object is rejected; inside a constructor body,
-mem-initializer, or default member initializer it is unclassified.
+mem-initializer, or default member initializer it is unclassified, but for a
+member or direct base whose lifetime the constructor tracks (see
+`Constructors`_), which its initializer constructs.
 
 The recognizer's answer is refined by *flow-tracked storage*: an
 ``[[uninit]]`` local, the referent of a ``[[ref_to_uninit]]`` local pointer
@@ -1440,6 +1442,20 @@ and an anonymous union of only unnamed bit-fields or only ``std::byte``
 members has nothing to initialize.  A delegating constructor is exempt --
 its target initializes the members -- and so is a union's own constructor,
 whose members are mutually exclusive (§5.6).
+
+In a constructor body, and in its member-initializer list, a member or a
+direct non-virtual base that the constructor destroys, constructs, or binds to
+a marked target has a lifetime of its own, as in other member functions (see
+"Binding Pointers and References"): it is uninitialized until its initializer
+constructs it -- a written initializer, a default member initializer, an
+implicit default construction, a base's initializer for the base and its
+members, or a delegating constructor's target for every one -- and live after.
+So ``S() : s("a") { std::construct_at(&s, "b"); }``,
+``std::construct_at(static_cast<Base *>(this))`` after the base's
+initializer, and ``S() : n(b.size()), b("x") {...}`` (``b`` used before its
+initializer) are rejected, while ``S() : s("a") { std::destroy_at(&s);
+std::construct_at(&s, "b"); }`` is accepted.  A member without an initializer
+(a default-initialized scalar) stays uninitialized.
 
 An *inherited* constructor (``using B::B;``) initializes only the base it
 is inherited from ([class.inhctor.init]); the inheriting class's own

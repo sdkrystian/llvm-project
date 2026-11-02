@@ -253,14 +253,18 @@ public:
   /// One leaf of an lvalue or pointer shape (forEachTargetLeaf): the
   /// expression \c E, and the arm \c E takes at each conditional nested
   /// below one of its member, element, indirection, or address-of steps (an
-  /// arm is taken when it is listed). A plain expression is a leaf with no
-  /// nested conditional. \c Arms is valid only while the walk that yields the
-  /// leaf runs.
+  /// arm is taken when it is listed), and \c OuterBases, the derived-to-base
+  /// steps of the casts the walk peeled above \c E, in object-to-member
+  /// order. A plain expression is a leaf with no nested conditional. \c Arms
+  /// and \c OuterBases are valid only while the walk that yields the leaf
+  /// runs.
   struct ShapeLeaf {
     const Expr *E;
     ArrayRef<const Expr *> Arms;
-    ShapeLeaf(const Expr *E, ArrayRef<const Expr *> Arms = {})
-        : E(E), Arms(Arms) {}
+    ArrayRef<const CXXRecordDecl *> OuterBases;
+    ShapeLeaf(const Expr *E, ArrayRef<const Expr *> Arms = {},
+              ArrayRef<const CXXRecordDecl *> OuterBases = {})
+        : E(E), Arms(Arms), OuterBases(OuterBases) {}
   };
 
   struct HandleLeaf;
@@ -500,8 +504,10 @@ public:
   /// and judged by its members' state. For a MarkedTarget or a Destroy, the
   /// current object as a whole (\c this, \c *this) in an instance member
   /// function other than a constructor is tracked: the pass tracks its
-  /// lifetime when the body binds it so (P4222R2 §4.6), and so is a member of
-  /// it a leaf names through \c this (lifecycleMember). A [[ref_to_uninit]]
+  /// lifetime when the body binds it so (P4222R2 §4.6). In every instance
+  /// member function, a member of it a leaf names through \c this is tracked
+  /// (lifecycleMember), and in a constructor a direct base \c this is
+  /// converted to (lifecycleBase). A [[ref_to_uninit]]
   /// pointer member of the current object (markedPointerMembers) is tracked
   /// for every use, as a marked local pointer is. For a ValueCopy -- the
   /// source of an unmarked value copy (isValueCopySource) -- a subobject of
@@ -522,12 +528,20 @@ public:
   /// tracked only for some \p Use (FlowLeafUse). The parse-time checks leave
   /// such a source to the pass; a source with no tracked leaf, or one outside
   /// any function body, is judged at parse time without flow state. A leaf
-  /// tracked as a lifecycle member sets \p LifecycleMember, when non-null, to
-  /// that member.
+  /// tracked as a lifecycle member or base sets \p Name, when non-null, to
+  /// it.
+  struct LifecycleName;
   bool isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
                          const DeclContext *CurContext,
                          FlowLeafUse Use = FlowLeafUse::Plain,
-                         const FieldDecl **LifecycleMember = nullptr) const;
+                         LifecycleName *Name = nullptr) const;
+  /// The current object's storage a lifecycle leaf names
+  /// (isFlowTrackedLeaf): a member (lifecycleMember) or a direct base
+  /// (lifecycleBase).
+  struct LifecycleName {
+    const FieldDecl *Member = nullptr;
+    const CXXRecordDecl *Base = nullptr;
+  };
   /// The member of the current object, of class \p RD, whose lifetime the
   /// flow analysis tracks for a marked target or a destroy of a leaf of shape
   /// \p Shape: the member the first step through \c this names, unless it is
@@ -537,6 +551,15 @@ public:
   /// (flowTrackedMemberRange); null otherwise. Its canonical declaration.
   const FieldDecl *lifecycleMember(const CXXRecordDecl *RD,
                                    const FlowLeafShape &Shape) const;
+  /// The direct base of the current object, of class \p RD, whose lifetime
+  /// the flow analysis tracks in a constructor for a marked target or a
+  /// destroy of \c this converted along the derived-to-base path \p Path:
+  /// the path's first, non-virtual step, unless it is raw storage
+  /// (isRawStorageType) or holds tracked members (flowTrackedMemberRange);
+  /// null otherwise. Its canonical declaration.
+  const CXXRecordDecl *
+  lifecycleBase(const CXXRecordDecl *RD,
+                ArrayRef<const CXXRecordDecl *> Path) const;
   /// True if the glvalue \p E of shape \p Shape, the object of class \p RD
   /// or a subobject of it enclosing tracked members
   /// (flowTrackedMemberRange), is tracked whole for \p Use (FlowLeafUse).

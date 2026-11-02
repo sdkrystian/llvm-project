@@ -4794,13 +4794,28 @@ SemaProfiles::enclosingInstanceMethod(const DeclContext *DC) {
 bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
                                      const DeclContext *CurContext,
                                      FlowLeafUse Use,
-                                     const FieldDecl **LifecycleMember) const {
+                                     LifecycleName *Name) const {
   if (!insideFunctionBody(CurContext))
     return false;
   // The current object as a whole, outside its constructors.
   auto CurrentObjectTracked = [&] {
     const CXXMethodDecl *MD = enclosingInstanceMethod(CurContext);
     return Use != FlowLeafUse::Plain && MD && !isa<CXXConstructorDecl>(MD);
+  };
+  auto LifecycleUse = [&] {
+    return Use == FlowLeafUse::MarkedTarget || Use == FlowLeafUse::Destroy;
+  };
+  auto InConstructor = [&] {
+    return isa_and_nonnull<CXXConstructorDecl>(
+        enclosingInstanceMethod(CurContext));
+  };
+  // A lifecycle base (lifecycleBase) for the derived-to-base path \p Path.
+  auto TrackBase = [&](ArrayRef<const CXXRecordDecl *> Path) {
+    const CXXRecordDecl *B =
+        lifecycleBase(enclosingInstanceMethod(CurContext)->getParent(), Path);
+    if (B && Name)
+      Name->Base = B;
+    return B != nullptr;
   };
   const Expr *E = ignoreTransparentCasts(Leaf.E, Leaf.Arms);
   // Pointer arithmetic bound to a marked target or destroyed points to an
@@ -4812,14 +4827,18 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
       pointerArithmeticBase(E);
   if (AsPointerValue && !Pointee) {
     if (const Expr *Op = addressOfOperand(E))
-      return isFlowTrackedLeaf(ShapeLeaf(Op, Leaf.Arms),
-                               /*AsPointerValue=*/false, CurContext, Use,
-                               LifecycleMember);
+      return isFlowTrackedLeaf(ShapeLeaf(Op, Leaf.Arms, Leaf.OuterBases),
+                               /*AsPointerValue=*/false, CurContext, Use, Name);
     // A decayed array is the array it decays from.
     if (E->getType()->isArrayType())
-      return isFlowTrackedLeaf(ShapeLeaf(E, Leaf.Arms),
-                               /*AsPointerValue=*/false, CurContext, Use,
-                               LifecycleMember);
+      return isFlowTrackedLeaf(ShapeLeaf(E, Leaf.Arms, Leaf.OuterBases),
+                               /*AsPointerValue=*/false, CurContext, Use, Name);
+    // In a constructor, a direct base \c this is converted to.
+    if (isa<CXXThisExpr>(E) && LifecycleUse() && InConstructor()) {
+      BasePath Path(Leaf.OuterBases);
+      peelBaseCasts(Leaf.E, Path, Leaf.Arms);
+      return TrackBase(Path);
+    }
     if (isa<CXXThisExpr>(E))
       return CurrentObjectTracked();
     // A std::array's begin or data: the array it points into, or the
@@ -4828,7 +4847,7 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
     if (const Expr *Arr = stdArrayAddressObject(E, PastStart))
       return isFlowTrackedLeaf(ShapeLeaf(Arr, Leaf.Arms),
                                Arr->getType()->isPointerType(), CurContext, Use,
-                               LifecycleMember);
+                               Name);
     // A Derive call: its argument, an array or a range as storage, a
     // pointer as a value, or a range's handle state.
     if (const auto *CE = dyn_cast<CallExpr>(E)) {
@@ -4838,10 +4857,9 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
         if (AT->isPointerType())
           return isFlowTrackedLeaf(ShapeLeaf(Arg, Leaf.Arms),
                                    /*AsPointerValue=*/true, CurContext, Use,
-                                   LifecycleMember);
+                                   Name);
         if (isFlowTrackedLeaf(ShapeLeaf(Arg, Leaf.Arms),
-                              /*AsPointerValue=*/false, CurContext, Use,
-                              LifecycleMember))
+                              /*AsPointerValue=*/false, CurContext, Use, Name))
           return true;
         bool ChainPartial = false;
         const DeclRefExpr *Base = handleChainBase(Arg, Leaf.Arms, ChainPartial);
@@ -4884,19 +4902,26 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
     if (!Shape->PointerMembers.empty())
       return MD && !Shape->Subscript &&
              findMarkedPointerMember(MD->getParent(), Shape->PointerMembers);
-    if (Shape->Members.empty() && !Shape->Subscript)
+    if (Shape->Members.empty() && !Shape->Subscript) {
+      if (LifecycleUse() && InConstructor()) {
+        // The casts within the shape, then the leaf's own, then those above.
+        BasePath Path(Leaf.OuterBases);
+        peelBaseCasts(Leaf.E, Path, Leaf.Arms);
+        Path.insert(Path.begin(), Shape->LeafBases.begin(),
+                    Shape->LeafBases.end());
+        return TrackBase(Path);
+      }
       return CurrentObjectTracked();
+    }
     if (!MD)
       return false;
     if (matchFlowTrackedMember(MD->getParent(), *Shape))
       return true;
-    // Outside its constructors, a member of the current object a marked
-    // target or a destroy names.
-    if ((Use == FlowLeafUse::MarkedTarget || Use == FlowLeafUse::Destroy) &&
-        !isa<CXXConstructorDecl>(MD))
+    // A member of the current object a marked target or a destroy names.
+    if (LifecycleUse())
       if (const FieldDecl *F = lifecycleMember(MD->getParent(), *Shape)) {
-        if (LifecycleMember)
-          *LifecycleMember = F;
+        if (Name)
+          Name->Member = F;
         return true;
       }
     // In a constructor body, a subobject enclosing tracked members, as for a
@@ -4956,6 +4981,24 @@ SemaProfiles::lifecycleMember(const CXXRecordDecl *RD,
   if (Held.first != Held.second)
     return nullptr;
   return F->getCanonicalDecl();
+}
+
+const CXXRecordDecl *
+SemaProfiles::lifecycleBase(const CXXRecordDecl *RD,
+                            ArrayRef<const CXXRecordDecl *> Path) const {
+  if (Path.empty() || !RD || !RD->hasDefinition())
+    return nullptr;
+  const CXXRecordDecl *B = Path.front()->getCanonicalDecl();
+  for (const CXXBaseSpecifier &BS : RD->getDefinition()->bases()) {
+    const CXXRecordDecl *BRD = BS.getType()->getAsCXXRecordDecl();
+    if (BS.isVirtual() || !BRD || BRD->getCanonicalDecl() != B)
+      continue;
+    std::pair<unsigned, unsigned> Held = flowTrackedMemberRange(RD, {}, B);
+    if (isRawStorageType(BS.getType()) || Held.first != Held.second)
+      return nullptr;
+    return B;
+  }
+  return nullptr;
 }
 
 bool SemaProfiles::isFlowTrackedSubobject(const CXXRecordDecl *RD,
@@ -5843,6 +5886,8 @@ forEachNestedArmChoice(const Expr *Cur, SmallVectorImpl<const Expr *> &Arms,
 
 void SemaProfiles::forEachTargetLeaf(
     const Expr *E, llvm::function_ref<void(const ShapeLeaf &)> F) {
+  BasePath Outer;
+  peelBaseCasts(E, Outer);
   E = ignoreTransparentCasts(E);
   // A conditional names whichever lvalue the chosen arm does: each arm is a
   // leaf of its own.
@@ -5854,7 +5899,8 @@ void SemaProfiles::forEachTargetLeaf(
   }
   SmallVector<const Expr *, 4> Arms;
   llvm::SmallPtrSet<const VarDecl *, 4> Followed;
-  forEachNestedArmChoice(E, Arms, Followed, [&] { F(ShapeLeaf(E, Arms)); });
+  forEachNestedArmChoice(E, Arms, Followed,
+                         [&] { F(ShapeLeaf(E, Arms, Outer)); });
 }
 
 /// The test::class_final pilot: fires on every completed non-lambda class.

@@ -1882,7 +1882,9 @@ enum class EntryState : uint8_t {
 /// default-initialization's credit, or the storage an unmarked local pointer
 /// initialized from std::construct_at's or a reserved placement new's result
 /// names (ConstructAlias; getConstructionAliasCall), identified per program
-/// point like a Pointee's.
+/// point like a Pointee's, or, in a constructor, a direct base subobject of
+/// the current object a lifecycle leaf names (CurrentObjectBase;
+/// SemaProfiles::lifecycleBase).
 struct TrackedEntity {
   enum class Kind : uint8_t {
     CurrentObjectMember,
@@ -1892,7 +1894,8 @@ struct TrackedEntity {
     MemberPointee,
     CurrentObject,
     SubMember,
-    ConstructAlias
+    ConstructAlias,
+    CurrentObjectBase
   };
   Kind K;
   /// The member is tracked as a whole object (member kinds).
@@ -1922,8 +1925,9 @@ struct TrackedEntity {
   bool AtStart = false;
   /// A lifecycle entity: storage tracked only because a lifecycle leaf of the
   /// body names it (collectLifecycleNames) -- a member of the current object
-  /// (SemaProfiles::lifecycleMember), tracked whole. It is never read-tracked,
-  /// and every binding or access below or naming it is judged against it.
+  /// (SemaProfiles::lifecycleMember), tracked whole, or a base of it. It is
+  /// never read-tracked, and every binding or access below or naming it is
+  /// judged against it.
   bool Lifecycle = false;
 
   /// The member a member entity stands for; null otherwise.
@@ -2268,6 +2272,33 @@ struct TrackedStorage {
     E.Type = F->getType();
     LifecycleMembers[F] = Entities.size();
     Entities.push_back(std::move(E));
+  }
+  /// The lifecycle entity of the current object's direct base subobject of
+  /// class \p B, by canonical declaration.
+  llvm::DenseMap<const CXXRecordDecl *, unsigned> LifecycleBases;
+  /// Append the lifecycle entity of the direct base \p B, entering in
+  /// \p Entry (once).
+  void addLifecycleBase(const CXXRecordDecl *B, EntryState Entry) {
+    B = B->getCanonicalDecl();
+    if (LifecycleBases.count(B))
+      return;
+    TrackedEntity E;
+    E.K = TrackedEntity::Kind::CurrentObjectBase;
+    E.TrackReads = false;
+    E.Lifecycle = true;
+    E.Entry = Entry;
+    E.Type = Ctx.getCanonicalTagType(B);
+    LifecycleBases[B] = Entities.size();
+    Entities.push_back(std::move(E));
+  }
+  /// The lifecycle entity of the direct base \p B, if tracked.
+  std::optional<unsigned> lifecycleBase(const CXXRecordDecl *B) const {
+    if (!B)
+      return std::nullopt;
+    auto It = LifecycleBases.find(B->getCanonicalDecl());
+    if (It == LifecycleBases.end())
+      return std::nullopt;
+    return It->second;
   }
   /// The lifecycle entity of the member \p F, if tracked.
   std::optional<unsigned> lifecycleMember(const FieldDecl *F) const {
@@ -2686,6 +2717,18 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
       R.Subobject = DesignatesPart(*CurrentObjectRoot);
       return R;
     }
+    // A lifecycle base, or a subobject of it through a further conversion:
+    // the casts within the leaf, then those the leaf walk peeled above it.
+    if (Steps.empty() && !Shape->Subscript && !LifecycleBases.empty()) {
+      BasePath Path(Shape->LeafBases);
+      Path.append(Leaf.OuterBases.begin(), Leaf.OuterBases.end());
+      if (std::optional<unsigned> Idx =
+              Path.empty() ? std::nullopt : lifecycleBase(Path.front())) {
+        R.Entity = Idx;
+        R.Subobject = Path.size() > 1 || !covers(Designated, *Idx, RawExempt);
+        return R;
+      }
+    }
     if (Steps.empty() || ResolveMember(CurrentObjectRange, CurrentObjectClass))
       return R;
     // A lifecycle member, or storage below it.
@@ -2791,13 +2834,24 @@ TrackedStorage::resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
     return resolve(Leaf, Designated, RawExempt);
   const Expr *E = SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms);
   if (const Expr *Op = SemaProfiles::addressOfOperand(E))
-    return resolve({Op, Leaf.Arms}, Designated, RawExempt);
+    return resolve({Op, Leaf.Arms, Leaf.OuterBases}, Designated, RawExempt);
   if (SemaProfiles::pointerArithmeticBase(E))
     return resolve({E, Leaf.Arms}, Designated, RawExempt, /*Pointee=*/true);
   // A decayed array is the array it decays from.
   if (E->getType()->isArrayType())
-    return resolve({E, Leaf.Arms}, Designated, RawExempt);
+    return resolve({E, Leaf.Arms, Leaf.OuterBases}, Designated, RawExempt);
   Resolution R;
+  // \c this converted to a lifecycle base.
+  if (isa<CXXThisExpr>(E) && !LifecycleBases.empty()) {
+    BasePath Path(Leaf.OuterBases);
+    SemaProfiles::peelBaseCasts(Leaf.E, Path, Leaf.Arms);
+    if (std::optional<unsigned> Idx =
+            Path.empty() ? std::nullopt : lifecycleBase(Path.front())) {
+      R.Entity = Idx;
+      R.Subobject = Path.size() > 1 || !covers(Designated, *Idx, RawExempt);
+      return R;
+    }
+  }
   if (isa<CXXThisExpr>(E) && CurrentObjectRoot) {
     R.Entity = CurrentObjectRoot;
     R.Subobject = !covers(Designated, *CurrentObjectRoot, RawExempt);
@@ -6332,6 +6386,38 @@ static void extractStdInitEvents(
         // it; a written base initializer (e.g. `: Base{1}`) gives the tracked
         // members of that constructor-less base subtree their values.
         const CXXCtorInitializer *CI = OptInit->getInitializer();
+        // A constructor's initializers construct its lifecycle members and
+        // bases: a member's own initializer -- written, a default member
+        // initializer, or an implicit default construction --, a base's
+        // initializer its base and the base's members, and a delegating
+        // initializer every one.
+        auto ConstructLifecycle = [&](unsigned Idx) {
+          DefAssignEvent Ev{DefAssignEventKind::Write, Idx, CI->getInit()};
+          Ev.Constructs = ConstructExtent::Start;
+          BlockEvents.push_back(Ev);
+        };
+        if (CI->isDelegatingInitializer()) {
+          for (unsigned Idx : llvm::make_second_range(Storage.LifecycleMembers))
+            ConstructLifecycle(Idx);
+          for (unsigned Idx : llvm::make_second_range(Storage.LifecycleBases))
+            ConstructLifecycle(Idx);
+        } else if (CI->isAnyMemberInitializer()) {
+          if (std::optional<unsigned> Idx =
+                  Storage.lifecycleMember(CI->getAnyMember()))
+            ConstructLifecycle(*Idx);
+        } else if (const CXXRecordDecl *BRD =
+                       CI->isBaseInitializer()
+                           ? CI->getBaseClass()->getAsCXXRecordDecl()
+                           : nullptr) {
+          if (std::optional<unsigned> Idx = Storage.lifecycleBase(BRD))
+            ConstructLifecycle(*Idx);
+          for (unsigned Idx :
+               llvm::make_second_range(Storage.LifecycleMembers)) {
+            const BasePath &Bases = Storage.Entities[Idx].Steps.front().Bases;
+            if (!Bases.empty() && Bases.front() == BRD->getCanonicalDecl())
+              ConstructLifecycle(Idx);
+          }
+        }
         // A marked pointer member's default member initializer reseats it.
         if (!CI->isWritten()) {
           if (const FieldDecl *F =
@@ -7159,27 +7245,33 @@ static bool isCurrentObjectLifecycleUse(Sema &S, const Stmt *St) {
   return Found;
 }
 
-/// Add to \p Out the lifecycle members of the analyzed body \p D: the members
-/// of the current object (SemaProfiles::lifecycleMember) that a lifecycle leaf
-/// names -- a leaf SemaProfiles::isFlowTrackedLeaf checks for a marked target
-/// or a destroy: an argument bound to a marked, Construct-role, or destroying
-/// parameter (a reserved placement new's address included), an explicit or
-/// pseudo-destructor call's object, a delete operand, and the source of a
-/// marked variable, init-capture, return, member initializer, aggregate
-/// element, pointer assignment, handle reseat, or byte copy. The predicate
-/// classifies each leaf, so the deferred sites and the engine's own judged
-/// leaves find their members harvested.
-static void collectLifecycleNames(Sema &S, const Decl *D,
-                                  llvm::SetVector<const FieldDecl *> &Out) {
+/// Add to \p Members and \p Bases the lifecycle members and bases of the
+/// analyzed body \p D: the members (SemaProfiles::lifecycleMember) and, in a
+/// constructor, the direct bases (SemaProfiles::lifecycleBase) of the current
+/// object that a lifecycle leaf names -- a leaf SemaProfiles::isFlowTrackedLeaf
+/// checks for a marked target or a destroy: an argument bound to a marked,
+/// Construct-role, or destroying parameter (a reserved placement new's address
+/// included), an explicit or pseudo-destructor call's object, a delete operand,
+/// and the source of a marked variable, init-capture, return, member
+/// initializer, aggregate element, pointer assignment, handle reseat, or byte
+/// copy. The predicate classifies each leaf, so the deferred sites and the
+/// engine's own judged leaves find their members harvested.
+static void
+collectLifecycleNames(Sema &S, const Decl *D,
+                      llvm::SetVector<const FieldDecl *> &Members,
+                      llvm::SetVector<const CXXRecordDecl *> &Bases) {
   using HandleLeaf = SemaProfiles::HandleLeaf;
   const auto *DC = cast<DeclContext>(D);
   auto Check = [&](const SemaProfiles::ShapeLeaf &Leaf, bool AsPointerValue) {
-    const FieldDecl *F = nullptr;
-    if (S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC,
-                                       SemaProfiles::FlowLeafUse::MarkedTarget,
-                                       &F) &&
-        F)
-      Out.insert(F);
+    SemaProfiles::LifecycleName Name;
+    if (!S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC,
+                                        SemaProfiles::FlowLeafUse::MarkedTarget,
+                                        &Name))
+      return;
+    if (Name.Member)
+      Members.insert(Name.Member);
+    if (Name.Base)
+      Bases.insert(Name.Base);
   };
   // The leaves of \p Src bound as \p T, through the handle walk for a handle.
   auto Leaves = [&](const Expr *Src, QualType T) {
@@ -7416,15 +7508,22 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
   });
   if (CurrentObjectUsed)
     Storage.addCurrentObjectRoot(Method->getParent());
-  // The current object's lifecycle members, live at the method's entry and in
-  // an unknown state in a lambda's or block's body inside it.
-  if (Method) {
+  // The current object's lifecycle members and bases: live at a method's
+  // entry, unassigned until their initializers in a constructor, and in an
+  // unknown state in a lambda's or block's body inside either.
+  if (const CXXMethodDecl *Owner =
+          SemaProfiles::enclosingInstanceMethod(dyn_cast<DeclContext>(D))) {
     llvm::SetVector<const FieldDecl *> Members;
-    collectLifecycleNames(S, D, Members);
+    llvm::SetVector<const CXXRecordDecl *> Bases;
+    collectLifecycleNames(S, D, Members, Bases);
+    EntryState Entry = D != Owner ? EntryState::Unknown
+                       : isa<CXXConstructorDecl>(Owner)
+                           ? EntryState::Unassigned
+                           : EntryState::Initialized;
     for (const FieldDecl *F : Members)
-      Storage.addLifecycleMember(Method->getParent(), F,
-                                 D == Method ? EntryState::Initialized
-                                             : EntryState::Unknown);
+      Storage.addLifecycleMember(Owner->getParent(), F, Entry);
+    for (const CXXRecordDecl *B : Bases)
+      Storage.addLifecycleBase(B, Entry);
   }
   for (const VarDecl *V : Locals) {
     HarvestMarked(V, EntryState::Unassigned);

@@ -1255,13 +1255,21 @@ marked variable, member, return, pointer assignment, aggregate element, handle
 reseat, or byte copy.  One walk (``collectLifecycleNames``) asks the predicate
 about every such leaf of the body and harvests what it reports
 (``TrackedEntity::Lifecycle``), so the deferred sites and the engine's own find
-their storage.  In an instance member function other than a constructor, a
-member of the current object the first step through ``this`` names is one
-(``SemaProfiles::lifecycleMember``): not a reference, a bit-field, a member of a
-union or an anonymous union, of union type or raw storage, an ``[[uninit]]`` or
-marked member, or a member holding tracked members.  It enters initialized
-(``EntryState::Initialized``, hence ``Constructed``), or unknown in a lambda's or
-block's body, is never read-tracked, and is judged by flow at every other
+their storage.  In an instance member function, a member of the current object
+the first step through ``this`` names is one (``SemaProfiles::lifecycleMember``):
+not a reference, a bit-field, a member of a union or an anonymous union, of
+union type or raw storage, an ``[[uninit]]`` or marked member, or a member
+holding tracked members; in a constructor, so is the direct non-virtual base
+``this`` converted to with no member step names (``SemaProfiles::lifecycleBase``,
+``TrackedEntity::Kind::CurrentObjectBase``), unless it is raw storage or holds
+tracked members -- the conversion's casts above the leaf, which the leaf walk
+peels, ride on the leaf (``ShapeLeaf::OuterBases``).  It enters initialized
+(``EntryState::Initialized``, hence ``Constructed``) in a member function other
+than a constructor; unassigned in a constructor, where the ``CFGInitializer``
+arm constructs it at its initializer -- a member's own, written, a default
+member initializer, or an implicit default construction; a base's, for the base
+and its members; a delegating one, for every one; and unknown in a lambda's or
+block's body.  It is never read-tracked, and is judged by flow at every other
 binding below or naming it, at every read below or naming it, and at every
 store below it, through a lifecycle leaf the engine adds although the
 predicate did not defer that site: the parse-time funnel judged it by form,

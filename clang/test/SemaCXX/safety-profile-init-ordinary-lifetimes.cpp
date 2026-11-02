@@ -7,6 +7,10 @@
 // RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -DLEADING_ERROR -fexceptions -fcxx-exceptions -isystem %t/sys %t/members.cpp
 // -Wunreachable-code makes the main path build a fully linearized CFG.
 // RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -Wunreachable-code -fexceptions -fcxx-exceptions -isystem %t/sys %t/members.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -fexceptions -fcxx-exceptions -isystem %t/sys %t/constructors.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -fexceptions -fcxx-exceptions -isystem %t/sys %t/constructors.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -DLEADING_ERROR -fexceptions -fcxx-exceptions -isystem %t/sys %t/constructors.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -Wunreachable-code -fexceptions -fcxx-exceptions -isystem %t/sys %t/constructors.cpp
 
 // std::init: ordinary storage a lifecycle call of a body names -- a member of
 // the current object here -- has a lifetime of its own in that body
@@ -347,4 +351,162 @@ struct WithRawStorage {
     new (buf) std::string("a");
     new (buf) std::string("b");
   }
+};
+
+//--- constructors.cpp
+// no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
+[[profiles::enforce(std::init)]];
+#include <lifetimes.h>
+
+#ifdef LEADING_ERROR
+int leading_unrelated_error = undeclared_identifier;
+// expected-error@-1 {{use of undeclared identifier 'undeclared_identifier'}}
+// no-profiles-error@-2 {{use of undeclared identifier 'undeclared_identifier'}}
+#endif
+
+void take(const std::string &s);
+
+// A construct_at over a member its mem-initializer constructed constructs over a live object
+struct MemInit {
+  std::string s;
+  MemInit() : s("a") {
+    std::construct_at(&s, "b"); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  }
+};
+
+// A construct_at over a member its default member initializer constructed constructs over a live object
+struct DefaultInit {
+  std::string s = "a";
+  DefaultInit() {
+    std::construct_at(&s, "b"); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  }
+};
+
+// A construct_at over an implicitly default-constructed member constructs over a live object
+struct ImplicitInit {
+  std::string s;
+  ImplicitInit() {
+    std::construct_at(&s, "b"); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  }
+};
+
+// std::addressof(this->s) names the member as &s does
+struct AddressofInit {
+  std::string s;
+  AddressofInit() : s("a") {
+    std::construct_at(std::addressof(this->s), "b"); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  }
+};
+
+// A construct_at over a scalar member its default member initializer initialized constructs over a live object
+struct ScalarDefault {
+  int i = 0;
+  ScalarDefault() {
+    std::construct_at(&i, 1); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  }
+};
+
+// A placement new over a mem-initialized member constructs over a live object
+struct PlacementInit {
+  std::string s;
+  PlacementInit() : s("a") {
+    new (&s) std::string("b"); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  }
+};
+
+struct InitBase {
+  std::string b;
+  InitBase() : b("x") {}
+};
+
+// A construct_at over a base its initializer constructed constructs over a live object
+struct DerivedInit : InitBase {
+  DerivedInit() : InitBase() {
+    std::construct_at(static_cast<InitBase *>(this)); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  }
+};
+
+// A construct_at over an implicitly constructed base constructs over a live object
+struct DerivedImplicit : InitBase {
+  DerivedImplicit() {
+    std::construct_at(static_cast<InitBase *>(this)); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  }
+};
+
+// Destroying and reconstructing a base is accepted
+struct DerivedRebuild : InitBase {
+  DerivedRebuild() {
+    std::destroy_at(static_cast<InitBase *>(this));
+    std::construct_at(static_cast<InitBase *>(this));
+  }
+};
+
+// A base destroyed twice through a reference conversion is a double destruction
+struct DerivedDestroyTwice : InitBase {
+  DerivedDestroyTwice() {
+    std::destroy_at(std::addressof(static_cast<InitBase &>(*this)));
+    std::destroy_at(std::addressof(static_cast<InitBase &>(*this))); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
+    std::construct_at(static_cast<InitBase *>(this));
+  }
+};
+
+// A delegating constructor's target constructs every member
+struct Delegating {
+  std::string s;
+  Delegating() : s("a") {}
+  Delegating(int) : Delegating() {
+    std::construct_at(&s, "b"); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  }
+};
+
+// Destroying and reconstructing a mem-initialized member is accepted
+struct Rebuild {
+  std::string s;
+  Rebuild() : s("a") {
+    std::destroy_at(&s);
+    std::construct_at(&s, "b");
+    take(s);
+  }
+};
+
+// A construct_at after a destroy on one path constructs over the object the other path kept
+struct RebuildOnePath {
+  std::string s;
+  RebuildOnePath(bool c) : s("a") {
+    if (c)
+      std::destroy_at(&s);
+    std::construct_at(&s, "b"); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  }
+};
+
+// A marked member initialized with the address of a member declared before it refers to a live object
+struct MarkedBefore {
+  std::string b;
+  std::string *p [[ref_to_uninit]];
+  MarkedBefore() : b("x"), p(&b) {} // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+};
+
+// A marked member initialized with the address of a member declared after it refers to uninitialized memory
+struct MarkedAfter {
+  std::string *p [[ref_to_uninit]];
+  std::string b;
+  MarkedAfter() : p(&b), b("x") {}
+};
+
+// A member used by an earlier member's initializer is used before its own initializer constructs it
+struct EarlyUse {
+  std::size_t n;
+  std::string b;
+  EarlyUse() : n(b.size()), b("x") { // expected-error {{calling member function 'size' binds its implicit object parameter to uninitialized memory under profile 'std::init'}} \
+                                     // expected-warning {{field 'b' is uninitialized when used here}} \
+                                     // no-profiles-warning {{field 'b' is uninitialized when used here}}
+    std::destroy_at(&b);
+    std::construct_at(&b);
+  }
+};
+
+// A scalar member without an initializer is uninitialized in the body
+struct ScalarNoInit {
+  int i; // expected-note {{member 'i' declared here}}
+  ScalarNoInit() { std::construct_at(&i, 1); } // expected-error {{constructor does not initialize member 'i' under profile 'std::init'}}
 };
