@@ -901,7 +901,8 @@ capture) gives it an anonymous referent of unknown state; a
 ``[[now_uninit]]`` call, ``std::destroy_at``, ``free``, ``realloc``,
 ``operator delete``, or a ``delete`` expression acts on the referent
 (below).  A marked target is rejected when the
-storage is initialized on every path reaching the binding; an unmarked
+storage is initialized on every path reaching the binding, or when a
+construction (below) may have constructed it on some path; an unmarked
 target is accepted when the storage is initialized on some path.  A local or
 by-value parameter with tracked ``[[uninit]]`` members, bound as a whole to a
 marked target (``std::construct_at(&a, 1, 2)``), is judged by those members
@@ -936,6 +937,24 @@ initializes nothing, and as a store is rejected like ``s.x = 1``
 (``*(int *)&s = 1``, ``std::construct_at(static_cast<Base *>(&d))``).
 ``std::construct_at`` constructs one object, so on an array it constructs the
 first element and initializes nothing.
+Such a credit still constructs an object.  A construction --
+``construct_at``, the ``uninitialized_*`` family, a ``[[now_init]]`` call,
+not a store or a byte-writing callee (below) -- leaves the storage constructed
+until it is destroyed or released or a marked binding asserts it
+uninitialized: whole or at its start (through another type or a base, or the
+element at index 0), or in part (an element past the first).  A marked binding
+of storage a construction may have constructed on some path -- whole or at the
+same start, or any part of it for a binding naming the storage whole -- is
+rejected, a construction included:
+``if (c) std::construct_at(&d); std::construct_at(&d);``,
+``std::construct_at(arr)`` twice, and
+``std::uninitialized_fill(a + 2, a + 4, v)`` followed by a fill of all of
+``a`` are rejected.  Constructions of elements past the first are not judged
+against each other, a destroy of the element at index 0 ends the object a
+construction began there, and a binding through an iterator or a handle's
+member call (``*it``, a range-for's element, ``s.data()``) or an offset
+handle, and ``std::now_init``'s argument, are judged by the state on every
+path alone.
 ``memset``, ``memcpy``, ``memmove``, and a ``[[now_init]]`` parameter whose
 pointee is ``void``, ``char``, ``unsigned char``, or ``std::byte`` claim the
 bytes and initialize the whole storage, unless reached through a conversion to
@@ -962,9 +981,9 @@ to there, ``fill(&a.m)`` the member ``m`` of ``a``,
 and ``fill(arr)`` an ``[[uninit]]`` array whole, local or member (§6's
 ``uninitialized_fill`` shape; the element form ``fill(&arr[0])`` initializes
 nothing, §5.4) -- with the same reverse-direction consequence (after a
-``fill(&u)`` on every path, a second ``fill(&u)`` is rejected: ``u`` no
-longer refers to uninitialized memory, which incidentally catches double
-``construct_at``).  This is the library annotation P4222R2 §4.4 requests, and
+``fill(&u)`` on some path, a second ``fill(&u)`` is rejected: ``u`` may
+already hold an object, which also catches double ``construct_at``).  This is
+the library annotation P4222R2 §4.4 requests, and
 Clang supplies it itself: a call to a ``std::construct_at`` whose first
 parameter is of pointer type is checked and credited as if the function were
 declared ``[[now_init]]`` with that parameter marked, so the real ``<memory>``
@@ -1059,10 +1078,11 @@ declares that the parameter accepts uninitialized storage -- the annotation
 spelling for an unrecognized release function.  Never accepted is storage
 destroyed on some path reaching the call and not stored since: a double
 destruction on that path (rule ``double_destroy``).  A destroy on one path only
-leaves the storage neither definitely initialized nor definitely destroyed: a
-marked binding is not forced, an unmarked binding stays accepted, a second
-destroy is a double destroy, and a read through a marker, a read of a
-subobject of an ``[[uninit]]`` object, or a subobject write is rejected.  Clang
+leaves the storage neither definitely initialized nor definitely destroyed: an
+unmarked binding stays accepted, while a second destroy is a double destroy, a
+marked binding or a construction of storage a construction left constructed on
+the other path is rejected, and so are a read through a marker, a read of a
+subobject of an ``[[uninit]]`` object, and a subobject write.  Clang
 treats ``std::destroy_at`` this way itself -- a call to a ``std::destroy_at``
 whose first parameter is of pointer type destroys that argument's storage, and
 so does a call to ``std::destroy`` or ``std::destroy_n`` (P4222R2 §4.4) or

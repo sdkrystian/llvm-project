@@ -2339,14 +2339,12 @@ void test_now_init_reference(int &r [[ref_to_uninit]]) {
   (void)v;
 }
 
-// A ternary-wrapped [[now_init]] argument may initialize either arm, since
-// the chosen arm is not known: the unmarked binding is accepted, the marked
-// binding is not forced.
+// A ternary-wrapped [[now_init]] argument may construct either arm: an unmarked binding of one is accepted, a marked binding rejected
 void test_now_init_ternary_arms(bool c) {
   int u [[uninit]], v [[uninit]];
   now_init_fill(c ? &u : &v);
   int *w = &u;                   // OK: 'u' may be initialized
-  int *m [[ref_to_uninit]] = &u; // OK: 'u' is not initialized on every path
+  int *m [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   (void)w;
   (void)m;
 }
@@ -3112,17 +3110,14 @@ void test_destroy_through_function_pointer() {
   (void)q;
 }
 
-// A *conditional* destroy may or may not have run: afterwards the storage is
-// neither definitely initialized (a marked binding is not forced) nor
-// definitely uninitialized (an unmarked binding stays accepted). Both
-// bindings below are accepted.
+// After a destroy on one path an unmarked binding is accepted, and a marked one is rejected: the other path keeps the constructed object
 void test_conditional_destroy(bool c) {
   int u [[uninit]];
   now_init_fill(&u);
   if (c)
     nu_wipe(&u);
   int *q = &u;                   // OK: initialized on some path
-  int *r [[ref_to_uninit]] = &u; // OK: not initialized on every path
+  int *r [[ref_to_uninit]] = &u; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   (void)q; (void)r;
 }
 

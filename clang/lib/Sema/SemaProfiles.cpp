@@ -4122,8 +4122,10 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms,
     QualType BT = Base->getType();
     S.ThroughPointer = BT->isPointerType() || isHandleType(BT);
     S.ThroughHandle = isHandleType(BT);
+    S.HandleCall = true;
     if (Element || PastStart || !S.ThroughPointer) {
       S.Subscript = true;
+      S.OffsetElement |= Element || PastStart;
       NamedBelowElement = LeafFirst.size();
     }
     Cur = Base;
@@ -4143,6 +4145,7 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms,
     if (!Arr || Arr->getType()->isPointerType())
       return false;
     S.Subscript = true;
+    S.OffsetElement |= PastStart;
     NamedBelowElement = LeafFirst.size();
     Cur = peelBaseCasts(Arr, Bases(), Arms);
     return true;
@@ -4165,6 +4168,7 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms,
       if (const Expr *Ptr = pointerArithmeticBase(Cur)) {
         if (!hasZeroLiteralOffset(cast<BinaryOperator>(Cur))) {
           S.Subscript = true;
+          S.OffsetElement = true;
           NamedBelowElement = LeafFirst.size();
         }
         Cur = peelBaseCasts(Ptr, Bases(), Arms);
@@ -4179,6 +4183,7 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms,
         break;
       if (Partial) {
         S.Subscript = true;
+        S.OffsetElement = true;
         NamedBelowElement = LeafFirst.size();
       }
       QualType AT = Arg->getType();
@@ -4241,6 +4246,9 @@ SemaProfiles::flowLeafShape(const Expr *E, ArrayRef<const Expr *> Arms,
     }
     if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(Cur)) {
       S.Subscript = true;
+      const auto *Index =
+          dyn_cast<IntegerLiteral>(ASE->getIdx()->IgnoreParenImpCasts());
+      S.OffsetElement |= !Index || !Index->getValue().isZero();
       NamedBelowElement = LeafFirst.size();
       Cur = peelBaseCasts(ASE->getBase(), Bases(), Arms);
       // p[i] indexes the pointer's value; arr[i] the array glvalue its

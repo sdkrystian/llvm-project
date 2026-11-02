@@ -1127,21 +1127,24 @@ a fresh anonymous referent for an untracked source, the target every arm of the
 source agrees on, or unidentified when the arms disagree and one is tracked.
 A reseat to a fresh or escaped referent leaves every pointer that refers to
 the replaced one unidentified; only a pointer that a chain of ``ViaPointer``
-reseats connects to it can (``TrackedStorage::AliasClasses``).  An
+or ``Alias`` reseats connects to it can (``TrackedStorage::AliasClasses``).  An
 identified referent named by a marked binding is asserted unassigned (``Must``,
-``May``, and ``MembersPending`` cleared, ``MayUnassigned`` set,
-``MayDestroyed`` and ``Esc`` kept); the ``Reseat`` follows the binding's
-``Binding`` event in block order, so the judgment sees the pre-assertion
-state.  A binding to a marked parameter is a ``Binding`` event only and
-asserts nothing.  An unmarked local pointer initialized from the result of a
+``May``, ``MembersPending``, ``Constructed``, and ``PartConstructed`` cleared,
+``MayUnassigned`` set, ``MayDestroyed`` and ``Esc`` kept); the ``Reseat``
+follows the binding's ``Binding`` event in block order, so the judgment sees
+the pre-assertion state.  A binding to a marked parameter is a ``Binding``
+event only and asserts nothing.  An unmarked local pointer initialized from
+the result of a
 call that constructs one object and returns a pointer to it
 (``std::construct_at``, ``std::ranges::construct_at``) and whose every use
 loads its value is a *construction alias* (``getConstructionAliasCall``) when
-the call constructs tracked storage whole: a ``ConstructAlias`` entity whose
-declaration reseats it to that storage without an assertion
-(``ReseatTarget::Alias``).  Events through it act on that storage; the
-parse-time funnel judges its bindings, reads, and stores by form, and a
-destroy through it, which the form never rejects, is the pass's alone.  A
+the call's argument names tracked storage as a destroy of it would, whole or
+at its start: a ``ConstructAlias`` entity whose declaration reseats it to that
+storage without an assertion (``ReseatTarget::Alias``).  Events through it act
+on that storage, a destroy through an alias of an object at the storage's
+start (``TrackedEntity::AtStart``) on that object alone; the parse-time funnel
+judges its bindings, reads, and stores by form, and a destroy through it,
+which the form never rejects, is the pass's alone.  A
 tracked local's DeclStmt emits a ``Reset`` of its
 ``[[uninit]]`` entity and one over its member entities ahead of the
 declaration's own binding and copy events, clearing every flag but
@@ -1308,7 +1311,20 @@ and untracked arms P4222R2 §4.9 rejects.  A templated body is never analyzed;
 each instantiation is analyzed on its own CFG, in which statements TreeTransform
 reused from the pattern are ordinary elements.  Consumers read the lattices as
 follows: ``double_destroy`` fires on ``MayDestroyed``, a marked-target binding
-on ``Must``; an unmarked-target binding and ``destroy_uninit`` are suppressed
+on ``Must`` or on the *construction bits*: ``Constructed`` (a construction made
+an object whole or at the storage's start on some path) and
+``PartConstructed`` (one at an offset), which the join unites.  A
+construction's credit sets them (``DefAssignEvent::Constructs``; a store or a
+byte writer's credit sets neither); a whole destroy, release, reset, escape, or
+marked binding's assertion clears both, and a destroy at the storage's start
+(``DestroySite::StartAffected``) clears ``Constructed``.  A leaf naming the
+storage whole reads both, one at its start (``Resolution::AtStart``: no member
+step below the entity and no element step but at index zero,
+``FlowLeafShape::OffsetElement``) reads ``Constructed``, and an object named
+whole by its member entities reads theirs; a leaf through a handle's member
+call (``Resolution::ViaHandle``) or an offset handle, and ``std::now_init``'s
+argument (``BindingSite::AssertUninit``), read neither.  An unmarked-target
+binding and ``destroy_uninit`` are suppressed
 by ``May``; a read through a marker or of a subobject of an ``[[uninit]]``
 object, a subobject write, and the unmarked binding of a value copy's source
 (``isValueCopySource``; ``BindingSite::EveryPath``: a whole copy reads every
@@ -1455,7 +1471,9 @@ Deliberate Strictnesses
   (``if (c) destroy_at(&m); ... if (!c) use(m);``) the member read is rejected
   although no executable path reads destroyed memory.  The subobject-write check
   over-flags the same way
-  (``if (c) std::construct_at(&s, v); ... if (c) s.x = 1;``).
+  (``if (c) std::construct_at(&s, v); ... if (c) s.x = 1;``), and so do
+  constructions: ``if (c) std::construct_at(&x); if (!c) std::construct_at(&x);``
+  rejects the second one.
 
 - Destroying through a ``[[ref_to_uninit]]`` pointer that was never stored
   through is rejected by ``destroy_uninit``: the marker asserts an
@@ -1475,8 +1493,12 @@ Deliberate Strictnesses
   ``std::uninitialized_*`` credit or suppression.  A credit through an
   argument naming several storages initializes none of them whole either:
   after ``std::destroy_at(c ? &a : &b)``, ``std::construct_at(c ? &a : &b)``
-  leaves both destroyed on some path, so both scope-exit destructors are
-  rejected.
+  is rejected, as the storage not destroyed still holds its object, and leaves
+  both destroyed on some path, so both scope-exit destructors are rejected.
+  Nor does a construction through another type than the storage's: a
+  ``std::byte`` buffer destroyed whole and constructed again as a class object
+  is still destroyed, so a second destroy of the object, by the cast or
+  through the pointer ``std::construct_at`` returned, is rejected.
 - Member-wise initialization of a class-type referent through
   ``[[ref_to_uninit]]`` is rejected even for trivially-copyable referents
   (``ptr->x = 5``): below a member step only whole-object ``construct_at``
@@ -1511,8 +1533,9 @@ Deliberate Strictnesses
 - The ``std::uninitialized_*`` credit reaches only what the whole-storage
   write reaches: an element-form range (``&arr[0]``, P4222R2 §1.3) or an
   offset class-type iterator (``s.begin() + 1``, ``std::next(s.begin())``)
-  earns nothing, and a marked pointer's further elements (``p[1]``) are never
-  credited.  ``std::fill`` assigns rather than initializes: into a
+  earns nothing, though a later construction of the whole storage is rejected,
+  and a marked pointer's further elements (``p[1]``) are never credited.
+  ``std::fill`` assigns rather than initializes: into a
   still-uninitialized ``[[uninit]]`` array it is rejected like any unmarked
   binding (``std::uninitialized_fill`` and ``memset`` initialize).
 - A marked handle's referent is one object, as a marked pointer's is, and an
@@ -1545,7 +1568,8 @@ Deliberate Strictnesses
 - A ``construct_at`` or ``[[now_init]]`` credit of a base subobject of an
   ``[[uninit]]`` local or a marked pointer's referent, and a store through a
   narrower type, initialize nothing: the storage is one entity, so even the
-  constructed base's own members stay uninitialized for a later read.  The
+  constructed base's own members stay uninitialized for a later read, though
+  a later construction of the storage after such a credit is rejected.  The
   remedies are a credit of the whole object or suppression.
 - A store through a marked pointer bound to one ``[[uninit]]`` member of
   default-initialized storage (``int *pa [[ref_to_uninit]] = &p->a; *pa = 1;``)
@@ -1767,6 +1791,16 @@ Missed Diagnostics
   not judged and destroys nothing tracked, as an element credit initializes
   nothing: an element never constructed, or destroyed twice, is destroyed
   without a diagnostic (P4222R2 §5.4's element form).
+- Constructing the same element past the first twice
+  (``std::construct_at(&a[1])`` twice; an element through a marker) is not
+  detected: elements are not tracked, only the storage's start.
+- A marked binding of storage a plain store initialized on some path only is
+  accepted (``if (c) u = 1; int *p [[ref_to_uninit]] = &u;``): only
+  constructions count against a marked binding on some path, so a
+  construction is also accepted after a destroy on one path of storage a
+  declaration or the function's entry initialized
+  (``Agg a{D{1}, 2}; if (c) std::destroy_at(&a.d); std::construct_at(&a.d);``,
+  ``if (c) std::destroy_at(this); std::construct_at(this);``).
 - The value of pointer arithmetic bound to an unmarked target is not
   classified, so that an end iterator binds in any state:
   ``int *q = p + 1;`` through a marked ``p``, or ``int *q = a + 1;`` before an

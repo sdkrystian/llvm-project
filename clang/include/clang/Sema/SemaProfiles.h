@@ -312,6 +312,11 @@ public:
     unsigned ElementFreePrefix = 0;
     /// An element step (`a[i]`) occurs in the chain.
     bool Subscript = false;
+    /// An element step other than at index zero occurs in the chain: a
+    /// subscript other than a literal 0, pointer arithmetic, an offsetting
+    /// Derive call, a std::array's begin past its start, or an element call
+    /// or offset handle (\c a[0], \c *a, and \c std::data(a) are at zero).
+    bool OffsetElement = false;
     /// The derived-to-base path the leaf's own casts take from the object
     /// the last step of \c Members designates (from the bottom object when
     /// \c Members is empty).
@@ -329,6 +334,10 @@ public:
     /// chain bottoming out at a pointer sets \c ThroughPointer alone, and one
     /// at storage \c Subscript alone.
     bool ThroughHandle = false;
+    /// The chain steps through a member call deriving a pointer or reference
+    /// from a handle, or a Derive call on one, whatever the handle's chain
+    /// bottoms out at.
+    bool HandleCall = false;
   };
   /// The shape of the glvalue \p E -- with \p Pointee, of \c *E for the
   /// pointer value \p E -- taking the arms listed in \p Arms, or none when its

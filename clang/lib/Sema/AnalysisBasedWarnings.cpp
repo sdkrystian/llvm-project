@@ -1903,6 +1903,10 @@ struct TrackedEntity {
   /// reference (its anonymous referent). A credit or store covers the entity
   /// only through a designation of this type (designationCovers).
   QualType Type;
+  /// A ConstructAlias whose call's construct argument names its target at
+  /// its start (an element at index zero), not whole: a destroy through it
+  /// ends the object there alone, as a destroy of the argument does.
+  bool AtStart = false;
 
   /// The member a member entity stands for; null otherwise.
   const FieldDecl *field() const {
@@ -2266,6 +2270,15 @@ struct TrackedStorage {
     std::pair<unsigned, unsigned> Opaque{0, 0};
     /// Below a WholeLocal's or Pointee's storage, the SubMember named.
     SubKey Sub;
+    /// A Subobject begins at the entity's start: no member step below the
+    /// entity and no element step but at index zero
+    /// (SemaProfiles::FlowLeafShape::OffsetElement), so only a designation or
+    /// a conversion to a base makes it a subobject.
+    bool AtStart = true;
+    /// The leaf reaches the entity through a member call deriving a pointer or
+    /// reference from a handle (*it, s.data(), up.get(), a range-for's
+    /// element), whose position within the referent is not followed.
+    bool ViaHandle = false;
   };
   /// Resolve the glvalue \p E through SemaProfiles::flowLeafShape: a tracked
   /// member of the current object (this->m, m, (*this).m, this->c.m) or of a
@@ -2559,6 +2572,7 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
            (!Shape->LeafBases.empty() || !covers(Designated, Idx, RawExempt));
   };
   Resolution R;
+  R.ViaHandle = Shape->HandleCall;
   // The member entity of the object with entity range \p Range and class
   // \p RD whose path the leaf's steps start with
   // (SemaProfiles::matchFlowTrackedMember); storage below it is a subobject.
@@ -2575,6 +2589,7 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
     R.Entity = Idx;
     R.Subobject = Shape->Members.size() > M->Length || Shape->Subscript ||
                   DesignatesPart(Idx);
+    R.AtStart = Shape->Members.size() == M->Length && !Shape->OffsetElement;
     return true;
   };
   // The first pointer-to-data-member step, if any.
@@ -2603,6 +2618,7 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
       R.Entity = Idx;
       R.Subobject = !Steps.empty() || DesignatesPart(*Idx);
       R.Sub = subKey(*Idx, *Shape);
+      R.AtStart = Steps.empty();
     }
     return R;
   }
@@ -2631,6 +2647,7 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
       R.Entity = Idx;
       R.Subobject = !Shape->Members.empty() || DesignatesPart(*Idx);
       R.Sub = subKey(*Idx, *Shape);
+      R.AtStart = Shape->Members.empty();
     }
     return R;
   }
@@ -2642,6 +2659,7 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
       R.Entity = Idx;
       R.Subobject = !Shape->Members.empty() || DesignatesPart(*Idx);
       R.Sub = subKey(*Idx, *Shape);
+      R.AtStart = Shape->Members.empty();
     }
     return R;
   }
@@ -2654,11 +2672,13 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
       R.Subobject = !Shape->Members.empty() || Shape->Subscript ||
                     DesignatesPart(It->second);
       R.Sub = subKey(It->second, *Shape);
+      R.AtStart = Shape->Members.empty() && !Shape->OffsetElement;
     } else if (Ent.K == TrackedEntity::Kind::Pointee &&
                V->getType()->isReferenceType() && !Shape->Subscript) {
       R.Entity = It->second;
       R.Subobject = !Shape->Members.empty() || DesignatesPart(It->second);
       R.Sub = subKey(It->second, *Shape);
+      R.AtStart = Shape->Members.empty();
     }
     return R;
   }
@@ -2738,11 +2758,14 @@ TrackedStorage::resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
               R.Entity = Idx;
               R.Subobject =
                   ChainPartial || !covers(Designated, *Idx, RawExempt);
+              R.AtStart = !ChainPartial;
+              R.ViaHandle = true;
             }
       }
       if (R.Entity && Partial) {
         R.Subobject = true;
         R.Sub = SubKey();
+        R.AtStart = false;
       }
       return R;
     }
@@ -2756,6 +2779,7 @@ TrackedStorage::resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
                               Designated, RawExempt)
             : resolve({Arr, Leaf.Arms}, Designated, RawExempt);
     R.Subobject |= PastStart;
+    R.AtStart &= !PastStart;
     return R;
   }
   // A pointer a marked handle's member returns to its whole referent, or
@@ -2773,6 +2797,8 @@ TrackedStorage::resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
               markedHandleObject(dyn_cast<VarDecl>(Base->getDecl()))) {
         R.Entity = Idx;
         R.Subobject = Partial || !covers(Designated, *Idx, RawExempt);
+        R.AtStart = !Partial;
+        R.ViaHandle = true;
       }
     return R;
   }
@@ -2822,6 +2848,7 @@ TrackedStorage::resolveHandleLeaf(const SemaProfiles::HandleLeaf &L,
   if (std::optional<unsigned> Idx = V ? markedHandleObject(V) : std::nullopt) {
     R.Entity = Idx;
     R.Subobject = L.Partial || !covers(Designated, *Idx, RawExempt);
+    R.AtStart = !L.Partial;
   }
   return R;
 }
@@ -2924,6 +2951,18 @@ enum class ReseatTarget {
   /// handed it, and its destroys destroy nothing (FlowState::Null).
   Null
 };
+/// What a credit constructed of the storage it reaches
+/// (DefAssignEvent::Constructs).
+enum class ConstructExtent : uint8_t {
+  /// Nothing: a store, or a byte writer's credit, which takes storage in any
+  /// state.
+  None,
+  /// The storage whole, or an object at its start
+  /// (TrackedStorage::Resolution::AtStart): FlowState::Constructed.
+  Start,
+  /// Part of the storage at an offset: FlowState::PartConstructed.
+  Offset
+};
 struct DefAssignEvent {
   DefAssignEventKind Kind;
   unsigned Idx;
@@ -2948,6 +2987,10 @@ struct DefAssignEvent {
   /// writes.
   SubKey Sub;
   bool SkipUninitMembers = false;
+  /// Write and MayWrite: what a construction's credit -- a Construct-role row
+  /// or a [[now_init]] parameter -- constructed of the storage the event
+  /// reaches; a SubMember's credit constructs nothing here.
+  ConstructExtent Constructs = ConstructExtent::None;
 };
 
 /// The form classification of a binding leaf: the parse-time recognizers'
@@ -2986,6 +3029,11 @@ struct BindingLeaf {
   /// leaf names that storage whole (leafState).
   SubKey Sub;
   bool WholeLeaf = false;
+  /// Whether a leaf naming a subobject of Entity's storage names it at its
+  /// start, and whether the leaf reaches the storage through a handle's member
+  /// call (TrackedStorage::Resolution::AtStart, ViaHandle).
+  bool AtStart = false;
+  bool ViaHandle = false;
   /// A store site's whole-referent leaf of a marked pointer or reference: the
   /// store's designated type. The store is the referent's initialization when
   /// the designation covers the storage referred to there, and a subobject
@@ -3013,6 +3061,11 @@ struct BindingSite {
   /// The bound type when it is a handle (SemaProfiles::isHandleType), which
   /// the diagnostics name; null for a pointer or reference.
   QualType HandleType;
+  /// The target is a parameter whose row only asserts the storage
+  /// uninitialized (KnownParamRole::AssertUninit, std::now_init): it attests
+  /// that an initialization the analysis may not see completed, so the
+  /// construction bits do not judge it.
+  bool AssertUninit = false;
 };
 
 /// A destruction site derived from a call element -- a [[now_uninit]] or
@@ -3051,6 +3104,10 @@ struct DestroySite {
   /// The entities destroyed: the whole entity each leaf names, or every
   /// entity of an object destroyed as a whole (`this`, `*this`, `&x`, `x`).
   SmallVector<unsigned, 2> Affected;
+  /// The entities a leaf names at their start (`&a[0]`): the destroy ends an
+  /// object a construction there began (FlowState::Constructed), and leaves
+  /// the rest of the storage as it was.
+  SmallVector<unsigned, 2> StartAffected;
 };
 
 /// A read through, or a store below, tracked storage (P4222R2 §4.5, §5.4)
@@ -3287,6 +3344,14 @@ struct FlowState {
     /// A marked std::unique_ptr null on some path: its destroys are no
     /// double_destroy, as the nulling path destroys nothing there.
     MayNull = 1u << 9,
+    /// Constructed whole, or as an object at its start, by a construction on
+    /// some path (DefAssignEvent::Constructs), with no whole destroy, release,
+    /// reset, escape, or uninitialized assertion since.
+    Constructed = 1u << 10,
+    /// Constructed in part, at an offset, by a construction on some path,
+    /// with no whole destroy, release, reset, escape, or uninitialized
+    /// assertion since.
+    PartConstructed = 1u << 11,
   };
   /// The flags the join intersects; it unites the others.
   static constexpr uint16_t JoinIntersects = Must | Esc | Null;
@@ -3457,9 +3522,12 @@ static LeafState leafState(const BindingLeaf &L, const FlowState &St,
 
 /// Judge a binding site against \p St with the funnel's verdict rule: a
 /// marked target rejects a source that is initialized (on every path) or
-/// Mixed, an unmarked one a source that is uninitialized (on every path) or
-/// Mixed -- for a whole copy, a source left uninitialized on some path
-/// (BindingSite::EveryPath); an Unknown source fires in neither direction.
+/// Mixed, or that a construction may have constructed on some path
+/// (FlowState::Constructed, PartConstructed) unless the target is
+/// std::now_init's (BindingSite::AssertUninit); an unmarked one a source that
+/// is uninitialized (on every path) or Mixed -- for a whole copy, a source
+/// left uninitialized on some path (BindingSite::EveryPath); an Unknown source
+/// fires in neither direction.
 static void judgeBindingSite(const BindingSite &Site, const FlowState &St,
                              const TrackedStorage &Storage,
                              SmallVectorImpl<PendingViolation> &Out) {
@@ -3484,10 +3552,29 @@ static void judgeBindingSite(const BindingSite &Site, const FlowState &St,
   LeafState Acc = State(Site.Leaves.front());
   for (const BindingLeaf &L : llvm::drop_begin(Site.Leaves))
     Acc = combineLeafStates(Acc, State(L));
+  // A construction on some path may have constructed the storage a marked
+  // target's leaf names: whole or at its start, or, for a leaf naming it
+  // whole, part of it -- for an object named whole, any of its members.
+  auto MayBeConstructed = [&](const BindingLeaf &L) {
+    if (L.Range.first != L.Range.second) {
+      for (unsigned I = L.Range.first; I != L.Range.second; ++I)
+        if (St.has(I, FlowState::Constructed) ||
+            St.has(I, FlowState::PartConstructed))
+          return true;
+      return false;
+    }
+    if (!L.Entity || L.ViaHandle || St.has(*L.Entity, FlowState::Offset))
+      return false;
+    std::optional<unsigned> R = referent(*L.Entity, St, Storage);
+    return R && (((L.WholeLeaf || L.AtStart) &&
+                  St.has(*R, FlowState::Constructed)) ||
+                 (L.WholeLeaf && St.has(*R, FlowState::PartConstructed)));
+  };
   // The shape select of the binding diagnostics: pointer, reference, handle.
   unsigned Shape = Site.IsReference ? 1 : !Site.HandleType.isNull() ? 2 : 0;
   if (Site.TargetMarked) {
-    if (Acc == LeafState::Initialized || Acc == LeafState::Mixed) {
+    if (Acc == LeafState::Initialized || Acc == LeafState::Mixed ||
+        (!Site.AssertUninit && llvm::any_of(Site.Leaves, MayBeConstructed))) {
       PendingViolation V{diag::err_init_ref_to_uninit_requires_uninit, Site.Loc,
                          Shape};
       V.HandleType = Site.HandleType;
@@ -3685,6 +3772,23 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
   auto MayWrite = [&](unsigned I) {
     St.update(I, FlowState::May, FlowState::EntryAsserted);
   };
+  // The construction bits, which a whole destroy, release, reset, escape, or
+  // uninitialized assertion clears.
+  constexpr uint16_t ConstructBits =
+      FlowState::Constructed | FlowState::PartConstructed;
+  // Mark the storage Idx refers to as a construction's credit left it,
+  // whether or not its designation covers the storage: an object of another
+  // type, or a base, constructed there is still an object. Through an offset
+  // handle the construction is at an offset.
+  auto Construct = [&](const DefAssignEvent &Ev) {
+    if (Ev.Constructs == ConstructExtent::None || Ev.Sub.Class)
+      return;
+    if (std::optional<unsigned> R = referent(Ev.Idx, St, Storage))
+      St.update(*R, Ev.Constructs == ConstructExtent::Offset ||
+                            St.has(Ev.Idx, FlowState::Offset)
+                        ? FlowState::PartConstructed
+                        : FlowState::Constructed);
+  };
   for (const DefAssignEvent &Ev : BlockEvents) {
     switch (Ev.Kind) {
     case DefAssignEventKind::Read:
@@ -3693,6 +3797,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
         (*Offending)[Ev.Idx].push_back(Ev.E);
       break;
     case DefAssignEventKind::Write:
+      Construct(Ev);
       if (std::optional<unsigned> R = WriteTarget(Ev)) {
         // Through an offset handle a credit reaches part of the referent.
         if (St.has(Ev.Idx, FlowState::Offset)) {
@@ -3717,6 +3822,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       Write(Ev.Idx);
       break;
     case DefAssignEventKind::MayWrite:
+      Construct(Ev);
       if (std::optional<unsigned> R = WriteTarget(Ev))
         WriteStorage(Ev, *R, MayWrite);
       break;
@@ -3724,7 +3830,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       constexpr uint16_t Copied =
           FlowState::Must | FlowState::May | FlowState::MayUnassigned |
           FlowState::Esc | FlowState::MayDestroyed | FlowState::EntryAsserted |
-          FlowState::MembersPending;
+          FlowState::MembersPending | ConstructBits;
       St.update(Ev.Idx, St.bits(Ev.Aux) & Copied, Copied);
       break;
     }
@@ -3733,7 +3839,8 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
         WithSubs(*R, [&](unsigned I) {
           St.update(I, FlowState::MayUnassigned,
                     FlowState::Must | FlowState::May | FlowState::Esc |
-                        FlowState::EntryAsserted | FlowState::MembersPending);
+                        FlowState::EntryAsserted | FlowState::MembersPending |
+                        ConstructBits);
         });
       break;
     case DefAssignEventKind::Destroy: {
@@ -3756,9 +3863,14 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
         if (Site.Conditional)
           Set |= FlowState::May;
         else
-          Clear |= FlowState::May | FlowState::Esc;
+          Clear |= FlowState::May | FlowState::Esc | ConstructBits;
         WithSubs(*R, [&](unsigned I) { St.update(I, Set, Clear); });
       }
+      if (!Site.Conditional)
+        for (unsigned A : Site.StartAffected)
+          if (std::optional<unsigned> R = referent(A, St, Storage);
+              R && !St.has(A, FlowState::Offset))
+            St.update(*R, 0, FlowState::Constructed);
       break;
     }
     case DefAssignEventKind::Reseat: {
@@ -3782,7 +3894,8 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
                                                    : FlowState::MayUnassigned,
                     FlowState::Must | FlowState::May |
                         FlowState::MayUnassigned | FlowState::MayDestroyed |
-                        FlowState::EntryAsserted | FlowState::MembersPending);
+                        FlowState::EntryAsserted | FlowState::MembersPending |
+                        ConstructBits);
         });
         break;
       case ReseatTarget::Entity:
@@ -3812,7 +3925,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
         WithSubs(NewTarget, [&](unsigned I) {
           St.update(I, FlowState::MayUnassigned,
                     FlowState::Must | FlowState::May |
-                        FlowState::MembersPending);
+                        FlowState::MembersPending | ConstructBits);
         });
       St.setTarget(Ev.Idx, NewTarget);
       // A copy of an offset handle is offset too.
@@ -3831,7 +3944,8 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
         WithSubs(*R, [&](unsigned I) {
           St.update(I, FlowState::May | FlowState::MayUnassigned,
                     FlowState::Must | FlowState::MayDestroyed |
-                        FlowState::EntryAsserted | FlowState::MembersPending);
+                        FlowState::EntryAsserted | FlowState::MembersPending |
+                        ConstructBits);
         });
       break;
     case DefAssignEventKind::Reset:
@@ -3840,7 +3954,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
           St.update(I, FlowState::MayUnassigned,
                     FlowState::Must | FlowState::May | FlowState::Esc |
                         FlowState::MayDestroyed | FlowState::EntryAsserted |
-                        FlowState::MembersPending);
+                        FlowState::MembersPending | ConstructBits);
         });
       break;
     case DefAssignEventKind::AggregateEscape:
@@ -4237,26 +4351,32 @@ static const CallExpr *getConstructionAliasCall(const ASTContext &Ctx,
 
 /// The storage a construction alias refers to after its declaration: the
 /// entity every leaf of its call's construct argument \p Arg, bound as
-/// \p ParamTy, names whole, as a destroy of the argument would name it; none
-/// when the leaves disagree or one names a subobject or untracked storage.
+/// \p ParamTy, names as a destroy of the argument would -- whole, or at its
+/// start (Resolution::AtStart), which sets \p AtStart; none when the leaves
+/// disagree or one names a subobject at an offset or untracked storage.
 static std::optional<unsigned>
 constructionAliasTarget(const TrackedStorage &Storage, const Expr *Arg,
-                        QualType ParamTy) {
+                        QualType ParamTy, bool &AtStart) {
+  AtStart = false;
   bool AsPointerValue;
   const Expr *Operand =
       SemaProfiles::bindingSourceOperand(Arg, ParamTy, AsPointerValue);
   if (!Operand)
     return std::nullopt;
-  SmallVector<std::optional<unsigned>, 2> Targets;
+  SmallVector<std::pair<std::optional<unsigned>, bool>, 2> Targets;
   SemaProfiles::forEachTargetLeaf(
       Operand, [&](const SemaProfiles::ShapeLeaf &Leaf) {
         TrackedStorage::Resolution R =
             Storage.resolveFlowLeaf(Leaf, AsPointerValue);
-        Targets.push_back(R.Entity && !R.Subobject ? R.Entity : std::nullopt);
+        if (R.Entity && (!R.Subobject || R.AtStart))
+          Targets.push_back({R.Entity, R.Subobject});
+        else
+          Targets.push_back({std::nullopt, false});
       });
   if (Targets.empty() || !llvm::all_equal(Targets))
     return std::nullopt;
-  return Targets.front();
+  AtStart = Targets.front().second;
+  return Targets.front().first;
 }
 
 /// Add \p Leaf to \p Unresolved once: a leaf SemaProfiles::isFlowTrackedLeaf
@@ -4416,6 +4536,7 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
               if (HL.Partial && L.R.Entity) {
                 L.R.Subobject = true;
                 L.R.Sub = SubKey();
+                L.R.AtStart = false;
               }
               if (HL.M == HandleLeaf::Mode::Range && !L.R.Entity &&
                   L.Whole.first == L.Whole.second) {
@@ -4468,11 +4589,15 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
   };
   // The storage an argument names, as events of \p Kind: the resolved whole
   // entity, or every entity of the object passed as a whole. A credit passes
-  // its \p Designated type and RawExempt (ResolveArg).
+  // its \p Designated type and RawExempt (ResolveArg), and a construction's
+  // credit \p Constructs: it constructs what it names whole -- each storage an
+  // argument naming several names -- and a subobject at the storage's start
+  // or at an offset (DefAssignEvent::Constructs).
   auto AppendFor = [&](const Expr *Arg, QualType ParamTy,
                        DefAssignEventKind Kind,
                        QualType Designated = QualType(), bool RawExempt = false,
-                       bool SkipUninitMembers = false) {
+                       bool SkipUninitMembers = false,
+                       bool Constructs = false) {
     SmallVector<ArgLeaf, 2> Leaves;
     ResolveArg(Arg, ParamTy, Leaves, Designated, RawExempt);
     if (Leaves.empty())
@@ -4488,6 +4613,8 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
       Ev.RawExempt = RawExempt;
       Ev.Sub = Sub;
       Ev.SkipUninitMembers = SkipUninitMembers;
+      if (Constructs && !Sub.Class)
+        Ev.Constructs = ConstructExtent::Start;
       BlockEvents.push_back(Ev);
     };
     for (const ArgLeaf &L : Leaves) {
@@ -4495,9 +4622,13 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
         Push(*L.R.Entity);
       // A credit of part of the storage may have initialized it, so it is no
       // longer uninitialized on every path; a read still needs every part.
-      if (L.R.Entity && L.R.Subobject && Kind == DefAssignEventKind::Write)
-        BlockEvents.push_back(
-            {DefAssignEventKind::MayWrite, *L.R.Entity, CallLike});
+      if (L.R.Entity && L.R.Subobject && Kind == DefAssignEventKind::Write) {
+        DefAssignEvent Ev{DefAssignEventKind::MayWrite, *L.R.Entity, CallLike};
+        if (Constructs)
+          Ev.Constructs =
+              L.R.AtStart ? ConstructExtent::Start : ConstructExtent::Offset;
+        BlockEvents.push_back(Ev);
+      }
       // A credit naming a SubMember whole credits that member.
       if (L.R.Entity && L.R.Subobject && L.R.Sub.Exact)
         Push(*L.R.Entity, L.R.Sub);
@@ -4540,8 +4671,12 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
       BindingLeaf Leaf;
       if (L.R.Entity) {
         Leaf.Entity = L.R.Entity;
-        if (!L.R.Subobject && !llvm::is_contained(Site.Affected, *L.R.Entity))
-          Site.Affected.push_back(*L.R.Entity);
+        bool Start =
+            L.R.Subobject ? L.R.AtStart : Storage.Entities[*L.R.Entity].AtStart;
+        SmallVectorImpl<unsigned> &Into =
+            Start ? Site.StartAffected : Site.Affected;
+        if ((!L.R.Subobject || Start) && !llvm::is_contained(Into, *L.R.Entity))
+          Into.push_back(*L.R.Entity);
       } else {
         Leaf.State = L.Form;
         Leaf.Range = L.Part;
@@ -4552,7 +4687,8 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
             Site.Affected.push_back(Idx);
       Site.Leaves.push_back(Leaf);
     }
-    if ((!Site.Judged || Site.Leaves.empty()) && Site.Affected.empty())
+    if ((!Site.Judged || Site.Leaves.empty()) && Site.Affected.empty() &&
+        Site.StartAffected.empty())
       return;
     DSites.push_back(std::move(Site));
     BlockEvents.push_back({DefAssignEventKind::Destroy, 0, CallLike,
@@ -4615,9 +4751,12 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
         Designated = S.Context.getConstantArrayType(
             Designated, llvm::APInt(64, 1), nullptr, ArraySizeModifier::Normal,
             0);
+      // A byte writer's credit takes storage in any state and constructs
+      // nothing.
       AppendFor(Arg, PT, DefAssignEventKind::Write, Designated, RawExempt,
                 /*SkipUninitMembers=*/Roles.DefaultInitCredit &&
-                    Roles.roleOf(P) == SemaProfiles::KnownParamRole::Construct);
+                    Roles.roleOf(P) == SemaProfiles::KnownParamRole::Construct,
+                /*Constructs=*/!Roles.isInitializingParam(P));
     });
 }
 
@@ -5648,6 +5787,8 @@ static void extractStdInitEvents(
           L.Entity = R.Entity;
           L.Sub = R.Sub;
           L.WholeLeaf = !R.Subobject;
+          L.AtStart = R.AtStart;
+          L.ViaHandle = R.ViaHandle;
           // A value copy through a pointer to data member reads what the
           // step may name.
           if (!L.Entity && Use == SemaProfiles::FlowLeafUse::ValueCopy &&
@@ -5682,6 +5823,7 @@ static void extractStdInitEvents(
               TrackedStorage::Resolution R = Storage.resolveHandleLeaf(HL);
               L.Entity = R.Entity;
               L.WholeLeaf = !R.Subobject;
+              L.AtStart = R.AtStart;
               if (!L.Entity)
                 noteUnresolvedFlowLeaf(UnresolvedLeaves, HL.E);
             }
@@ -5900,11 +6042,17 @@ static void extractStdInitEvents(
                            Roles.isEndParam(Parm) ||
                            Roles.transfersParam(Parm) ||
                            (SemaProfiles::isHandleType(T) &&
-                            SemaProfiles::isAssignmentSource(Parm))))
+                            SemaProfiles::isAssignmentSource(Parm)))) {
+                  size_t First = Sites.size();
                   AddBinding(K::Parameter, Loc,
                              Parm && Roles.isMarkedParam(Parm), T, Arg, nullptr,
                              CallLike, SemaProfiles::isValueCopySource(Parm),
                              AsRange, Parm);
+                  if (Parm && Roles.roleOf(Parm) ==
+                                  SemaProfiles::KnownParamRole::AssertUninit)
+                    for (BindingSite &Site : llvm::drop_begin(Sites, First))
+                      Site.AssertUninit = true;
+                }
               });
         };
     // The mutable aliases the arguments of the call-like \p CallLike of a
@@ -6540,8 +6688,10 @@ static void extractStdInitEvents(
               const Expr *Arg;
               QualType ParamTy;
               std::optional<unsigned> Target;
+              bool AtStart;
               if (getConstructionAliasCall(Ctx, V, Arg, ParamTy))
-                Target = constructionAliasTarget(Storage, Arg, ParamTy);
+                Target =
+                    constructionAliasTarget(Storage, Arg, ParamTy, AtStart);
               AppendReseat(It->second, Init,
                            Target ? ReseatTarget::Alias : ReseatTarget::Unknown,
                            Target.value_or(0));
@@ -6971,11 +7121,15 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
   for (const DeclRefExpr *DRE : Uses)
     if (!Loaded.contains(DRE))
       AliasVars.erase(cast<VarDecl>(DRE->getDecl()));
-  for (const AliasCandidate &C : Aliases)
-    if (AliasVars.contains(C.V) &&
-        constructionAliasTarget(Storage, C.Arg, C.ParamTy))
-      Storage.addLocalEntity(TrackedEntity::Kind::ConstructAlias, C.V,
-                             /*UnknownEntry=*/false);
+  for (const AliasCandidate &C : Aliases) {
+    bool AtStart;
+    if (!AliasVars.contains(C.V) ||
+        !constructionAliasTarget(Storage, C.Arg, C.ParamTy, AtStart))
+      continue;
+    unsigned Idx = Storage.addLocalEntity(TrackedEntity::Kind::ConstructAlias,
+                                          C.V, /*UnknownEntry=*/false);
+    Storage.Entities[Idx].AtStart = AtStart;
+  }
 }
 
 /// Add to \p Out every expression below a construct of \p D's body that the CFG

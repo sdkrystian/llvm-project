@@ -50,6 +50,7 @@ template <class P, class It> void destroy(P &&policy, It first, It last);
 template <class P, class It, class Size> It destroy_n(P &&policy, It first, Size n);
 template <class T, __SIZE_TYPE__ N> T *begin(T (&a)[N]);
 template <class T, __SIZE_TYPE__ N> T *end(T (&a)[N]);
+template <class T, __SIZE_TYPE__ N> T *data(T (&a)[N]);
 template <class T> struct allocator {
   T *allocate(__SIZE_TYPE__ n);
   void deallocate(T *p, __SIZE_TYPE__ n);
@@ -1024,6 +1025,130 @@ void construct_at_result_byte_buffer() {
   std::construct_at((ScopedDtor *)buf);
 }
 
+// A first element constructed, destroyed through the returned pointer, and constructed again is accepted
+void construct_at_result_first_element() {
+  [[uninit]] ScopedDtor arr[2];
+  ScopedDtor *q = std::construct_at(&arr[0]);
+  std::destroy_at(q);
+  std::construct_at(&arr[0]);
+}
+
+struct ScopedBase { int x; ~ScopedBase(); };
+struct ScopedDerived : ScopedBase { int y; };
+[[now_init]] void fill_scoped(ScopedDtor *p [[ref_to_uninit]]);
+
+// A second construct_at into a std::byte buffer is a double construction
+void construct_byte_buffer_twice() {
+  alignas(ScopedDtor) std::byte buf [[uninit]] [sizeof(ScopedDtor)];
+  std::construct_at((ScopedDtor *)buf);
+  std::construct_at((ScopedDtor *)buf); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A second construct_at into an unsigned char buffer is a double construction
+void construct_uchar_buffer_twice() {
+  alignas(ScopedDtor) unsigned char buf [[uninit]] [sizeof(ScopedDtor)];
+  std::construct_at((ScopedDtor *)buf);
+  std::construct_at((ScopedDtor *)buf); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// Constructing an object whole after its base is a double construction
+void construct_base_then_whole() {
+  ScopedDerived d [[uninit]];
+  std::construct_at(static_cast<ScopedBase *>(&d));
+  std::construct_at(&d); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// Constructing an object whole after a narrower object at its start is a double construction
+void construct_narrower_then_whole() {
+  ScopedDtor w [[uninit]];
+  std::construct_at(reinterpret_cast<int *>(&w), 1);
+  std::construct_at(&w); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// construct_at of an array constructs its first element, so a second one is a double construction
+void construct_array_twice() {
+  [[uninit]] ScopedDtor arr[2];
+  std::construct_at(arr);
+  std::construct_at(arr); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// construct_at through std::data twice is a double construction
+void construct_data_twice() {
+  [[uninit]] ScopedDtor arr[2];
+  std::construct_at(std::data(arr));
+  std::construct_at(std::data(arr)); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A [[now_init]] call on the first element twice is a double construction
+void now_init_first_element_twice() {
+  [[uninit]] ScopedDtor arr[2];
+  fill_scoped(&arr[0]);
+  fill_scoped(&arr[0]); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// Filling a whole array after part of it is a double construction
+void fill_part_then_whole(const ScopedDtor &v) {
+  [[uninit]] ScopedDtor a[4];
+  std::uninitialized_fill(a + 2, a + 4, v);
+  std::uninitialized_fill(a, a + 4, v); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// Element-wise construction is accepted
+void construct_elements() {
+  [[uninit]] ScopedDtor arr[2];
+  std::construct_at(&arr[0]);
+  std::construct_at(&arr[1]);
+}
+
+// A second construction of an element past the first is accepted: elements are not tracked
+void construct_element_twice() {
+  [[uninit]] ScopedDtor arr[2];
+  std::construct_at(&arr[1]);
+  std::construct_at(&arr[1]);
+}
+
+// Constructing the first element after destroying it is accepted
+void construct_first_element_after_destroy() {
+  [[uninit]] ScopedDtor arr[2];
+  std::construct_at(&arr[0]);
+  std::destroy_at(&arr[0]);
+  std::construct_at(&arr[0]);
+}
+
+// A construct_at after one on some path is a double construction
+void construct_after_one_path(bool c) {
+  ScopedDtor w [[uninit]];
+  if (c)
+    std::construct_at(&w);
+  std::construct_at(&w); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A construct_at in a loop constructs over the previous iteration's object
+void construct_in_loop(int n) {
+  ScopedDtor w [[uninit]];
+  for (int i = 0; i != n; ++i)
+    std::construct_at(&w); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// Destroying and constructing again in a loop is accepted
+void destroy_construct_in_loop(int n) {
+  ScopedDtor w [[uninit]];
+  std::construct_at(&w);
+  for (int i = 0; i != n; ++i) {
+    std::destroy_at(&w);
+    std::construct_at(&w);
+  }
+}
+
+// std::now_init after element-wise construction is accepted
+void now_init_after_elements() {
+  [[uninit]] ScopedDtor arr[4];
+  for (int i = 0; i != 4; ++i)
+    std::construct_at(arr + i);
+  ScopedDtor(*p)[4] = std::now_init(&arr);
+  (void)p;
+}
+
 struct LocalAgg {
   int m [[uninit]];
   int k [[uninit]]; // expected-note 2 {{member 'k' declared here}}
@@ -1220,13 +1345,12 @@ void wording_by_spelling() {
   (void)a; (void)b;
 }
 
-// A marked binding asserts the local it names uninitialized, whatever a
-// conditional construct_at left it.
+// A marked binding of a local constructed on one path is rejected, and asserts the local uninitialized
 void construct_conditional_then_bind(bool c) {
   Payload x [[uninit]];
   if (c)
     std::construct_at(&x, 1);
-  Payload *p [[ref_to_uninit]] = &x; // OK: constructed on one path only
+  Payload *p [[ref_to_uninit]] = &x; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   int z = x.y; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
   std::construct_at(p, 2);
   int z2 = x.y; // OK
@@ -1249,6 +1373,22 @@ int construct_every_path_subobject_read(bool c) {
   else
     std::construct_at(&x, 2);
   return x.y; // OK
+}
+
+// A construct_at through a marked pointer after one on some path is a double construction
+void construct_through_pointer_one_path(bool c, Payload *p [[ref_to_uninit]]) {
+  if (c)
+    std::construct_at(p, 1);
+  std::construct_at(p, 2); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A marked binding after a destroy on one path is rejected: the other path keeps the constructed object
+void bind_after_one_path_destroy(bool c, Payload *p [[ref_to_uninit]]) {
+  std::construct_at(p, 1);
+  if (c)
+    std::destroy_at(p);
+  Payload *q [[ref_to_uninit]] = p; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)q;
 }
 
 // A read through a marker after a construct_at on one path only is rejected

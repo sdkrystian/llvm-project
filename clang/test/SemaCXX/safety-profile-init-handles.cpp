@@ -435,6 +435,12 @@ int range_for(std::span<int> s [[ref_to_uninit]]) {
   return k;
 }
 
+// A range-for over a marked span constructing each element through a marked reference is accepted
+void range_for_construct(std::span<int> s [[ref_to_uninit]]) {
+  for (int &x [[ref_to_uninit]] : s)
+    std::construct_at(&x, 1);
+}
+
 // A copy of a marked span and a local reference to one refer to the same
 // memory
 int copied_span(std::span<int> s [[ref_to_uninit]]) {
