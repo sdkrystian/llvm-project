@@ -1133,7 +1133,16 @@ identified referent named by a marked binding is asserted unassigned (``Must``,
 ``MayDestroyed`` and ``Esc`` kept); the ``Reseat`` follows the binding's
 ``Binding`` event in block order, so the judgment sees the pre-assertion
 state.  A binding to a marked parameter is a ``Binding`` event only and
-asserts nothing.  A tracked local's DeclStmt emits a ``Reset`` of its
+asserts nothing.  An unmarked local pointer initialized from the result of a
+call that constructs one object and returns a pointer to it
+(``std::construct_at``, ``std::ranges::construct_at``) and whose every use
+loads its value is a *construction alias* (``getConstructionAliasCall``) when
+the call constructs tracked storage whole: a ``ConstructAlias`` entity whose
+declaration reseats it to that storage without an assertion
+(``ReseatTarget::Alias``).  Events through it act on that storage; the
+parse-time funnel judges its bindings, reads, and stores by form, and a
+destroy through it, which the form never rejects, is the pass's alone.  A
+tracked local's DeclStmt emits a ``Reset`` of its
 ``[[uninit]]`` entity and one over its member entities ahead of the
 declaration's own binding and copy events, clearing every flag but
 ``MayUnassigned``, which it sets: each execution of the declaration starts a
@@ -1836,8 +1845,15 @@ Missed Diagnostics
 - An assignment through a conditional, comma, or GNU ``?:`` target whose
   arms differ in marking accepts either source: any single answer would
   reject a legal combination.
-- A second ``destroy_at`` of storage that is not flow-tracked (the referent
-  of another object's marked pointer member) is not a double destroy.
+- A second destroy of storage that is not flow-tracked -- an ordinary local
+  or member, the referent of an unmarked pointer that is not a construction
+  alias, the referent of another object's marked pointer member -- is not a
+  double destroy.
+- A destroy of tracked storage through an unmarked alias other than a
+  construction alias -- ``D *p = &d``, a reference, a by-reference capture, a
+  returned pointer the body assigns or binds to a reference -- records
+  nothing: the storage stays live for a later construction and its scope
+  exit.
 - A pointer passed through a non-const reference to it -- a forwarding
   reference (``v.emplace_back(raw, 4)``,
   ``std::make_unique<std::span<int>>(raw, 4)``) -- binds the pointer object,

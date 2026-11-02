@@ -1861,10 +1861,12 @@ using MemberPath = SemaProfiles::MemberPath;
 /// member of the current object (MemberPointee, keyed by the member's path;
 /// SemaProfiles::markedPointerMembers), which enters asserted
 /// (FlowState::EntryAsserted), the current object as a whole outside its
-/// constructors, which enters live (SemaProfiles::FlowLeafUse), or an
+/// constructors, which enters live (SemaProfiles::FlowLeafUse), an
 /// [[uninit]] member of a WholeLocal's or Pointee's storage (SubMember), whose
 /// state every event on that storage carries along except a
-/// default-initialization's credit.
+/// default-initialization's credit, or the storage an unmarked local pointer
+/// initialized from std::construct_at's result names (ConstructAlias;
+/// getConstructionAliasCall), identified per program point like a Pointee's.
 struct TrackedEntity {
   enum class Kind : uint8_t {
     CurrentObjectMember,
@@ -1873,7 +1875,8 @@ struct TrackedEntity {
     Pointee,
     MemberPointee,
     CurrentObject,
-    SubMember
+    SubMember,
+    ConstructAlias
   };
   Kind K;
   /// The member is tracked as a whole object (member kinds).
@@ -1909,10 +1912,11 @@ struct TrackedEntity {
   bool isMember() const {
     return K == Kind::CurrentObjectMember || K == Kind::LocalMember;
   }
-  /// The referent of a marked pointer, reference, or handle, identified per
-  /// program point (FlowState::Target).
+  /// The referent of a marked pointer, reference, or handle, or of a
+  /// construction alias, identified per program point (FlowState::Target).
   bool isPointee() const {
-    return K == Kind::Pointee || K == Kind::MemberPointee;
+    return K == Kind::Pointee || K == Kind::MemberPointee ||
+           K == Kind::ConstructAlias;
   }
 };
 
@@ -2125,9 +2129,10 @@ struct TrackedStorage {
   /// (initializesEveryMember): their members are written right after the
   /// declaration's Reset.
   llvm::SmallPtrSet<const VarDecl *, 4> InitializedLocals;
-  /// The marked pointers, references, and handles each ViaPointer reseat of
-  /// the body connects (runStdInitMemberReadChecks): only a pointer in
-  /// another's class can refer to that one's anonymous referent.
+  /// The marked pointers, references, handles, and construction aliases each
+  /// ViaPointer or Alias reseat of the body connects
+  /// (runStdInitMemberReadChecks): only a pointer in another's class can refer
+  /// to that one's anonymous referent.
   llvm::EquivalenceClasses<unsigned> AliasClasses;
 
   /// Append one entity per entry of \p RD's flow-tracked member table
@@ -2224,7 +2229,8 @@ struct TrackedStorage {
   }
 
   /// Append the WholeLocal or Pointee entity of the marked local or
-  /// parameter \p V (once); returns its index.
+  /// parameter \p V, or the ConstructAlias entity of the construction alias
+  /// \p V (once); returns its index.
   unsigned addLocalEntity(TrackedEntity::Kind K, const VarDecl *V,
                           bool UnknownEntry);
 
@@ -2303,7 +2309,8 @@ struct TrackedStorage {
   }
 
   /// The Pointee entity of the marked local pointer \p V (a reference's
-  /// referent cannot be reseated and is not one), if tracked.
+  /// referent cannot be reseated and is not one), or the ConstructAlias entity
+  /// of the construction alias \p V, if tracked.
   std::optional<unsigned> markedPointerObject(const VarDecl *V) const;
   /// The Pointee entity of the marked local handle \p V
   /// (SemaProfiles::isFlowTrackedHandleVar), if tracked.
@@ -2401,7 +2408,8 @@ unsigned TrackedStorage::addLocalEntity(TrackedEntity::Kind K, const VarDecl *V,
     T = SemaProfiles::handleValueType(T);
     if (T.isNull())
       T = Ctx.VoidTy;
-  } else if (K == TrackedEntity::Kind::Pointee) {
+  } else if (K == TrackedEntity::Kind::Pointee ||
+             K == TrackedEntity::Kind::ConstructAlias) {
     T = T->isPointerType() ? T->getPointeeType() : T.getNonReferenceType();
   }
   TrackedEntity E;
@@ -2411,7 +2419,9 @@ unsigned TrackedStorage::addLocalEntity(TrackedEntity::Kind K, const VarDecl *V,
   E.UnknownEntry = UnknownEntry;
   unsigned Idx = Entities.size();
   Entities.push_back(std::move(E));
-  addSubMembers(Idx);
+  // A construction alias always refers to other storage.
+  if (K != TrackedEntity::Kind::ConstructAlias)
+    addSubMembers(Idx);
   return LocalEntity[V] = Idx;
 }
 
@@ -2777,7 +2787,8 @@ std::optional<unsigned>
 TrackedStorage::markedPointerObject(const VarDecl *V) const {
   auto It = LocalEntity.find(V);
   if (It == LocalEntity.end() ||
-      Entities[It->second].K != TrackedEntity::Kind::Pointee ||
+      (Entities[It->second].K != TrackedEntity::Kind::Pointee &&
+       Entities[It->second].K != TrackedEntity::Kind::ConstructAlias) ||
       !V->getType()->isPointerType())
     return std::nullopt;
   return It->second;
@@ -2904,6 +2915,10 @@ enum class ReseatTarget {
   /// +=, -=, std::advance): a credit or destroy through it reaches part of
   /// the referent (FlowState::Offset).
   Offset,
+  /// The storage DefAssignEvent::Aux names there -- what it refers to, for a
+  /// Pointee; nothing through an offset handle -- asserting nothing: a
+  /// construction alias's (getConstructionAliasCall).
+  Alias,
   /// Nothing: a std::unique_ptr moved from, released, reset, assigned null,
   /// or constructed null. The referent it had stays where a move or release
   /// handed it, and its destroys destroy nothing (FlowState::Null).
@@ -3783,6 +3798,11 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       case ReseatTarget::Null:
         NewTarget = St.target(Ev.Idx);
         break;
+      case ReseatTarget::Alias:
+        NewTarget = !Storage.Entities[Ev.Aux].isPointee() ? Ev.Aux
+                    : St.has(Ev.Aux, FlowState::Offset)   ? UnknownTarget
+                                                          : St.target(Ev.Aux);
+        break;
       }
       // The binding's marker asserts the referent uninitialized; see
       // ReseatTarget.
@@ -4180,6 +4200,65 @@ static bool constructsOneObject(const SemaProfiles::CalleeLifecycleRoles &Roles,
                              });
 }
 
+/// If \p V may be a construction alias -- an unmarked local pointer, not a
+/// parameter or a __block variable, whose initializer is, through transparent
+/// casts, a call that constructs one object and returns a pointer to it
+/// (std::construct_at, std::ranges::construct_at; constructsOneObject) --
+/// return that call and set \p Arg and \p ParamTy to its construct argument
+/// and the parameter that argument binds; null otherwise. harvestTrackedLocals
+/// also requires that every use of \p V loads its value.
+static const CallExpr *getConstructionAliasCall(const ASTContext &Ctx,
+                                                const VarDecl *V,
+                                                const Expr *&Arg,
+                                                QualType &ParamTy) {
+  Arg = nullptr;
+  if (!V->hasLocalStorage() || isa<ParmVarDecl>(V) || V->isImplicit() ||
+      !V->getType()->isPointerType() || !V->getInit() ||
+      V->hasAttr<RefToUninitAttr>() || V->hasAttr<BlocksAttr>())
+    return nullptr;
+  const auto *CE =
+      dyn_cast<CallExpr>(SemaProfiles::ignoreTransparentCasts(V->getInit()));
+  const FunctionDecl *Callee = CE ? CE->getDirectCallee() : nullptr;
+  if (!Callee || !Callee->getReturnType()->isPointerType())
+    return nullptr;
+  SemaProfiles::CalleeLifecycleRoles Roles =
+      SemaProfiles::getCalleeLifecycleRoles(Callee);
+  forEachArgumentBinding(
+      Ctx, CE,
+      [&](const ParmVarDecl *P, QualType PT, const Expr *A, bool Variadic) {
+        if (!Arg && P && !Variadic && constructsOneObject(Roles, P) &&
+            Roles.initializesParam(P)) {
+          Arg = A;
+          ParamTy = PT;
+        }
+      });
+  return Arg ? CE : nullptr;
+}
+
+/// The storage a construction alias refers to after its declaration: the
+/// entity every leaf of its call's construct argument \p Arg, bound as
+/// \p ParamTy, names whole, as a destroy of the argument would name it; none
+/// when the leaves disagree or one names a subobject or untracked storage.
+static std::optional<unsigned>
+constructionAliasTarget(const TrackedStorage &Storage, const Expr *Arg,
+                        QualType ParamTy) {
+  bool AsPointerValue;
+  const Expr *Operand =
+      SemaProfiles::bindingSourceOperand(Arg, ParamTy, AsPointerValue);
+  if (!Operand)
+    return std::nullopt;
+  SmallVector<std::optional<unsigned>, 2> Targets;
+  SemaProfiles::forEachTargetLeaf(
+      Operand, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+        TrackedStorage::Resolution R =
+            Storage.resolveFlowLeaf(Leaf, AsPointerValue);
+        Targets.push_back(R.Entity && !R.Subobject ? R.Entity : std::nullopt);
+      });
+  if (Targets.empty() || !llvm::all_equal(Targets))
+    return std::nullopt;
+  return Targets.front();
+}
+
 /// Add \p Leaf to \p Unresolved once: a leaf SemaProfiles::isFlowTrackedLeaf
 /// reports tracked whose resolution names no entity and no member range, on
 /// which the predicate and the resolver disagree.
@@ -4453,6 +4532,11 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
       // destroys nothing tracked (SemaProfiles::designatesReferentElement).
       if (L.Element)
         continue;
+      // The parse-time funnel judged a construction alias, an unmarked
+      // pointer, by its form, which never rejects a destroy.
+      if (L.R.Entity && Storage.Entities[*L.R.Entity].K ==
+                            TrackedEntity::Kind::ConstructAlias)
+        Site.Judged = true;
       BindingLeaf Leaf;
       if (L.R.Entity) {
         Leaf.Entity = L.R.Entity;
@@ -6440,7 +6524,8 @@ static void extractStdInitEvents(
               AppendAliasEscapes(Init, V->getType(), Init);
             // A declared marked pointer or reference refers to what its
             // initializer names; a __block one can be reseated by a block
-            // body the analysis does not see.
+            // body the analysis does not see. A construction alias refers to
+            // what its call constructed.
             if (auto It = Storage.LocalEntity.find(V);
                 It != Storage.LocalEntity.end() &&
                 Storage.Entities[It->second].K ==
@@ -6449,6 +6534,17 @@ static void extractStdInitEvents(
               if (!V->hasAttr<BlocksAttr>())
                 RT = ReseatTargetFor(Init, V->getType());
               AppendReseat(It->second, Init, RT.first, RT.second);
+            } else if (It != Storage.LocalEntity.end() &&
+                       Storage.Entities[It->second].K ==
+                           TrackedEntity::Kind::ConstructAlias) {
+              const Expr *Arg;
+              QualType ParamTy;
+              std::optional<unsigned> Target;
+              if (getConstructionAliasCall(Ctx, V, Arg, ParamTy))
+                Target = constructionAliasTarget(Storage, Arg, ParamTy);
+              AppendReseat(It->second, Init,
+                           Target ? ReseatTarget::Alias : ReseatTarget::Unknown,
+                           Target.value_or(0));
             }
           }
           // A tracked copy: each dest member's state becomes its source
@@ -6699,9 +6795,10 @@ static bool isCurrentObjectLifecycleUse(Sema &S, const Stmt *St) {
 /// resolves). Tracked for bindings only are the members of every other local,
 /// handler variable, or parameter whose class has marked scalar members
 /// (SemaProfiles::flowTrackedAggregateClass), every [[uninit]] local or
-/// parameter as a whole, and the referent of every [[ref_to_uninit]] local
-/// pointer, reference, or handle; a variable of an enclosing function the body
-/// reaches by capture is tracked from an unknown entry state. The read-tracking
+/// parameter as a whole, the referent of every [[ref_to_uninit]] local
+/// pointer, reference, or handle, and the storage a construction alias's call
+/// constructs; a variable of an enclosing function the body reaches by
+/// capture is tracked from an unknown entry state. The read-tracking
 /// premises -- a copy does not inherit initialization, a by-value parameter is
 /// a copy of the caller's argument, a defaulted parameter is not -- are argued
 /// in ProfilesFrameworkInternals.rst, "Flow-Tracked Storage (std::init)" and
@@ -6834,6 +6931,51 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
         Storage.addObject(V, RD, /*TrackReads=*/false,
                           /*UnknownEntry=*/true);
   }
+  // The construction aliases (getConstructionAliasCall) whose call constructs
+  // tracked storage and whose every use loads their value -- the operand of
+  // a load or of a cast to void, so no store, increment, address, reference
+  // binding, or by-reference capture -- in source order, so an alias may name
+  // an earlier one.
+  struct AliasCandidate {
+    const VarDecl *V;
+    const Expr *Arg;
+    QualType ParamTy;
+  };
+  SmallVector<AliasCandidate, 2> Aliases;
+  llvm::SmallPtrSet<const VarDecl *, 2> AliasVars;
+  for (const VarDecl *V : Locals) {
+    AliasCandidate C{V, nullptr, QualType()};
+    if (!Storage.LocalEntity.count(V) &&
+        getConstructionAliasCall(S.Context, V, C.Arg, C.ParamTy)) {
+      Aliases.push_back(C);
+      AliasVars.insert(V);
+    }
+  }
+  if (Aliases.empty())
+    return;
+  llvm::SmallPtrSet<const DeclRefExpr *, 8> Loaded;
+  SmallVector<const DeclRefExpr *, 8> Uses;
+  forEachAnalyzedStmt(D, [&](const Stmt *Cur) {
+    if (const auto *CE = dyn_cast<CastExpr>(Cur)) {
+      if (CE->getCastKind() == CK_LValueToRValue ||
+          CE->getCastKind() == CK_ToVoid)
+        if (const auto *DRE =
+                dyn_cast<DeclRefExpr>(CE->getSubExpr()->IgnoreParens()))
+          Loaded.insert(DRE);
+    } else if (const auto *DRE = dyn_cast<DeclRefExpr>(Cur)) {
+      if (const auto *V = dyn_cast<VarDecl>(DRE->getDecl());
+          V && AliasVars.contains(V))
+        Uses.push_back(DRE);
+    }
+  });
+  for (const DeclRefExpr *DRE : Uses)
+    if (!Loaded.contains(DRE))
+      AliasVars.erase(cast<VarDecl>(DRE->getDecl()));
+  for (const AliasCandidate &C : Aliases)
+    if (AliasVars.contains(C.V) &&
+        constructionAliasTarget(Storage, C.Arg, C.ParamTy))
+      Storage.addLocalEntity(TrackedEntity::Kind::ConstructAlias, C.V,
+                             /*UnknownEntry=*/false);
 }
 
 /// Add to \p Out every expression below a construct of \p D's body that the CFG
@@ -7019,7 +7161,9 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
     NumFlowEvents += BlockEvents.size();
     for (const DefAssignEvent &Ev : BlockEvents)
       if (Ev.Kind == DefAssignEventKind::Reseat &&
-          Ev.RT == ReseatTarget::ViaPointer)
+          (Ev.RT == ReseatTarget::ViaPointer ||
+           (Ev.RT == ReseatTarget::Alias &&
+            Storage.Entities[Ev.Aux].isPointee())))
         Storage.AliasClasses.unionSets(Ev.Idx, Ev.Aux);
   }
   // Nothing is assigned at function entry: written initializers write at

@@ -1075,7 +1075,13 @@ the end iterator is accepted in any state, as for ``uninitialized_fill`` -- so
 the construct/destroy/construct cycle is legal, a second destruction is
 rejected, a destroy of never-constructed storage is rejected too, and binding
 the destroyed storage to an ordinary pointer or reference is rejected as the
-unmarked-direction violation.  An
+unmarked-direction violation.  A local pointer initialized from the result of
+``std::construct_at`` or ``std::ranges::construct_at`` whose value the body
+only reads -- no assignment, increment, address, reference binding, or
+by-reference capture -- names the storage the call constructed whole: a
+destroy through it destroys that storage, so after
+``T *q = std::construct_at(&u); std::destroy_at(q);`` a construction of ``u``
+is accepted and a second destroy of it is rejected.  An
 explicit destructor call (``p->~T()``, ``s.~T()``, and a scalar's
 pseudo-destructor call) is the same destroy -- ``std::destroy_at`` is specified
 as one ([specialized.destroy]) -- and the diagnostics name it a destructor

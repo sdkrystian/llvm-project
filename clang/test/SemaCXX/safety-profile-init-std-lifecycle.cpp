@@ -970,6 +970,60 @@ void scope_exit_rejected_marker() {
                            // expected-note {{default-initialization of 'ScopedCtor' runs a constructor}}
 }
 
+// A destroy through the pointer construct_at returned destroys the local, so its scope-exit destructor destroys it again
+void construct_at_result_destroy() {
+  ScopedDtor w [[uninit]]; // expected-note {{'w' is destroyed at the end of its scope}}
+  ScopedDtor *q = std::construct_at(&w);
+  std::destroy_at(q);
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+
+// A construction after a destroy through the returned pointer is accepted
+void construct_at_result_destroy_reconstruct() {
+  ScopedDtor w [[uninit]];
+  ScopedDtor *q = std::construct_at(&w);
+  std::destroy_at(q);
+  std::construct_at(&w);
+}
+
+// A destructor call through the returned pointer destroys the local
+void construct_at_result_destructor_call() {
+  ScopedDtor w [[uninit]]; // expected-note {{'w' is destroyed at the end of its scope}}
+  ScopedDtor *q = std::construct_at(&w);
+  q->~ScopedDtor();
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+
+// std::destroy through the returned pointer destroys the local
+void construct_at_result_destroy_range() {
+  ScopedDtor w [[uninit]]; // expected-note {{'w' is destroyed at the end of its scope}}
+  ScopedDtor *q = std::construct_at(&w);
+  std::destroy(q, q + 1);
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+
+// A second destroy through the returned pointer is a double destruction
+void construct_at_result_double_destroy() {
+  ScopedDtor w [[uninit]]; // expected-note {{'w' is destroyed at the end of its scope}}
+  ScopedDtor *q = std::construct_at(&w);
+  std::destroy_at(q);
+  std::destroy_at(q); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+
+// A returned pointer the body assigns destroys nothing tracked
+void construct_at_result_assigned() {
+  ScopedDtor w [[uninit]];
+  ScopedDtor *q = std::construct_at(&w);
+  std::destroy_at(q);
+  std::construct_at(&w); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  q = nullptr;
+}
+
+// A byte buffer constructed, destroyed through the returned pointer, and constructed again is accepted
+void construct_at_result_byte_buffer() {
+  alignas(ScopedDtor) std::byte buf [[uninit]] [sizeof(ScopedDtor)];
+  ScopedDtor *p = std::construct_at((ScopedDtor *)buf);
+  std::destroy_at(p);
+  std::construct_at((ScopedDtor *)buf);
+}
+
 struct LocalAgg {
   int m [[uninit]];
   int k [[uninit]]; // expected-note 2 {{member 'k' declared here}}
