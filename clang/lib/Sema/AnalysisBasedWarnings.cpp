@@ -1850,6 +1850,21 @@ using BasePath = SemaProfiles::BasePath;
 using MemberStep = SemaProfiles::MemberStep;
 using MemberPath = SemaProfiles::MemberPath;
 
+/// The state a std::init flow entity enters the analyzed body in
+/// (runDefiniteAssignment's function-entry state).
+enum class EntryState : uint8_t {
+  /// Unassigned on every path; the current object as a whole enters live
+  /// and a marked pointer member's referent asserted uninitialized
+  /// (FlowState::EntryAsserted).
+  Unassigned,
+  /// Possibly assigned, on no path definitely, and on no path known
+  /// unassigned: a variable of an enclosing function a lambda or block body
+  /// reaches by capture.
+  Unknown,
+  /// Assigned on every path.
+  Initialized
+};
+
 /// One flow-tracked std::init storage entity of the analyzed body: an
 /// [[uninit]] member of the current object or of a directly named local or
 /// by-value parameter -- a scalar, or a class or array object tracked whole --
@@ -1884,11 +1899,8 @@ struct TrackedEntity {
   /// Read events are extracted for this entity (a constructor body's or a
   /// default-initialized constructor-less local's members).
   bool TrackReads = true;
-  /// The entity belongs to an enclosing function (a variable a lambda body
-  /// reaches by capture): its entry state is unknown -- possibly assigned,
-  /// on no path definitely, and on no path known unassigned -- rather than
-  /// unassigned.
-  bool UnknownEntry = false;
+  /// The state the entity enters the analyzed body in.
+  EntryState Entry = EntryState::Unassigned;
   /// The member path from the object (member kinds; its key in the object's
   /// SemaProfiles::flowTrackedMembers table) or to a MemberPointee's pointer
   /// member (SemaProfiles::markedPointerMembers), referring into that cached
@@ -2148,7 +2160,7 @@ struct TrackedStorage {
   /// only when non-empty.
   std::pair<unsigned, unsigned> addObject(const VarDecl *Base,
                                           const CXXRecordDecl *RD,
-                                          bool TrackReads, bool UnknownEntry);
+                                          bool TrackReads, EntryState Entry);
 
   /// Append a MemberPointee entity for each marked pointer member of the
   /// current object of class \p RD, then the SubMembers of each.
@@ -2236,7 +2248,7 @@ struct TrackedStorage {
   /// parameter \p V, or the ConstructAlias entity of the construction alias
   /// \p V (once); returns its index.
   unsigned addLocalEntity(TrackedEntity::Kind K, const VarDecl *V,
-                          bool UnknownEntry);
+                          EntryState Entry);
 
   /// The member entity of the object \p Base (null: the current object)
   /// whose member path is \p Steps, if tracked.
@@ -2385,7 +2397,7 @@ struct TrackedStorage {
 std::pair<unsigned, unsigned> TrackedStorage::addObject(const VarDecl *Base,
                                                         const CXXRecordDecl *RD,
                                                         bool TrackReads,
-                                                        bool UnknownEntry) {
+                                                        EntryState Entry) {
   unsigned Begin = Entities.size();
   for (const SemaProfiles::FlowTrackedMember &M :
        Profiles.flowTrackedMembers(RD)) {
@@ -2396,7 +2408,7 @@ std::pair<unsigned, unsigned> TrackedStorage::addObject(const VarDecl *Base,
     E.Whole = M.second;
     E.Type = M.first.back().Field->getType();
     E.TrackReads = TrackReads;
-    E.UnknownEntry = UnknownEntry;
+    E.Entry = Entry;
     Entities.push_back(std::move(E));
   }
   std::pair<unsigned, unsigned> Range{Begin, (unsigned)Entities.size()};
@@ -2411,7 +2423,7 @@ std::pair<unsigned, unsigned> TrackedStorage::addObject(const VarDecl *Base,
 }
 
 unsigned TrackedStorage::addLocalEntity(TrackedEntity::Kind K, const VarDecl *V,
-                                        bool UnknownEntry) {
+                                        EntryState Entry) {
   auto It = LocalEntity.find(V);
   if (It != LocalEntity.end())
     return It->second;
@@ -2429,7 +2441,7 @@ unsigned TrackedStorage::addLocalEntity(TrackedEntity::Kind K, const VarDecl *V,
   E.K = K;
   E.Type = T;
   E.TrackReads = false;
-  E.UnknownEntry = UnknownEntry;
+  E.Entry = Entry;
   unsigned Idx = Entities.size();
   Entities.push_back(std::move(E));
   // A construction alias always refers to other storage.
@@ -2450,7 +2462,7 @@ void TrackedStorage::addSubMembers(unsigned Idx) {
   unsigned Begin = Entities.size();
   Entities[Idx].Subs = {Begin, Begin + (unsigned)Table.size()};
   Entities[Idx].SubClass = RD;
-  bool UnknownEntry = Entities[Idx].UnknownEntry;
+  EntryState Entry = Entities[Idx].Entry;
   for (const SemaProfiles::FlowTrackedMember &M : Table) {
     TrackedEntity Sub;
     Sub.K = TrackedEntity::Kind::SubMember;
@@ -2458,7 +2470,7 @@ void TrackedStorage::addSubMembers(unsigned Idx) {
     Sub.Whole = M.second;
     Sub.Type = M.first.back().Field->getType();
     Sub.TrackReads = false;
-    Sub.UnknownEntry = UnknownEntry;
+    Sub.Entry = Entry;
     Entities.push_back(std::move(Sub));
   }
 }
@@ -3982,8 +3994,8 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
   }
 }
 
-/// The forward dataflow of the std::init engine: nothing is assigned at
-/// function entry (an entity of an enclosing function is may-assigned and in no
+/// The forward dataflow of the std::init engine: each entity enters in its
+/// EntryState (an entity of an enclosing function may-assigned and in no
 /// known state), a block's entry is the join of its predecessors' exits (an
 /// entity is definitely assigned at a point only if assigned on every incoming
 /// path, the paper's all-branches rule, P4222R2 §1.3), and a block's transfer
@@ -4018,12 +4030,14 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
   std::vector<FlowState> ExitState(NumBlocks);
   FlowState FunctionEntry(NumTracked);
   for (unsigned I = 0; I != NumTracked; ++I) {
-    if (Storage.Entities[I].UnknownEntry)
+    const TrackedEntity &E = Storage.Entities[I];
+    if (E.Entry == EntryState::Unknown)
       FunctionEntry.update(I, FlowState::May, FlowState::MayUnassigned);
-    else if (Storage.Entities[I].K == TrackedEntity::Kind::CurrentObject)
+    else if (E.Entry == EntryState::Initialized ||
+             E.K == TrackedEntity::Kind::CurrentObject)
       FunctionEntry.update(I, FlowState::Must | FlowState::May,
                            FlowState::MayUnassigned);
-    else if (Storage.Entities[I].K == TrackedEntity::Kind::MemberPointee)
+    else if (E.K == TrackedEntity::Kind::MemberPointee)
       FunctionEntry.update(I, FlowState::EntryAsserted);
   }
   const CFGBlock &CFGEntry = cfg.getEntry();
@@ -6963,16 +6977,16 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
                                  TrackedStorage &Storage) {
   // A marked local or parameter is tracked as a whole ([[uninit]]) or by
   // its referent ([[ref_to_uninit]] pointer, reference, or handle).
-  auto HarvestMarked = [&](const VarDecl *V, bool UnknownEntry) {
+  auto HarvestMarked = [&](const VarDecl *V, EntryState Entry) {
     if (V->isInvalidDecl() || !V->hasLocalStorage())
       return;
     if (V->hasAttr<UninitAttr>())
-      Storage.addLocalEntity(TrackedEntity::Kind::WholeLocal, V, UnknownEntry);
+      Storage.addLocalEntity(TrackedEntity::Kind::WholeLocal, V, Entry);
     else if (V->hasAttr<RefToUninitAttr>() &&
              (V->getType()->isPointerType() ||
               V->getType()->isReferenceType() ||
               SemaProfiles::isHandleType(V->getType())))
-      Storage.addLocalEntity(TrackedEntity::Kind::Pointee, V, UnknownEntry);
+      Storage.addLocalEntity(TrackedEntity::Kind::Pointee, V, Entry);
   };
   llvm::SmallPtrSet<const VarDecl *, 16> Owned;
   // A by-value parameter's members are read-tracked from the all-unassigned
@@ -6989,12 +7003,12 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
     Params = OMD->parameters();
   for (const ParmVarDecl *P : Params) {
     Owned.insert(P);
-    HarvestMarked(P, /*UnknownEntry=*/false);
+    HarvestMarked(P, EntryState::Unassigned);
     if (const CXXRecordDecl *RD = SemaProfiles::flowTrackedAggregateClass(P))
       Storage.addObject(P, RD,
                         /*TrackReads=*/!P->hasDefaultArg() &&
                             SemaProfiles::getTrackableSlotClass(P->getType()),
-                        /*UnknownEntry=*/false);
+                        EntryState::Unassigned);
   }
   // The current object's lifetime, outside its constructors, when the body
   // has a lifecycle use of it.
@@ -7030,12 +7044,12 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
   if (CurrentObjectUsed)
     Storage.addCurrentObjectRoot(Method->getParent());
   for (const VarDecl *V : Locals) {
-    HarvestMarked(V, /*UnknownEntry=*/false);
+    HarvestMarked(V, EntryState::Unassigned);
     bool InitializedAtDecl;
     if (const CXXRecordDecl *RD =
             getTrackedLocalAggregate(V, InitializedAtDecl)) {
       std::pair<unsigned, unsigned> Range =
-          Storage.addObject(V, RD, /*TrackReads=*/true, /*UnknownEntry=*/false);
+          Storage.addObject(V, RD, /*TrackReads=*/true, EntryState::Unassigned);
       if (InitializedAtDecl && Range.first != Range.second)
         Storage.InitializedLocals.insert(V);
     }
@@ -7061,9 +7075,8 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
         if (SrcIt == Storage.LocalRange.end() ||
             !Storage.Entities[SrcIt->second.first].TrackReads)
           continue;
-        std::pair<unsigned, unsigned> Range =
-            Storage.addObject(V, RD, /*TrackReads=*/true,
-                              /*UnknownEntry=*/false);
+        std::pair<unsigned, unsigned> Range = Storage.addObject(
+            V, RD, /*TrackReads=*/true, EntryState::Unassigned);
         if (Range.first == Range.second)
           continue;
         Storage.CopySource[V] = {Src, std::move(CastPath)};
@@ -7074,18 +7087,16 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
   for (const VarDecl *V : Locals)
     if (!Storage.LocalRange.count(V))
       if (const CXXRecordDecl *RD = SemaProfiles::flowTrackedAggregateClass(V))
-        Storage.addObject(V, RD, /*TrackReads=*/false,
-                          /*UnknownEntry=*/false);
+        Storage.addObject(V, RD, /*TrackReads=*/false, EntryState::Unassigned);
   // Variables of enclosing functions, from an unknown entry state.
   llvm::SmallPtrSet<const VarDecl *, 4> Seen;
   for (const VarDecl *V : Referenced) {
     if (Owned.count(V) || !Seen.insert(V).second)
       continue;
-    HarvestMarked(V, /*UnknownEntry=*/true);
+    HarvestMarked(V, EntryState::Unknown);
     if (!Storage.LocalRange.count(V) && !Storage.LocalEntity.count(V))
       if (const CXXRecordDecl *RD = SemaProfiles::flowTrackedAggregateClass(V))
-        Storage.addObject(V, RD, /*TrackReads=*/false,
-                          /*UnknownEntry=*/true);
+        Storage.addObject(V, RD, /*TrackReads=*/false, EntryState::Unknown);
   }
   // The construction aliases (getConstructionAliasCall) whose call constructs
   // tracked storage and whose every use loads their value -- the operand of
@@ -7133,7 +7144,7 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
         !constructionAliasTarget(Storage, C.Arg, C.ParamTy, AtStart))
       continue;
     unsigned Idx = Storage.addLocalEntity(TrackedEntity::Kind::ConstructAlias,
-                                          C.V, /*UnknownEntry=*/false);
+                                          C.V, EntryState::Unassigned);
     Storage.Entities[Idx].AtStart = AtStart;
   }
 }
@@ -7252,7 +7263,7 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
           SemaProfiles::enclosingInstanceMethod(dyn_cast<DeclContext>(D))) {
     if (const CXXRecordDecl *RD = MD->getParent()->getDefinition()) {
       Storage.addObject(/*Base=*/nullptr, RD, /*TrackReads=*/Ctor != nullptr,
-                        /*UnknownEntry=*/false);
+                        EntryState::Unassigned);
       Storage.addMemberPointerRoots(RD);
     }
     // A [*this] capture copy-constructs the whole object; its whole-object
