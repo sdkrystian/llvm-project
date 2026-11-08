@@ -1302,7 +1302,13 @@ destructor's member teardown (``CFGMemberDtor``) destroys a lifecycle member
 and a tracked whole ``[[uninit]]`` member of a type with a non-trivial
 destructor, and a lifecycle local's scope exit (``CFGAutomaticObjDtor``) the
 local, each judged for ``double_destroy`` only
-(``InitDestroyer::MemberTeardown``, ``InitDestroyer::ScopeExit``).  In every
+(``InitDestroyer::MemberTeardown``, ``InitDestroyer::ScopeExit``); so are a
+constructor's lifecycle members and every lifecycle by-value parameter of such
+a type against the join of the states the body's normal exits leave
+(``appendExitDestroySites``, ``isNormalExitEdge``: a return or the body's end,
+not a call's exception edge, a throw, a try dispatch, or a call that does not
+return), since a call's exception edge carries the state after its own
+effects.  In every
 member function, each ``[[ref_to_uninit]]`` pointer member
 reachable from the current object through members by value
 (``SemaProfiles::markedPointerMembers``) has a ``MemberPointee`` entity for

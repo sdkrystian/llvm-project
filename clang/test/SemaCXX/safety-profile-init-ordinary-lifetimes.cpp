@@ -554,6 +554,68 @@ struct EarlyUse {
   }
 };
 
+// A constructor that leaves a member destroyed hands the object's destructor a destroyed member
+struct LeftDestroyed {
+  std::string s;
+  LeftDestroyed() : s("a") { std::destroy_at(&s); } // expected-error {{storage already destroyed is destroyed again by the destructor's member teardown under profile 'std::init'}}
+};
+
+// A constructor that destroys and reconstructs a member is accepted
+struct LeftReconstructed {
+  std::string s;
+  LeftReconstructed() : s("a") {
+    std::destroy_at(&s);
+    std::construct_at(&s, "b");
+  }
+};
+
+// A constructor that destroys a member on one path leaves it destroyed there
+struct LeftDestroyedOnePath {
+  std::string s;
+  LeftDestroyedOnePath(bool c) : s("a") {
+    if (c)
+      std::destroy_at(&s);
+  } // expected-error {{storage already destroyed is destroyed again by the destructor's member teardown under profile 'std::init'}}
+};
+
+// A return before the reconstruction leaves the member destroyed
+struct LeftDestroyedReturn {
+  std::string s;
+  LeftDestroyedReturn(bool c) : s("a") {
+    std::destroy_at(&s);
+    if (c)
+      return;
+    std::construct_at(&s, "b");
+  } // expected-error {{storage already destroyed is destroyed again by the destructor's member teardown under profile 'std::init'}}
+};
+
+void may_throw();
+
+// An exception between the destroy and the reconstruction is not a normal exit
+struct LeftDestroyedThrow {
+  std::string s;
+  LeftDestroyedThrow(bool c) : s("a") {
+    std::destroy_at(&s);
+    may_throw();
+    if (c)
+      throw 1;
+    std::construct_at(&s, "b");
+  }
+};
+
+// A delegating constructor that leaves a member destroyed hands it to the destructor destroyed
+struct LeftDestroyedDelegating {
+  std::string s;
+  LeftDestroyedDelegating() : s("a") {}
+  LeftDestroyedDelegating(int) : LeftDestroyedDelegating() { std::destroy_at(&s); } // expected-error {{storage already destroyed is destroyed again by the destructor's member teardown under profile 'std::init'}}
+};
+
+// A scalar member left destroyed has no destructor to run
+struct LeftDestroyedScalar {
+  int i = 0;
+  LeftDestroyedScalar() { std::destroy_at(&i); }
+};
+
 // A scalar member without an initializer is uninitialized in the body
 struct ScalarNoInit {
   int i; // expected-note {{member 'i' declared here}}
@@ -767,6 +829,35 @@ void parameter_destroy_twice(X x) {
 void parameter_destroy_construct(X x) {
   std::destroy_at(&x);
   std::construct_at(&x);
+}
+
+// A by-value parameter left destroyed is destroyed again by its owner
+void parameter_left_destroyed(X x) { // expected-note {{'x' is destroyed at the end of its scope}}
+  std::destroy_at(&x);
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+
+// A by-value parameter destroyed on one path is destroyed again there by its owner
+void parameter_left_destroyed_one_path(X x, bool c) { // expected-note {{'x' is destroyed at the end of its scope}}
+  if (c)
+    std::destroy_at(&x);
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+
+void may_throw();
+
+// An exception between a parameter's destroy and its reconstruction is not a normal exit
+void parameter_destroy_throw(X x, bool c) {
+  std::destroy_at(&x);
+  may_throw();
+  if (c)
+    throw 1;
+  std::construct_at(&x);
+}
+
+// A lambda's by-value parameter left destroyed is destroyed again by its owner
+void lambda_parameter_left_destroyed() {
+  [](X x) { // expected-note {{'x' is destroyed at the end of its scope}}
+    std::destroy_at(&x);
+  }(X{}); // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
 }
 
 // A catch variable is constructed at the handler's entry

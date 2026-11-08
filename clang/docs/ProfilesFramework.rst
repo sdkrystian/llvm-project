@@ -1153,7 +1153,9 @@ member are rejected, while destroying and then reconstructing it
 ``s.~T(); new (&s) T(v);``) is accepted.  In a lambda's or block's body, the
 current object's members are judged by form only.  At the end of a destructor,
 the member teardown destroys again a member of a type with a non-trivial
-destructor that the body left destroyed on some path.  References, bit-fields,
+destructor that the body left destroyed on some path, and so does the object's
+destructor for a member a constructor leaves destroyed on some path that
+returns: the constructor's closing brace is rejected.  References, bit-fields,
 members of a union or an anonymous union, members of union type or of raw
 storage, and members marked ``[[uninit]]`` or ``[[ref_to_uninit]]`` have no
 such lifetime.  A local variable or by-value parameter that a function
@@ -1162,12 +1164,15 @@ lifetime, starting initialized at its declaration or, for a parameter,
 at the function's entry: besides the uses above, a read or store of a
 member of it after a destroy, and the destructor that ends its scope
 after a destroy, are rejected; a plain read of a destroyed
-scalar is not.  A lambda's or block's own locals and parameters have such a
-lifetime in its body; a variable it captures is judged by form there.
-References, ``static``, ``thread_local``, and ``__block`` variables, structured
-bindings, marked variables, and variables of union type, of raw storage, or of
-a class with ``[[uninit]]`` members have none, and an element (``&a[1]``) is
-judged by form.  A variable of a class with ``[[uninit]]`` members is tracked
+scalar is not.  A by-value parameter of a type with a non-trivial destructor
+that the function leaves destroyed on some path that returns is rejected at
+the function's closing brace: its owner destroys it again.  A lambda's or
+block's own locals and parameters have such a lifetime in its body; a variable
+it captures is judged by form there.  References, ``static``,
+``thread_local``, and ``__block`` variables, structured bindings, marked
+variables, and variables of union type, of raw storage, or of a class with
+``[[uninit]]`` members have none, and an element (``&a[1]``) is judged by
+form.  A variable of a class with ``[[uninit]]`` members is tracked
 through those members instead: destroying it whole a second time is rejected.
 A range argument (``std::ranges::destroy(r)``, a ``std::ranges`` uninitialized
 algorithm's range, a range a handle is built over) names its elements, so it

@@ -4302,6 +4302,30 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
   }
 }
 
+/// True if the CFG edge from \p Pred to the exit block \p Exit of \p cfg is
+/// a normal exit: not a call's exception edge (the call ends \p Pred, whose
+/// normal successor is another block), a throw, a try dispatch rethrowing, or
+/// a call that does not return.
+static bool isNormalExitEdge(const CFG &cfg, const CFGBlock &Pred,
+                             const CFGBlock &Exit) {
+  if (Pred.hasNoReturnElement() || llvm::is_contained(cfg.try_blocks(), &Pred))
+    return false;
+  const Stmt *Last = nullptr;
+  for (const CFGElement &Elem : llvm::reverse(Pred))
+    if (auto CS = Elem.getAs<CFGStmt>()) {
+      Last = CS->getStmt();
+      break;
+    }
+  if (isa_and_nonnull<CXXThrowExpr, ObjCAtThrowStmt>(Last))
+    return false;
+  if (!isa_and_nonnull<CallExpr>(Last) || Pred.getTerminatorStmt() ||
+      Pred.succ_empty())
+    return true;
+  const CFGBlock::AdjacentBlock &Normal = *Pred.succ_begin();
+  const CFGBlock *Next = Normal.getReachableBlock();
+  return (Next ? Next : Normal.getPossiblyUnreachableBlock()) == &Exit;
+}
+
 /// The forward dataflow of the std::init engine: each entity enters in its
 /// EntryState (an entity of an enclosing function may-assigned and in no
 /// known state), a block's entry is the join of its predecessors' exits (an
@@ -4324,14 +4348,14 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
 /// is never flagged. Returns, per
 /// read-tracked entity, the reads at program points where the entity is not
 /// definitely assigned nor escaped, and appends every other rule's violations
-/// to \p Violations.
-static OffendingReads
-runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
-                      const TrackedStorage &Storage,
-                      ArrayRef<SmallVector<DefAssignEvent, 4>> Events,
-                      ArrayRef<BindingSite> Sites, ArrayRef<DestroySite> DSites,
-                      ArrayRef<AccessSite> ASites,
-                      SmallVectorImpl<PendingViolation> &Violations) {
+/// to \p Violations -- \p ExitSites judged against the join of the states the
+/// function's normal exits leave (isNormalExitEdge).
+static OffendingReads runDefiniteAssignment(
+    CFG &cfg, AnalysisDeclContext &AC, const TrackedStorage &Storage,
+    ArrayRef<SmallVector<DefAssignEvent, 4>> Events,
+    ArrayRef<BindingSite> Sites, ArrayRef<DestroySite> DSites,
+    ArrayRef<AccessSite> ASites, ArrayRef<DestroySite> ExitSites,
+    SmallVectorImpl<PendingViolation> &Violations) {
   const unsigned NumTracked = Storage.Entities.size();
   const unsigned NumBlocks = cfg.getNumBlockIDs();
   std::vector<FlowState> EntryState(NumBlocks);
@@ -4400,6 +4424,20 @@ runDefiniteAssignment(CFG &cfg, AnalysisDeclContext &AC,
       ExitState[B->getBlockID()] = In;
       Worklist.enqueueSuccessors(B);
     }
+  }
+
+  // The state the function's normal exits leave: a return or the end of its
+  // body, not an exception.
+  if (!ExitSites.empty()) {
+    const CFGBlock &Exit = cfg.getExit();
+    FlowState AtExit;
+    for (const CFGBlock *Pred : Exit.preds())
+      if (Pred && Visited[Pred->getBlockID()] &&
+          isNormalExitEdge(cfg, *Pred, Exit))
+        AtExit.meet(ExitState[Pred->getBlockID()]);
+    if (AtExit.Reached)
+      for (const DestroySite &Site : ExitSites)
+        judgeDestroySite(Site, AtExit, Storage, Violations);
   }
 
   // Replay each visited (reachable) block from its fixpoint entry state and
@@ -8048,6 +8086,61 @@ static void verifyDeferredInitSites(
   }
 }
 
+/// Append to \p Out the destroy sites the normal exits of the analyzed body
+/// \p D judge (runDefiniteAssignment), each for a double destruction only, at
+/// the body's closing brace: in a constructor, each lifecycle member of a type
+/// with a non-trivial destructor, which the object's destructor destroys again
+/// (InitDestroyer::MemberTeardown); in any body but a coroutine's, whose
+/// parameters live in its frame, each lifecycle by-value parameter of such a
+/// type, which its owner destroys again (InitDestroyer::ScopeExit).
+static void appendExitDestroySites(const ASTContext &Ctx, const Decl *D,
+                                   const TrackedStorage &Storage,
+                                   SmallVectorImpl<DestroySite> &Out) {
+  const Stmt *Body = D->getBody();
+  if (!Body)
+    return;
+  auto NonTrivialDtor = [&](QualType T) {
+    const auto *RD = Ctx.getBaseElementType(T)->getAsCXXRecordDecl();
+    return RD && RD->hasDefinition() && !RD->hasTrivialDestructor();
+  };
+  auto Append = [&](unsigned Idx, SemaProfiles::InitDestroyer Destroyer,
+                    const VarDecl *ScopeExitVar) {
+    DestroySite Site;
+    Site.Loc = Body->getEndLoc();
+    Site.Judged = true;
+    Site.Exempt = true;
+    Site.Destroyer = Destroyer;
+    Site.ScopeExitVar = ScopeExitVar;
+    BindingLeaf Leaf;
+    Leaf.Entity = Idx;
+    Leaf.WholeLeaf = true;
+    Site.Leaves.push_back(Leaf);
+    Out.push_back(std::move(Site));
+  };
+  if (isa<CXXConstructorDecl>(D)) {
+    SmallVector<unsigned, 4> Members;
+    for (auto [F, Idx] : Storage.LifecycleMembers)
+      if (NonTrivialDtor(F->getType()))
+        Members.push_back(Idx);
+    llvm::sort(Members);
+    for (unsigned Idx : Members)
+      Append(Idx, SemaProfiles::InitDestroyer::MemberTeardown, nullptr);
+  }
+  if (isa<CoroutineBodyStmt>(Body))
+    return;
+  ArrayRef<ParmVarDecl *> Params;
+  if (const auto *FD = dyn_cast<FunctionDecl>(D))
+    Params = FD->parameters();
+  else if (const auto *BD = dyn_cast<BlockDecl>(D))
+    Params = BD->parameters();
+  else if (const auto *OMD = dyn_cast<ObjCMethodDecl>(D))
+    Params = OMD->parameters();
+  for (const ParmVarDecl *P : Params)
+    if (Storage.LifecycleLocals.contains(P) && NonTrivialDtor(P->getType()))
+      Append(Storage.LocalEntity.find(P)->second,
+             SemaProfiles::InitDestroyer::ScopeExit, P);
+}
+
 /// The std::init flow engine over one body: the member read-before-init rule
 /// (P4222R2 §4.2, §5.1-§5.4) and the binding, destroy, read-through, and
 /// subobject-write judgments of flow-tracked storage
@@ -8149,13 +8242,16 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
             Storage.Entities[Ev.Aux].isPointee())))
         Storage.AliasClasses.unionSets(Ev.Idx, Ev.Aux);
   }
-  // Nothing is assigned at function entry: written initializers write at
+  // Each entity enters in its EntryState: written initializers write at
   // their CFGInitializer elements, a tracked local cannot be referenced
-  // before its DeclStmt, a by-value parameter starts unassigned by design,
-  // and a marked local's marker asserts it.
+  // before its DeclStmt, a by-value parameter's tracked members start
+  // unassigned by design, and a marked local's marker asserts it.
   SmallVector<PendingViolation, 8> Violations;
-  OffendingReads Offending = runDefiniteAssignment(
-      *cfg, InitAC, Storage, Events, Sites, DSites, ASites, Violations);
+  SmallVector<DestroySite, 2> ExitSites;
+  appendExitDestroySites(S.Context, D, Storage, ExitSites);
+  OffendingReads Offending =
+      runDefiniteAssignment(*cfg, InitAC, Storage, Events, Sites, DSites,
+                            ASites, ExitSites, Violations);
   reportMemberReadsBeforeInit(S, Offending, Storage, Entry.Name);
   reportFlowViolations(S, Violations, Entry.Name);
 }
