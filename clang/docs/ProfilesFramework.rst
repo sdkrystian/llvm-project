@@ -1150,9 +1150,9 @@ lifetime of its own there, starting initialized: a second destroy, a member
 call, copy, binding, or read after a destroy, and a construction over the live
 member are rejected, while destroying and then reconstructing it
 (``std::destroy_at(&s); std::construct_at(&s, v);``,
-``s.~T(); new (&s) T(v);``) is accepted.  A lambda's or block's body starts
-with such a member in an unknown state.  At the end of a destructor, the
-member teardown destroys again a member of a type with a non-trivial
+``s.~T(); new (&s) T(v);``) is accepted.  In a lambda's or block's body, the
+current object's members are judged by form only.  At the end of a destructor,
+the member teardown destroys again a member of a type with a non-trivial
 destructor that the body left destroyed on some path.  References, bit-fields,
 members of a union or an anonymous union, members of union type or of raw
 storage, and members marked ``[[uninit]]`` or ``[[ref_to_uninit]]`` have no

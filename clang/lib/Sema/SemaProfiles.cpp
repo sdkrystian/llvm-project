@@ -3679,6 +3679,12 @@ const Decl *SemaProfiles::flowAnalysisOwner(const DeclContext *DC) {
   return DC && DC->isFunctionOrMethod() ? cast<Decl>(DC) : nullptr;
 }
 
+bool SemaProfiles::isLambdaOrBlockBody(const DeclContext *DC) {
+  const Decl *Owner = flowAnalysisOwner(DC);
+  return isa_and_nonnull<BlockDecl>(Owner) ||
+         (Owner && isLambdaCallOperator(cast<DeclContext>(Owner)));
+}
+
 void SemaProfiles::recordDeferredInitSite(DeferredInitSite Site) {
   const Sema::ExpressionEvaluationContextRecord &EC =
       SemaRef.currentEvaluationContext();
@@ -4805,6 +4811,11 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
   auto LifecycleUse = [&] {
     return Use == FlowLeafUse::MarkedTarget || Use == FlowLeafUse::Destroy;
   };
+  // The current object's lifecycle members and bases, which a lambda's or
+  // block's body judges by form (isLambdaOrBlockBody).
+  auto MemberLifecycleUse = [&] {
+    return LifecycleUse() && !isLambdaOrBlockBody(CurContext);
+  };
   auto InConstructor = [&] {
     return isa_and_nonnull<CXXConstructorDecl>(
         enclosingInstanceMethod(CurContext));
@@ -4834,7 +4845,7 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
       return isFlowTrackedLeaf(ShapeLeaf(E, Leaf.Arms, Leaf.OuterBases),
                                /*AsPointerValue=*/false, CurContext, Use, Name);
     // In a constructor, a direct base \c this is converted to.
-    if (isa<CXXThisExpr>(E) && LifecycleUse() && InConstructor()) {
+    if (isa<CXXThisExpr>(E) && MemberLifecycleUse() && InConstructor()) {
       BasePath Path(Leaf.OuterBases);
       peelBaseCasts(Leaf.E, Path, Leaf.Arms);
       return TrackBase(Path);
@@ -4903,7 +4914,7 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
       return MD && !Shape->Subscript &&
              findMarkedPointerMember(MD->getParent(), Shape->PointerMembers);
     if (Shape->Members.empty() && !Shape->Subscript) {
-      if (LifecycleUse() && InConstructor()) {
+      if (MemberLifecycleUse() && InConstructor()) {
         // The casts within the shape, then the leaf's own, then those above.
         BasePath Path(Leaf.OuterBases);
         peelBaseCasts(Leaf.E, Path, Leaf.Arms);
@@ -4918,7 +4929,7 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
     if (matchFlowTrackedMember(MD->getParent(), *Shape))
       return true;
     // A member of the current object a marked target or a destroy names.
-    if (LifecycleUse())
+    if (MemberLifecycleUse())
       if (const FieldDecl *F = lifecycleMember(MD->getParent(), *Shape)) {
         if (Name)
           Name->Member = F;

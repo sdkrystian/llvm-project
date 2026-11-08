@@ -1268,10 +1268,11 @@ peels, ride on the leaf (``ShapeLeaf::OuterBases``).  It enters initialized
 than a constructor; unassigned in a constructor, where the ``CFGInitializer``
 arm constructs it at its initializer -- a member's own, written, a default
 member initializer, or an implicit default construction; a base's, for the base
-and its members; a delegating one, for every one; and unknown in a lambda's or
-block's body.  It is never read-tracked, and is judged by flow at every other
-binding below or naming it, at every read below or naming it, and at every
-store below it, through a lifecycle leaf the engine adds although the
+and its members; a delegating one, for every one.  A lambda's or block's body
+has none (``SemaProfiles::isLambdaOrBlockBody``): it judges the current
+object's members by form.  It is never read-tracked, and is judged by flow at
+every other binding below or naming it, at every read below or naming it, and
+at every store below it, through a lifecycle leaf the engine adds although the
 predicate did not defer that site: the parse-time funnel judged it by form,
 which never rejects live storage there, so no verdict repeats.  A store naming
 a scalar one whole initializes it.  A destructor's member teardown
@@ -1919,6 +1920,8 @@ Missed Diagnostics
   not diagnosed: another member function may reconstruct it before the object
   is destroyed.  A member call on the current object changes no member's
   lifetime there.
+- A member of the current object destroyed twice, or used after a destroy,
+  inside a lambda's or block's body is not diagnosed.
 - A read of a tracked member inside another member's default initializer is
   not detected.
 - A store through an alias of a pointer object (``int *&r = p; r = &u;``,

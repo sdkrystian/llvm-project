@@ -1,12 +1,12 @@
 // RUN: rm -rf %t && mkdir -p %t
 // RUN: split-file %s %t
-// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -fexceptions -fcxx-exceptions -isystem %t/sys %t/members.cpp
-// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -fexceptions -fcxx-exceptions -isystem %t/sys %t/members.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -fexceptions -fcxx-exceptions -fblocks -isystem %t/sys %t/members.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -fexceptions -fcxx-exceptions -fblocks -isystem %t/sys %t/members.cpp
 // The LEADING_ERROR run adds a leading unrelated error so every later function
 // is analyzed through the post-error path.
-// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -DLEADING_ERROR -fexceptions -fcxx-exceptions -isystem %t/sys %t/members.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -DLEADING_ERROR -fexceptions -fcxx-exceptions -fblocks -isystem %t/sys %t/members.cpp
 // -Wunreachable-code makes the main path build a fully linearized CFG.
-// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -Wunreachable-code -fexceptions -fcxx-exceptions -isystem %t/sys %t/members.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -Wunreachable-code -fexceptions -fcxx-exceptions -fblocks -isystem %t/sys %t/members.cpp
 // RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -fexceptions -fcxx-exceptions -isystem %t/sys %t/constructors.cpp
 // RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -fexceptions -fcxx-exceptions -isystem %t/sys %t/constructors.cpp
 // RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -DLEADING_ERROR -fexceptions -fcxx-exceptions -isystem %t/sys %t/constructors.cpp
@@ -102,6 +102,8 @@ struct A {
   void marked_binding_destroyed();
   void lambda_destroy();
   void lambda_destroy_twice();
+  void lambda_construct_live();
+  void block_construct_live();
 };
 
 // A member destroyed twice in one body is a double destruction
@@ -236,17 +238,27 @@ void A::marked_binding_destroyed() {
   take(s);
 }
 
-// A lambda's body enters with the member in an unknown state, so its destroy is not judged
+// A lambda's body judges a member by form, which accepts its destroy
 void A::lambda_destroy() {
   [this] { std::destroy_at(&s); }();
 }
 
-// A lambda's body that destroys a member twice is a double destruction
+// A lambda's body judges a member by form, which accepts a second destroy
 void A::lambda_destroy_twice() {
   [this] {
     std::destroy_at(&s);
-    std::destroy_at(&s); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
+    std::destroy_at(&s);
   }();
+}
+
+// A lambda's body judges a member by form, which rejects a construction over it
+void A::lambda_construct_live() {
+  [this] { std::construct_at(&s, "b"); }(); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A block's body judges a member by form, which rejects a construction over it
+void A::block_construct_live() {
+  ^{ std::construct_at(&s, "b"); }(); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
 }
 
 struct TeardownDestroyed {
@@ -447,6 +459,14 @@ struct DerivedDestroyTwice : InitBase {
     std::destroy_at(std::addressof(static_cast<InitBase &>(*this)));
     std::destroy_at(std::addressof(static_cast<InitBase &>(*this))); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
     std::construct_at(static_cast<InitBase *>(this));
+  }
+};
+
+// A lambda's body in a constructor judges a member by form, which leaves the object under construction unclassified
+struct LambdaInCtor {
+  std::string s;
+  LambdaInCtor() : s("a") {
+    [this] { std::construct_at(&s, "b"); }();
   }
 };
 

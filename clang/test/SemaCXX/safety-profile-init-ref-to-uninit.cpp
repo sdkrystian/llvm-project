@@ -216,7 +216,7 @@ struct ThisObject {
   int &f6() { return y; }                            // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   void g() {
     int *p [[ref_to_uninit]] = &x; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
-    auto l = [this] { int *q [[ref_to_uninit]] = &x; (void)q; }; // OK: a lambda's body enters with the member in an unknown state
+    auto l = [this] { int *q [[ref_to_uninit]] = &x; (void)q; }; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
     (void)p; (void)l;
   }
 };

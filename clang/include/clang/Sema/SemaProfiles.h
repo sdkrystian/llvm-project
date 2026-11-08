@@ -507,7 +507,8 @@ public:
   /// lifetime when the body binds it so (P4222R2 §4.6). In every instance
   /// member function, a member of it a leaf names through \c this is tracked
   /// (lifecycleMember), and in a constructor a direct base \c this is
-  /// converted to (lifecycleBase). A [[ref_to_uninit]]
+  /// converted to (lifecycleBase), outside a lambda's or block's body
+  /// (isLambdaOrBlockBody). A [[ref_to_uninit]]
   /// pointer member of the current object (markedPointerMembers) is tracked
   /// for every use, as a marked local pointer is. For a ValueCopy -- the
   /// source of an unmarked value copy (isValueCopySource) -- a subobject of
@@ -908,6 +909,10 @@ public:
   /// any other's) -- the check's analysis owner -- or null when \p DC is no
   /// body (a local class).
   static const Decl *flowAnalysisOwner(const DeclContext *DC);
+  /// True if the analysis owner of \p DC (flowAnalysisOwner) is a lambda's
+  /// call operator or a block: a body that reaches the current object and
+  /// the enclosing function's variables by capture.
+  static bool isLambdaOrBlockBody(const DeclContext *DC);
 
   /// Hand the sites recorded for the analysis owner \p Body to its flow
   /// pass, erasing them.

@@ -7509,17 +7509,16 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
   if (CurrentObjectUsed)
     Storage.addCurrentObjectRoot(Method->getParent());
   // The current object's lifecycle members and bases: live at a method's
-  // entry, unassigned until their initializers in a constructor, and in an
-  // unknown state in a lambda's or block's body inside either.
+  // entry and unassigned until their initializers in a constructor; a
+  // lambda's or block's body has none (SemaProfiles::isLambdaOrBlockBody).
   if (const CXXMethodDecl *Owner =
-          SemaProfiles::enclosingInstanceMethod(dyn_cast<DeclContext>(D))) {
+          SemaProfiles::enclosingInstanceMethod(dyn_cast<DeclContext>(D));
+      Owner && !SemaProfiles::isLambdaOrBlockBody(cast<DeclContext>(D))) {
     llvm::SetVector<const FieldDecl *> Members;
     llvm::SetVector<const CXXRecordDecl *> Bases;
     collectLifecycleNames(S, D, Members, Bases);
-    EntryState Entry = D != Owner ? EntryState::Unknown
-                       : isa<CXXConstructorDecl>(Owner)
-                           ? EntryState::Unassigned
-                           : EntryState::Initialized;
+    EntryState Entry = isa<CXXConstructorDecl>(Owner) ? EntryState::Unassigned
+                                                      : EntryState::Initialized;
     for (const FieldDecl *F : Members)
       Storage.addLifecycleMember(Owner->getParent(), F, Entry);
     for (const CXXRecordDecl *B : Bases)
