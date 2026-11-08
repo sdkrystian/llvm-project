@@ -4797,6 +4797,37 @@ SemaProfiles::enclosingInstanceMethod(const DeclContext *DC) {
   return nullptr;
 }
 
+/// Set \p Name's member path below storage of type \p T
+/// (LifecycleName::SubPath) to \p Steps, the member steps of a lifecycle leaf
+/// of shape \p Shape below that storage, when they qualify: non-empty, field
+/// steps alone, none naming a reference, a bit-field, a marked member, a member
+/// of a union, or a member of union type or raw storage, with no element step
+/// and no conversion at the end.
+static void noteLifecycleSubPath(QualType T,
+                                 ArrayRef<SemaProfiles::MemberStep> Steps,
+                                 const SemaProfiles::FlowLeafShape &Shape,
+                                 SemaProfiles::LifecycleName *Name) {
+  if (!Name || T.isNull() || Steps.empty() || Shape.Subscript ||
+      !Shape.LeafBases.empty())
+    return;
+  const CXXRecordDecl *RD = T.getNonReferenceType()->getAsCXXRecordDecl();
+  if (!RD || !(RD = RD->getDefinition()) || RD->isUnion())
+    return;
+  for (const SemaProfiles::MemberStep &Step : Steps) {
+    const FieldDecl *F = Step.Field;
+    if (!F || F->isBitField() || F->getParent()->isUnion() ||
+        F->hasAttr<UninitAttr>() || F->hasAttr<RefToUninitAttr>())
+      return;
+    QualType FT = F->getType();
+    if (FT->isReferenceType() || FT->isDependentType() ||
+        FT->getBaseElementTypeUnsafe()->isUnionType() ||
+        SemaProfiles::isRawStorageType(FT))
+      return;
+  }
+  Name->SubClass = RD->getCanonicalDecl();
+  Name->SubPath.assign(Steps.begin(), Steps.end());
+}
+
 bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
                                      const DeclContext *CurContext,
                                      FlowLeafUse Use,
@@ -4933,6 +4964,8 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
       if (const FieldDecl *F = lifecycleMember(MD->getParent(), *Shape)) {
         if (Name)
           Name->Member = F;
+        noteLifecycleSubPath(
+            F->getType(), ArrayRef(Shape->Members).drop_front(), *Shape, Name);
         return true;
       }
     // In a constructor body, a subobject enclosing tracked members, as for a
@@ -4947,21 +4980,28 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
   const VarDecl *V = Shape->Local;
   if (!V->hasLocalStorage())
     return false;
+  // A member path a lifecycle leaf names below the storage of type \p T.
+  auto NoteSubPath = [&](QualType T) {
+    if (LifecycleUse())
+      noteLifecycleSubPath(T, Shape->Members, *Shape, Name);
+    return true;
+  };
   // *up, up->m: a marked handle's referent or a subobject of it; an element
   // (s[i], or through an offset handle) is never tracked, as for a pointer.
   if (Shape->ThroughHandle)
-    return !Shape->Subscript && isFlowTrackedHandleVar(V);
+    return !Shape->Subscript && isFlowTrackedHandleVar(V) &&
+           NoteSubPath(handleValueType(V->getType()));
   // *p, p->m, (*p).m: a marked pointer's referent or a subobject of it; an
   // element (p[i]) is never tracked (P4222R2 §5.4).
   if (Shape->ThroughPointer)
     return V->getType()->isPointerType() && V->hasAttr<RefToUninitAttr>() &&
-           !Shape->Subscript;
+           !Shape->Subscript && NoteSubPath(V->getType()->getPointeeType());
   // u, u.x, arr[i]: an [[uninit]] local as a whole or a subobject of it.
   if (V->hasAttr<UninitAttr>())
-    return true;
+    return NoteSubPath(V->getType());
   // r, r.m: a marked reference's referent or a subobject of it.
   if (V->hasAttr<RefToUninitAttr>() && V->getType()->isReferenceType())
-    return !Shape->Subscript;
+    return !Shape->Subscript && NoteSubPath(V->getType().getNonReferenceType());
   // a.m: a tracked member of an aggregate local or by-value parameter; for a
   // marked target, also a, or a subobject enclosing tracked members.
   if (const CXXRecordDecl *RD = flowTrackedAggregateClass(V)) {
@@ -4974,7 +5014,7 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
     if (const VarDecl *L = lifecycleLocal(*Shape, CurContext)) {
       if (Name)
         Name->Local = L;
-      return true;
+      return NoteSubPath(L->getType());
     }
   return false;
 }
@@ -5048,11 +5088,14 @@ bool SemaProfiles::isFlowTrackedRangeLeaf(const ShapeLeaf &Leaf,
   if (!isFlowTrackedLeaf(Leaf, /*AsPointerValue=*/false, CurContext, Use,
                          &Found))
     return false;
-  if ((Found.Member || Found.Local) &&
-      !holdsOwnElements(ignoreTransparentCasts(Leaf.E, Leaf.Arms)->getType()))
-    return false;
+  if (!holdsOwnElements(ignoreTransparentCasts(Leaf.E, Leaf.Arms)->getType())) {
+    if (Found.Member || Found.Local)
+      return false;
+    Found.SubClass = nullptr;
+    Found.SubPath.clear();
+  }
   if (Name)
-    *Name = Found;
+    *Name = std::move(Found);
   return true;
 }
 

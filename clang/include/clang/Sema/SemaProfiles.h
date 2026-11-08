@@ -539,11 +539,18 @@ public:
                          LifecycleName *Name = nullptr) const;
   /// The storage a lifecycle leaf names (isFlowTrackedLeaf): a member of the
   /// current object (lifecycleMember), a direct base of it (lifecycleBase),
-  /// or a local or by-value parameter (lifecycleLocal).
+  /// or a local or by-value parameter (lifecycleLocal); and, below storage of
+  /// class \c SubClass the pass tracks whole -- an [[uninit]] local, a marked
+  /// local pointer's, reference's, or handle's referent, or a lifecycle
+  /// member or local -- the member path \c SubPath the leaf names through
+  /// field steps alone, none naming a reference, a bit-field, a marked member,
+  /// a member of a union, or a member of union type or raw storage.
   struct LifecycleName {
     const FieldDecl *Member = nullptr;
     const CXXRecordDecl *Base = nullptr;
     const VarDecl *Local = nullptr;
+    const CXXRecordDecl *SubClass = nullptr;
+    MemberPath SubPath;
   };
   /// The member of the current object, of class \p RD, whose lifetime the
   /// flow analysis tracks for a marked target or a destroy of a leaf of shape
@@ -583,8 +590,8 @@ public:
   /// the range's elements (HandleLeaf::Mode::Range: a range a known callee's
   /// role parameter takes by reference, a range a handle is built over, a
   /// Derive call's range): a lifecycle member or local (LifecycleName) is
-  /// that storage only when the range holds its own elements
-  /// (holdsOwnElements).
+  /// that storage, and a member path below tracked storage a SubMember, only
+  /// when the range holds its own elements (holdsOwnElements).
   bool isFlowTrackedRangeLeaf(const ShapeLeaf &Leaf,
                               const DeclContext *CurContext,
                               FlowLeafUse Use = FlowLeafUse::Plain,

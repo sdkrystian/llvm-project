@@ -1172,7 +1172,13 @@ through those members instead: destroying it whole a second time is rejected.
 A range argument (``std::ranges::destroy(r)``, a ``std::ranges`` uninitialized
 algorithm's range, a range a handle is built over) names its elements, so it
 destroys or constructs such a member or variable only when that is an array or
-a ``std::array``; the elements of a span or a vector lie elsewhere.
+a ``std::array``; the elements of a span or a vector lie elsewhere.  A member
+that a destroy names below storage the analysis tracks -- an ``[[uninit]]``
+local, a marked pointer's or reference's referent, or such a member or
+variable (``std::destroy_at(&s.m)``, ``p->m.~T()``) -- is destroyed alone: a
+second destroy or a use of it is rejected, reconstructing it is accepted, and
+destroying the storage whole before it is reconstructed (explicitly, at its
+scope's end, or by a destructor's member teardown) destroys it again.
 A function may carry both
 attributes -- a reinitializer that destroys and then reconstructs its
 argument's storage -- and models destroy-then-construct: the storage bound to

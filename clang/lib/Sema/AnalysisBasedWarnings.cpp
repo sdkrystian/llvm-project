@@ -1879,9 +1879,12 @@ enum class EntryState : uint8_t {
 /// SemaProfiles::markedPointerMembers), which enters asserted
 /// (FlowState::EntryAsserted), the current object as a whole outside its
 /// constructors, which enters live (SemaProfiles::FlowLeafUse), an
-/// [[uninit]] member of a WholeLocal's or Pointee's storage (SubMember), whose
+/// [[uninit]] member of a WholeLocal's or Pointee's storage, or a member path
+/// a lifecycle leaf names below such storage or below a lifecycle member or
+/// local (SubMember; a lifecycle one is TrackedEntity::Lifecycle), whose
 /// state every event on that storage carries along except a
-/// default-initialization's credit, or the storage an unmarked local pointer
+/// default-initialization's credit of an [[uninit]] one, or the storage an
+/// unmarked local pointer
 /// initialized from std::construct_at's or a reserved placement new's result
 /// names (ConstructAlias; getConstructionAliasCall), identified per program
 /// point like a Pointee's, or, in a constructor, a direct base subobject of
@@ -1912,10 +1915,13 @@ struct TrackedEntity {
   /// member (SemaProfiles::markedPointerMembers), referring into that cached
   /// table; empty otherwise.
   ArrayRef<MemberStep> Steps;
-  /// WholeLocal and Pointee: the SubMember entities of the storage's
-  /// flow-tracked members, in SubClass's flow-tracked member table order.
+  /// WholeLocal, Pointee, and a lifecycle member: the SubMember entities of
+  /// the storage -- first its flow-tracked members, in SubClass's flow-tracked
+  /// member table order (TableSubs of them), then its lifecycle SubMembers
+  /// (TrackedStorage::LifecycleSubPaths).
   std::pair<unsigned, unsigned> Subs{0, 0};
   const CXXRecordDecl *SubClass = nullptr;
+  unsigned TableSubs = 0;
   /// The type of the storage the entity stands for: the member's or the
   /// local's declared type, or the referent type of a marked pointer or
   /// reference (its anonymous referent). A credit or store covers the entity
@@ -2116,6 +2122,10 @@ struct SubKey {
   unsigned Index = 0;
   /// The leaf names the member whole, not a subobject of it.
   bool Exact = false;
+  /// A lifecycle SubMember's member path (TrackedStorage::LifecycleSubPaths),
+  /// by which the storage referred to at each transfer finds its own; empty
+  /// for a table entry.
+  ArrayRef<MemberStep> Path;
 };
 
 /// The entity table of one analyzed body and the lvalue-shape resolvers
@@ -2203,20 +2213,44 @@ struct TrackedStorage {
          ++I)
       addSubMembers(I);
   }
-  /// Append the SubMembers of storage entity \p Idx, one per entry of its
-  /// class's flow-tracked member table (SemaProfiles::flowTrackedMembers), for
-  /// a class whose default-initialization runs no user-provided constructor.
-  void addSubMembers(unsigned Idx);
+  /// The member paths lifecycle leaves of the body name below tracked storage
+  /// of each class (SemaProfiles::LifecycleName::SubPath), by canonical
+  /// declaration: none a prefix of another, none at, below, or above an entry
+  /// of the class's flow-tracked member table. Kept in LifecycleSubPathStore.
+  llvm::DenseMap<const CXXRecordDecl *, SmallVector<ArrayRef<MemberStep>, 2>>
+      LifecycleSubPaths;
+  std::deque<MemberPath> LifecycleSubPathStore;
+  /// Record the member path \p Path a lifecycle leaf names below storage of
+  /// class \p RD (LifecycleSubPaths), before any storage is harvested.
+  void addLifecycleSubPath(const CXXRecordDecl *RD, const MemberPath &Path);
+  /// Append the SubMembers of storage entity \p Idx: with \p Table, one per
+  /// entry of its class's flow-tracked member table
+  /// (SemaProfiles::flowTrackedMembers), for a class whose
+  /// default-initialization runs no user-provided constructor; with
+  /// \p Lifecycle, then one per path of its class in LifecycleSubPaths.
+  void addSubMembers(unsigned Idx, bool Table = true, bool Lifecycle = false);
   /// The SubMember of the storage entity \p R that \p K names, if \p R
   /// has the SubMembers of \p K's class or of a class derived from it along
   /// one non-virtual path: a base view of the storage names the derived
-  /// class's entry for the member.
+  /// class's entry for the member. A lifecycle SubMember is found by its path
+  /// in storage of \p K's class.
   std::optional<unsigned> subEntity(unsigned R, const SubKey &K) const {
     const TrackedEntity &E = Entities[R];
     if (!K.Class || !E.SubClass)
       return std::nullopt;
+    if (!K.Path.empty()) {
+      if (E.SubClass != K.Class)
+        return std::nullopt;
+      for (unsigned I = E.Subs.first + E.TableSubs; I != E.Subs.second; ++I)
+        if (Entities[I].Steps == K.Path)
+          return I;
+      return std::nullopt;
+    }
+    if (!E.TableSubs)
+      return std::nullopt;
     if (E.SubClass == K.Class)
-      return E.Subs.first + K.Index;
+      return K.Index < E.TableSubs ? std::optional(E.Subs.first + K.Index)
+                                   : std::nullopt;
     std::optional<SemaProfiles::BasePath> Path =
         uniqueBasePath(E.SubClass, K.Class);
     ArrayRef<SemaProfiles::FlowTrackedMember> BaseTable =
@@ -2234,16 +2268,24 @@ struct TrackedStorage {
     return std::nullopt;
   }
   /// The SubMember key of the leaf of shape \p Shape below entity \p Idx's
-  /// storage.
-  SubKey subKey(unsigned Idx, const SemaProfiles::FlowLeafShape &Shape) const {
-    const CXXRecordDecl *RD = Entities[Idx].SubClass;
+  /// storage, whose member steps begin after the first \p Skip of the shape's.
+  SubKey subKey(unsigned Idx, const SemaProfiles::FlowLeafShape &Shape,
+                unsigned Skip = 0) const {
+    const TrackedEntity &E = Entities[Idx];
+    const CXXRecordDecl *RD = E.SubClass;
     if (!RD || Shape.Subscript)
       return {};
-    std::optional<SemaProfiles::FlowMemberMatch> M =
-        Profiles.matchFlowTrackedMember(RD, Shape);
-    if (!M)
-      return {};
-    return {RD, M->Index, M->Length == Shape.Members.size()};
+    if (E.TableSubs && !Skip)
+      if (std::optional<SemaProfiles::FlowMemberMatch> M =
+              Profiles.matchFlowTrackedMember(RD, Shape))
+        return {RD, M->Index, M->Length == Shape.Members.size()};
+    ArrayRef<MemberStep> Steps = ArrayRef(Shape.Members).drop_front(Skip);
+    for (unsigned I = E.Subs.first + E.TableSubs; I != E.Subs.second; ++I) {
+      ArrayRef<MemberStep> Path = Entities[I].Steps;
+      if (Path.size() <= Steps.size() && Steps.take_front(Path.size()) == Path)
+        return {RD, I - E.Subs.first, Path.size() == Steps.size(), Path};
+    }
+    return {};
   }
 
   /// The MemberPointee entity of the pointer member at \p Path, if tracked.
@@ -2278,8 +2320,10 @@ struct TrackedStorage {
     E.Entry = Entry;
     E.Steps = ArrayRef(LifecycleSteps.back());
     E.Type = F->getType();
-    LifecycleMembers[F] = Entities.size();
+    unsigned Idx = Entities.size();
+    LifecycleMembers[F] = Idx;
     Entities.push_back(std::move(E));
+    addSubMembers(Idx, /*Table=*/false, /*Lifecycle=*/true);
   }
   /// The lifecycle entity of the current object's direct base subobject of
   /// class \p B, by canonical declaration.
@@ -2319,9 +2363,11 @@ struct TrackedStorage {
     E.Lifecycle = true;
     E.Entry = Entry;
     E.Type = V->getType();
-    LocalEntity[V] = Entities.size();
+    unsigned Idx = Entities.size();
+    LocalEntity[V] = Idx;
     Entities.push_back(std::move(E));
     LifecycleLocals.insert(V);
+    addSubMembers(Idx, /*Table=*/false, /*Lifecycle=*/true);
   }
   /// The lifecycle entity of the member \p F, if tracked.
   std::optional<unsigned> lifecycleMember(const FieldDecl *F) const {
@@ -2425,17 +2471,21 @@ struct TrackedStorage {
                              QualType Designated = QualType(),
                              bool RawExempt = false) const;
 
-  /// True if \p R, the resolution of the glvalue leaf \p Leaf of a range,
-  /// names a lifecycle member or local whose range does not hold its own
-  /// elements (SemaProfiles::isFlowTrackedRangeLeaf): the range's elements
-  /// lie elsewhere.
-  bool namesRangeHandle(const Resolution &R,
-                        const SemaProfiles::ShapeLeaf &Leaf) const {
-    return R.Entity && Entities[*R.Entity].Lifecycle &&
-           Entities[*R.Entity].K != TrackedEntity::Kind::CurrentObjectBase &&
-           !SemaProfiles::holdsOwnElements(
-               SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms)
-                   ->getType());
+  /// \p R, the resolution of the glvalue leaf \p Leaf of a range, as the
+  /// range's elements (SemaProfiles::isFlowTrackedRangeLeaf): when the range
+  /// does not hold its own elements, which lie elsewhere, nothing in place of
+  /// a lifecycle member or local, and no lifecycle SubMember.
+  Resolution asRange(Resolution R, const SemaProfiles::ShapeLeaf &Leaf) const {
+    if (!R.Entity ||
+        SemaProfiles::holdsOwnElements(
+            SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms)->getType()))
+      return R;
+    const TrackedEntity &E = Entities[*R.Entity];
+    if (E.Lifecycle && E.K != TrackedEntity::Kind::CurrentObjectBase)
+      return Resolution();
+    if (!R.Sub.Path.empty())
+      R.Sub = SubKey();
+    return R;
   }
   /// True if a designation of type \p Designated covers entity \p Idx whole
   /// (designationCovers); a null \p Designated covers everything.
@@ -2557,24 +2607,61 @@ unsigned TrackedStorage::addLocalEntity(TrackedEntity::Kind K, const VarDecl *V,
   Entities.push_back(std::move(E));
   // A construction alias always refers to other storage.
   if (K != TrackedEntity::Kind::ConstructAlias)
-    addSubMembers(Idx);
+    addSubMembers(Idx, /*Table=*/true, /*Lifecycle=*/true);
   return LocalEntity[V] = Idx;
 }
 
-void TrackedStorage::addSubMembers(unsigned Idx) {
-  const CXXRecordDecl *RD =
-      SemaProfiles::getDefaultInitTrackableClass(Entities[Idx].Type);
-  if (!RD)
-    return;
-  ArrayRef<SemaProfiles::FlowTrackedMember> Table =
-      Profiles.flowTrackedMembers(RD);
-  if (Table.empty())
+void TrackedStorage::addLifecycleSubPath(const CXXRecordDecl *RD,
+                                         const MemberPath &Path) {
+  RD = RD->getCanonicalDecl();
+  // Below or above an entry of the table, the table's SubMembers track it.
+  if (const CXXRecordDecl *TableRD = SemaProfiles::getDefaultInitTrackableClass(
+          Ctx.getCanonicalTagType(RD)))
+    for (const SemaProfiles::FlowTrackedMember &M :
+         Profiles.flowTrackedMembers(TableRD)) {
+      ArrayRef<MemberStep> Entry = M.first;
+      size_t N = std::min(Entry.size(), Path.size());
+      if (Entry.take_front(N) == ArrayRef(Path).take_front(N))
+        return;
+    }
+  SmallVector<ArrayRef<MemberStep>, 2> &Paths = LifecycleSubPaths[RD];
+  for (ArrayRef<MemberStep> Other : Paths)
+    if (Other.size() <= Path.size() &&
+        ArrayRef(Path).take_front(Other.size()) == Other)
+      return;
+  llvm::erase_if(Paths, [&](ArrayRef<MemberStep> Other) {
+    return Path.size() < Other.size() &&
+           Other.take_front(Path.size()) == ArrayRef(Path);
+  });
+  LifecycleSubPathStore.push_back(Path);
+  Paths.push_back(LifecycleSubPathStore.back());
+}
+
+void TrackedStorage::addSubMembers(unsigned Idx, bool Table, bool Lifecycle) {
+  QualType T = Entities[Idx].Type;
+  const CXXRecordDecl *TableRD =
+      Table ? SemaProfiles::getDefaultInitTrackableClass(T) : nullptr;
+  ArrayRef<SemaProfiles::FlowTrackedMember> Entries;
+  if (TableRD)
+    Entries = Profiles.flowTrackedMembers(TableRD);
+  const CXXRecordDecl *RD = TableRD;
+  if (!RD && Lifecycle)
+    if ((RD = T->getAsCXXRecordDecl()))
+      RD = RD->getDefinition();
+  ArrayRef<ArrayRef<MemberStep>> Paths;
+  if (Lifecycle && RD)
+    if (auto It = LifecycleSubPaths.find(RD->getCanonicalDecl());
+        It != LifecycleSubPaths.end())
+      Paths = It->second;
+  if (Entries.empty() && Paths.empty())
     return;
   unsigned Begin = Entities.size();
-  Entities[Idx].Subs = {Begin, Begin + (unsigned)Table.size()};
+  Entities[Idx].Subs = {Begin,
+                        Begin + (unsigned)(Entries.size() + Paths.size())};
   Entities[Idx].SubClass = RD;
+  Entities[Idx].TableSubs = Entries.size();
   EntryState Entry = Entities[Idx].Entry;
-  for (const SemaProfiles::FlowTrackedMember &M : Table) {
+  for (const SemaProfiles::FlowTrackedMember &M : Entries) {
     TrackedEntity Sub;
     Sub.K = TrackedEntity::Kind::SubMember;
     Sub.Steps = M.first;
@@ -2582,6 +2669,17 @@ void TrackedStorage::addSubMembers(unsigned Idx) {
     Sub.Type = M.first.back().Field->getType();
     Sub.TrackReads = false;
     Sub.Entry = Entry;
+    Entities.push_back(std::move(Sub));
+  }
+  for (ArrayRef<MemberStep> Path : Paths) {
+    TrackedEntity Sub;
+    Sub.K = TrackedEntity::Kind::SubMember;
+    Sub.Steps = Path;
+    Sub.Whole = true;
+    Sub.Type = Path.back().Field->getType();
+    Sub.TrackReads = false;
+    Sub.Entry = Entry;
+    Sub.Lifecycle = true;
     Entities.push_back(std::move(Sub));
   }
 }
@@ -2771,6 +2869,7 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
       R.Entity = Idx;
       R.Subobject =
           Steps.size() > 1 || Shape->Subscript || DesignatesPart(*Idx);
+      R.Sub = subKey(*Idx, *Shape, /*Skip=*/1);
       R.AtStart = Steps.size() == 1 && !Shape->OffsetElement;
       return R;
     }
@@ -2902,9 +3001,8 @@ TrackedStorage::resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
         R = resolveFlowLeaf({Arg, Leaf.Arms}, /*AsPointerValue=*/true,
                             Designated, RawExempt);
       } else {
-        R = resolve({Arg, Leaf.Arms}, Designated, RawExempt);
-        if (namesRangeHandle(R, {Arg, Leaf.Arms}))
-          R = Resolution();
+        R = asRange(resolve({Arg, Leaf.Arms}, Designated, RawExempt),
+                    {Arg, Leaf.Arms});
         bool ChainPartial = false;
         if (!R.Entity && SemaProfiles::isHandleType(AT))
           if (const DeclRefExpr *Base =
@@ -3269,6 +3367,9 @@ struct DestroySite {
   /// object a construction there began (FlowState::Constructed), and leaves
   /// the rest of the storage as it was.
   SmallVector<unsigned, 2> StartAffected;
+  /// The SubMembers a leaf names exactly (`&s.d`, `&p->d`), by the entity of
+  /// their storage: the destroy ends each member alone.
+  SmallVector<std::pair<unsigned, SubKey>, 1> SubAffected;
 };
 
 /// A read through, or a store below, tracked storage (P4222R2 §4.5, §5.4)
@@ -3792,10 +3893,30 @@ static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
     } else {
       std::optional<unsigned> R =
           L.Entity ? referent(*L.Entity, St, Storage) : std::nullopt;
+      // A leaf naming a SubMember of the storage exactly destroys that member
+      // alone, and is judged by its state.
+      if (R && !L.WholeLeaf && L.Sub.Exact)
+        if (std::optional<unsigned> Sub = Storage.subEntity(*R, L.Sub)) {
+          AllDestroyed &= St.has(*Sub, FlowState::MayDestroyed);
+          LeafState S = St.has(*Sub, FlowState::Must) ? LeafState::Initialized
+                        : !St.has(*Sub, FlowState::May)
+                            ? LeafState::Uninitialized
+                            : LeafState::Unknown;
+          Acc = Acc ? combineLeafStates(*Acc, S) : S;
+          continue;
+        }
       // At its scope exit, a member of a local that escaped after the
-      // member's destroy may have been reconstructed since.
+      // member's destroy may have been reconstructed since. A destroy of the
+      // storage whole destroys again a SubMember a destroy ended on some
+      // path and nothing reconstructed.
+      bool Destroyed = R && St.has(*R, FlowState::MayDestroyed);
+      if (R && L.WholeLeaf)
+        for (unsigned I = Storage.Entities[*R].Subs.first,
+                      N = Storage.Entities[*R].Subs.second;
+             I != N && !Destroyed; ++I)
+          Destroyed = St.has(I, FlowState::MayDestroyed);
       AllDestroyed &=
-          R && St.has(*R, FlowState::MayDestroyed) &&
+          Destroyed &&
           !(Site.Destroyer == SemaProfiles::InitDestroyer::ScopeExit &&
             St.has(*R, FlowState::Esc));
       // A marked pointer member's entry assertion alone is no evidence that
@@ -3928,14 +4049,29 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
           return std::nullopt;
     return R;
   };
-  // Write \p R and, unless the event is a default-initialization's credit or
-  // names a SubMember, the SubMembers of its storage.
+  // Write \p R and, unless the event names a SubMember, the SubMembers of
+  // its storage -- of them, a default-initialization's credit writes the
+  // lifecycle ones and leaves the [[uninit]] ones indeterminate, no longer
+  // destroyed.
   auto WriteStorage = [&](const DefAssignEvent &Ev, unsigned R,
                           llvm::function_ref<void(unsigned)> F) {
-    if (Ev.Sub.Class || Ev.SkipUninitMembers)
+    if (Ev.Sub.Class) {
       F(R);
-    else
+      return;
+    }
+    if (!Ev.SkipUninitMembers) {
       WithSubs(R, F);
+      return;
+    }
+    F(R);
+    for (unsigned I = Storage.Entities[R].Subs.first,
+                  N = Storage.Entities[R].Subs.second;
+         I != N; ++I) {
+      if (Storage.Entities[I].Lifecycle)
+        F(I);
+      else
+        St.update(I, 0, FlowState::MayDestroyed);
+    }
   };
   auto MayWrite = [&](unsigned I) {
     St.update(I, FlowState::May, FlowState::EntryAsserted);
@@ -4045,6 +4181,22 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
           if (std::optional<unsigned> R = referent(A, St, Storage);
               R && !St.has(A, FlowState::Offset))
             St.update(*R, 0, FlowState::Constructed);
+      for (const auto &[A, K] : Site.SubAffected) {
+        std::optional<unsigned> R = referent(A, St, Storage);
+        std::optional<unsigned> Sub = R && !St.has(A, FlowState::Offset)
+                                          ? Storage.subEntity(*R, K)
+                                          : std::nullopt;
+        if (!Sub)
+          continue;
+        uint16_t Set = FlowState::MayUnassigned | FlowState::MayDestroyed;
+        uint16_t Clear = FlowState::Must | FlowState::EntryAsserted |
+                         FlowState::MembersPending;
+        if (Site.Conditional)
+          Set |= FlowState::May;
+        else
+          Clear |= FlowState::May | FlowState::Esc | ConstructBits;
+        St.update(*Sub, Set, Clear);
+      }
       break;
     }
     case DefAssignEventKind::Reseat: {
@@ -4664,8 +4816,8 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
                        bool InRange = false) {
       ArgLeaf L{Leaf.E, Storage.resolveFlowLeaf(Leaf, AsPointerValue,
                                                 Designated, RawExempt)};
-      if (InRange && Storage.namesRangeHandle(L.R, Leaf))
-        L.R = TrackedStorage::Resolution();
+      if (InRange)
+        L.R = Storage.asRange(L.R, Leaf);
       // A credit through a conversion to a base class names the base
       // subobject, whatever its designated type.
       if (L.R.Entity && !Designated.isNull()) {
@@ -4889,12 +5041,17 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
       BindingLeaf Leaf;
       if (L.R.Entity) {
         Leaf.Entity = L.R.Entity;
+        Leaf.WholeLeaf = !L.R.Subobject;
+        Leaf.Sub = L.R.Sub;
         bool Start =
             L.R.Subobject ? L.R.AtStart : Storage.Entities[*L.R.Entity].AtStart;
         SmallVectorImpl<unsigned> &Into =
             Start ? Site.StartAffected : Site.Affected;
         if ((!L.R.Subobject || Start) && !llvm::is_contained(Into, *L.R.Entity))
           Into.push_back(*L.R.Entity);
+        // A SubMember named exactly is destroyed alone.
+        if (L.R.Subobject && L.R.Sub.Exact)
+          Site.SubAffected.push_back({*L.R.Entity, L.R.Sub});
       } else if (!L.Tracked && L.LocalWhole) {
         // The parse-time funnel judged the local by form, which never rejects
         // its destroy; its members say whether it was destroyed already.
@@ -4919,7 +5076,7 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
           Leaf.State = LeafState::Unknown;
     }
     if ((!Site.Judged || Site.Leaves.empty()) && Site.Affected.empty() &&
-        Site.StartAffected.empty())
+        Site.StartAffected.empty() && Site.SubAffected.empty())
       return;
     DSites.push_back(std::move(Site));
     BlockEvents.push_back({DefAssignEventKind::Destroy, 0, CallLike,
@@ -5656,6 +5813,7 @@ static void extractStdInitEvents(
       Site.Owner = Idx;
       BindingLeaf Leaf;
       Leaf.Entity = Idx;
+      Leaf.WholeLeaf = true;
       Site.Leaves.push_back(Leaf);
       Site.Affected.push_back(Idx);
       DSites.push_back(std::move(Site));
@@ -5713,9 +5871,8 @@ static void extractStdInitEvents(
                     S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC);
                 TrackedStorage::Resolution R =
                     Storage.resolveFlowLeaf(Leaf, AsPointerValue);
-                if (HL.M == HandleLeaf::Mode::Range &&
-                    Storage.namesRangeHandle(R, Leaf))
-                  R = TrackedStorage::Resolution();
+                if (HL.M == HandleLeaf::Mode::Range)
+                  R = Storage.asRange(R, Leaf);
                 if (HL.M == HandleLeaf::Mode::Range && !R.Entity) {
                   SemaProfiles::forEachHandleSourceLeaf(
                       Leaf.E,
@@ -6268,6 +6425,7 @@ static void extractStdInitEvents(
                 BindingLeaf Life;
                 Life.Entity = R.Entity;
                 Life.WholeLeaf = !R.Subobject;
+                Life.Sub = R.Sub;
                 Site.Leaves.push_back(Life);
                 AnyCurrentObject = true;
               }
@@ -6667,6 +6825,7 @@ static void extractStdInitEvents(
         Site.Destroyer = SemaProfiles::InitDestroyer::MemberTeardown;
         BindingLeaf Leaf;
         Leaf.Entity = Idx;
+        Leaf.WholeLeaf = true;
         Site.Leaves.push_back(Leaf);
         Site.Affected.push_back(*Idx);
         DSites.push_back(std::move(Site));
@@ -6740,6 +6899,7 @@ static void extractStdInitEvents(
         Site.ScopeExitVar = V;
         BindingLeaf Leaf;
         Leaf.Entity = It->second;
+        Leaf.WholeLeaf = true;
         Site.Leaves.push_back(Leaf);
         Site.Affected.push_back(It->second);
         DSites.push_back(std::move(Site));
@@ -7387,20 +7547,24 @@ struct LifecycleNames {
   llvm::SetVector<const FieldDecl *> Members;
   llvm::SetVector<const CXXRecordDecl *> Bases;
   llvm::SetVector<const VarDecl *> Locals;
+  /// The member paths below tracked storage, with the storage's class
+  /// (SemaProfiles::LifecycleName::SubPath).
+  SmallVector<std::pair<const CXXRecordDecl *, MemberPath>, 2> SubPaths;
 };
 
 /// Add to \p Out the lifecycle storage of the analyzed body \p D: the members
 /// (SemaProfiles::lifecycleMember) and, in a constructor, the direct bases
-/// (SemaProfiles::lifecycleBase) of the current object, and the locals and
-/// by-value parameters (SemaProfiles::lifecycleLocal), that a lifecycle leaf
-/// names -- a leaf SemaProfiles::isFlowTrackedLeaf checks for a marked target
-/// or a destroy: an argument bound to a marked, Construct-role, or destroying
-/// parameter (a reserved placement new's address included), an explicit or
-/// pseudo-destructor call's object, a delete operand, and the source of a
-/// marked variable, init-capture, return, member initializer, aggregate
-/// element, pointer assignment, handle reseat, or byte copy. The predicate
-/// classifies each leaf, so the deferred sites and the engine's own judged
-/// leaves find their storage harvested.
+/// (SemaProfiles::lifecycleBase) of the current object, the locals and
+/// by-value parameters (SemaProfiles::lifecycleLocal), and the member paths
+/// below tracked storage (SemaProfiles::LifecycleName::SubPath) that a
+/// lifecycle leaf names -- a leaf SemaProfiles::isFlowTrackedLeaf checks for a
+/// marked target or a destroy: an argument bound to a marked, Construct-role,
+/// or destroying parameter (a reserved placement new's address included), an
+/// explicit or pseudo-destructor call's object, a delete operand, and the
+/// source of a marked variable, init-capture, return, member initializer,
+/// aggregate element, pointer assignment, handle reseat, or byte copy. The
+/// predicate classifies each leaf, so the deferred sites and the engine's own
+/// judged leaves find their storage harvested.
 static void collectLifecycleNames(Sema &S, const Decl *D, LifecycleNames &Out) {
   using HandleLeaf = SemaProfiles::HandleLeaf;
   const auto *DC = cast<DeclContext>(D);
@@ -7420,6 +7584,8 @@ static void collectLifecycleNames(Sema &S, const Decl *D, LifecycleNames &Out) {
       Out.Bases.insert(Name.Base);
     if (Name.Local)
       Out.Locals.insert(Name.Local);
+    if (Name.SubClass)
+      Out.SubPaths.push_back({Name.SubClass, std::move(Name.SubPath)});
   };
   // The leaves of \p Src bound as \p T, through the handle walk for a handle;
   // with \p AsRange, a class-type \p Src taken by reference is a range a
@@ -7608,6 +7774,12 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
               SemaProfiles::isHandleType(V->getType())))
       Storage.addLocalEntity(TrackedEntity::Kind::Pointee, V, Entry);
   };
+  // The member paths lifecycle leaves name below tracked storage, which the
+  // storage's SubMembers include from its harvest on.
+  LifecycleNames Lifecycle;
+  collectLifecycleNames(S, D, Lifecycle);
+  for (const auto &[RD, Path] : Lifecycle.SubPaths)
+    Storage.addLifecycleSubPath(RD, Path);
   llvm::SmallPtrSet<const VarDecl *, 16> Owned;
   // A by-value parameter's members are read-tracked from the all-unassigned
   // entry state unless the parameter declares a default argument (a
@@ -7663,8 +7835,6 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
   });
   if (CurrentObjectUsed)
     Storage.addCurrentObjectRoot(Method->getParent());
-  LifecycleNames Lifecycle;
-  collectLifecycleNames(S, D, Lifecycle);
   // The current object's lifecycle members and bases: live at a method's
   // entry and unassigned until their initializers in a constructor; a
   // lambda's or block's body has none (SemaProfiles::isLambdaOrBlockBody).

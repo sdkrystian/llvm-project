@@ -15,13 +15,17 @@
 // RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -fexceptions -fcxx-exceptions -isystem %t/sys %t/locals.cpp
 // RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -DLEADING_ERROR -fexceptions -fcxx-exceptions -isystem %t/sys %t/locals.cpp
 // RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -Wunreachable-code -fexceptions -fcxx-exceptions -isystem %t/sys %t/locals.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -fexceptions -fcxx-exceptions -isystem %t/sys %t/submembers.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -fexceptions -fcxx-exceptions -isystem %t/sys %t/submembers.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -DLEADING_ERROR -fexceptions -fcxx-exceptions -isystem %t/sys %t/submembers.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -Wunreachable-code -fexceptions -fcxx-exceptions -isystem %t/sys %t/submembers.cpp
 
 // std::init: ordinary storage a lifecycle call of a body names -- a member of
-// the current object, a local, or a by-value parameter -- has a lifetime of
-// its own in that body (ProfilesFramework.rst, "Binding Pointers and
-// References"): destroying it twice, using it after a destroy, and
-// constructing over it while it is live are rejected, and destroying then
-// reconstructing it is accepted.
+// the current object, a local, a by-value parameter, or a member below
+// tracked storage -- has a lifetime of its own in that body
+// (ProfilesFramework.rst, "Binding Pointers and References"): destroying it
+// twice, using it after a destroy, and constructing over it while it is live
+// are rejected, and destroying then reconstructing it is accepted.
 
 //--- sys/lifetimes.h
 // The shapes of libstdc++'s <memory>, <new>, and <string> the tests use.
@@ -838,4 +842,126 @@ void raw_buffer_place_twice() {
   alignas(std::string) unsigned char buf[sizeof(std::string)] = {};
   new (buf) std::string("a");
   new (buf) std::string("b");
+}
+
+//--- submembers.cpp
+// no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
+[[profiles::enforce(std::init)]];
+#include <lifetimes.h>
+
+#ifdef LEADING_ERROR
+int leading_unrelated_error = undeclared_identifier;
+// expected-error@-1 {{use of undeclared identifier 'undeclared_identifier'}}
+// no-profiles-error@-2 {{use of undeclared identifier 'undeclared_identifier'}}
+#endif
+
+struct D { int v; ~D(); };
+struct S2 { D d; int k; };
+struct S3 { D d [[uninit]]; int k [[uninit]]; };
+struct DView {
+  D *first, *last;
+  D *begin() const;
+  D *end() const;
+  std::size_t size() const;
+};
+struct WithView { DView v; int k; };
+
+// A member destroyed below an [[uninit]] local is destroyed again by the local's scope exit
+void member_destroy_then_scope_exit() {
+  S2 s [[uninit]]; // expected-note {{'s' is destroyed at the end of its scope}}
+  std::construct_at(&s);
+  std::destroy_at(&s.d);
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+
+// A member destroyed twice below an [[uninit]] local is a double destruction
+void member_destroy_twice() {
+  S2 s [[uninit]];
+  std::construct_at(&s);
+  std::destroy_at(&s.d);
+  std::destroy_at(&s.d); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
+  std::construct_at(&s.d);
+}
+
+// A read below a destroyed member reads uninitialized memory
+int member_destroy_then_read() {
+  S2 s [[uninit]];
+  std::construct_at(&s);
+  std::destroy_at(&s.d);
+  int r = s.d.v; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  std::construct_at(&s.d);
+  return r;
+}
+
+// A member destroyed and reconstructed below an [[uninit]] local is accepted
+void member_destroy_construct() {
+  S2 s [[uninit]];
+  std::construct_at(&s);
+  std::destroy_at(&s.d);
+  std::construct_at(&s.d);
+}
+
+// A read of another member after a member's destroy is accepted
+int member_destroy_sibling_read() {
+  S2 s [[uninit]];
+  std::construct_at(&s);
+  std::destroy_at(&s.d);
+  int r = s.k;
+  std::construct_at(&s.d);
+  return r;
+}
+
+// A destroy of the storage whole after a member's destroy destroys the member again
+void member_destroy_then_whole(bool c) {
+  S2 s [[uninit]]; // expected-note {{'s' is destroyed at the end of its scope}}
+  std::construct_at(&s);
+  if (c)
+    std::destroy_at(&s.d);
+  std::destroy_at(&s); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+
+// An [[uninit]] member destroyed twice is a double destruction, a read of it after is rejected, and the scope exit destroys it again
+void uninit_member_destroy_twice() {
+  S3 s [[uninit]]; // expected-note {{'s' is destroyed at the end of its scope}}
+  std::construct_at(&s);
+  std::destroy_at(&s.d);
+  std::destroy_at(&s.d); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
+  int r = s.d.v; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+  (void)r;
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+
+// An [[uninit]] member destroyed and reconstructed is accepted
+void uninit_member_destroy_construct() {
+  S3 s [[uninit]];
+  std::construct_at(&s);
+  std::destroy_at(&s.d);
+  std::construct_at(&s.d);
+}
+
+// A member destroyed below an ordinary local is destroyed again by the local's scope exit
+void local_member_destroy_then_scope_exit() {
+  S2 s{}; // expected-note {{'s' is destroyed at the end of its scope}}
+  std::destroy_at(&s.d);
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+
+// A member destroyed and reconstructed below an ordinary local is accepted
+void local_member_destroy_construct() {
+  S2 s{};
+  std::destroy_at(&s.d);
+  std::construct_at(&s.d);
+}
+
+struct Outer {
+  S2 s;
+  // A destructor that destroys a member of a member destroys it again at the member teardown
+  ~Outer() {
+    std::destroy_at(&s.d);
+  } // expected-error {{storage already destroyed is destroyed again by the destructor's member teardown under profile 'std::init'}}
+};
+
+// A range destroy below tracked storage destroys the range's elements, not the member
+void member_range_destroy(WithView *p [[ref_to_uninit]]) {
+  std::construct_at(p);
+  std::ranges::destroy(p->v);
+  (void)p->v.size();
+  std::destroy_at(p);
 }

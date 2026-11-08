@@ -1808,6 +1808,34 @@ struct MemberLifecycleCalls {
   }
 };
 
+struct WithDtor { int v; ~WithDtor(); };
+struct Holder { WithDtor w; int k; };
+
+// A member destroyed below a marked pointer's referent is destroyed again by a destroy of the referent whole.
+void member_then_whole_through_pointer(Holder *p [[ref_to_uninit]]) {
+  std::construct_at(p);
+  std::destroy_at(&p->w);
+  std::destroy_at(p); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
+}
+
+// A member destroyed and reconstructed below a marked pointer's referent is accepted.
+void member_reconstruct_through_pointer(Holder *p [[ref_to_uninit]]) {
+  std::construct_at(p);
+  std::destroy_at(&p->w);
+  std::construct_at(&p->w);
+  std::destroy_at(p);
+}
+
+// A member destroyed through a marked pointer is the member of the local it refers to.
+void member_destroy_through_alias() {
+  Holder h [[uninit]];
+  Holder *p [[ref_to_uninit]] = &h;
+  std::construct_at(p);
+  std::destroy_at(&p->w);
+  std::destroy_at(&h.w); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
+  std::construct_at(&h.w);
+}
+
 //--- sys/init_mem.h
 inline void *operator new(__SIZE_TYPE__, void *p) noexcept { return p; }
 namespace std {

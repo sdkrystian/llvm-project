@@ -1276,9 +1276,10 @@ whole destroy of it, which the funnel judged by form, is judged against its
 member range for ``double_destroy`` only (``BindingLeaf::DestroyedOnly``).  A
 range (``HandleLeaf::Mode::Range``: a range a known callee's role parameter
 takes by reference, a range a handle is built over, a Derive call's range)
-names its elements, so a lifecycle member or local is a range's storage only
-when the range holds its own elements, an array or a ``std::array``
-(``SemaProfiles::isFlowTrackedRangeLeaf``, ``TrackedStorage::namesRangeHandle``);
+names its elements, so a lifecycle member, local, or ``SubMember`` is a
+range's storage only when the range holds its own elements, an array or a
+``std::array``
+(``SemaProfiles::isFlowTrackedRangeLeaf``, ``TrackedStorage::asRange``);
 any other class reference names the object.  A lifecycle entity enters
 initialized (``EntryState::Initialized``, hence
 ``Constructed``) in a member function other than a constructor, and as a
@@ -1330,7 +1331,20 @@ it (a ``void`` referent) is uninitialized while members are pending, until a
 store naming one such member -- and a whole copy the worst of all of them.  A
 marked binding is judged by the storage alone, or, when it names one SubMember
 exactly, by that member; an unmarked one of live storage whose SubMembers
-alone are unassigned is Unknown unless it names one exactly.  The enumeration
+alone are unassigned is Unknown unless it names one exactly.  Such storage, and
+a lifecycle member or local, also carries one *lifecycle* ``SubMember`` per
+member path a lifecycle leaf names below it through field steps alone
+(``SemaProfiles::LifecycleName::SubPath``) that is not at, below, or above a
+table entry, after the table's (``TrackedEntity::TableSubs``): the paths are
+kept per class (``TrackedStorage::LifecycleSubPaths``), none a prefix of
+another, so every storage of a class has the same ones and a pointer's key
+(``SubKey::Path``) finds its own in the storage it refers to.  A
+default-initialization's credit constructs a lifecycle ``SubMember``.  A
+destroy naming a ``SubMember`` exactly ends that member alone
+(``DestroySite::SubAffected``) and is judged by its state, and a destroy of the
+storage whole -- explicit, at its scope exit, at a member teardown, or by an
+owner -- is ``double_destroy`` when a ``SubMember`` was destroyed on some path
+and nothing reconstructed it.  The enumeration
 enters a *container* -- a named, unmarked, non-reference, non-array member with
 no default member initializer whose default constructor is not user-provided
 (``SemaProfiles::getDefaultInitTrackableClass``) -- up to eight member steps
@@ -1957,10 +1971,12 @@ Missed Diagnostics
   reject a legal combination.
 - A second destroy of storage that is not flow-tracked -- a ``static``,
   ``thread_local``, or ``__block`` variable, raw storage, a union member or a
-  variable of union type, an element of a local array, a member of a local, a
-  member the body names in no lifecycle leaf, the referent of a reference or
-  of an unmarked pointer that is not a construction alias, the referent of
-  another object's marked pointer member -- is not a double destroy.
+  variable of union type, an element of a local array, a member of a local
+  with tracked members or of another object's marked pointer member's
+  referent, a member the body names in no lifecycle leaf, the referent of a
+  reference or of an unmarked pointer that is not a construction alias, the
+  referent of another object's marked pointer member -- is not a double
+  destroy.
 - A destroy of tracked storage, a local included, through an unmarked alias
   other than a construction alias -- ``D *p = &d``, a reference
   (``X &r = x; std::destroy_at(&r);``), a by-reference capture, a returned
