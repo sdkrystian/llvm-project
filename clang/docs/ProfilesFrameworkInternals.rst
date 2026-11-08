@@ -1263,23 +1263,46 @@ holding tracked members; in a constructor, so is the direct non-virtual base
 ``this`` converted to with no member step names (``SemaProfiles::lifecycleBase``,
 ``TrackedEntity::Kind::CurrentObjectBase``), unless it is raw storage or holds
 tracked members -- the conversion's casts above the leaf, which the leaf walk
-peels, ride on the leaf (``ShapeLeaf::OuterBases``).  It enters initialized
-(``EntryState::Initialized``, hence ``Constructed``) in a member function other
-than a constructor; unassigned in a constructor, where the ``CFGInitializer``
-arm constructs it at its initializer -- a member's own, written, a default
-member initializer, or an implicit default construction; a base's, for the base
-and its members; a delegating one, for every one.  A lambda's or block's body
-has none (``SemaProfiles::isLambdaOrBlockBody``): it judges the current
-object's members by form.  It is never read-tracked, and is judged by flow at
-every other binding below or naming it, at every read below or naming it, and
+peels, ride on the leaf (``ShapeLeaf::OuterBases``).  In every body, so is a
+local or by-value parameter of that body a leaf names through field steps alone
+(``SemaProfiles::lifecycleLocal``, a ``WholeLocal``): not a reference, a
+``static``, ``thread_local``, ``__block``, implicit, or decomposition variable,
+an init-capture, a variable of an enclosing function, which a lambda's or
+block's body reaches by capture, a marked variable, or one of union type, of
+raw storage, or of a class with tracked members, and no step names a
+reference, a bit-field, a union member, or a member of union type or raw
+storage.  A variable with tracked members is tracked by those members: a
+whole destroy of it, which the funnel judged by form, is judged against its
+member range for ``double_destroy`` only (``BindingLeaf::DestroyedOnly``).  A
+range (``HandleLeaf::Mode::Range``: a range a known callee's role parameter
+takes by reference, a range a handle is built over, a Derive call's range)
+names its elements, so a lifecycle member or local is a range's storage only
+when the range holds its own elements, an array or a ``std::array``
+(``SemaProfiles::isFlowTrackedRangeLeaf``, ``TrackedStorage::namesRangeHandle``);
+any other class reference names the object.  A lifecycle entity enters
+initialized (``EntryState::Initialized``, hence
+``Constructed``) in a member function other than a constructor, and as a
+parameter; unassigned in a constructor, where the ``CFGInitializer`` arm
+constructs it at its initializer -- a member's own, written, a default member
+initializer, or an implicit default construction; a base's, for the base and
+its members; a delegating one, for every one; and as a local, which its
+declaration or its handler's entry constructs, whatever the declaration's
+form.  A lambda's or block's body has no lifecycle member or base
+(``SemaProfiles::isLambdaOrBlockBody``): it judges the current object's members
+by form.  A lifecycle entity is never read-tracked, and is judged by flow at
+every other unmarked binding below or naming it, at every read below or naming
+it but a local's plain read whole (the uninitialized-values analysis's), and
 at every store below it, through a lifecycle leaf the engine adds although the
 predicate did not defer that site: the parse-time funnel judged it by form,
-which never rejects live storage there, so no verdict repeats.  A store naming
-a scalar one whole initializes it.  A destructor's member teardown
-(``CFGMemberDtor``) destroys a lifecycle member and a tracked whole
-``[[uninit]]`` member of a type with a non-trivial destructor, judged for
-``double_destroy`` only (``InitDestroyer::MemberTeardown``).  In every member
-function, each ``[[ref_to_uninit]]`` pointer member
+which never rejects live storage there, so no verdict repeats; a marked
+target the predicate leaves to the form (an element of a local array) keeps
+the form's verdict.  A store naming a scalar one whole initializes it.  A
+destructor's member teardown (``CFGMemberDtor``) destroys a lifecycle member
+and a tracked whole ``[[uninit]]`` member of a type with a non-trivial
+destructor, and a lifecycle local's scope exit (``CFGAutomaticObjDtor``) the
+local, each judged for ``double_destroy`` only
+(``InitDestroyer::MemberTeardown``, ``InitDestroyer::ScopeExit``).  In every
+member function, each ``[[ref_to_uninit]]`` pointer member
 reachable from the current object through members by value
 (``SemaProfiles::markedPointerMembers``) has a ``MemberPointee`` entity for
 its referent: it enters asserted uninitialized (``FlowState::EntryAsserted``,
@@ -1543,7 +1566,9 @@ Deliberate Strictnesses
   over raw storage (``SemaProfiles::isRawStorageType``: an array of
   ``std::byte``, ``char``, or ``unsigned char``, or a class of only such
   arrays), where it begins a new object that may be destroyed again, though
-  its bytes stay uninitialized for a read.
+  its bytes stay uninitialized for a read.  An element of a local array
+  without a marker is judged by form, which takes it as live, so constructing
+  one after a whole destroy is rejected.
 - Member-wise initialization of a class-type referent through
   ``[[ref_to_uninit]]`` is rejected even for trivially-copyable referents
   (``ptr->x = 5``): below a member step only whole-object ``construct_at``
@@ -1717,9 +1742,10 @@ Missed Diagnostics
   ``construct_at`` checks the lifecycle start (double construction via the
   reverse-direction rule) and ``destroy_at`` the end (double destruction,
   use-after-destroy where the storage is *bound*, and a member read after the
-  destroy).  A direct named read of a plain ``[[uninit]]`` *local* after a
-  destroy stays with the local-variable analysis, which treats the call as an
-  escape, so it is a missed diagnostic.
+  destroy).  A direct named read of a plain ``[[uninit]]`` *local*, or of an
+  ordinary scalar local (``int i = 1; std::destroy_at(&i); return i;``),
+  after a destroy stays with the local-variable analysis, which treats the
+  call as an escape, so it is a missed diagnostic.
 - Clang's knowledge of ``std::construct_at``, ``std::destroy_at``, and
   ``std::now_init`` applies where their parameter is a pointer, and of their
   ``std::ranges`` objects likewise; a call with a class-type argument checks
@@ -1929,15 +1955,25 @@ Missed Diagnostics
 - An assignment through a conditional, comma, or GNU ``?:`` target whose
   arms differ in marking accepts either source: any single answer would
   reject a legal combination.
-- A second destroy of storage that is not flow-tracked -- an ordinary local, a
-  member the body names in no lifecycle leaf, the referent of an unmarked
-  pointer that is not a construction alias, the referent of another object's
-  marked pointer member -- is not a double destroy.
-- A destroy of tracked storage through an unmarked alias other than a
-  construction alias -- ``D *p = &d``, a reference, a by-reference capture, a
-  returned pointer the body assigns or binds to a reference -- records
-  nothing: the storage stays live for a later construction and its scope
-  exit.
+- A second destroy of storage that is not flow-tracked -- a ``static``,
+  ``thread_local``, or ``__block`` variable, raw storage, a union member or a
+  variable of union type, an element of a local array, a member of a local, a
+  member the body names in no lifecycle leaf, the referent of a reference or
+  of an unmarked pointer that is not a construction alias, the referent of
+  another object's marked pointer member -- is not a double destroy.
+- A destroy of tracked storage, a local included, through an unmarked alias
+  other than a construction alias -- ``D *p = &d``, a reference
+  (``X &r = x; std::destroy_at(&r);``), a by-reference capture, a returned
+  pointer the body assigns or binds to a reference -- records nothing: the
+  storage stays live, so its scope exit is no double destroy and a later
+  construction of it by name is rejected.
+- An object reached only through an unmarked pointer or an unmarked owner
+  (``D *p = new D; std::destroy_at(p); delete p;``,
+  ``std::unique_ptr<D> up(new D); std::destroy_at(up.get());``) has no
+  lifetime of its own: its second destruction is accepted, and destroying then
+  reconstructing it through the pointer (``std::destroy_at(p);
+  std::construct_at(p, v);`` for an unmarked ``p``) is rejected (see also the
+  ``delete`` entry).
 - A pointer passed through a non-const reference to it -- a forwarding
   reference (``v.emplace_back(raw, 4)``,
   ``std::make_unique<std::span<int>>(raw, 4)``) -- binds the pointer object,

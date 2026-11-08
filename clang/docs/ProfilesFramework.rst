@@ -1156,7 +1156,24 @@ the member teardown destroys again a member of a type with a non-trivial
 destructor that the body left destroyed on some path.  References, bit-fields,
 members of a union or an anonymous union, members of union type or of raw
 storage, and members marked ``[[uninit]]`` or ``[[ref_to_uninit]]`` have no
-such lifetime.  A function may carry both
+such lifetime.  A local variable or by-value parameter that a function
+destroys, constructs, or binds to a marked target also has such a
+lifetime, starting initialized at its declaration or, for a parameter,
+at the function's entry: besides the uses above, a read or store of a
+member of it after a destroy, and the destructor that ends its scope
+after a destroy, are rejected; a plain read of a destroyed
+scalar is not.  A lambda's or block's own locals and parameters have such a
+lifetime in its body; a variable it captures is judged by form there.
+References, ``static``, ``thread_local``, and ``__block`` variables, structured
+bindings, marked variables, and variables of union type, of raw storage, or of
+a class with ``[[uninit]]`` members have none, and an element (``&a[1]``) is
+judged by form.  A variable of a class with ``[[uninit]]`` members is tracked
+through those members instead: destroying it whole a second time is rejected.
+A range argument (``std::ranges::destroy(r)``, a ``std::ranges`` uninitialized
+algorithm's range, a range a handle is built over) names its elements, so it
+destroys or constructs such a member or variable only when that is an array or
+a ``std::array``; the elements of a span or a vector lie elsewhere.
+A function may carry both
 attributes -- a reinitializer that destroys and then reconstructs its
 argument's storage -- and models destroy-then-construct: the storage bound to
 its ``[[ref_to_uninit]]`` parameters is initialized after the call, and calling

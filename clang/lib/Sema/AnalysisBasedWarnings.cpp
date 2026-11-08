@@ -1869,10 +1869,12 @@ enum class EntryState : uint8_t {
 /// [[uninit]] member of the current object or of a directly named local or
 /// by-value parameter -- a scalar, or a class or array object tracked whole --
 /// (directly or inside a member subobject;
-/// SemaProfiles::forEachFlowTrackedMember), an [[uninit]] local or parameter
-/// as a whole, the referent of a [[ref_to_uninit]] local pointer, reference,
-/// or handle (parameters included), which the dataflow identifies per program
-/// point (FlowState::Target), the referent of a [[ref_to_uninit]] pointer
+/// SemaProfiles::forEachFlowTrackedMember), an [[uninit]] local or parameter,
+/// or a local or by-value parameter a lifecycle leaf names
+/// (SemaProfiles::lifecycleLocal), as a whole, the referent of a
+/// [[ref_to_uninit]] local pointer, reference, or handle (parameters
+/// included), which the dataflow identifies per program point
+/// (FlowState::Target), the referent of a [[ref_to_uninit]] pointer
 /// member of the current object (MemberPointee, keyed by the member's path;
 /// SemaProfiles::markedPointerMembers), which enters asserted
 /// (FlowState::EntryAsserted), the current object as a whole outside its
@@ -1925,9 +1927,10 @@ struct TrackedEntity {
   bool AtStart = false;
   /// A lifecycle entity: storage tracked only because a lifecycle leaf of the
   /// body names it (collectLifecycleNames) -- a member of the current object
-  /// (SemaProfiles::lifecycleMember), tracked whole, or a base of it. It is
-  /// never read-tracked, and every binding or access below or naming it is
-  /// judged against it.
+  /// (SemaProfiles::lifecycleMember), tracked whole, a base of it, or a local
+  /// or by-value parameter (SemaProfiles::lifecycleLocal), a WholeLocal. It
+  /// is never read-tracked, and every binding or access below or naming it is
+  /// judged against it, but a plain read of a local whole.
   bool Lifecycle = false;
 
   /// The member a member entity stands for; null otherwise.
@@ -2126,9 +2129,14 @@ struct TrackedStorage {
   SmallVector<TrackedEntity, 8> Entities;
   /// The contiguous entity range of each tracked local's members.
   llvm::DenseMap<const VarDecl *, std::pair<unsigned, unsigned>> LocalRange;
+  /// The lifecycle locals and by-value parameters
+  /// (SemaProfiles::lifecycleLocal), whose WholeLocal entities LocalEntity
+  /// holds.
+  llvm::SmallPtrSet<const VarDecl *, 4> LifecycleLocals;
   /// The class of each local in LocalRange.
   llvm::DenseMap<const VarDecl *, const CXXRecordDecl *> LocalClass;
-  /// The WholeLocal or Pointee entity of a marked local or parameter.
+  /// The WholeLocal or Pointee entity of a marked or lifecycle local or
+  /// parameter, and the ConstructAlias entity of a construction alias.
   llvm::DenseMap<const VarDecl *, unsigned> LocalEntity;
   /// The current object's range (an instance member function body); empty
   /// otherwise.
@@ -2300,6 +2308,21 @@ struct TrackedStorage {
       return std::nullopt;
     return It->second;
   }
+  /// Append the lifecycle entity of the local or by-value parameter \p V, a
+  /// WholeLocal entering in \p Entry (once).
+  void addLifecycleLocal(const VarDecl *V, EntryState Entry) {
+    if (LocalEntity.count(V))
+      return;
+    TrackedEntity E;
+    E.K = TrackedEntity::Kind::WholeLocal;
+    E.TrackReads = false;
+    E.Lifecycle = true;
+    E.Entry = Entry;
+    E.Type = V->getType();
+    LocalEntity[V] = Entities.size();
+    Entities.push_back(std::move(E));
+    LifecycleLocals.insert(V);
+  }
   /// The lifecycle entity of the member \p F, if tracked.
   std::optional<unsigned> lifecycleMember(const FieldDecl *F) const {
     if (!F)
@@ -2402,6 +2425,18 @@ struct TrackedStorage {
                              QualType Designated = QualType(),
                              bool RawExempt = false) const;
 
+  /// True if \p R, the resolution of the glvalue leaf \p Leaf of a range,
+  /// names a lifecycle member or local whose range does not hold its own
+  /// elements (SemaProfiles::isFlowTrackedRangeLeaf): the range's elements
+  /// lie elsewhere.
+  bool namesRangeHandle(const Resolution &R,
+                        const SemaProfiles::ShapeLeaf &Leaf) const {
+    return R.Entity && Entities[*R.Entity].Lifecycle &&
+           Entities[*R.Entity].K != TrackedEntity::Kind::CurrentObjectBase &&
+           !SemaProfiles::holdsOwnElements(
+               SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms)
+                   ->getType());
+  }
   /// True if a designation of type \p Designated covers entity \p Idx whole
   /// (designationCovers); a null \p Designated covers everything.
   bool covers(QualType Designated, unsigned Idx, bool RawExempt) const {
@@ -2868,6 +2903,8 @@ TrackedStorage::resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
                             Designated, RawExempt);
       } else {
         R = resolve({Arg, Leaf.Arms}, Designated, RawExempt);
+        if (namesRangeHandle(R, {Arg, Leaf.Arms}))
+          R = Resolution();
         bool ChainPartial = false;
         if (!R.Entity && SemaProfiles::isHandleType(AT))
           if (const DeclRefExpr *Base =
@@ -3159,6 +3196,10 @@ struct BindingLeaf {
   /// the designation covers the storage referred to there, and a subobject
   /// store otherwise.
   QualType WholeIf;
+  /// A destroy site's leaf naming a local or by-value parameter with tracked
+  /// members whole, which the parse-time funnel judged by form: Range decides
+  /// a double destruction alone.
+  bool DestroyedOnly = false;
 };
 
 /// A ref_to_uninit binding site derived from a CFG element: the construct's
@@ -3743,6 +3784,11 @@ static void judgeDestroySite(const DestroySite &Site, const FlowState &St,
     if (L.Range.first != L.Range.second) {
       for (unsigned I = L.Range.first; I != L.Range.second; ++I)
         AllDestroyed &= St.has(I, FlowState::MayDestroyed);
+      if (L.DestroyedOnly) {
+        Acc = Acc ? combineLeafStates(*Acc, LeafState::Unknown)
+                  : LeafState::Unknown;
+        continue;
+      }
     } else {
       std::optional<unsigned> R =
           L.Entity ? referent(*L.Entity, St, Storage) : std::nullopt;
@@ -4588,26 +4634,38 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
     /// The leaf names an element of what a pointer or handle refers to
     /// (SemaProfiles::designatesReferentElement, or an offset handle leaf).
     bool Element = false;
+    /// The leaf names a local or by-value parameter with tracked members
+    /// whole, with no conversion: Whole is its member range.
+    bool LocalWhole = false;
   };
   // Resolve the leaves of \p Arg; a credit passes its \p Designated type and
   // RawExempt (TrackedStorage::resolve). A credit of an object passed as a
   // whole reaches only the entities of the base subobject its argument
   // converts to, and none when \p Designated is not that subobject's class.
-  // \p Use is the parameter's (SemaProfiles::isFlowTrackedLeaf).
+  // \p Use is the parameter's (SemaProfiles::isFlowTrackedLeaf). With
+  // \p AsRange, a class-type \p Arg is a range a known callee's role
+  // parameter takes by reference, naming its elements; otherwise it names
+  // the object.
   auto ResolveArg = [&](const Expr *Arg, QualType ParamTy,
                         SmallVectorImpl<ArgLeaf> &Leaves,
                         QualType Designated = QualType(),
                         bool RawExempt = false,
                         SemaProfiles::FlowLeafUse Use =
-                            SemaProfiles::FlowLeafUse::Plain) {
+                            SemaProfiles::FlowLeafUse::Plain,
+                        bool AsRange = false) {
     bool AnyTracked = false;
     // One leaf, used as a pointer value or a glvalue, below the casts
-    // \p OuterPath; a leaf no entity tracks takes \p Form's state.
+    // \p OuterPath; a leaf no entity tracks takes \p Form's state. With
+    // \p InRange, the glvalue leaf is a range naming its elements
+    // (SemaProfiles::isFlowTrackedRangeLeaf).
     auto AddLeaf = [&](const SemaProfiles::ShapeLeaf &Leaf, bool AsPointerValue,
                        ArrayRef<const CXXRecordDecl *> OuterPath,
-                       llvm::function_ref<LeafState()> Form) {
+                       llvm::function_ref<LeafState()> Form,
+                       bool InRange = false) {
       ArgLeaf L{Leaf.E, Storage.resolveFlowLeaf(Leaf, AsPointerValue,
                                                 Designated, RawExempt)};
+      if (InRange && Storage.namesRangeHandle(L.R, Leaf))
+        L.R = TrackedStorage::Resolution();
       // A credit through a conversion to a base class names the base
       // subobject, whatever its designated type.
       if (L.R.Entity && !Designated.isNull()) {
@@ -4618,7 +4676,9 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
           L.R.Sub = SubKey();
         }
       }
-      L.Tracked = S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC, Use);
+      L.Tracked = InRange ? S.Profiles().isFlowTrackedRangeLeaf(Leaf, DC, Use)
+                          : S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue,
+                                                           DC, Use);
       L.Element = SemaProfiles::designatesReferentElement(
           Leaf.E, AsPointerValue, Leaf.Arms);
       if (L.Tracked && Use == SemaProfiles::FlowLeafUse::MarkedTarget &&
@@ -4635,6 +4695,13 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
         if (L.Tracked && !L.R.Entity && L.Part.first == L.Part.second &&
             L.Whole.first == L.Whole.second)
           noteUnresolvedFlowLeaf(UnresolvedLeaves, Leaf.E);
+        BasePath CastPath(OuterPath);
+        SemaProfiles::peelBaseCasts(Leaf.E, CastPath, Leaf.Arms);
+        const auto *Ref = dyn_cast<DeclRefExpr>(G);
+        const auto *V = Ref ? dyn_cast<VarDecl>(Ref->getDecl()) : nullptr;
+        auto It = V ? Storage.LocalRange.find(V) : Storage.LocalRange.end();
+        L.LocalWhole = !L.R.Entity && CastPath.empty() &&
+                       It != Storage.LocalRange.end() && It->second == L.Whole;
         if (!Designated.isNull())
           L.Whole =
               designatedWholeRange(Storage, Leaf, AsPointerValue, G, L.Whole,
@@ -4650,7 +4717,10 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
     if (SemaProfiles::isHandleType(ParamTy.getNonReferenceType())) {
       using HandleLeaf = SemaProfiles::HandleLeaf;
       SemaProfiles::HandleWalkMemo Memo;
-      auto Visit = [&](auto &Self, const HandleLeaf &HL) -> void {
+      // \p Object: \p HL is the argument itself, an object rather than a
+      // range unless \p AsRange.
+      auto Visit = [&](auto &Self, const HandleLeaf &HL,
+                       bool Object = false) -> void {
         auto FormOf = [&](const SemaProfiles::ShapeLeaf &Leaf) {
           return formState(S.Profiles().classifyInitHandleLeaf(
               {Leaf.E, HL.M, HL.Partial, Leaf.Arms}, D));
@@ -4669,8 +4739,10 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
         }
         SemaProfiles::forEachTargetLeaf(
             HL.E, [&](const SemaProfiles::ShapeLeaf &Leaf) {
-              AddLeaf(Leaf, HL.M == HandleLeaf::Mode::PointerValue, {},
-                      [&] { return FormOf(Leaf); });
+              AddLeaf(
+                  Leaf, HL.M == HandleLeaf::Mode::PointerValue, {},
+                  [&] { return FormOf(Leaf); },
+                  /*InRange=*/HL.M == HandleLeaf::Mode::Range && !Object);
               ArgLeaf &L = Leaves.back();
               L.Element |= HL.Partial;
               if (HL.Partial && L.R.Entity) {
@@ -4694,7 +4766,8 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
             });
       };
       if (ParamTy->isReferenceType())
-        Visit(Visit, HandleLeaf{Arg, HandleLeaf::Mode::Range});
+        Visit(Visit, HandleLeaf{Arg, HandleLeaf::Mode::Range},
+              /*Object=*/!AsRange);
       else
         SemaProfiles::forEachHandleSourceLeaf(
             Arg, [&](const HandleLeaf &HL) { Visit(Visit, HL); }, &Memo);
@@ -4736,10 +4809,11 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
   auto AppendFor = [&](const Expr *Arg, QualType ParamTy,
                        DefAssignEventKind Kind,
                        QualType Designated = QualType(), bool RawExempt = false,
-                       bool SkipUninitMembers = false,
-                       bool Constructs = false) {
+                       bool SkipUninitMembers = false, bool Constructs = false,
+                       bool AsRange = false) {
     SmallVector<ArgLeaf, 2> Leaves;
-    ResolveArg(Arg, ParamTy, Leaves, Designated, RawExempt);
+    ResolveArg(Arg, ParamTy, Leaves, Designated, RawExempt,
+               SemaProfiles::FlowLeafUse::Plain, AsRange);
     if (Leaves.empty())
       return;
     if (NameOneStorage(Leaves))
@@ -4786,7 +4860,7 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
   // when \p Marked), destroyed by \p Destroyer: one destroy site.
   auto AppendDestroy = [&](const Expr *Arg, QualType T, bool Exempt,
                            SemaProfiles::InitDestroyer Destroyer,
-                           bool Marked = false) {
+                           bool Marked = false, bool AsRange = false) {
     SmallVector<ArgLeaf, 2> Leaves;
     DestroySite Site;
     Site.Loc = Arg->IgnoreImplicit()->getExprLoc();
@@ -4794,7 +4868,11 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
     Site.Destroyer = Destroyer;
     Site.Judged = ResolveArg(Arg, T, Leaves, QualType(), /*RawExempt=*/false,
                              Marked ? SemaProfiles::FlowLeafUse::MarkedTarget
-                                    : SemaProfiles::FlowLeafUse::Destroy);
+                                    : SemaProfiles::FlowLeafUse::Destroy,
+                             AsRange);
+    // A leaf naming a local with tracked members whole, whose destroy the
+    // parse-time funnel judged by form with the site's other leaves.
+    bool AnyLocalWhole = false;
     Site.Conditional = !NameOneStorage(Leaves);
     for (const ArgLeaf &L : Leaves) {
       if (L.Tracked)
@@ -4817,6 +4895,12 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
             Start ? Site.StartAffected : Site.Affected;
         if ((!L.R.Subobject || Start) && !llvm::is_contained(Into, *L.R.Entity))
           Into.push_back(*L.R.Entity);
+      } else if (!L.Tracked && L.LocalWhole) {
+        // The parse-time funnel judged the local by form, which never rejects
+        // its destroy; its members say whether it was destroyed already.
+        Leaf.Range = L.Whole;
+        Leaf.DestroyedOnly = true;
+        AnyLocalWhole = true;
       } else {
         Leaf.State = L.Form;
         Leaf.Range = L.Part;
@@ -4827,12 +4911,27 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
             Site.Affected.push_back(Idx);
       Site.Leaves.push_back(Leaf);
     }
+    // With no flow-tracked leaf, the funnel judged every other leaf.
+    if (AnyLocalWhole && !Site.Judged) {
+      Site.Judged = true;
+      for (BindingLeaf &Leaf : Site.Leaves)
+        if (!Leaf.Entity && !Leaf.DestroyedOnly)
+          Leaf.State = LeafState::Unknown;
+    }
     if ((!Site.Judged || Site.Leaves.empty()) && Site.Affected.empty() &&
         Site.StartAffected.empty())
       return;
     DSites.push_back(std::move(Site));
     BlockEvents.push_back({DefAssignEventKind::Destroy, 0, CallLike,
                            (unsigned)(DSites.size() - 1)});
+  };
+  // A known callee's role parameter \p P takes a class-type range by
+  // reference, which names its elements.
+  auto TakesRange = [&](const ParmVarDecl *P) {
+    QualType PT = P->getType();
+    return PT->isReferenceType() &&
+           SemaProfiles::isHandleType(PT.getNonReferenceType()) &&
+           Roles.roleOf(P) != SemaProfiles::KnownParamRole::None;
   };
   auto ForEachParam =
       [&](llvm::function_ref<void(const ParmVarDecl *, const Expr *)> F) {
@@ -4857,17 +4956,22 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
           !SemaProfiles::isHandleType(PT))
         return;
       if (Roles.destroysParam(P))
-        AppendDestroy(
-            Arg, PT,
-            Roles.InitializesRefToUninitParams || Roles.isMarkedParam(P),
-            SemaProfiles::InitDestroyer::Function, Roles.isMarkedParam(P));
+        AppendDestroy(Arg, PT,
+                      Roles.InitializesRefToUninitParams ||
+                          Roles.isMarkedParam(P),
+                      SemaProfiles::InitDestroyer::Function,
+                      Roles.isMarkedParam(P), TakesRange(P));
       else if (Roles.releasesParam(P, /*TrustedOnly=*/true))
-        AppendFor(Arg, PT, DefAssignEventKind::Kill);
+        AppendFor(Arg, PT, DefAssignEventKind::Kill, QualType(),
+                  /*RawExempt=*/false, /*SkipUninitMembers=*/false,
+                  /*Constructs=*/false, TakesRange(P));
     });
   if (Roles.OpaqueParam)
     ForEachParam([&](const ParmVarDecl *P, const Expr *Arg) {
       if (P->getFunctionScopeIndex() == *Roles.OpaqueParam)
-        AppendFor(Arg, P->getType(), DefAssignEventKind::Escape);
+        AppendFor(Arg, P->getType(), DefAssignEventKind::Escape, QualType(),
+                  /*RawExempt=*/false, /*SkipUninitMembers=*/false,
+                  /*Constructs=*/false, TakesRange(P));
     });
   // A credit designates the parameter's pointee or referenced type; a
   // [[now_init]] or initializing parameter claims raw bytes
@@ -4928,7 +5032,7 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
       // nothing.
       AppendFor(Arg, PT, DefAssignEventKind::Write, Designated, RawExempt,
                 SkipUninitMembers,
-                /*Constructs=*/!Roles.isInitializingParam(P));
+                /*Constructs=*/!Roles.isInitializingParam(P), TakesRange(P));
     });
 }
 
@@ -5516,6 +5620,14 @@ static void extractStdInitEvents(
           Read(Idx);
       }
     };
+    // The construction of the lifecycle local \p Idx by its declaration or
+    // its handler's entry, at \p At: a write that counts as a construction
+    // (DefAssignEvent::Constructs).
+    auto AppendDeclConstruction = [&](unsigned Idx, const Expr *At) {
+      DefAssignEvent Ev{DefAssignEventKind::Write, Idx, At};
+      Ev.Constructs = ConstructExtent::Start;
+      BlockEvents.push_back(Ev);
+    };
     // A Reseat of the marked pointer, reference, or handle \p Idx at \p At.
     auto AppendReseat = [&](unsigned Idx, const Expr *At, ReseatTarget RT,
                             unsigned Aux = 0) {
@@ -5601,6 +5713,9 @@ static void extractStdInitEvents(
                     S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC);
                 TrackedStorage::Resolution R =
                     Storage.resolveFlowLeaf(Leaf, AsPointerValue);
+                if (HL.M == HandleLeaf::Mode::Range &&
+                    Storage.namesRangeHandle(R, Leaf))
+                  R = TrackedStorage::Resolution();
                 if (HL.M == HandleLeaf::Mode::Range && !R.Entity) {
                   SemaProfiles::forEachHandleSourceLeaf(
                       Leaf.E,
@@ -5950,9 +6065,9 @@ static void extractStdInitEvents(
       if (IsHandle || AsRange)
         Site.HandleType = T.getNonReferenceType();
       bool AnyTracked = false;
-      // A leaf below or naming a lifecycle entity, which the parse-time
-      // funnel judged by form: storage live at entry, which the form never
-      // rejects for an unmarked target (TrackedEntity::Lifecycle).
+      // A leaf of an unmarked target below or naming a lifecycle entity,
+      // which the parse-time funnel judged by form: storage live at entry,
+      // which the form never rejects there (TrackedEntity::Lifecycle).
       bool AnyLifecycle = false;
       // The derived-to-base casts above the leaves, which the leaf walk peels.
       BasePath OuterPath;
@@ -5985,7 +6100,8 @@ static void extractStdInitEvents(
             L.Range = Storage.objectPart(Leaf, AsPointerValue, OuterPath, Use);
           if (!L.Entity && L.Range.first == L.Range.second)
             noteUnresolvedFlowLeaf(UnresolvedLeaves, Leaf.E);
-        } else if (!Storage.LifecycleMembers.empty()) {
+        } else if (!TargetMarked && (!Storage.LifecycleMembers.empty() ||
+                                     !Storage.LifecycleLocals.empty())) {
           TrackedStorage::Resolution R =
               Storage.resolveFlowLeaf(Leaf, AsPointerValue);
           if (R.Entity && Storage.Entities[*R.Entity].Lifecycle) {
@@ -6033,8 +6149,8 @@ static void extractStdInitEvents(
           SemaProfiles::forEachTargetLeaf(
               HL.E, [&](const SemaProfiles::ShapeLeaf &Leaf) {
                 if (HL.M != HandleLeaf::Mode::Range ||
-                    S.Profiles().isFlowTrackedLeaf(
-                        Leaf, /*AsPointerValue=*/false, DC,
+                    S.Profiles().isFlowTrackedRangeLeaf(
+                        Leaf, DC,
                         TargetMarked ? SemaProfiles::FlowLeafUse::MarkedTarget
                                      : SemaProfiles::FlowLeafUse::Plain)) {
                   AddLeaf(Leaf, HL.M == HandleLeaf::Mode::PointerValue,
@@ -6140,11 +6256,15 @@ static void extractStdInitEvents(
           G, [&](const SemaProfiles::ShapeLeaf &Leaf) {
             // A read below or naming a lifecycle member, and a store below
             // one, is one of its lifetime, judged on every path; a store
-            // naming it whole initializes it.
-            if (!Storage.LifecycleMembers.empty()) {
+            // naming it whole initializes it. A lifecycle local's plain read
+            // whole is the uninitialized-values analysis's.
+            if (!Storage.LifecycleMembers.empty() ||
+                !Storage.LifecycleLocals.empty()) {
               TrackedStorage::Resolution R = Storage.resolve(Leaf);
               if (R.Entity && Storage.Entities[*R.Entity].Lifecycle &&
-                  (!IsWrite || R.Subobject)) {
+                  (R.Subobject ||
+                   (!IsWrite && Storage.Entities[*R.Entity].K !=
+                                    TrackedEntity::Kind::WholeLocal))) {
                 BindingLeaf Life;
                 Life.Entity = R.Entity;
                 Life.WholeLeaf = !R.Subobject;
@@ -6555,9 +6675,9 @@ static void extractStdInitEvents(
         continue;
       }
       if (auto Dtor = Elem.getAs<CFGAutomaticObjDtor>()) {
-        // The scope-exit destructor of an [[uninit]] local of a type with a
-        // non-trivial destructor destroys it (P4222R2 §4.6), reported where
-        // the scope ends. Member and base destructors are not judged.
+        // The scope-exit destructor of an [[uninit]] or lifecycle local of a
+        // type with a non-trivial destructor destroys it (P4222R2 §4.6),
+        // reported where the scope ends.
         const VarDecl *V = Dtor->getVarDecl();
         // A marked std::unique_ptr's destructor destroys its referent.
         if (std::optional<unsigned> Idx = Storage.markedHandleObject(V);
@@ -6606,13 +6726,16 @@ static void extractStdInitEvents(
           continue;
         // A declaration whose marker a marker rule rejects -- one with an
         // initializer or a default-initialization that runs code --
-        // constructed the local.
-        if (!S.Profiles().isConsistentUninitMarker(V))
+        // constructed the local. A lifecycle local's declaration constructs
+        // it, so its scope exit is judged for a double destruction only.
+        bool Lifecycle = Storage.Entities[It->second].Lifecycle;
+        if (!Lifecycle && !S.Profiles().isConsistentUninitMarker(V))
           continue;
         DestroySite Site;
         const Stmt *Trigger = Dtor->getTriggerStmt();
         Site.Loc = Trigger ? Trigger->getEndLoc() : V->getLocation();
         Site.Judged = true;
+        Site.Exempt = Lifecycle;
         Site.Destroyer = SemaProfiles::InitDestroyer::ScopeExit;
         Site.ScopeExitVar = V;
         BindingLeaf Leaf;
@@ -6932,18 +7055,31 @@ static void extractStdInitEvents(
           PendingEscapes[It->second].push_back(Ev);
         else
           BlockEvents.push_back(Ev);
+      } else if (const auto *CS = dyn_cast<CXXCatchStmt>(St)) {
+        // A handler's entry constructs its lifecycle exception variable.
+        if (const VarDecl *V = CS->getExceptionDecl();
+            V && Storage.LifecycleLocals.contains(V)) {
+          unsigned Idx = Storage.LocalEntity.find(V)->second;
+          BlockEvents.push_back({DefAssignEventKind::Reset, Idx, nullptr});
+          AppendDeclConstruction(Idx, nullptr);
+        }
       } else if (const auto *DS = dyn_cast<DeclStmt>(St)) {
         for (const Decl *Dcl : DS->decls()) {
           const auto *V = dyn_cast<VarDecl>(Dcl);
           if (!V || V->isInvalidDecl())
             continue;
           // A tracked object's storage is a new object, unassigned, each time
-          // its declaration runs.
+          // its declaration runs; the declaration of a lifecycle local
+          // constructs it, whatever its form.
           if (auto It = Storage.LocalEntity.find(V);
               It != Storage.LocalEntity.end() &&
-              Storage.Entities[It->second].K == TrackedEntity::Kind::WholeLocal)
+              Storage.Entities[It->second].K ==
+                  TrackedEntity::Kind::WholeLocal) {
             BlockEvents.push_back(
                 {DefAssignEventKind::Reset, It->second, nullptr});
+            if (Storage.Entities[It->second].Lifecycle)
+              AppendDeclConstruction(It->second, V->getInit());
+          }
           if (auto It = Storage.LocalRange.find(V);
               It != Storage.LocalRange.end()) {
             BlockEvents.push_back({DefAssignEventKind::Reset, It->second.first,
@@ -7245,46 +7381,62 @@ static bool isCurrentObjectLifecycleUse(Sema &S, const Stmt *St) {
   return Found;
 }
 
-/// Add to \p Members and \p Bases the lifecycle members and bases of the
-/// analyzed body \p D: the members (SemaProfiles::lifecycleMember) and, in a
-/// constructor, the direct bases (SemaProfiles::lifecycleBase) of the current
-/// object that a lifecycle leaf names -- a leaf SemaProfiles::isFlowTrackedLeaf
-/// checks for a marked target or a destroy: an argument bound to a marked,
-/// Construct-role, or destroying parameter (a reserved placement new's address
-/// included), an explicit or pseudo-destructor call's object, a delete operand,
-/// and the source of a marked variable, init-capture, return, member
-/// initializer, aggregate element, pointer assignment, handle reseat, or byte
-/// copy. The predicate classifies each leaf, so the deferred sites and the
-/// engine's own judged leaves find their members harvested.
-static void
-collectLifecycleNames(Sema &S, const Decl *D,
-                      llvm::SetVector<const FieldDecl *> &Members,
-                      llvm::SetVector<const CXXRecordDecl *> &Bases) {
+/// The storage the lifecycle leaves of an analyzed body name
+/// (collectLifecycleNames).
+struct LifecycleNames {
+  llvm::SetVector<const FieldDecl *> Members;
+  llvm::SetVector<const CXXRecordDecl *> Bases;
+  llvm::SetVector<const VarDecl *> Locals;
+};
+
+/// Add to \p Out the lifecycle storage of the analyzed body \p D: the members
+/// (SemaProfiles::lifecycleMember) and, in a constructor, the direct bases
+/// (SemaProfiles::lifecycleBase) of the current object, and the locals and
+/// by-value parameters (SemaProfiles::lifecycleLocal), that a lifecycle leaf
+/// names -- a leaf SemaProfiles::isFlowTrackedLeaf checks for a marked target
+/// or a destroy: an argument bound to a marked, Construct-role, or destroying
+/// parameter (a reserved placement new's address included), an explicit or
+/// pseudo-destructor call's object, a delete operand, and the source of a
+/// marked variable, init-capture, return, member initializer, aggregate
+/// element, pointer assignment, handle reseat, or byte copy. The predicate
+/// classifies each leaf, so the deferred sites and the engine's own judged
+/// leaves find their storage harvested.
+static void collectLifecycleNames(Sema &S, const Decl *D, LifecycleNames &Out) {
   using HandleLeaf = SemaProfiles::HandleLeaf;
   const auto *DC = cast<DeclContext>(D);
-  auto Check = [&](const SemaProfiles::ShapeLeaf &Leaf, bool AsPointerValue) {
+  // \p InRange: the glvalue \p Leaf is a range naming its elements
+  // (SemaProfiles::isFlowTrackedRangeLeaf).
+  auto Check = [&](const SemaProfiles::ShapeLeaf &Leaf, bool AsPointerValue,
+                   bool InRange = false) {
     SemaProfiles::LifecycleName Name;
-    if (!S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC,
-                                        SemaProfiles::FlowLeafUse::MarkedTarget,
-                                        &Name))
+    constexpr auto Use = SemaProfiles::FlowLeafUse::MarkedTarget;
+    if (InRange ? !S.Profiles().isFlowTrackedRangeLeaf(Leaf, DC, Use, &Name)
+                : !S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC, Use,
+                                                  &Name))
       return;
     if (Name.Member)
-      Members.insert(Name.Member);
+      Out.Members.insert(Name.Member);
     if (Name.Base)
-      Bases.insert(Name.Base);
+      Out.Bases.insert(Name.Base);
+    if (Name.Local)
+      Out.Locals.insert(Name.Local);
   };
-  // The leaves of \p Src bound as \p T, through the handle walk for a handle.
-  auto Leaves = [&](const Expr *Src, QualType T) {
+  // The leaves of \p Src bound as \p T, through the handle walk for a handle;
+  // with \p AsRange, a class-type \p Src taken by reference is a range a
+  // known callee's role parameter takes, and otherwise an object.
+  auto Leaves = [&](const Expr *Src, QualType T, bool AsRange = false) {
     if (!Src || T.isNull() || T->isDependentType())
       return;
     if (SemaProfiles::isHandleType(T.getNonReferenceType())) {
       SemaProfiles::HandleWalkMemo Memo;
-      auto Visit = [&](auto &Self, const HandleLeaf &HL) -> void {
+      auto Visit = [&](auto &Self, const HandleLeaf &HL,
+                       bool Object = false) -> void {
         if (HL.M == HandleLeaf::Mode::Handle)
           return;
         SemaProfiles::forEachTargetLeaf(
             HL.E, [&](const SemaProfiles::ShapeLeaf &Leaf) {
-              Check(Leaf, HL.M == HandleLeaf::Mode::PointerValue);
+              Check(Leaf, HL.M == HandleLeaf::Mode::PointerValue,
+                    HL.M == HandleLeaf::Mode::Range && !Object);
               if (HL.M == HandleLeaf::Mode::Range)
                 SemaProfiles::forEachHandleSourceLeaf(
                     Leaf.E, [&](const HandleLeaf &Inner) { Self(Self, Inner); },
@@ -7292,7 +7444,8 @@ collectLifecycleNames(Sema &S, const Decl *D,
             });
       };
       if (T->isReferenceType())
-        Visit(Visit, HandleLeaf{Src, HandleLeaf::Mode::Range});
+        Visit(Visit, HandleLeaf{Src, HandleLeaf::Mode::Range},
+              /*Object=*/!AsRange);
       else
         SemaProfiles::forEachHandleSourceLeaf(
             Src, [&](const HandleLeaf &HL) { Visit(Visit, HL); }, &Memo);
@@ -7321,7 +7474,8 @@ collectLifecycleNames(Sema &S, const Decl *D,
         [&](const ParmVarDecl *P, QualType PT, const Expr *Arg, bool Variadic) {
           if (P && !Variadic &&
               (Roles.isMarkedParam(P) || Roles.destroysParam(P)))
-            Leaves(Arg, PT);
+            Leaves(Arg, PT,
+                   Roles.roleOf(P) != SemaProfiles::KnownParamRole::None);
         });
   };
   // The elements of an aggregate initializer of type \p T bound to marked
@@ -7431,9 +7585,10 @@ collectLifecycleNames(Sema &S, const Decl *D,
 /// handler variable, or parameter whose class has marked scalar members
 /// (SemaProfiles::flowTrackedAggregateClass), every [[uninit]] local or
 /// parameter as a whole, the referent of every [[ref_to_uninit]] local
-/// pointer, reference, or handle, and the storage a construction alias's call
-/// constructs; a variable of an enclosing function the body reaches by
-/// capture is tracked from an unknown entry state. The read-tracking
+/// pointer, reference, or handle, the storage a construction alias's call
+/// constructs, and the lifecycle storage of the body (collectLifecycleNames);
+/// a variable of an enclosing function the body reaches by capture is tracked
+/// from an unknown entry state. The read-tracking
 /// premises -- a copy does not inherit initialization, a by-value parameter is
 /// a copy of the caller's argument, a defaulted parameter is not -- are argued
 /// in ProfilesFrameworkInternals.rst, "Flow-Tracked Storage (std::init)" and
@@ -7508,22 +7663,28 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
   });
   if (CurrentObjectUsed)
     Storage.addCurrentObjectRoot(Method->getParent());
+  LifecycleNames Lifecycle;
+  collectLifecycleNames(S, D, Lifecycle);
   // The current object's lifecycle members and bases: live at a method's
   // entry and unassigned until their initializers in a constructor; a
   // lambda's or block's body has none (SemaProfiles::isLambdaOrBlockBody).
   if (const CXXMethodDecl *Owner =
           SemaProfiles::enclosingInstanceMethod(dyn_cast<DeclContext>(D));
       Owner && !SemaProfiles::isLambdaOrBlockBody(cast<DeclContext>(D))) {
-    llvm::SetVector<const FieldDecl *> Members;
-    llvm::SetVector<const CXXRecordDecl *> Bases;
-    collectLifecycleNames(S, D, Members, Bases);
     EntryState Entry = isa<CXXConstructorDecl>(Owner) ? EntryState::Unassigned
                                                       : EntryState::Initialized;
-    for (const FieldDecl *F : Members)
+    for (const FieldDecl *F : Lifecycle.Members)
       Storage.addLifecycleMember(Owner->getParent(), F, Entry);
-    for (const CXXRecordDecl *B : Bases)
+    for (const CXXRecordDecl *B : Lifecycle.Bases)
       Storage.addLifecycleBase(B, Entry);
   }
+  // The lifecycle locals and by-value parameters: a parameter live at entry,
+  // a local from its declaration on (extractStdInitEvents).
+  for (const VarDecl *V : Lifecycle.Locals)
+    if (Owned.contains(V))
+      Storage.addLifecycleLocal(V, isa<ParmVarDecl>(V)
+                                       ? EntryState::Initialized
+                                       : EntryState::Unassigned);
   for (const VarDecl *V : Locals) {
     HarvestMarked(V, EntryState::Unassigned);
     bool InitializedAtDecl;

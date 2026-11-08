@@ -508,7 +508,8 @@ public:
   /// member function, a member of it a leaf names through \c this is tracked
   /// (lifecycleMember), and in a constructor a direct base \c this is
   /// converted to (lifecycleBase), outside a lambda's or block's body
-  /// (isLambdaOrBlockBody). A [[ref_to_uninit]]
+  /// (isLambdaOrBlockBody); in every body, so is a local or by-value
+  /// parameter of the body a leaf names (lifecycleLocal). A [[ref_to_uninit]]
   /// pointer member of the current object (markedPointerMembers) is tracked
   /// for every use, as a marked local pointer is. For a ValueCopy -- the
   /// source of an unmarked value copy (isValueCopySource) -- a subobject of
@@ -529,19 +530,20 @@ public:
   /// tracked only for some \p Use (FlowLeafUse). The parse-time checks leave
   /// such a source to the pass; a source with no tracked leaf, or one outside
   /// any function body, is judged at parse time without flow state. A leaf
-  /// tracked as a lifecycle member or base sets \p Name, when non-null, to
-  /// it.
+  /// tracked as a lifecycle member, base, or local sets \p Name, when
+  /// non-null, to it.
   struct LifecycleName;
   bool isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
                          const DeclContext *CurContext,
                          FlowLeafUse Use = FlowLeafUse::Plain,
                          LifecycleName *Name = nullptr) const;
-  /// The current object's storage a lifecycle leaf names
-  /// (isFlowTrackedLeaf): a member (lifecycleMember) or a direct base
-  /// (lifecycleBase).
+  /// The storage a lifecycle leaf names (isFlowTrackedLeaf): a member of the
+  /// current object (lifecycleMember), a direct base of it (lifecycleBase),
+  /// or a local or by-value parameter (lifecycleLocal).
   struct LifecycleName {
     const FieldDecl *Member = nullptr;
     const CXXRecordDecl *Base = nullptr;
+    const VarDecl *Local = nullptr;
   };
   /// The member of the current object, of class \p RD, whose lifetime the
   /// flow analysis tracks for a marked target or a destroy of a leaf of shape
@@ -561,6 +563,32 @@ public:
   const CXXRecordDecl *
   lifecycleBase(const CXXRecordDecl *RD,
                 ArrayRef<const CXXRecordDecl *> Path) const;
+  /// The local variable or by-value parameter of the body the flow pass of
+  /// \p CurContext analyzes (flowAnalysisOwner) whose lifetime the flow
+  /// analysis tracks for a marked target or a destroy of a leaf of shape
+  /// \p Shape: the variable at the bottom of the shape, reached through
+  /// field steps alone, unless it is a reference, not of automatic storage,
+  /// implicit, an init-capture, a decomposition, a __block variable, of union
+  /// type or raw storage (isRawStorageType), marked [[uninit]] or
+  /// [[ref_to_uninit]], or of a class with tracked members
+  /// (flowTrackedMembers), or a step names a reference, a bit-field, a
+  /// member of a union, or a member of union type or raw storage; null
+  /// otherwise.
+  const VarDecl *lifecycleLocal(const FlowLeafShape &Shape,
+                                const DeclContext *CurContext) const;
+  /// True if a range of type \p T holds its elements as its own subobjects:
+  /// an array or a std::array.
+  static bool holdsOwnElements(QualType T);
+  /// isFlowTrackedLeaf for the glvalue leaf \p Leaf of a range, which names
+  /// the range's elements (HandleLeaf::Mode::Range: a range a known callee's
+  /// role parameter takes by reference, a range a handle is built over, a
+  /// Derive call's range): a lifecycle member or local (LifecycleName) is
+  /// that storage only when the range holds its own elements
+  /// (holdsOwnElements).
+  bool isFlowTrackedRangeLeaf(const ShapeLeaf &Leaf,
+                              const DeclContext *CurContext,
+                              FlowLeafUse Use = FlowLeafUse::Plain,
+                              LifecycleName *Name = nullptr) const;
   /// True if the glvalue \p E of shape \p Shape, the object of class \p RD
   /// or a subobject of it enclosing tracked members
   /// (flowTrackedMemberRange), is tracked whole for \p Use (FlowLeafUse).

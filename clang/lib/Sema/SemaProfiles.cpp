@@ -4869,8 +4869,8 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
           return isFlowTrackedLeaf(ShapeLeaf(Arg, Leaf.Arms),
                                    /*AsPointerValue=*/true, CurContext, Use,
                                    Name);
-        if (isFlowTrackedLeaf(ShapeLeaf(Arg, Leaf.Arms),
-                              /*AsPointerValue=*/false, CurContext, Use, Name))
+        if (isFlowTrackedRangeLeaf(ShapeLeaf(Arg, Leaf.Arms), CurContext, Use,
+                                   Name))
           return true;
         bool ChainPartial = false;
         const DeclRefExpr *Base = handleChainBase(Arg, Leaf.Arms, ChainPartial);
@@ -4964,12 +4964,19 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
     return !Shape->Subscript;
   // a.m: a tracked member of an aggregate local or by-value parameter; for a
   // marked target, also a, or a subobject enclosing tracked members.
-  const CXXRecordDecl *RD = flowTrackedAggregateClass(V);
-  if (!RD)
-    return false;
-  if (matchFlowTrackedMember(RD, *Shape))
-    return true;
-  return isFlowTrackedSubobject(RD, E, *Shape, Use);
+  if (const CXXRecordDecl *RD = flowTrackedAggregateClass(V)) {
+    if (matchFlowTrackedMember(RD, *Shape) ||
+        isFlowTrackedSubobject(RD, E, *Shape, Use))
+      return true;
+  }
+  // x, x.m: a local or by-value parameter a marked target or a destroy names.
+  if (LifecycleUse())
+    if (const VarDecl *L = lifecycleLocal(*Shape, CurContext)) {
+      if (Name)
+        Name->Local = L;
+      return true;
+    }
+  return false;
 }
 
 const FieldDecl *
@@ -4992,6 +4999,61 @@ SemaProfiles::lifecycleMember(const CXXRecordDecl *RD,
   if (Held.first != Held.second)
     return nullptr;
   return F->getCanonicalDecl();
+}
+
+const VarDecl *
+SemaProfiles::lifecycleLocal(const FlowLeafShape &Shape,
+                             const DeclContext *CurContext) const {
+  const VarDecl *V = Shape.Local;
+  if (!V || Shape.IsThis || Shape.ThroughPointer || Shape.ThroughHandle ||
+      Shape.Subscript || !Shape.PointerMembers.empty())
+    return nullptr;
+  if (!V->hasLocalStorage() || V->isImplicit() || V->isInitCapture() ||
+      isa<DecompositionDecl>(V) || V->isInvalidDecl() ||
+      V->hasAttr<UninitAttr>() || V->hasAttr<RefToUninitAttr>() ||
+      V->hasAttr<BlocksAttr>())
+    return nullptr;
+  // A variable of an enclosing function, which a lambda's or block's body
+  // reaches by capture, is judged by form there.
+  if (flowAnalysisOwner(V->getDeclContext()) != flowAnalysisOwner(CurContext))
+    return nullptr;
+  ASTContext &Ctx = getASTContext();
+  auto Excluded = [&](QualType T) {
+    return T->isDependentType() || T->isReferenceType() ||
+           Ctx.getBaseElementType(T)->isUnionType() || isRawStorageType(T);
+  };
+  if (Excluded(V->getType()))
+    return nullptr;
+  for (const MemberStep &Step : Shape.Members)
+    if (!Step.Field || Step.Field->isBitField() ||
+        Step.Field->getParent()->isUnion() || Excluded(Step.Field->getType()))
+      return nullptr;
+  // A variable with tracked members is tracked through them.
+  if (const CXXRecordDecl *RD = flowTrackedAggregateClass(V);
+      RD && !flowTrackedMembers(RD).empty())
+    return nullptr;
+  return V;
+}
+
+bool SemaProfiles::holdsOwnElements(QualType T) {
+  T = T.getNonReferenceType();
+  return T->isArrayType() || isStdArrayType(T);
+}
+
+bool SemaProfiles::isFlowTrackedRangeLeaf(const ShapeLeaf &Leaf,
+                                          const DeclContext *CurContext,
+                                          FlowLeafUse Use,
+                                          LifecycleName *Name) const {
+  LifecycleName Found;
+  if (!isFlowTrackedLeaf(Leaf, /*AsPointerValue=*/false, CurContext, Use,
+                         &Found))
+    return false;
+  if ((Found.Member || Found.Local) &&
+      !holdsOwnElements(ignoreTransparentCasts(Leaf.E, Leaf.Arms)->getType()))
+    return false;
+  if (Name)
+    *Name = Found;
+  return true;
 }
 
 const CXXRecordDecl *
@@ -5120,8 +5182,7 @@ bool SemaProfiles::hasFlowTrackedLeaf(const Expr *Src, QualType T,
         return;
       case HandleLeaf::Mode::Range:
         forEachTargetLeaf(L.E, [&](const ShapeLeaf &Leaf) {
-          if (isFlowTrackedLeaf(Leaf, /*AsPointerValue=*/false,
-                                SemaRef.CurContext, Use)) {
+          if (isFlowTrackedRangeLeaf(Leaf, SemaRef.CurContext, Use)) {
             Any = true;
             if (Leaves && !llvm::is_contained(*Leaves, Leaf.E))
               Leaves->push_back(Leaf.E);

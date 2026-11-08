@@ -11,12 +11,17 @@
 // RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -fexceptions -fcxx-exceptions -isystem %t/sys %t/constructors.cpp
 // RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -DLEADING_ERROR -fexceptions -fcxx-exceptions -isystem %t/sys %t/constructors.cpp
 // RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -Wunreachable-code -fexceptions -fcxx-exceptions -isystem %t/sys %t/constructors.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -fexceptions -fcxx-exceptions -isystem %t/sys %t/locals.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -fexceptions -fcxx-exceptions -isystem %t/sys %t/locals.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -DLEADING_ERROR -fexceptions -fcxx-exceptions -isystem %t/sys %t/locals.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -Wunreachable-code -fexceptions -fcxx-exceptions -isystem %t/sys %t/locals.cpp
 
 // std::init: ordinary storage a lifecycle call of a body names -- a member of
-// the current object here -- has a lifetime of its own in that body
-// (ProfilesFramework.rst, "Binding Pointers and References"): destroying it
-// twice, using it after a destroy, and constructing over it while it is live
-// are rejected, and destroying then reconstructing it is accepted.
+// the current object, a local, or a by-value parameter -- has a lifetime of
+// its own in that body (ProfilesFramework.rst, "Binding Pointers and
+// References"): destroying it twice, using it after a destroy, and
+// constructing over it while it is live are rejected, and destroying then
+// reconstructing it is accepted.
 
 //--- sys/lifetimes.h
 // The shapes of libstdc++'s <memory>, <new>, and <string> the tests use.
@@ -42,6 +47,11 @@ struct __destroy_at_fn {
   template <class T> constexpr void operator()(T *p) const noexcept;
 };
 inline constexpr __destroy_at_fn destroy_at{};
+struct __destroy_fn {
+  template <class I, class S> constexpr I operator()(I first, S last) const noexcept;
+  template <class R> constexpr R &operator()(R &&r) const noexcept;
+};
+inline constexpr __destroy_fn destroy{};
 } // namespace ranges
 class string {
 public:
@@ -321,6 +331,21 @@ struct DerivedOfMember : BaseWithMember {
   }
 };
 
+struct StrView {
+  std::string *first, *last;
+  std::string *begin() const;
+  std::string *end() const;
+  std::size_t size() const;
+};
+struct ViewHolder {
+  StrView v;
+  // A range destroy of a member view destroys the view's elements, not the member
+  void range_destroy() {
+    std::ranges::destroy(v);
+    (void)v.size();
+  }
+};
+
 union UnionClass {
   std::string s;
   int i;
@@ -530,3 +555,287 @@ struct ScalarNoInit {
   int i; // expected-note {{member 'i' declared here}}
   ScalarNoInit() { std::construct_at(&i, 1); } // expected-error {{constructor does not initialize member 'i' under profile 'std::init'}}
 };
+
+//--- locals.cpp
+// no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
+[[profiles::enforce(std::init)]];
+#include <lifetimes.h>
+
+#ifdef LEADING_ERROR
+int leading_unrelated_error = undeclared_identifier;
+// expected-error@-1 {{use of undeclared identifier 'undeclared_identifier'}}
+// no-profiles-error@-2 {{use of undeclared identifier 'undeclared_identifier'}}
+#endif
+
+void take(const std::string &s);
+void take_ptr(std::string *p);
+struct X { int v; ~X(); };
+struct D { int v; ~D(); };
+struct Agg { D d [[uninit]]; int k [[uninit]]; };
+union U { int i; float f; };
+
+// A destructor call ends a local's lifetime, so its scope exit destroys it again
+void destructor_call_then_scope_exit() {
+  std::string s("a"); // expected-note {{'s' is destroyed at the end of its scope}}
+  s.~string();
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+
+// std::destroy over a local's address destroys it
+void destroy_range_then_scope_exit() {
+  X x{}; // expected-note {{'x' is destroyed at the end of its scope}}
+  std::destroy(&x, &x + 1);
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+
+// std::destroy_n over a local's address destroys it
+void destroy_n_then_scope_exit() {
+  X x{}; // expected-note {{'x' is destroyed at the end of its scope}}
+  std::destroy_n(&x, 1);
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+
+// std::ranges::destroy_at destroys a local
+void ranges_destroy_at_then_scope_exit() {
+  X x{}; // expected-note {{'x' is destroyed at the end of its scope}}
+  std::ranges::destroy_at(&x);
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+
+// allocator_traits::destroy destroys a local
+void allocator_destroy_then_scope_exit() {
+  std::allocator<X> al;
+  X x{}; // expected-note {{'x' is destroyed at the end of its scope}}
+  std::allocator_traits<std::allocator<X>>::destroy(al, &x);
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+
+// std::destroy over a whole local array destroys it
+void array_destroy_then_scope_exit() {
+  X a[2]{}; // expected-note {{'a' is destroyed at the end of its scope}}
+  std::destroy(a, a + 2);
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+
+// std::ranges::destroy over a whole local array destroys it
+void array_ranges_destroy_then_scope_exit() {
+  X a[2]{}; // expected-note {{'a' is destroyed at the end of its scope}}
+  std::ranges::destroy(a);
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+
+// A local destroyed twice is a double destruction
+void destroy_twice() {
+  std::string s("a");
+  std::destroy_at(&s);
+  std::destroy_at(&s); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
+  std::construct_at(&s);
+}
+
+// Destroying and reconstructing a local is accepted
+void destroy_then_construct() {
+  std::string s("a");
+  std::destroy_at(&s);
+  std::construct_at(&s, "b");
+  take(s);
+}
+
+// A destructor call and a placement new reconstruct a local
+void destructor_call_then_placement() {
+  std::string s("a");
+  s.~string();
+  new (&s) std::string("b");
+  take(s);
+}
+
+// A construction after a destroy on one path constructs over the object the other path kept
+void destroy_one_path_then_placement(bool c) {
+  std::string s("a");
+  if (c)
+    s.~string();
+  new (&s) std::string("b"); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A placement new over a live local constructs over a live object
+void placement_over_live() {
+  std::string s("a");
+  new (&s) std::string("b"); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A construction through a conditional whose other arm is null constructs over the live local
+void construct_null_arm(bool c) {
+  std::string s("a");
+  std::construct_at(c ? &s : nullptr, "b"); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// Destroying and reconstructing a local in a loop is accepted
+void destroy_construct_loop(int n) {
+  std::string s("a");
+  for (int k = 0; k != n; ++k) {
+    std::destroy_at(&s);
+    std::construct_at(&s, "b");
+  }
+}
+
+// A copy of a destroyed local reads uninitialized memory
+void destroy_then_copy() {
+  std::string s("a");
+  std::destroy_at(&s);
+  std::string t = s; // expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  std::construct_at(&s);
+}
+
+// An assignment to a destroyed local is a member call on uninitialized memory
+void destroy_then_assign() {
+  std::string s("a");
+  std::destroy_at(&s);
+  s = "b"; // expected-error {{calling member function 'operator=' binds its implicit object parameter to uninitialized memory under profile 'std::init'}}
+  std::construct_at(&s);
+}
+
+// A member call on a destroyed local binds its object to uninitialized memory
+void destroy_then_call() {
+  std::string s("a");
+  std::destroy_at(&s);
+  (void)s.size(); // expected-error {{calling member function 'size' binds its implicit object parameter to uninitialized memory under profile 'std::init'}}
+  std::construct_at(&s);
+}
+
+// A pointer to a destroyed local bound to an unmarked parameter refers to uninitialized memory
+void destroy_then_pass() {
+  std::string s("a");
+  std::destroy_at(&s);
+  take_ptr(&s); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  std::construct_at(&s);
+}
+
+// A read of a member of a destroyed local reads uninitialized memory
+int destroy_then_member_read() {
+  X x{1};
+  std::destroy_at(&x);
+  int r = x.v; // expected-error {{read of a subobject of uninitialized storage accesses uninitialized memory under profile 'std::init'}}
+  std::construct_at(&x);
+  return r;
+}
+
+// A store to a member of a destroyed local initializes nothing
+void destroy_then_member_store() {
+  X x{1};
+  std::destroy_at(&x);
+  x.v = 2; // expected-error {{writing a member of uninitialized storage does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
+  std::construct_at(&x);
+}
+
+// A scalar local destroyed and reconstructed is accepted, and its plain read after the destroy is the uninitialized-values analysis's
+int scalar_destroy_construct() {
+  int i = 1;
+  std::destroy_at(&i);
+  int r = i;
+  std::construct_at(&i, 2);
+  return r + i;
+}
+
+// std::construct_at over a live scalar local constructs over a live object
+void scalar_construct_live() {
+  int i = 1;
+  std::construct_at(&i, 2); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A marked pointer bound to a destroyed local is accepted, and constructing through it reconstructs the local
+void marked_binding_destroyed() {
+  std::string s("a");
+  std::destroy_at(&s);
+  std::string *p [[ref_to_uninit]] = &s;
+  std::construct_at(p, "b");
+  take(s);
+}
+
+// A destroy through the pointer a construction returned destroys the local
+void destroy_through_construction_result() {
+  std::string s("a");
+  std::destroy_at(&s);
+  std::string *q = std::construct_at(&s, "b");
+  std::destroy_at(q);
+  std::construct_at(&s, "c");
+}
+
+// A by-value parameter destroyed twice is a double destruction
+void parameter_destroy_twice(X x) {
+  std::destroy_at(&x);
+  std::destroy_at(&x); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
+  std::construct_at(&x);
+}
+
+// A by-value parameter destroyed and reconstructed is accepted
+void parameter_destroy_construct(X x) {
+  std::destroy_at(&x);
+  std::construct_at(&x);
+}
+
+// A catch variable is constructed at the handler's entry
+void catch_variable_destroy() {
+  try {
+    throw 1;
+  } catch (std::string s) { // expected-note {{'s' is destroyed at the end of its scope}}
+    std::destroy_at(&s);
+  } // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+}
+
+// A lambda's own local has a lifetime in the lambda's body
+void lambda_own_local() {
+  [] {
+    std::string s("a"); // expected-note {{'s' is destroyed at the end of its scope}}
+    std::destroy_at(&s);
+  }(); // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+}
+
+// A local a lambda captures is judged by form in the lambda's body
+void lambda_captured_local() {
+  std::string s("a");
+  [&] { std::destroy_at(&s); }();
+}
+
+struct XView {
+  X *first, *last;
+  X *begin() const;
+  X *end() const;
+  std::size_t size() const;
+};
+
+// A range destroy of a local view destroys the view's elements, not the view
+void view_range_destroy(XView v) {
+  std::ranges::destroy(v);
+  (void)v.size();
+  std::destroy_at(&v);
+  std::construct_at(&v);
+}
+
+// A destroy through a reference is not attributed to the local
+void destroy_through_reference() {
+  X x{};
+  X &r = x;
+  std::destroy_at(&r);
+}
+
+// A local with [[uninit]] members destroyed whole twice is a double destruction
+void aggregate_destroy_twice() {
+  Agg a; // expected-note {{'a' is destroyed at the end of its scope}}
+  std::construct_at(&a.d);
+  std::destroy_at(&a);
+  std::destroy_at(&a); // expected-error {{storage already destroyed is destroyed again by a '[[now_uninit]]' function under profile 'std::init'}}
+} // expected-error {{storage already destroyed is destroyed again by its scope-exit destructor under profile 'std::init'}}
+
+// A local with [[uninit]] members destroyed and reconstructed whole is accepted
+void aggregate_destroy_construct() {
+  Agg a;
+  std::construct_at(&a.d);
+  std::destroy_at(&a);
+  std::construct_at(&a);
+}
+
+// A union local has no lifetime of its own
+void union_destroy_twice() {
+  U u{1};
+  std::destroy_at(&u.i);
+  std::destroy_at(&u.i);
+}
+
+// A raw byte buffer has no lifetime of its own, and a placement new into it is not judged
+void raw_buffer_place_twice() {
+  alignas(std::string) unsigned char buf[sizeof(std::string)] = {};
+  new (buf) std::string("a");
+  new (buf) std::string("b");
+}
