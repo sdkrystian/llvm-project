@@ -1138,9 +1138,14 @@ identified referent named by a marked binding is asserted unassigned (``Must``,
 ``May``, ``MembersPending``, ``Constructed``, and ``PartConstructed`` cleared,
 ``MayUnassigned`` set, ``MayDestroyed`` and ``Esc`` kept); the ``Reseat``
 follows the binding's ``Binding`` event in block order, so the judgment sees
-the pre-assertion state.  A binding to a marked parameter is a ``Binding``
-event only and asserts nothing.  An unmarked local pointer initialized from
-the result of a
+the pre-assertion state.  A lifecycle entity and the current object are not
+asserted (``TrackedStorage::isLifetimeOnly``): their state is their
+lifetime's, so every later binding of them is judged against it -- a second
+marked binding of live storage is rejected as the first is, an unmarked one
+accepted -- and a suppressed binding hides no later one, since a suppression
+filters the report, never the transfer.  A binding to a marked parameter is a
+``Binding`` event only and asserts nothing.  An unmarked local pointer
+initialized from the result of a
 call that constructs one object and returns a pointer to it
 (``std::construct_at``, ``std::ranges::construct_at``) or of a reserved
 placement ``new`` (``SemaProfiles::isReservedPlacementNew``) and whose every use
@@ -1403,7 +1408,8 @@ member its value -- a braced or value-initializing one, a tracked copy's
 copy of a class-type member -- while storage that enters initialized
 (``EntryState::Initialized``, the current object as a whole) enters
 ``Constructed``; a whole destroy, release, reset, escape, or
-marked binding's assertion clears both, and a destroy at the storage's start
+marked binding's assertion (never of a lifecycle entity or the current
+object) clears both, and a destroy at the storage's start
 (``DestroySite::StartAffected``) clears ``Constructed``.  A leaf naming the
 storage whole reads both, one at its start (``Resolution::AtStart``: no member
 step below the entity and no element step but at index zero,
@@ -1734,6 +1740,10 @@ Missed Diagnostics
   pointer, a store or ``[[now_init]]`` call through it credits nothing, and a
   marked binding to it asserts nothing: a later ``int *w = &u`` stays the
   unmarked-direction error.
+- A marked binding of a lifecycle entity or the current object asserts
+  nothing, so after one accepted in an unknown state -- after an allocator's
+  own ``destroy`` (``std::allocator_traits<A>::destroy(a, &s)``) -- an
+  unmarked binding of the storage or a member call on it is accepted.
 - The identity functions are recognized by builtin ID: under
   ``-fno-builtin`` (or ``-fno-builtin-std-<name>``) and for a user-written
   identity function (``template <class T> T &&fwd(T &)``), the call is an

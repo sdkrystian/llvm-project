@@ -887,7 +887,11 @@ names: after ``int *p [[ref_to_uninit]] = &u;`` the local ``u``, after
 From the binding on, the marker asserts the referent uninitialized under
 every name that reaches it -- after ``int *p [[ref_to_uninit]] = &u;`` an
 unmarked ``&u`` is rejected until ``u`` is stored -- and a destroyed
-referent stays destroyed.  A source the analysis does not track (an
+referent stays destroyed.  It asserts nothing of storage tracked only for
+its lifetime -- the current object, and a member, base, local, or by-value
+parameter with a lifetime of its own (below) -- so each later binding of
+it is judged by its own state: a second marked binding of a live local is
+rejected as the first is.  A source the analysis does not track (an
 allocation, pointer arithmetic, a subobject, a decayed array) gives it an
 anonymous referent; paths that bind it differently leave the referent
 unidentified: nothing is asserted and nothing fires through the pointer.  Each

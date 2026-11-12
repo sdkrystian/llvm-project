@@ -113,6 +113,8 @@ struct A {
   int scalar_store_after_destroy();
   void addressof_destroy_construct();
   void marked_binding_live();
+  void marked_binding_twice();
+  void marked_binding_this_twice();
   void marked_binding_destroyed();
   void lambda_destroy();
   void lambda_destroy_twice();
@@ -242,6 +244,20 @@ void A::addressof_destroy_construct() {
 void A::marked_binding_live() {
   std::string *p [[ref_to_uninit]] = &s; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   (void)p;
+}
+
+// A second marked binding of a live member is rejected as the first is
+void A::marked_binding_twice() {
+  std::string *p [[ref_to_uninit]] = &s; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  std::string *q [[ref_to_uninit]] = &s; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)p; (void)q;
+}
+
+// A second marked binding of the live current object is rejected as the first is
+void A::marked_binding_this_twice() {
+  A *p [[ref_to_uninit]] = this; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  A *q [[ref_to_uninit]] = this; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)p; (void)q;
 }
 
 // A marked pointer bound to a destroyed member is accepted, and constructing through it reconstructs the member
@@ -542,6 +558,16 @@ struct MarkedAfter {
   MarkedAfter() : p(&b), b("x") {}
 };
 
+// A marked binding of a live member in a constructor body is rejected, and an unmarked binding after it is accepted
+struct MarkedThenUnmarked {
+  int i = 1;
+  MarkedThenUnmarked() {
+    int *g [[ref_to_uninit]] = &i; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+    int *h = &i;
+    (void)g; (void)h;
+  }
+};
+
 // A member used by an earlier member's initializer is used before its own initializer constructs it
 struct EarlyUse {
   std::size_t n;
@@ -798,6 +824,64 @@ int scalar_destroy_construct() {
 void scalar_construct_live() {
   int i = 1;
   std::construct_at(&i, 2); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A second marked binding of a live local is rejected as the first is
+void marked_binding_twice() {
+  X y{7};
+  X *p [[ref_to_uninit]] = &y; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  X &r [[ref_to_uninit]] = y;  // expected-error {{reference marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)p; (void)r;
+}
+
+// A second marked binding of a live scalar local is rejected as the first is
+void marked_binding_scalar_twice() {
+  int i = 1;
+  int *p [[ref_to_uninit]] = &i; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int *q [[ref_to_uninit]] = &i; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)p; (void)q;
+}
+
+// A suppressed marked binding of a live local leaves a later unsuppressed one rejected
+void marked_binding_suppressed_then_unsuppressed() {
+  int i = 1;
+  // no-profiles-warning@+1 {{'profiles::suppress' attribute ignored}}
+  [[profiles::suppress(std::init, rule: "ref_to_uninit")]] int *p [[ref_to_uninit]] = &i;
+  int *q [[ref_to_uninit]] = &i; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)p; (void)q;
+}
+
+// A second marked binding of a live by-value parameter is rejected as the first is
+void marked_binding_parameter_twice(int x) {
+  int *p [[ref_to_uninit]] = &x; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int *q [[ref_to_uninit]] = &x; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)p; (void)q;
+}
+
+// An unmarked binding of a live local after a rejected marked one is accepted
+void marked_then_unmarked_binding() {
+  int i = 1;
+  int *p [[ref_to_uninit]] = &i; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int *h = &i;
+  (void)p; (void)h;
+}
+
+void take_marked(int *p [[ref_to_uninit]]);
+
+// Each call binding a live local to a marked parameter is rejected
+void marked_parameter_binding_twice() {
+  int y = 1;
+  take_marked(&y); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  take_marked(&y); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A marked binding of a local destroyed on one path is rejected, and so is a construction through it over the object the other path kept
+void marked_binding_destroyed_one_path(bool c) {
+  std::string s("a");
+  if (c)
+    std::destroy_at(&s);
+  std::string *p [[ref_to_uninit]] = &s; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  std::construct_at(p, "b"); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
 }
 
 // A marked pointer bound to a destroyed local is accepted, and constructing through it reconstructs the local

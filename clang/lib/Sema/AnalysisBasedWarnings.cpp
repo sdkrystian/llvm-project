@@ -2389,6 +2389,15 @@ struct TrackedStorage {
     CurrentObjectRoot = Entities.size() - 1;
   }
 
+  /// True if entity \p Idx is storage tracked only for its lifetime: a
+  /// lifecycle entity (TrackedEntity::Lifecycle) or the current object. A
+  /// marked binding naming it asserts nothing of its state, so each later
+  /// binding is judged against that state.
+  bool isLifetimeOnly(unsigned Idx) const {
+    const TrackedEntity &E = Entities[Idx];
+    return E.Lifecycle || E.K == TrackedEntity::Kind::CurrentObject;
+  }
+
   /// Append the WholeLocal or Pointee entity of the marked local or
   /// parameter \p V, or the ConstructAlias entity of the construction alias
   /// \p V (once); returns its index.
@@ -3136,21 +3145,21 @@ TrackedStorage::markedPointerObject(const SemaProfiles::ShapeLeaf &Leaf) const {
 /// then unassigned and destroyed until stored again -- for an argument naming
 /// several storages, each may be. Reseat: the marked pointer, reference, or
 /// handle Idx refers, from here, to the storage DefAssignEvent::RT describes
-/// and, when a marked binding names an identified referent (Entity,
-/// ViaPointer), asserts it unassigned: Must and May cleared, MayUnassigned set,
-/// MayDestroyed and Esc kept. Escape: Idx may have been destroyed or released
-/// by one of several arms or an opaque callee: possibly assigned or not, and
-/// not destroyed. Reset: Idx belongs to a local whose declaration runs here,
-/// which begins a new object each time (a loop's next iteration, a backward
-/// goto): unassigned, not escaped, and not destroyed. AggregateEscape: the
-/// tracked aggregate local owning member Idx escapes as a whole (a non-benign
-/// DeclRefExpr), so reads of the member are trusted from here (the local read
-/// leniency) while its assignment state is unchanged. Binding: a pointer,
-/// reference, or handle binding whose source has a tracked leaf
-/// (BindingSites[Aux]), judged by the binding rule. ReadThrough /
-/// SubobjectWrite: a read through, or a store below, tracked storage
-/// (AccessSites[Aux]), judged by uninit_read / uninit_write. An event on a
-/// Pointee entity acts on the storage the pointer refers to at its program
+/// and, when a marked binding names an identified referent its marker asserts
+/// (ReseatTarget::Entity, ViaPointer), asserts it unassigned: Must and May
+/// cleared, MayUnassigned set, MayDestroyed and Esc kept. Escape: Idx may have
+/// been destroyed or released by one of several arms or an opaque callee:
+/// possibly assigned or not, and not destroyed. Reset: Idx belongs to a local
+/// whose declaration runs here, which begins a new object each time (a loop's
+/// next iteration, a backward goto): unassigned, not escaped, and not
+/// destroyed. AggregateEscape: the tracked aggregate local owning member Idx
+/// escapes as a whole (a non-benign DeclRefExpr), so reads of the member are
+/// trusted from here (the local read leniency) while its assignment state is
+/// unchanged. Binding: a pointer, reference, or handle binding whose source has
+/// a tracked leaf (BindingSites[Aux]), judged by the binding rule.
+/// ReadThrough / SubobjectWrite: a read through, or a store below, tracked
+/// storage (AccessSites[Aux]), judged by uninit_read / uninit_write. An event
+/// on a Pointee entity acts on the storage the pointer refers to at its program
 /// point (referent). Every event but a Reset and a scope-exit Destroy carries
 /// the anchor expression the diagnostic and the suppression walk use. A Reset
 /// or AggregateEscape whose Aux is above Idx acts on each entity of the range
@@ -3182,11 +3191,13 @@ enum class ReseatTarget {
   /// pointer object was handed out (P4222R2 §4.3).
   Escaped,
   /// The entity DefAssignEvent::Aux (`&u`, `&a.m`, `&m`, `u` for a
-  /// reference), which the binding's marker asserts uninitialized.
+  /// reference), which the binding's marker asserts uninitialized unless it
+  /// is tracked only for its lifetime (TrackedStorage::isLifetimeOnly).
   Entity,
   /// What the marked pointer, reference, or handle DefAssignEvent::Aux refers
   /// to there (q, &*q, &r, *q for a reference), which the binding's
-  /// marker asserts uninitialized; an unidentified referent asserts nothing.
+  /// marker asserts as it does an Entity target; an unidentified referent
+  /// asserts nothing.
   ViaPointer,
   /// Not identified: a conditional source with a tracked arm, or a store
   /// whose target names several pointers or a marked pointer on only some
@@ -4247,7 +4258,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
       // ReseatTarget.
       if ((Ev.RT == ReseatTarget::Entity ||
            Ev.RT == ReseatTarget::ViaPointer) &&
-          NewTarget != UnknownTarget)
+          NewTarget != UnknownTarget && !Storage.isLifetimeOnly(NewTarget))
         WithSubs(NewTarget, [&](unsigned I) {
           St.update(I, FlowState::MayUnassigned,
                     FlowState::Must | FlowState::May |

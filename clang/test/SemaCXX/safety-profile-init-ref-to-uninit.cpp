@@ -194,17 +194,18 @@ void test_conditional_reference(bool c) {
 
 // `this` denotes the current object: initialized in a member function, so a
 // marked pointer or reference to an initialized member is rejected (the
-// P4222R2 §4.5 accessor mirror), and under construction -- unclassified -- in
-// a constructor body, a mem-initializer, or a default member initializer,
-// through a lambda as well.
+// P4222R2 §4.5 accessor mirror); in a constructor, a member a mem-initializer
+// or the body binds to a marked target is live once its own initializer has
+// run, and the current object is under construction -- unclassified -- in a
+// default member initializer and in a lambda.
 struct ThisObject {
   int x = 1;
   int y [[uninit]];
   int *nsd [[ref_to_uninit]] = &x; // OK: under construction
   int *ptr [[ref_to_uninit]];
-  ThisObject() : ptr{&x} {} // OK: under construction
+  ThisObject() : ptr{&x} {} // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
   ThisObject(int) : ptr{&y} {
-    int *p [[ref_to_uninit]] = &x; // OK: under construction
+    int *p [[ref_to_uninit]] = &x; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
     auto l = [this] { int *q [[ref_to_uninit]] = &x; (void)q; }; // OK: under construction
     (void)p; (void)l;
   }
