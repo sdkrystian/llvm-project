@@ -1375,6 +1375,48 @@ int read_after_handing_out() {
   return a.k;
 }
 
+// A range credit through a marked pointer initializes the storage in part: a
+// marked binding of it is accepted, a construction is not
+void range_part_binding(int *p [[ref_to_uninit]], int *src, int n) {
+  std::uninitialized_move(src, src + n, p);
+  int *q [[ref_to_uninit]] = p; // OK
+  (void)q;
+}
+void range_part_construct(int *p [[ref_to_uninit]], int n) {
+  std::uninitialized_fill_n(p, n, 0);
+  std::construct_at(p); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+void range_part_fill_twice(int *p [[ref_to_uninit]], int n) {
+  std::uninitialized_fill_n(p, n, 0);
+  std::uninitialized_fill_n(p, n, 0); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// A marked binding after a credit of the whole storage, or after a credit on
+// one path only, is rejected
+void range_whole_binding(int (&a [[ref_to_uninit]])[4]) {
+  std::uninitialized_fill(a, a + 4, 0);
+  int *q [[ref_to_uninit]] = a; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)q;
+}
+void range_part_one_path(bool c, int *p [[ref_to_uninit]], int n) {
+  if (c)
+    std::uninitialized_fill_n(p, n, 0);
+  int *q [[ref_to_uninit]] = p; // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)q;
+}
+
+// The reserve of P4222R3 §4.7's Vector: the new buffer holds the moved
+// elements and the rest uninitialized, and the marked member takes it
+struct Vec {
+  int *elem [[ref_to_uninit]];
+  int n;
+  void reserve(int *fresh [[ref_to_uninit]]) {
+    int *old = std::now_init(elem);
+    std::uninitialized_move(old, old + n, fresh);
+    elem = fresh; // OK
+  }
+};
+
 //--- referent.cpp
 // A marked local pointer or reference refers to the storage its latest
 // binding names (ProfilesFramework.rst, "Binding Pointers and References"),

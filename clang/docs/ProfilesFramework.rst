@@ -973,7 +973,12 @@ rejected, a construction included:
 ``if (c) std::construct_at(&d); std::construct_at(&d);``,
 ``std::construct_at(arr)`` twice, and
 ``std::uninitialized_fill(a + 2, a + 4, v)`` followed by a fill of all of
-``a`` are rejected.  Constructions of elements past the first are not judged
+``a`` are rejected.  Storage a range call initialized in part on every path,
+as far as the analysis can see -- through a marked pointer, whose extent is
+unknown (``std::uninitialized_move(old, old + n, p)``) -- holds both objects
+and uninitialized slots, so a marked binding of it that does not construct it
+is accepted (``int *q [[ref_to_uninit]] = p;``), while a construction there
+is still rejected.  Constructions of elements past the first are not judged
 against each other, a destroy of the element at index 0 ends the object a
 construction began there, and a binding through an iterator or a handle's
 member call (``*it``, a range-for's element, ``s.data()``) or an offset

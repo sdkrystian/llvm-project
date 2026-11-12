@@ -1505,7 +1505,16 @@ step below the entity and no element step but at index zero,
 whole by its member entities reads theirs; a leaf through a handle's member
 call (``Resolution::ViaHandle``) or an offset handle, and the argument of an
 ``AssertUninit`` default-construct row (``BindingSite::AssertUninit``), read
-neither.  An unmarked-target
+neither.  Storage a range credit initialized in part on every path -- one not
+proven whole (``RangeCredit::Part``, ``FlowState::RangePart``): a marked
+pointer's referent, whose extent is unknown, or a handle built over part of
+its storage -- holds initialized objects and uninitialized slots, the mixture
+a buffer or a vector manages (P4222R2 §1.1, §4.4), so a marked binding naming
+it whole that does not construct it (``BindingSite::Constructs``) reads
+neither ``Must`` nor the construction bits: the binding may hand the slots on
+(the reserve of a vector moving its elements into a new buffer), while
+``std::construct_at`` or an ``std::uninitialized_*`` call there stays a
+second construction.  An unmarked-target
 binding and ``destroy_uninit`` are suppressed
 by ``May``; a read through a marker or of a subobject of an ``[[uninit]]``
 object, a subobject write, and the unmarked binding of a value copy's source
@@ -1957,6 +1966,11 @@ Missed Diagnostics
   credited although P4222R2 §6 asks for ``construct_at``.  So do the
   element-assigning algorithms through a marked pointer, whose extent is
   unknown: ``std::fill(p, p + 1, 0)`` initializes ``p``'s whole referent.
+- A marked binding of storage a range credit through a marked pointer
+  initialized (``FlowState::RangePart``) is accepted also where the credit
+  covered all of it (``std::uninitialized_fill_n(p, n, v)`` with ``n`` the
+  whole extent): the pointer's extent is unknown, so the binding may refer to
+  initialized memory only.
 - A recognized counted loop over a parameter the body must initialize trusts
   its bound as the extent of the caller's storage, which the callee cannot
   know: ``for (int i = 0; i < n; ++i) p[i] = 0;`` keeps the obligation for

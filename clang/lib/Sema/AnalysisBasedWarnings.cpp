@@ -3300,6 +3300,18 @@ enum class ConstructExtent : uint8_t {
   /// Part of the storage at an offset: FlowState::PartConstructed.
   Offset
 };
+/// What a range credit -- a known callee's range parameter's, or a recognized
+/// loop's -- initialized of the range it names (DefAssignEvent::Range).
+enum class RangeCredit : uint8_t {
+  /// Not a range credit.
+  None,
+  /// Part of the range at least, the whole range not proven: a marked
+  /// pointer's referent, a handle built over part of its storage, or a range
+  /// whose end the analysis cannot see (FlowState::RangePart).
+  Part,
+  /// The whole range, provably (FlowState::WholeRange).
+  Whole
+};
 struct DefAssignEvent {
   DefAssignEventKind Kind;
   unsigned Idx;
@@ -3329,10 +3341,10 @@ struct DefAssignEvent {
   /// constructed of the storage the event reaches; a SubMember's credit
   /// constructs nothing here.
   ConstructExtent Constructs = ConstructExtent::None;
-  /// Write: the credit provably covers the whole range of what it names (a
-  /// range passed as itself, an iterator pair or count spanning it, a
-  /// recognized loop), which sets FlowState::WholeRange.
-  bool WholeRange = false;
+  /// Write: what of the range it names a range credit initialized -- the
+  /// whole range, provably (a range passed as itself, an iterator pair or
+  /// count spanning it, a recognized loop), or part of it at least.
+  RangeCredit Range = RangeCredit::None;
 };
 
 /// The form classification of a binding leaf: the parse-time recognizers'
@@ -3416,6 +3428,11 @@ struct BindingSite {
   /// uninitialized (KnownParamRole::AssertUninit): the construction bits do
   /// not judge it.
   bool AssertUninit = false;
+  /// The target is a parameter the callee initializes
+  /// (CalleeLifecycleRoles::initializesParam): a construction, judged by
+  /// construct-once also where a range credit initialized the storage in
+  /// part (FlowState::RangePart).
+  bool Constructs = false;
 };
 
 /// A destruction site derived from a call element -- a [[now_uninit]] or
@@ -3725,9 +3742,16 @@ struct FlowState {
     /// is initialized (BindingLeaf::Element). Never set on a marked
     /// pointer's referent (TrackedEntity::PointerReferent).
     WholeRange = 1u << 12,
+    /// Initialized in part as a range on every path -- by a range credit not
+    /// proven whole (RangeCredit::Part), a marked pointer's referent's
+    /// included -- with no destroy, release, reset, escape, or uninitialized
+    /// assertion since: a marked binding that does not construct it is
+    /// accepted (judgeBindingSite).
+    RangePart = 1u << 13,
   };
   /// The flags the join intersects; it unites the others.
-  static constexpr uint16_t JoinIntersects = Must | Esc | Null | WholeRange;
+  static constexpr uint16_t JoinIntersects =
+      Must | Esc | Null | WholeRange | RangePart;
 
   /// False for the identity of the join.
   bool Reached = false;
@@ -3909,7 +3933,9 @@ static LeafState leafState(const BindingLeaf &L, const FlowState &St,
 /// marked target rejects a source that is initialized (on every path) or
 /// Mixed, or that a construction may have constructed on some path
 /// (FlowState::Constructed, PartConstructed) unless the target only asserts
-/// the storage uninitialized (BindingSite::AssertUninit); an unmarked one a
+/// the storage uninitialized (BindingSite::AssertUninit) -- neither where
+/// each leaf names whole storage a range credit initialized in part and the
+/// target does not construct it (FlowState::RangePart); an unmarked one a
 /// source that is uninitialized (on every path) or Mixed -- for a whole copy,
 /// a source left uninitialized on some path (BindingSite::EveryPath); an
 /// Unknown source fires in neither direction.
@@ -3957,6 +3983,16 @@ static void judgeBindingSite(const BindingSite &Site, const FlowState &St,
   };
   // The shape select of the binding diagnostics: pointer, reference, handle.
   unsigned Shape = Site.IsReference ? 1 : !Site.HandleType.isNull() ? 2 : 0;
+  // A marked target that does not construct may refer to storage a range
+  // credit initialized in part on every path (P4222R2 §4.2), named whole.
+  if (Site.TargetMarked && !Site.Constructs &&
+      llvm::all_of(Site.Leaves, [&](const BindingLeaf &L) {
+        std::optional<unsigned> R = L.Entity && L.WholeLeaf
+                                        ? referent(*L.Entity, St, Storage)
+                                        : std::nullopt;
+        return R && St.has(*R, FlowState::RangePart);
+      }))
+    return;
   if (Site.TargetMarked) {
     if (Acc == LeafState::Initialized || Acc == LeafState::Mixed ||
         (!Site.AssertUninit && llvm::any_of(Site.Leaves, MayBeConstructed))) {
@@ -4206,11 +4242,11 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
   auto MayWrite = [&](unsigned I) {
     St.update(I, FlowState::May, FlowState::EntryAsserted);
   };
-  // The construction bits and the whole-range bit, which a whole destroy,
+  // The construction bits and the range bits, which a whole destroy,
   // release, reset, escape, or uninitialized assertion clears.
-  constexpr uint16_t ConstructBits = FlowState::Constructed |
-                                     FlowState::PartConstructed |
-                                     FlowState::WholeRange;
+  constexpr uint16_t ConstructBits =
+      FlowState::Constructed | FlowState::PartConstructed |
+      FlowState::WholeRange | FlowState::RangePart;
   // Mark the storage Idx refers to as a construction's credit left it,
   // whether or not its designation covers the storage: an object of another
   // type, or a base, constructed there is still an object. Through an offset
@@ -4248,8 +4284,11 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
         WriteStorage(Ev, *R, Write);
         if (Ev.SkipUninitMembers)
           St.update(*R, FlowState::MembersPending);
-        if (Ev.WholeRange && !Storage.Entities[*R].PointerReferent)
+        if (Ev.Range == RangeCredit::Whole &&
+            !Storage.Entities[*R].PointerReferent)
           St.update(*R, FlowState::WholeRange);
+        else if (Ev.Range != RangeCredit::None)
+          St.update(*R, FlowState::RangePart);
       } else if (Ev.Sub.Class && Ev.Sub.Exact) {
         // A store naming one member of storage with no SubMember for it (a
         // void referent viewed as a class) ends its pending members.
@@ -4302,7 +4341,8 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
           continue;
         uint16_t Set = FlowState::MayUnassigned | FlowState::MayDestroyed;
         uint16_t Clear = FlowState::Must | FlowState::EntryAsserted |
-                         FlowState::MembersPending | FlowState::WholeRange;
+                         FlowState::MembersPending | FlowState::WholeRange |
+                         FlowState::RangePart;
         if (Site.Conditional)
           Set |= FlowState::May;
         else
@@ -5201,13 +5241,12 @@ public:
   /// its \p Designated type and RawExempt (resolveArg), and a construction's
   /// credit \p Constructs: it constructs what it names whole -- each storage an
   /// argument naming several names -- and a subobject at the storage's start
-  /// or at an offset (DefAssignEvent::Constructs). A whole credit
-  /// \p WholeRange covers the whole range of what it names
-  /// (DefAssignEvent::WholeRange).
+  /// or at an offset (DefAssignEvent::Constructs). A whole credit of a range
+  /// carries what of it \p Range covers (DefAssignEvent::Range).
   void appendFor(const Expr *Arg, QualType ParamTy, DefAssignEventKind Kind,
                  QualType Designated = QualType(), bool RawExempt = false,
                  bool SkipUninitMembers = false, bool Constructs = false,
-                 bool AsRange = false, bool WholeRange = false);
+                 bool AsRange = false, RangeCredit Range = RangeCredit::None);
 
 private:
   Sema &S;
@@ -5375,7 +5414,7 @@ void ArgumentEffects::appendFor(const Expr *Arg, QualType ParamTy,
                                 DefAssignEventKind Kind, QualType Designated,
                                 bool RawExempt, bool SkipUninitMembers,
                                 bool Constructs, bool AsRange,
-                                bool WholeRange) {
+                                RangeCredit Range) {
   SmallVector<ArgLeaf, 2> Leaves;
   resolveArg(Arg, ParamTy, Leaves, Designated, RawExempt,
              SemaProfiles::FlowLeafUse::Plain, AsRange);
@@ -5394,7 +5433,8 @@ void ArgumentEffects::appendFor(const Expr *Arg, QualType ParamTy,
     Ev.SkipUninitMembers = SkipUninitMembers;
     if (Constructs && !Sub.Class)
       Ev.Constructs = ConstructExtent::Start;
-    Ev.WholeRange = WholeRange && Kind == DefAssignEventKind::Write;
+    if (Kind == DefAssignEventKind::Write)
+      Ev.Range = Range;
     Events.push_back(Ev);
   };
   for (const ArgLeaf &L : Leaves) {
@@ -5653,9 +5693,14 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
       // A credit of a range named directly and passed as itself (not a
       // copy's output, which stops at its source's end), by an iterator pair
       // or a count spanning it (coversWholeExtent), or by a callee that must
-      // initialize the handle passed covers the whole range.
-      bool WholeRange =
-          (PT->isReferenceType() && !Roles.SourceParam &&
+      // initialize the handle passed covers the whole range; any other credit
+      // of a row's range or of a handle covers part of it at least.
+      bool RangeArg = SemaProfiles::isHandleType(PT.getNonReferenceType()) ||
+                      (Roles.roleOf(P) != SemaProfiles::KnownParamRole::None &&
+                       (Roles.EndParam || Roles.CountParam ||
+                        Roles.SourceParam || PT->isReferenceType()));
+      RangeCredit Range = RangeArg ? RangeCredit::Part : RangeCredit::None;
+      if ((PT->isReferenceType() && !Roles.SourceParam &&
            (TakesRange(P) || PT.getNonReferenceType()->isArrayType()) &&
            namesRangeDirectly(Arg)) ||
           (!PT->isReferenceType() &&
@@ -5664,13 +5709,14 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
            coversWholeExtent(S.Context, CallLike, Roles)) ||
           (Roles.mustInitializeParam(P) &&
            SemaProfiles::isHandleType(PT.getNonReferenceType()) &&
-           namesRangeDirectly(Arg));
+           namesRangeDirectly(Arg)))
+        Range = RangeCredit::Whole;
       // A byte writer's credit takes storage in any state and constructs
       // nothing.
       Args.appendFor(Arg, PT, DefAssignEventKind::Write, Designated, RawExempt,
                      SkipUninitMembers,
                      /*Constructs=*/!Roles.isInitializingParam(P),
-                     TakesRange(P), WholeRange);
+                     TakesRange(P), Range);
     });
 }
 
@@ -5719,6 +5765,7 @@ static void appendLoopCredits(Sema &S, const Decl *D, const CFG &cfg,
                         For->getCond()};
       if (LI->Constructs)
         Ev.Constructs = ConstructExtent::Start;
+      Ev.Range = RangeCredit::Part;
       EdgeEvents[Edge].push_back(Ev);
       continue;
     }
@@ -5748,7 +5795,8 @@ static void appendLoopCredits(Sema &S, const Decl *D, const CFG &cfg,
     Args.appendFor(RangeInit, RangeT, DefAssignEventKind::Write, Elem,
                    /*RawExempt=*/false, /*SkipUninitMembers=*/false,
                    LI->Constructs, AsRange,
-                   /*WholeRange=*/namesRangeDirectly(RangeInit));
+                   namesRangeDirectly(RangeInit) ? RangeCredit::Whole
+                                                 : RangeCredit::Part);
     llvm::append_range(EdgeEvents[Edge], Credit);
     Credited.insert(Range);
     if (!LI->LoopVar->hasAttr<RefToUninitAttr>())
@@ -7161,10 +7209,12 @@ static void extractStdInitEvents(
                       /*Consume=*/Parm && Roles.isInitializingParam(Parm) &&
                           creditsInitializingParam(Storage, CallLike, Roles,
                                                    Parm, Arg));
-                  if (Parm && Roles.roleOf(Parm) ==
-                                  SemaProfiles::KnownParamRole::AssertUninit)
-                    for (BindingSite &Site : llvm::drop_begin(Sites, First))
-                      Site.AssertUninit = true;
+                  for (BindingSite &Site : llvm::drop_begin(Sites, First)) {
+                    Site.AssertUninit =
+                        Parm && Roles.roleOf(Parm) ==
+                                    SemaProfiles::KnownParamRole::AssertUninit;
+                    Site.Constructs = Parm && Roles.initializesParam(Parm);
+                  }
                 }
               });
         };
