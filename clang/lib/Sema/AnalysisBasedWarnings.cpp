@@ -3034,7 +3034,8 @@ TrackedStorage::resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
     }
   }
   // A std::array's begin or data: the array it points into -- through a
-  // pointer, the pointer's referent -- a subobject from its end.
+  // pointer, the pointer's referent -- a subobject from a result past its
+  // start.
   bool PastStart;
   if (const Expr *Arr = SemaProfiles::stdArrayAddressObject(E, PastStart)) {
     R = Arr->getType()->isPointerType()
@@ -7040,7 +7041,8 @@ static void extractStdInitEvents(
         if (ObjectMethod && Object && isa<CXXDestructorDecl>(ObjectMethod)) {
           DestroyedObject = Object;
         } else if (ObjectMethod && Object &&
-                   !SemaProfiles::isStdArrayAddressMember(ObjectMethod)) {
+                   !SemaProfiles::isStdArrayAddressMember(ObjectMethod) &&
+                   !SemaProfiles::isStdArrayObservingMember(ObjectMethod)) {
           QualType OT = Object->getType();
           QualType T =
               OT->isPointerType()

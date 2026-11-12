@@ -2930,9 +2930,10 @@ static bool isStdArrayType(QualType T) {
 bool SemaProfiles::isStdArrayAddressMember(const CXXMethodDecl *MD) {
   if (!MD->getIdentifier() || !isStdArrayClass(MD->getParent()))
     return false;
-  return llvm::is_contained(
-      ArrayRef<StringRef>{"begin", "end", "cbegin", "cend", "data"},
-      MD->getName());
+  return llvm::is_contained(ArrayRef<StringRef>{"begin", "end", "cbegin",
+                                                "cend", "data", "rbegin",
+                                                "rend", "crbegin", "crend"},
+                            MD->getName());
 }
 
 const Expr *SemaProfiles::stdArrayAddressObject(const Expr *E,
@@ -2942,10 +2943,18 @@ const Expr *SemaProfiles::stdArrayAddressObject(const Expr *E,
       CE ? dyn_cast_or_null<CXXMethodDecl>(CE->getDirectCallee()) : nullptr;
   if (!MD || !isStdArrayAddressMember(MD))
     return nullptr;
-  PastStart = MD->getName() == "end" || MD->getName() == "cend";
+  PastStart = !llvm::is_contained(
+      ArrayRef<StringRef>{"begin", "cbegin", "data"}, MD->getName());
   if (const auto *MCE = dyn_cast<CXXMemberCallExpr>(CE))
     return MCE->getImplicitObjectArgument();
   return memberCallObject(CE, MD);
+}
+
+bool SemaProfiles::isStdArrayObservingMember(const CXXMethodDecl *MD) {
+  if (!MD->getIdentifier() || !isStdArrayClass(MD->getParent()))
+    return false;
+  return llvm::is_contained(ArrayRef<StringRef>{"size", "max_size", "empty"},
+                            MD->getName());
 }
 
 bool SemaProfiles::isStdArrayElementMember(const CXXMethodDecl *MD) {
@@ -5414,8 +5423,8 @@ void SemaProfiles::checkInitProfileObjectArgument(const Expr *Object,
   // argument for static call operators all the same, so skip them here.
   if (Method->isStatic())
     return;
-  // A std::array's address members only take its address.
-  if (isStdArrayAddressMember(Method))
+  // A std::array's address and observing members read no element.
+  if (isStdArrayAddressMember(Method) || isStdArrayObservingMember(Method))
     return;
   // An arrow call's object argument arrives as the pointer expression, a dot
   // call's as the object glvalue; the implicit object parameter's type is the

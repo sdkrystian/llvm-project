@@ -456,15 +456,19 @@ public:
   static const CXXRecordDecl *flowTrackedAggregateClass(const VarDecl *V);
 
   /// True if \p MD is a member of a std::array specialization that returns
-  /// an address into the array's elements -- begin, end, cbegin, cend, or
-  /// data: a call to one on uninitialized storage is no object-argument
-  /// violation, and its result designates the array's element storage
-  /// (P4222R2 §5.5).
+  /// an address into the array's elements -- begin, end, cbegin, cend, data,
+  /// rbegin, rend, crbegin, or crend: a call to one on uninitialized storage
+  /// is no object-argument violation, and its result designates the array's
+  /// element storage (P4222R2 §5.5).
   static bool isStdArrayAddressMember(const CXXMethodDecl *MD);
   /// For such a call \p E, the object -- or for an arrow call, the pointer
-  /// to it -- and whether the result is past its start (end, cend); null
-  /// otherwise.
+  /// to it -- and whether the result is past its start (end, cend, and the
+  /// reverse members); null otherwise.
   static const Expr *stdArrayAddressObject(const Expr *E, bool &PastStart);
+  /// True if \p MD is a member of a std::array specialization that reads no
+  /// element -- size, max_size, or empty: a call to one on uninitialized
+  /// storage is no object-argument violation.
+  static bool isStdArrayObservingMember(const CXXMethodDecl *MD);
   /// True if \p MD is a member of a std::array specialization that names an
   /// element -- operator[], at, front, or back: its call reads the array as a
   /// built-in array's element access does, on every path.

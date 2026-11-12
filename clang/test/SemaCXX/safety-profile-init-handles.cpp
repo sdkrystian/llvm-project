@@ -160,19 +160,31 @@ public:
   void reset(nullptr_t = nullptr) noexcept;
 };
 
+template <class It> class reverse_iterator;
 template <class T, size_t N> struct array {
   T _M_elems[N];
   using value_type = T;
   using iterator = T *;
   using const_iterator = const T *;
+  using reverse_iterator = std::reverse_iterator<iterator>;
+  using const_reverse_iterator = std::reverse_iterator<const_iterator>;
+  constexpr void swap(array &other) noexcept;
   constexpr iterator begin() noexcept;
   constexpr iterator end() noexcept;
+  constexpr reverse_iterator rbegin() noexcept;
+  constexpr reverse_iterator rend() noexcept;
   constexpr const_iterator cbegin() const noexcept;
   constexpr const_iterator cend() const noexcept;
-  constexpr T *data() noexcept;
+  constexpr const_reverse_iterator crbegin() const noexcept;
+  constexpr const_reverse_iterator crend() const noexcept;
   constexpr size_t size() const noexcept;
+  constexpr size_t max_size() const noexcept;
+  constexpr bool empty() const noexcept;
   constexpr T &operator[](size_t n) noexcept;
+  constexpr T *data() noexcept;
 };
+template <class T, size_t N>
+constexpr bool operator==(const array<T, N> &a, const array<T, N> &b);
 
 template <class C> constexpr auto begin(C &c) -> decltype(c.begin());
 template <class C> constexpr auto end(C &c) -> decltype(c.end());
@@ -1181,6 +1193,39 @@ int array_unfilled() {
   int *p = a.data(); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
   (void)p;
   return a[0]; // expected-error {{calling member function 'operator[]' binds its implicit object parameter to uninitialized memory under profile 'std::init'}}
+}
+
+// A std::array's size, max_size, and empty read no element, and its reverse
+// members only take its address, past its start
+std::size_t array_observers() {
+  std::array<int, 4> a [[uninit]];
+  std::reverse_iterator<int *> r [[ref_to_uninit]] = a.rbegin();
+  std::reverse_iterator<int *> e [[ref_to_uninit]] = a.rend();
+  std::reverse_iterator<const int *> cr [[ref_to_uninit]] = a.crbegin();
+  std::reverse_iterator<const int *> ce [[ref_to_uninit]] = a.crend();
+  auto u = a.rbegin(); // expected-error {{handle of type 'reverse_iterator' (aka 'std::reverse_iterator<int *>') to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)r, (void)e, (void)cr, (void)ce, (void)u;
+  return a.size() + a.max_size() + a.empty();
+}
+std::size_t array_observers_through_pointer(
+    std::array<int, 4> *pa [[ref_to_uninit]]) {
+  return pa->size() + pa->empty();
+}
+
+// A fill through a std::array's reverse members initializes no element
+int array_reverse_fill() {
+  std::array<int, 4> a [[uninit]];
+  std::uninitialized_fill(a.rbegin(), a.rend(), 0);
+  return a[0]; // expected-error {{calling member function 'operator[]' binds its implicit object parameter to uninitialized memory under profile 'std::init'}}
+}
+
+// Swapping or comparing std::arrays reads their elements
+void array_swap_compare() {
+  std::array<int, 4> a [[uninit]];
+  std::array<int, 4> b [[uninit]];
+  a.swap(b); // expected-error {{calling member function 'swap' binds its implicit object parameter to uninitialized memory under profile 'std::init'}} \
+                expected-error {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  (void)(a == b); // expected-error 2 {{reference to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
 }
 
 // std::begin, std::data, and their kin derive from their argument, which

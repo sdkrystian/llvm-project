@@ -1063,15 +1063,19 @@ terminal that refers to uninitialized memory, while the parameter's own
 binding is judged as usual.
 
 A ``std::array`` is storage, not a handle: its ``begin``, ``end``,
-``cbegin``, ``cend``, and ``data`` (``SemaProfiles::isStdArrayAddressMember``)
-are exempt from the object-argument rule, and their result designates the
-array's element storage -- the pointer recognizer classifies the array as a
-decayed array, the predicate and the resolver take the array whole (from
-``end``, a subobject), the shape walk steps through them to an element of the
-array, and the walk makes it a ``Range`` leaf; called through a pointer they
-designate its referent instead -- while ``designationCovers`` counts a
-``std::array`` by its elements, so an ``int`` credit covers a
-``std::array<int, 4>``.  Its element members (``operator[]``, ``at``,
+``cbegin``, ``cend``, ``data``, ``rbegin``, ``rend``, ``crbegin``, and
+``crend`` (``SemaProfiles::isStdArrayAddressMember``) are exempt from the
+object-argument rule, and their result designates the array's element
+storage -- the pointer recognizer classifies the array as a decayed array,
+the predicate and the resolver take the array whole (from ``end``, ``cend``,
+or a reverse member, a subobject: a reverse iterator is an offset handle, so
+no credit reaches the array whole through it), the shape walk steps through
+them to an element of the array, and the walk makes it a ``Range`` leaf;
+called through a pointer they designate its referent instead -- while
+``designationCovers`` counts a ``std::array`` by its elements, so an ``int``
+credit covers a ``std::array<int, 4>``.  Its ``size``, ``max_size``, and
+``empty`` (``isStdArrayObservingMember``) read no element and are exempt from
+the object-argument rule too.  Its element members (``operator[]``, ``at``,
 ``front``, ``back``; ``isStdArrayElementMember``) bind the array on every
 path, as a built-in array's element read is judged.
 
@@ -1621,9 +1625,10 @@ Deliberate Strictnesses
   wrapper or suppression.
 - The ``std::uninitialized_*`` credit reaches only what the whole-storage
   write reaches: an element-form range (``&arr[0]``, P4222R2 §1.3) or an
-  offset class-type iterator (``s.begin() + 1``, ``std::next(s.begin())``)
-  earns nothing, though a later construction of the whole storage is rejected,
-  and a marked pointer's further elements (``p[1]``) are never credited.
+  offset class-type iterator (``s.begin() + 1``, ``std::next(s.begin())``,
+  a ``std::array``'s ``rbegin``) earns nothing, though a later construction
+  of the whole storage is rejected, and a marked pointer's further elements
+  (``p[1]``) are never credited.
   ``std::fill`` assigns rather than initializes: into a
   still-uninitialized ``[[uninit]]`` array it is rejected like any unmarked
   binding (``std::uninitialized_fill`` and ``memset`` initialize).

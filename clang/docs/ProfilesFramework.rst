@@ -1402,6 +1402,10 @@ to -- so ``std::uninitialized_fill(a.begin(), a.end(), 0)`` and
 ``std::ranges::uninitialized_fill(a, 0)`` initialize an ``[[uninit]]``
 ``std::array`` whole (§5.5), and ``*a.data()`` then reads it as ``*arr``
 does, while ``a[0]`` before that is a member call on uninitialized storage.
+Its ``rbegin``, ``rend``, ``crbegin``, and ``crend`` are accepted the same
+way and designate its elements from past their start, so a fill through them
+initializes no element; its ``size``, ``max_size``, and ``empty`` read no
+element and are accepted in any state.
 Its ``operator[]``, ``at``, ``front``, and ``back`` read the array as
 ``arr[i]`` does: it must be initialized on every path.
 
