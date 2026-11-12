@@ -1080,6 +1080,9 @@ original name:
     int v = u;  // OK: fill() initialized u
   }
 
+The function's own body must initialize, on every path that returns, the
+storage the parameter refers to when the function is entered.
+
 The attribute applies to a parameter whose type is a pointer or reference to
 a non-const object, or a *handle* (an object of non-union class type that
 refers to memory, such as a span); any other type is diagnosed regardless of
@@ -1121,6 +1124,10 @@ original name:
     fill(&u);
     int v = u;  // OK: fill() initialized u
   }
+
+The function's own body must initialize, on every path that returns, the
+storage each ``[[ref_to_uninit]]`` parameter refers to when the function is
+entered, as for a ``[[must_init]]`` parameter.
 
 The library function ``std::now_init`` (P4222R2 §4.4) is a different
 facility: it launders a pointer *value* and leaves the argument's storage as

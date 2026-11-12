@@ -14547,6 +14547,10 @@ def err_init_destroy_uninit : ProfileRule<
   "a destructor call|its scope-exit destructor|its owner's reset or "
   "reassignment|the destructor's member teardown}1 under profile '%0'",
   ProfileStdInitDestroyUninit>;
+def err_init_must_init_uninitialized : ProfileRule<
+  "storage referred to by %select{parameter %2|an unnamed parameter}1 is not "
+  "initialized on every path that returns under profile '%0'",
+  ProfileStdInitMustInit>;
 def err_init_deferred_check_unjudged : Error<
   "std::init %select{binding|destroy|read|store}0 check deferred to the flow "
   "analysis was never judged">;

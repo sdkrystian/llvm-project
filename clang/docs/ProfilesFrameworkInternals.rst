@@ -870,6 +870,12 @@ follows:
        ``[[ref_to_uninit]]`` at the top level only: the member arm of the
        glvalue recognizer clears the trust, so subobject writes below the marker
        classify uninitialized)
+   * - ``must_init``
+     - CFG rider
+     - the obligation sites of ``appendExitObligationSites``, judged in
+       ``runDefiniteAssignment`` against the join of the normal exits: each
+       ``ParamReferent`` entity of ``TrackedStorage::EntryTargets`` must be
+       ``Must`` there
 
 Three recognizers and a helper are shared across the rules.  The pointer,
 glvalue, and handle recognizers -- ``classifyUninitSource`` dispatches a
@@ -1342,7 +1348,14 @@ a type against the join of the states the body's normal exits leave
 (``appendExitDestroySites``, ``isNormalExitEdge``: a return or the body's end,
 not a call's exception edge, a throw, a try dispatch, or a call that does not
 return), since a call's exception edge carries the state after its own
-effects.  In every
+effects.  A parameter the body must initialize -- a ``[[must_init]]``
+parameter, or a marked parameter of a ``[[now_init]]`` function -- refers at
+entry to a ``ParamReferent`` entity (``TrackedStorage::EntryTargets``), not
+to its anonymous referent: the obligation is about the storage the caller
+passed, and a reseat to a fresh referent (``p++``, ``p = nullptr``) resets
+the anonymous referent's flags.  Rule ``must_init`` requires ``Must`` of the
+``ParamReferent`` in the same join of the normal exits
+(``appendExitObligationSites``), except in a coroutine.  In every
 member function, each ``[[ref_to_uninit]]`` pointer member
 reachable from the current object through members by value
 (``SemaProfiles::markedPointerMembers``) has a ``MemberPointee`` entity for
@@ -1759,6 +1772,23 @@ Deliberate Strictnesses
 - ``std::construct_at(&r[1], v)`` on a ``std::array`` that is not yet filled is
   rejected as a member call (``operator[]``) on uninitialized storage and
   again as a marked binding to initialized memory.
+- A ``[[must_init]]`` parameter, and a marked parameter of a ``[[now_init]]``
+  function, is obligated on every path that returns, a path that tests it for
+  null included: after ``if (!p) return;`` the storage is uninitialized on the
+  null path, so rule ``must_init`` rejects the function.  The remedies are a
+  plain ``[[ref_to_uninit]]`` parameter or suppressing ``must_init``.
+- An element-by-element fill of an obligated parameter's storage
+  (``p[i] = 0`` in a loop, ``*p++ = 0``) initializes nothing (see the element
+  write entry under Missed Diagnostics), so it leaves the obligation unkept.
+  The remedies are a ``std::uninitialized_*`` fill, ``memset``, or suppression.
+- A function that hands out a mutable alias of an obligated parameter
+  (``&p``, a by-reference capture) leaves its storage in an unknown state, so
+  a write through the alias (a lambda's ``*p = 1``) does not keep the
+  obligation; the body must initialize the storage itself.
+- A ``[[must_init]]`` or ``[[now_init]]`` call in a loop over storage declared
+  outside it is rejected from the second iteration on: the storage may hold the
+  object the previous call constructed (construct-once).  Declaring the
+  storage inside the loop gives each iteration a new object.
 
 Missed Diagnostics
 ------------------
@@ -1926,6 +1956,13 @@ Missed Diagnostics
   loop through a marked pointer into a hard error, with range algorithms,
   ``construct_at``, or suppression as the only remedies (``std::byte``
   buffers excepted, P4222R2 §4.6).
+- A marker added to a declaration after a function's definition does not
+  obligate that definition, judged when its body ended; calls of the later
+  declaration are credited all the same.  Likewise an override need not repeat
+  ``[[must_init]]``: a call through the base's declaration credits the
+  argument whatever the override's body does.
+- A coroutine is not judged by rule ``must_init``: its parameters live in its
+  frame, as for its by-value parameters' exit destroys.
 - A destroy of an element of what a marked pointer or handle refers to --
   ``std::destroy_at(&p[i])``, ``std::destroy_at(p + i)``,
   ``std::destroy(p + 1, p + n)``, a destroy through an offset iterator -- is

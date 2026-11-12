@@ -267,6 +267,9 @@ CoTask coroutine_marked_params(int *q [[ref_to_uninit]], int *r) {
   co_return;
 }
 
+// A coroutine's [[must_init]] parameter is not judged at its end
+CoTask coroutine_must_init(int *q [[must_init]]) { co_return; }
+
 // An awaited object is the object argument of each awaiter call
 struct CoAwaiter {
   int v;

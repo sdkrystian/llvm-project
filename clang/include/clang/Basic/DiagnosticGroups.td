@@ -2045,13 +2045,14 @@ def ProfileStdInitUninitWithInitializer : ProfileRuleGroup<"std::init", "uninit_
 def ProfileStdInitPointerMarker : ProfileRuleGroup<"std::init", "pointer_marker">;
 def ProfileStdInitUnionMarker : ProfileRuleGroup<"std::init", "union_marker">;
 def ProfileStdInitStaticMarker : ProfileRuleGroup<"std::init", "static_marker">;
+def ProfileStdInitMustInit : ProfileRuleGroup<"std::init", "must_init">;
 def ProfileStdInit : ProfileGroup<"std::init", [
     ProfileStdInitUninitRead, ProfileStdInitUninitDecl, ProfileStdInitUninitWrite,
     ProfileStdInitRefToUninit, ProfileStdInitDoubleDestroy,
     ProfileStdInitDestroyUninit, ProfileStdInitCtorUninitMember,
     ProfileStdInitStaticRuntimeInit, ProfileStdInitUninitWithInitializer,
     ProfileStdInitPointerMarker, ProfileStdInitUnionMarker,
-    ProfileStdInitStaticMarker]>;
+    ProfileStdInitStaticMarker, ProfileStdInitMustInit]>;
 def Profiles : DiagGroup<"profiles", [ProfileTestTypeCast, ProfileTestUninitRead,
                                       ProfileTestCfgHooks, ProfileTestClassFinal,
                                       ProfileTestCtorFinal, ProfileTestArith,

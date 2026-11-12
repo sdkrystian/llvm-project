@@ -447,6 +447,10 @@ Rule                        Diagnoses
 ``union_marker``            ``[[uninit]]`` on a union object or member.
 ``static_marker``           ``[[uninit]]`` on a variable with static or thread
                             storage duration.
+``must_init``               A function that leaves the storage a
+                            ``[[must_init]]`` parameter, or a marked parameter
+                            of a ``[[now_init]]`` function, refers to
+                            uninitialized on a path that returns.
 =========================== ======================================================
 
 
@@ -1006,7 +1010,13 @@ and ``fill(arr)`` an ``[[uninit]]`` array whole, local or member (§6's
 ``uninitialized_fill`` shape; the element form ``fill(&arr[0])`` initializes
 nothing, §5.4) -- with the same reverse-direction consequence (after a
 ``fill(&u)`` on some path, a second ``fill(&u)`` is rejected: ``u`` may
-already hold an object, which also catches double ``construct_at``).  This is
+already hold an object, which also catches double ``construct_at``).  The
+function's own body keeps the promise (rule ``must_init``, §6.2): the storage
+each such parameter refers to when the function is entered must be initialized
+on every path that returns.  A path that throws or does not return is not
+judged, the storage stays the one the caller passed when the parameter is
+reseated (``*p = 1; p = nullptr;`` keeps it, a ``*p++ = 0`` loop does not),
+and a coroutine is not judged.  This is
 the library annotation P4222R2 §4.4 requests, and
 Clang supplies it itself: a call to a ``std::construct_at`` whose first
 parameter is of pointer type is checked and credited as if that parameter

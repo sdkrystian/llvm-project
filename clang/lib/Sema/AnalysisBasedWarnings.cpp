@@ -1900,7 +1900,10 @@ struct TrackedEntity {
     CurrentObject,
     SubMember,
     ConstructAlias,
-    CurrentObjectBase
+    CurrentObjectBase,
+    /// The storage an obligated parameter refers to at the function's entry
+    /// (TrackedStorage::EntryTargets).
+    ParamReferent
   };
   Kind K;
   /// The member is tracked as a whole object (member kinds).
@@ -2387,6 +2390,32 @@ struct TrackedStorage {
     E.TrackReads = false;
     Entities.push_back(std::move(E));
     CurrentObjectRoot = Entities.size() - 1;
+  }
+
+  /// A parameter whose referent at entry the body must leave initialized on
+  /// every path that returns -- a [[must_init]] parameter, or a marked
+  /// parameter of a [[now_init]] function -- with its Pointee entity, which
+  /// refers at entry to the ParamReferent entity Referent. The ParamReferent
+  /// keeps that storage's state when the parameter is reseated, which resets
+  /// the Pointee's own (ReseatTarget::Fresh).
+  struct EntryTarget {
+    const ParmVarDecl *Param;
+    unsigned Pointee;
+    unsigned Referent;
+  };
+  SmallVector<EntryTarget, 2> EntryTargets;
+  /// Append the ParamReferent entity of the obligated parameter \p P, whose
+  /// Pointee entity is \p Pointee, and its SubMembers (EntryTargets).
+  void addParamReferent(const ParmVarDecl *P, unsigned Pointee) {
+    TrackedEntity E;
+    E.K = TrackedEntity::Kind::ParamReferent;
+    E.Type = Entities[Pointee].Type;
+    E.TrackReads = false;
+    E.Entry = EntryState::Unassigned;
+    unsigned Idx = Entities.size();
+    Entities.push_back(std::move(E));
+    addSubMembers(Idx, /*Table=*/true, /*Lifecycle=*/true);
+    EntryTargets.push_back({P, Pointee, Idx});
   }
 
   /// True if entity \p Idx is storage tracked only for its lifetime: a
@@ -3383,6 +3412,17 @@ struct DestroySite {
   SmallVector<std::pair<unsigned, SubKey>, 1> SubAffected;
 };
 
+/// A parameter's obligation, judged at the body's normal exits
+/// (runDefiniteAssignment): the storage it referred to at entry, the
+/// ParamReferent entity Referent, is initialized on every path that returns
+/// (TrackedStorage::EntryTargets).
+struct ObligationSite {
+  /// The body's closing brace.
+  SourceLocation Loc;
+  const ParmVarDecl *Param;
+  unsigned Referent;
+};
+
 /// A read through, or a store below, tracked storage (P4222R2 §4.5, §5.4)
 /// derived from a load, assignment, or increment element: the leaves that
 /// resolve to the referent of a marked pointer or reference (`*p`, `p->m`,
@@ -4359,13 +4399,14 @@ static bool isNormalExitEdge(const CFG &cfg, const CFGBlock &Pred,
 /// is never flagged. Returns, per
 /// read-tracked entity, the reads at program points where the entity is not
 /// definitely assigned nor escaped, and appends every other rule's violations
-/// to \p Violations -- \p ExitSites judged against the join of the states the
-/// function's normal exits leave (isNormalExitEdge).
+/// to \p Violations -- \p ExitSites and \p Obligations judged against the
+/// join of the states the function's normal exits leave (isNormalExitEdge).
 static OffendingReads runDefiniteAssignment(
     CFG &cfg, AnalysisDeclContext &AC, const TrackedStorage &Storage,
     ArrayRef<SmallVector<DefAssignEvent, 4>> Events,
     ArrayRef<BindingSite> Sites, ArrayRef<DestroySite> DSites,
     ArrayRef<AccessSite> ASites, ArrayRef<DestroySite> ExitSites,
+    ArrayRef<ObligationSite> Obligations,
     SmallVectorImpl<PendingViolation> &Violations) {
   const unsigned NumTracked = Storage.Entities.size();
   const unsigned NumBlocks = cfg.getNumBlockIDs();
@@ -4384,6 +4425,8 @@ static OffendingReads runDefiniteAssignment(
     else if (E.K == TrackedEntity::Kind::MemberPointee)
       FunctionEntry.update(I, FlowState::EntryAsserted);
   }
+  for (const TrackedStorage::EntryTarget &T : Storage.EntryTargets)
+    FunctionEntry.setTarget(T.Pointee, T.Referent);
   const CFGBlock &CFGEntry = cfg.getEntry();
   ForwardDataflowWorklist Worklist(cfg, AC);
   Worklist.enqueueBlock(&CFGEntry);
@@ -4439,16 +4482,23 @@ static OffendingReads runDefiniteAssignment(
 
   // The state the function's normal exits leave: a return or the end of its
   // body, not an exception.
-  if (!ExitSites.empty()) {
+  if (!ExitSites.empty() || !Obligations.empty()) {
     const CFGBlock &Exit = cfg.getExit();
     FlowState AtExit;
     for (const CFGBlock *Pred : Exit.preds())
       if (Pred && Visited[Pred->getBlockID()] &&
           isNormalExitEdge(cfg, *Pred, Exit))
         AtExit.meet(ExitState[Pred->getBlockID()]);
-    if (AtExit.Reached)
+    if (AtExit.Reached) {
       for (const DestroySite &Site : ExitSites)
         judgeDestroySite(Site, AtExit, Storage, Violations);
+      for (const ObligationSite &Site : Obligations)
+        if (!AtExit.has(Site.Referent, FlowState::Must)) {
+          PendingViolation V{diag::err_init_must_init_uninitialized, Site.Loc};
+          V.Subject = Site.Param;
+          Violations.push_back(V);
+        }
+    }
   }
 
   // Replay each visited (reachable) block from its fixpoint entry state and
@@ -4510,7 +4560,11 @@ static void reportFlowViolations(Sema &S,
                                                  /*D=*/nullptr,
                                                  /*PostParse=*/true))
       continue;
-    if (V.Subject)
+    if (V.DiagID == diag::err_init_must_init_uninitialized) {
+      S.Diag(V.Loc, V.DiagID)
+          << Name << V.Subject->getDeclName().isEmpty() << V.Subject;
+      S.Diag(V.Subject->getLocation(), diag::note_declared_at);
+    } else if (V.Subject)
       S.Diag(V.Loc, V.DiagID) << Name << V.Subject;
     else if (V.DiagID == diag::err_init_uninit_subobject_write)
       S.Diag(V.Loc, V.DiagID) << Name << V.Flag << V.Select;
@@ -7846,9 +7900,16 @@ static void harvestTrackedLocals(Sema &S, const Decl *D,
     Params = BD->parameters();
   else if (const auto *OMD = dyn_cast<ObjCMethodDecl>(D))
     Params = OMD->parameters();
+  // A function's [[now_init]] obligates each of its marked parameters.
+  bool NowInit = D->hasAttr<NowInitAttr>();
   for (const ParmVarDecl *P : Params) {
     Owned.insert(P);
     HarvestMarked(P, EntryState::Unassigned);
+    if (P->hasAttr<MustInitAttr>() ||
+        (NowInit && P->hasAttr<RefToUninitAttr>()))
+      if (auto It = Storage.LocalEntity.find(P);
+          It != Storage.LocalEntity.end())
+        Storage.addParamReferent(P, It->second);
     if (const CXXRecordDecl *RD = SemaProfiles::flowTrackedAggregateClass(P))
       Storage.addObject(P, RD,
                         /*TrackReads=*/!P->hasDefaultArg() &&
@@ -8156,6 +8217,20 @@ static void appendExitDestroySites(const ASTContext &Ctx, const Decl *D,
              SemaProfiles::InitDestroyer::ScopeExit, P);
 }
 
+/// Append to \p Out the obligation of each parameter of the analyzed body
+/// \p D that must leave its referent initialized
+/// (TrackedStorage::EntryTargets), judged at the body's closing brace -- in
+/// any body but a coroutine's, whose parameters live in its frame.
+static void appendExitObligationSites(const Decl *D,
+                                      const TrackedStorage &Storage,
+                                      SmallVectorImpl<ObligationSite> &Out) {
+  const Stmt *Body = D->getBody();
+  if (!Body || isa<CoroutineBodyStmt>(Body))
+    return;
+  for (const TrackedStorage::EntryTarget &T : Storage.EntryTargets)
+    Out.push_back({Body->getEndLoc(), T.Param, T.Referent});
+}
+
 /// The std::init flow engine over one body: the member read-before-init rule
 /// (P4222R2 §4.2, §5.1-§5.4) and the binding, destroy, read-through, and
 /// subobject-write judgments of flow-tracked storage
@@ -8264,9 +8339,11 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
   SmallVector<PendingViolation, 8> Violations;
   SmallVector<DestroySite, 2> ExitSites;
   appendExitDestroySites(S.Context, D, Storage, ExitSites);
+  SmallVector<ObligationSite, 2> Obligations;
+  appendExitObligationSites(D, Storage, Obligations);
   OffendingReads Offending =
       runDefiniteAssignment(*cfg, InitAC, Storage, Events, Sites, DSites,
-                            ASites, ExitSites, Violations);
+                            ASites, ExitSites, Obligations, Violations);
   reportMemberReadsBeforeInit(S, Offending, Storage, Entry.Name);
   reportFlowViolations(S, Violations, Entry.Name);
 }

@@ -240,10 +240,11 @@ void test_element_member_write_suppress_only(Pair *ptr [[ref_to_uninit]],
 // recognizer input: the piecemeal write is rejected there too -- verbatim
 // the paper's uninitialized_fill discipline ("Existing support for
 // uninitialized", p4222r2.md:1223-1226): writing through the marker goes
-// through construct_at, whole scalar stores, or suppression.
-[[now_init]] void fill_pair_body(Pair *p [[ref_to_uninit]]) {
+// through construct_at, whole scalar stores, or suppression. The write
+// initializes nothing, so the body leaves its [[now_init]] promise unkept.
+[[now_init]] void fill_pair_body(Pair *p [[ref_to_uninit]]) { // expected-note {{declared here}}
   p->x = 1; // expected-error {{writing a member of uninitialized storage reached through a '[[ref_to_uninit]]' pointer or reference does not initialize it under profile 'std::init'; initialize the whole object ('construct_at()' for a class object)}}
-}
+} // expected-error {{storage referred to by parameter 'p' is not initialized on every path that returns under profile 'std::init'}}
 
 // A dependent store target defers to instantiation, like the named twin.
 template <class T>
