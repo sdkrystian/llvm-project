@@ -6516,10 +6516,17 @@ static void extractStdInitEvents(
           (!T->isPointerType() && !T->isReferenceType() && !IsHandle) ||
           isa<RecoveryExpr>(Src->IgnoreParens()))
         return;
+      // A range a role parameter takes by reference is named as the handle it
+      // is; a marked range-for element (a variable judged against its range,
+      // SemaProfiles::isMarkedRangeForElement) as the reference it is, and its
+      // leaves reach the range at a position the construction bits do not
+      // follow (TrackedStorage::Resolution::ViaHandle).
+      bool RangeElement = AsRange && Kind == K::Variable;
+      bool HandleRange = AsRange && !RangeElement;
       BindingSite Site{
-          Kind,    Loc, TargetMarked, T->isReferenceType() && !AsRange,
+          Kind,    Loc, TargetMarked, T->isReferenceType() && !HandleRange,
           Subject, {},  EveryPath};
-      if (IsHandle || AsRange)
+      if (IsHandle || HandleRange)
         Site.HandleType = T.getNonReferenceType();
       bool AnyTracked = false;
       // A leaf of an unmarked target below or naming a lifecycle entity,
@@ -6657,6 +6664,9 @@ static void extractStdInitEvents(
       }
       if ((!AnyTracked && !AnyLifecycle) || Consume)
         return;
+      if (RangeElement)
+        for (BindingLeaf &L : Site.Leaves)
+          L.ViaHandle = true;
       // The parse-time funnel judged every leaf of a binding with no
       // flow-tracked leaf.
       if (!AnyTracked)
@@ -7601,7 +7611,15 @@ static void extractStdInitEvents(
           // initializer, which the handle walk sees through, and no implicit
           // local (range-for's __range) hands out an alias of its own.
           if (const Expr *Init = V->getInit()) {
-            if (!V->isImplicit() || !SemaProfiles::isHandleType(V->getType()))
+            // A marked range-for element binds the range's elements
+            // (SemaProfiles::isMarkedRangeForElement).
+            if (SemaProfiles::isMarkedRangeForElement(V))
+              AddBinding(K::Variable, V->getLocation(), /*TargetMarked=*/true,
+                         V->getType(), SemaProfiles::rangeForRangeInit(V),
+                         nullptr, Init, /*EveryPath=*/false, /*AsRange=*/true,
+                         V);
+            else if (!V->isImplicit() ||
+                     !SemaProfiles::isHandleType(V->getType()))
               AddBinding(K::Variable, V->getLocation(),
                          V->hasAttr<RefToUninitAttr>(), V->getType(), Init,
                          nullptr, Init, /*EveryPath=*/false, /*AsRange=*/false,
@@ -7928,6 +7946,31 @@ static void collectLifecycleNames(Sema &S, const Decl *D, LifecycleNames &Out) {
     if (Name.SubClass)
       Out.SubPaths.push_back({Name.SubClass, std::move(Name.SubPath)});
   };
+  // Check the leaves the handle walk reaches from \p Src: a Range-mode leaf
+  // when taken by reference (\p ByReference; an object rather than a range
+  // with \p Object), and otherwise a handle's source.
+  auto HandleWalk = [&](const Expr *Src, bool ByReference, bool Object) {
+    SemaProfiles::HandleWalkMemo Memo;
+    auto Visit = [&](auto &Self, const HandleLeaf &HL,
+                     bool Object = false) -> void {
+      if (HL.M == HandleLeaf::Mode::Handle)
+        return;
+      SemaProfiles::forEachTargetLeaf(
+          HL.E, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+            Check(Leaf, HL.M == HandleLeaf::Mode::PointerValue,
+                  HL.M == HandleLeaf::Mode::Range && !Object);
+            if (HL.M == HandleLeaf::Mode::Range)
+              SemaProfiles::forEachHandleSourceLeaf(
+                  Leaf.E, [&](const HandleLeaf &Inner) { Self(Self, Inner); },
+                  &Memo);
+          });
+    };
+    if (ByReference)
+      Visit(Visit, HandleLeaf{Src, HandleLeaf::Mode::Range}, Object);
+    else
+      SemaProfiles::forEachHandleSourceLeaf(
+          Src, [&](const HandleLeaf &HL) { Visit(Visit, HL); }, &Memo);
+  };
   // The leaves of \p Src bound as \p T, through the handle walk for a handle;
   // with \p AsRange, a class-type \p Src taken by reference is a range a
   // known callee's role parameter takes, and otherwise an object.
@@ -7935,27 +7978,7 @@ static void collectLifecycleNames(Sema &S, const Decl *D, LifecycleNames &Out) {
     if (!Src || T.isNull() || T->isDependentType())
       return;
     if (SemaProfiles::isHandleType(T.getNonReferenceType())) {
-      SemaProfiles::HandleWalkMemo Memo;
-      auto Visit = [&](auto &Self, const HandleLeaf &HL,
-                       bool Object = false) -> void {
-        if (HL.M == HandleLeaf::Mode::Handle)
-          return;
-        SemaProfiles::forEachTargetLeaf(
-            HL.E, [&](const SemaProfiles::ShapeLeaf &Leaf) {
-              Check(Leaf, HL.M == HandleLeaf::Mode::PointerValue,
-                    HL.M == HandleLeaf::Mode::Range && !Object);
-              if (HL.M == HandleLeaf::Mode::Range)
-                SemaProfiles::forEachHandleSourceLeaf(
-                    Leaf.E, [&](const HandleLeaf &Inner) { Self(Self, Inner); },
-                    &Memo);
-            });
-      };
-      if (T->isReferenceType())
-        Visit(Visit, HandleLeaf{Src, HandleLeaf::Mode::Range},
-              /*Object=*/!AsRange);
-      else
-        SemaProfiles::forEachHandleSourceLeaf(
-            Src, [&](const HandleLeaf &HL) { Visit(Visit, HL); }, &Memo);
+      HandleWalk(Src, T->isReferenceType(), /*Object=*/!AsRange);
       return;
     }
     bool AsPointerValue;
@@ -8051,9 +8074,13 @@ static void collectLifecycleNames(Sema &S, const Decl *D, LifecycleNames &Out) {
     } else if (const auto *DE = dyn_cast<CXXDeleteExpr>(St)) {
       ObjectLeaves(DE->getArgument());
     } else if (const auto *DS = dyn_cast<DeclStmt>(St)) {
+      // A marked range-for element binds its range's elements.
       for (const Decl *Dcl : DS->decls())
         if (const auto *V = dyn_cast<VarDecl>(Dcl);
-            V && V->hasAttr<RefToUninitAttr>())
+            V && SemaProfiles::isMarkedRangeForElement(V))
+          HandleWalk(SemaProfiles::rangeForRangeInit(V), /*ByReference=*/true,
+                     /*Object=*/false);
+        else if (V && V->hasAttr<RefToUninitAttr>())
           Leaves(V->getInit(), V->getType());
     } else if (const auto *LE = dyn_cast<LambdaExpr>(St)) {
       for (const LambdaCapture &C : LE->captures())

@@ -977,7 +977,11 @@ rejected, a construction included:
 against each other, a destroy of the element at index 0 ends the object a
 construction began there, and a binding through an iterator or a handle's
 member call (``*it``, a range-for's element, ``s.data()``) or an offset
-handle are judged by the state on every path alone.
+handle are judged by the state on every path alone.  A marked reference loop
+variable of a range-for binds an element of its range, so its binding is
+judged against the range's elements: ``for (int &x [[ref_to_uninit]] : a)`` is
+accepted while the array ``a`` is uninitialized and rejected once it is
+initialized.
 ``memset``, ``memcpy``, ``memmove``, and a ``[[must_init]]`` or
 ``[[now_init]]`` parameter whose pointee is ``void``, ``char``,
 ``unsigned char``, or ``std::byte`` claim the bytes and initialize the whole

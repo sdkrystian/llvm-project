@@ -482,6 +482,18 @@ public:
   /// tracks: a local or parameter of handle type (isHandleType) marked
   /// [[ref_to_uninit]].
   static bool isFlowTrackedHandleVar(const VarDecl *V);
+  /// The range initializer of the range-for statement whose loop variable is
+  /// \p LoopVar -- what its implicit \c __range variable is bound to, found
+  /// through the loop variable's initializer \c *__begin (\p Init while the
+  /// initializer is being attached) and \c __begin's initializer -- or null
+  /// when \p LoopVar is no such variable.
+  static const Expr *rangeForRangeInit(const VarDecl *LoopVar,
+                                       const Expr *Init = nullptr);
+  /// True if \p V is a [[ref_to_uninit]] reference loop variable of a
+  /// range-for statement: it binds an element of the range, so its binding is
+  /// judged against the range's elements (rangeForRangeInit, with \p Init).
+  static bool isMarkedRangeForElement(const VarDecl *V,
+                                      const Expr *Init = nullptr);
   /// The variable a handle chain \p E bottoms out at -- stepping through
   /// member calls that return the handle itself, copies, a std-table
   /// construction to its first transfer argument (a pointer's value, or

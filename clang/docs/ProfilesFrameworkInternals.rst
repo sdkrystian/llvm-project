@@ -1106,9 +1106,14 @@ under TreeTransform's reuse of a construction.  A discarded temporary handle
 lands nowhere (see `Known Gaps (std::init)`_).  An implicit handle local
 (range-for's ``__begin`` and ``__end``) is not a binding of its own: the walk
 sees through it to the range, so the elements a range-for binds are judged
-instead.  An author-marked constructor parameter makes a construction a
-terminal that refers to uninitialized memory, while the parameter's own
-binding is judged as usual.
+instead.  A marked reference loop variable binds the range itself, judged as
+a range a role parameter takes (``SemaProfiles::isMarkedRangeForElement``,
+``rangeForRangeInit``): an array or a ``std::array`` by its elements, a
+handle by what it refers to; its leaves reach the range at a position the
+construction bits do not follow, as ``*it`` does, so each iteration's binding
+is judged by the state on every path alone.  An author-marked constructor
+parameter makes a construction a terminal that refers to uninitialized memory,
+while the parameter's own binding is judged as usual.
 
 A ``std::array`` is storage, not a handle: its ``begin``, ``end``,
 ``cbegin``, ``cend``, ``data``, ``rbegin``, ``rend``, ``crbegin``, and
@@ -1780,10 +1785,9 @@ Deliberate Strictnesses
   it legalizes no later access.
 - A range-for over an ``[[uninit]]`` array or ``std::array`` binds the
   range to its implicit ``__range`` reference, an unmarked binding, so before
-  the array is filled the loop is rejected there whatever its body does; a
-  marked loop variable (``for (int &x [[ref_to_uninit]] : a)``) is rejected
-  there and again as a marked binding of an element.  A fill of the whole
-  array before the loop is the remedy.
+  the array is filled the loop is rejected there whatever its body does, a
+  marked loop variable (``for (int &x [[ref_to_uninit]] : a)``) included.  A
+  fill of the whole array before the loop is the remedy.
 - In a constructor, a binding of, or a destroy through, a member reached by a
   pointer-to-data-member step on the current object (``&(this->*pm).d``) is
   judged by its form, so it is rejected even after the member is constructed,

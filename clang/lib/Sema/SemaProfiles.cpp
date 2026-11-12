@@ -3124,6 +3124,47 @@ bool SemaProfiles::isStdArrayElementMember(const CXXMethodDecl *MD) {
                             MD->getName());
 }
 
+const Expr *SemaProfiles::rangeForRangeInit(const VarDecl *LoopVar,
+                                            const Expr *Init) {
+  if (!Init && LoopVar)
+    Init = LoopVar->getInit();
+  if (!LoopVar || !LoopVar->isCXXForRangeDecl() || !Init)
+    return nullptr;
+  // The loop variable's *__begin: a built-in or an overloaded indirection.
+  const Expr *Deref = Init->IgnoreImplicit()->IgnoreParens();
+  const Expr *Iter = nullptr;
+  if (const auto *UO = dyn_cast<UnaryOperator>(Deref);
+      UO && UO->getOpcode() == UO_Deref)
+    Iter = UO->getSubExpr();
+  else if (const auto *OCE = dyn_cast<CXXOperatorCallExpr>(Deref);
+           OCE && OCE->getOperator() == OO_Star && OCE->getNumArgs() == 1)
+    Iter = OCE->getArg(0);
+  // An implicit variable's initializer, through its DeclRefExpr \p E.
+  auto ImplicitInit = [](const Expr *E) -> const Expr * {
+    const auto *DRE =
+        E ? dyn_cast<DeclRefExpr>(E->IgnoreParenImpCasts()) : nullptr;
+    const auto *V = DRE ? dyn_cast<VarDecl>(DRE->getDecl()) : nullptr;
+    return V && V->isImplicit() ? V->getInit() : nullptr;
+  };
+  // __begin's initializer names __range: as itself (an array), as the object
+  // of its begin(), or as the argument of a begin(__range).
+  const Expr *BeginInit = ImplicitInit(Iter);
+  if (!BeginInit)
+    return nullptr;
+  const Expr *Range = BeginInit->IgnoreImplicit();
+  if (const auto *MCE = dyn_cast<CXXMemberCallExpr>(Range))
+    Range = MCE->getImplicitObjectArgument();
+  else if (const auto *CE = dyn_cast<CallExpr>(Range);
+           CE && CE->getNumArgs() == 1)
+    Range = CE->getArg(0);
+  return Range ? ImplicitInit(Range) : nullptr;
+}
+
+bool SemaProfiles::isMarkedRangeForElement(const VarDecl *V, const Expr *Init) {
+  return V && V->hasAttr<RefToUninitAttr>() &&
+         V->getType()->isReferenceType() && rangeForRangeInit(V, Init);
+}
+
 bool SemaProfiles::isFlowTrackedHandleVar(const VarDecl *V) {
   return V && V->hasLocalStorage() && isHandleType(V->getType()) &&
          V->hasAttr<RefToUninitAttr>();
@@ -3935,6 +3976,18 @@ void SemaProfiles::checkInitProfileBinding(const InitializedEntity &Entity,
     // initializer, which the handle walk sees through.
     if (Var->isImplicit() && isHandleType(Entity.getType()))
       return;
+    // A marked reference loop variable binds an element of the range, judged
+    // against the range's elements as a range.
+    if (const auto *VD = dyn_cast<VarDecl>(Var);
+        VD && isMarkedRangeForElement(VD, Src)) {
+      judgeInitProfileBinding(InitBindingKind::Variable, Loc,
+                              /*TargetMarked=*/true, Entity.getType(),
+                              rangeForRangeInit(VD, Src), VD,
+                              /*Subject=*/nullptr,
+                              /*AfterFlowPass=*/nullptr, /*ValueCopy=*/false,
+                              /*AsRange=*/true);
+      return;
+    }
     checkInitProfileBinding(InitBindingKind::Variable, Loc, Var,
                             Entity.getType(), Src, Var);
     return;
@@ -4108,9 +4161,14 @@ void SemaProfiles::judgeInitProfileBinding(
   } else {
     State = classifyUninitSource(getASTContext(), Src, T, Opts, AsRange);
   }
-  // A range is named as the handle it is.
+  // A range a role parameter takes by reference is named as the handle it
+  // is, a marked range-for element (isMarkedRangeForElement) as the
+  // reference it is.
   diagnoseBindingVerdict(*this, Kind, Loc, TargetMarked,
-                         AsRange ? T.getNonReferenceType() : T, State, Subject);
+                         AsRange && Kind != InitBindingKind::Variable
+                             ? T.getNonReferenceType()
+                             : T,
+                         State, Subject);
 }
 
 bool SemaProfiles::bindsHandleByReference(InitBindingKind Kind, QualType T,
