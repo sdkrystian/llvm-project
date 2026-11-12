@@ -2515,12 +2515,13 @@ const Expr *SemaProfiles::derivedArgument(const CallExpr *CE, bool &Partial) {
 SemaProfiles::CalleeLifecycleRoles
 SemaProfiles::getCalleeLifecycleRoles(const FunctionDecl *FD) {
   SemaProfiles::CalleeLifecycleRoles Roles;
-  Roles.InitializesRefToUninitParams = FD->hasAttr<NowInitAttr>();
+  const FunctionDecl *Latest = FD->getMostRecentDecl();
+  Roles.InitializesRefToUninitParams = Latest->hasAttr<NowInitAttr>();
   Roles.HasMustInitParams =
-      llvm::any_of(FD->parameters(), [](const ParmVarDecl *P) {
+      llvm::any_of(Latest->parameters(), [](const ParmVarDecl *P) {
         return P->hasAttr<MustInitAttr>();
       });
-  Roles.DestroysParams = FD->hasAttr<NowUninitAttr>();
+  Roles.DestroysParams = Latest->hasAttr<NowUninitAttr>();
   if (const auto *Ctor = dyn_cast<CXXConstructorDecl>(FD))
     Roles.HandleTransfers = isStdHandleConstruction(Ctor);
   else if (const auto *MD = dyn_cast<CXXMethodDecl>(FD))
@@ -2559,6 +2560,15 @@ SemaProfiles::getCalleeLifecycleRoles(const FunctionDecl *FD) {
   return Roles;
 }
 
+const ParmVarDecl *SemaProfiles::latestParam(const ParmVarDecl *P) {
+  const auto *FD = dyn_cast<FunctionDecl>(P->getDeclContext());
+  if (!FD)
+    return P;
+  const FunctionDecl *Latest = FD->getMostRecentDecl();
+  unsigned Index = P->getFunctionScopeIndex();
+  return Index < Latest->getNumParams() ? Latest->getParamDecl(Index) : P;
+}
+
 SemaProfiles::KnownParamRole
 SemaProfiles::CalleeLifecycleRoles::roleOf(const ParmVarDecl *P) const {
   return KnownParam == P->getFunctionScopeIndex() ? KnownRole
@@ -2568,7 +2578,8 @@ SemaProfiles::CalleeLifecycleRoles::roleOf(const ParmVarDecl *P) const {
 bool SemaProfiles::CalleeLifecycleRoles::isMarkedParam(
     const ParmVarDecl *P) const {
   KnownParamRole R = roleOf(P);
-  return P->hasAttr<RefToUninitAttr>() || R == KnownParamRole::AssertUninit ||
+  return latestParam(P)->hasAttr<RefToUninitAttr>() ||
+         R == KnownParamRole::AssertUninit ||
          R == KnownParamRole::AssertInitialized ||
          R == KnownParamRole::Construct;
 }
@@ -2599,7 +2610,7 @@ bool SemaProfiles::CalleeLifecycleRoles::releasesParam(const ParmVarDecl *P,
 
 bool SemaProfiles::CalleeLifecycleRoles::mustInitializeParam(
     const ParmVarDecl *P) const {
-  return (HasMustInitParams && P->hasAttr<MustInitAttr>()) ||
+  return (HasMustInitParams && latestParam(P)->hasAttr<MustInitAttr>()) ||
          (InitializesRefToUninitParams && isMarkedParam(P));
 }
 

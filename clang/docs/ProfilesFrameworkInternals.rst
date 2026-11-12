@@ -915,7 +915,14 @@ up at each call
 (``getCalleeLifecycleRoles``) and never attached as attributes: the library's
 declarations stay as written, so a module or header unit built without
 ``-fprofiles`` reads the same, and a library definition is judged against its
-author's markers alone.  The ``Construct`` rows are bidirectional like
+author's markers alone.  A callee's own markers -- its parameters'
+``[[ref_to_uninit]]`` and ``[[must_init]]``, its ``[[now_init]]`` and
+``[[now_uninit]]`` -- are read from its most recent declaration
+(``getCalleeLifecycleRoles``, ``latestParam``), which inherits every earlier
+one's: a call through a
+using-declaration made before a marked redeclaration (``std::snprintf`` after
+a redeclared ``::snprintf``) names the earlier declaration.  The
+``Construct`` rows are bidirectional like
 ``construct_at`` (P4222R2 §4.7 rejects an initialized range).
 ``std::now_init``'s argument is judged as bound to a marked parameter by form
 at the call (``judgeInitProfileBinding``'s ``ByForm``), never deferred to the

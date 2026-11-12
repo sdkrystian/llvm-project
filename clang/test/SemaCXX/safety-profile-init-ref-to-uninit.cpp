@@ -4525,6 +4525,34 @@ void test_now_init_credit_after_redecl() {
   ni_sink(&u);              // OK: the [[now_init]] callee initialized u
 }
 
+// A call through a using-declaration made before a redeclaration sees the redeclaration's markers
+extern "C" int snprintf(char *s, decltype(sizeof 0) n, const char *f, ...);
+namespace std { using ::snprintf; }
+extern "C" int snprintf(char *s [[ref_to_uninit]], decltype(sizeof 0) n, const char *f, ...);
+void test_using_before_marked_redecl() {
+  char buf [[uninit]] [8];
+  std::snprintf(buf, sizeof buf, "%d", 1); // OK: marked target, uninitialized source
+}
+
+struct RedeclAgg { int a; int b; };
+void redecl_must_init_fill(RedeclAgg *p);
+namespace redecl { using ::redecl_must_init_fill; }
+void redecl_must_init_fill(RedeclAgg *p [[must_init]]);
+int test_using_before_must_init_redecl() {
+  RedeclAgg g [[uninit]];
+  redecl::redecl_must_init_fill(&g); // OK: marked target, uninitialized source
+  return g.a;                        // OK: the [[must_init]] callee initialized g
+}
+
+void redecl_now_init_late(RedeclAgg *p [[ref_to_uninit]]);
+namespace redecl { using ::redecl_now_init_late; }
+[[now_init]] void redecl_now_init_late(RedeclAgg *p);
+int test_using_before_now_init_redecl() {
+  RedeclAgg g [[uninit]];
+  redecl::redecl_now_init_late(&g);
+  return g.a; // OK: the [[now_init]] callee initialized g
+}
+
 // A call through a pointer to member function binds its unmarked parameters
 struct PmfTarget { void take(int *); };
 void test_pointer_to_member_call(PmfTarget s, void (PmfTarget::*pm)(int *)) {

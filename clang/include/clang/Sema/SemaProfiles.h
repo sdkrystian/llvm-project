@@ -1148,7 +1148,8 @@ public:
     /// The row role of \p P, a parameter of the callee.
     KnownParamRole roleOf(const ParmVarDecl *P) const;
     /// True if the binding to \p P is judged against a [[ref_to_uninit]]
-    /// target: \p P carries the marker, or its row role implies one.
+    /// target: \p P carries the marker (latestParam), or its row role
+    /// implies one.
     bool isMarkedParam(const ParmVarDecl *P) const;
     /// True if \p P is an initializing parameter, trusted or by name: its
     /// binding accepts storage in any live state.
@@ -1163,8 +1164,8 @@ public:
     /// match counts unless \p TrustedOnly.
     bool releasesParam(const ParmVarDecl *P, bool TrustedOnly) const;
     /// True if the callee's declaration promises to initialize the storage
-    /// bound to \p P: \p P carries [[must_init]], or is a marked parameter
-    /// of a [[now_init]] callee.
+    /// bound to \p P: \p P carries [[must_init]] (latestParam), or is a
+    /// marked parameter of a [[now_init]] callee.
     bool mustInitializeParam(const ParmVarDecl *P) const;
     /// True if the call initializes the storage bound to \p P on a trusted
     /// basis: mustInitializeParam, or a trusted row's Construct or
@@ -1203,10 +1204,16 @@ public:
   /// when the call offsets it (std::end, std::next).
   static const Expr *derivedArgument(const CallExpr *CE, bool &Partial);
   /// Derive what \p FD does to the storage bound to its parameters: the
-  /// lifetime attributes plus the known-callee row, looked up at the call
-  /// so the library's own declarations need no annotation. Shared by the
-  /// parse-time funnel and the CFG pass's argument and lifecycle arms.
+  /// lifetime attributes of its most recent declaration plus the
+  /// known-callee row, looked up at the call so the library's own
+  /// declarations need no annotation. Shared by the parse-time funnel and
+  /// the CFG pass's argument and lifecycle arms.
   static CalleeLifecycleRoles getCalleeLifecycleRoles(const FunctionDecl *FD);
+  /// The parameter \p P of a function as its most recent declaration
+  /// declares it, carrying the markers every declaration so far wrote: a call
+  /// may name an earlier declaration (through a using-declaration made before
+  /// a redeclaration). \p P itself when it is not a function's parameter.
+  static const ParmVarDecl *latestParam(const ParmVarDecl *P);
 
 private:
   /// True if `this` in the current context denotes an object under
