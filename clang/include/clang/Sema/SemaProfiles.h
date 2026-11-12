@@ -495,11 +495,12 @@ public:
   static bool isMarkedRangeForElement(const VarDecl *V,
                                       const Expr *Init = nullptr);
   /// A loop the flow pass credits on its exit as initializing storage element
-  /// by element: the range-for's loop variable, and whether the loop body's
-  /// first statement constructs the element rather than assigning it or
-  /// writing it in any state.
+  /// by element: the range-for's loop variable or the counted loop's pointer
+  /// parameter, and whether the loop body's first statement constructs the
+  /// element rather than assigning it or writing it in any state.
   struct LoopInitialization {
     const VarDecl *LoopVar = nullptr;
+    const ParmVarDecl *Param = nullptr;
     bool Constructs = false;
   };
   /// The range-for statement \p S as a loop initializing its range: a
@@ -513,6 +514,23 @@ public:
   /// initializer names. None otherwise.
   static std::optional<LoopInitialization>
   initializingRangeFor(const CXXForRangeStmt *S);
+  /// The for statement \p S of the function body \p FunctionBody as a loop
+  /// initializing the storage a pointer parameter P refers to, element by
+  /// element: an index loop (\c i declared or assigned 0, \c i < E or
+  /// \c i != E, \c ++i, \c i++, or \c i += 1) whose body begins by
+  /// initializing \c P[i] -- a call or reserved placement new initializing
+  /// the parameter receiving \c P + i, \c &P[i], or
+  /// \c std::addressof(P[i]), or a built-in scalar store to \c P[i] or
+  /// \c *(P + i) -- or an iterator loop (no init, \c P != E, \c ++P or
+  /// \c P++) whose body begins by initializing \c *P the same way. E names
+  /// neither \c i nor P and has no side effects; the body only loads \c i,
+  /// P, and E's variables, names P only where its first statement designates
+  /// the element, and holds no statement expression and no label a jump could
+  /// enter it by; and the function modifies P nowhere but in the iterator
+  /// loop's increment. None otherwise.
+  static std::optional<LoopInitialization>
+  initializingCountedLoop(const ASTContext &Ctx, const ForStmt *S,
+                          const Stmt *FunctionBody);
   /// The variable a handle chain \p E bottoms out at -- stepping through
   /// member calls that return the handle itself, copies, a std-table
   /// construction to its first transfer argument (a pointer's value, or

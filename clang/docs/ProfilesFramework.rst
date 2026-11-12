@@ -1020,7 +1020,18 @@ each such parameter refers to when the function is entered must be initialized
 on every path that returns.  A path that throws or does not return is not
 judged, the storage stays the one the caller passed when the parameter is
 reseated (``*p = 1; p = nullptr;`` keeps it, a ``*p++ = 0`` loop does not),
-and a coroutine is not judged.  This is
+and a coroutine is not judged.  A counted loop over a pointer parameter whose
+body begins by initializing its next element initializes the whole storage
+when the loop completes: ``for (int i = 0; i < n; ++i)`` (or ``i != n``,
+``i++``, ``i += 1``) whose first statement is
+``std::construct_at(p + i, v)`` -- or a construction, placement ``new``, or
+``[[must_init]]`` call at ``&p[i]`` or ``std::addressof(p[i])`` -- or a
+built-in store ``p[i] = v`` or ``*(p + i) = v`` of scalar type, and
+``for (; p != e; ++p)`` initializing ``*p`` the same way.  The loop's bound
+is trusted, as the caller's storage extent cannot be known; a loop that skips
+elements (a stride of 2, a start of 1, ``<=``, a ``continue`` before the
+store), names the parameter again in its body, or follows a change to the
+parameter initializes nothing.  This is
 the library annotation P4222R2 §4.4 requests, and
 Clang supplies it itself: a call to a ``std::construct_at`` whose first
 parameter is of pointer type is checked and credited as if that parameter

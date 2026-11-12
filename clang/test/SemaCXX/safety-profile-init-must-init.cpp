@@ -16,6 +16,10 @@
 // RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -fexceptions -fcxx-exceptions -isystem %t/sys %t/obligation.cpp
 // RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -DLEADING_ERROR -fexceptions -fcxx-exceptions -isystem %t/sys %t/obligation.cpp
 // RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -Wunreachable-code -fexceptions -fcxx-exceptions -isystem %t/sys %t/obligation.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -fexceptions -fcxx-exceptions -isystem %t/sys %t/loops.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=no-profiles -std=c++23 -fexceptions -fcxx-exceptions -isystem %t/sys %t/loops.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -DLEADING_ERROR -fexceptions -fcxx-exceptions -isystem %t/sys %t/loops.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify=expected -fprofiles -fprofiles-verify-deferred-checks -std=c++23 -Wunreachable-code -fexceptions -fcxx-exceptions -isystem %t/sys %t/loops.cpp
 
 // std::init: a [[must_init]] parameter is a [[ref_to_uninit]] parameter whose
 // storage the call initializes, and which the function's body initializes on
@@ -28,6 +32,7 @@ namespace std {
 using size_t = decltype(sizeof 0);
 template <class T, class... A> constexpr T *construct_at(T *p, A &&...args);
 template <class T> constexpr void destroy_at(T *p);
+template <class T> constexpr T *addressof(T &r) noexcept;
 template <class It, class Size, class T>
 It uninitialized_fill_n(It first, Size n, const T &x);
 template <class T> struct span {
@@ -44,6 +49,7 @@ inline constexpr __uninitialized_fill_fn uninitialized_fill{};
 } // namespace ranges
 } // namespace std
 extern "C" void *memset(void *, int, std::size_t);
+void *operator new(std::size_t, void *p) noexcept;
 
 //--- p15.cpp
 // no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
@@ -375,11 +381,11 @@ void constructed_then_destroyed(Obj *p [[must_init]]) { // expected-note {{decla
   std::destroy_at(p);
 } // expected-error {{storage referred to by parameter 'p' is not initialized on every path that returns under profile 'std::init'}}
 
-// An element store initializes nothing
-void element_loop(int *p [[must_init]], int n) { // expected-note {{declared here}}
+// A loop storing every element initializes the storage (loops.cpp)
+void element_loop(int *p [[must_init]], int n) {
   for (int i = 0; i < n; ++i)
     p[i] = 0;
-} // expected-error {{storage referred to by parameter 'p' is not initialized on every path that returns under profile 'std::init'}}
+}
 
 // A null-checked parameter is not initialized on the null path
 void null_checked(int *p [[must_init]]) { // expected-note {{declared here}}
@@ -451,4 +457,204 @@ void loop_fresh(int n) {
     fill_agg(&g);
     use(g.a);
   }
+}
+
+//--- loops.cpp
+// A counted loop whose body begins by initializing the next element of the
+// storage a parameter it must initialize refers to initializes that storage
+// when the loop completes.
+
+// no-profiles-warning@+1 {{'profiles::enforce' attribute ignored}}
+[[profiles::enforce(std::init)]];
+#include <must_init.h>
+
+#ifdef LEADING_ERROR
+int leading_unrelated_error = undeclared_identifier;
+// expected-error@-1 {{use of undeclared identifier 'undeclared_identifier'}}
+// no-profiles-error@-2 {{use of undeclared identifier 'undeclared_identifier'}}
+#endif
+
+void use(int);
+void fill_one(int *p [[must_init]]);
+struct Copyable {
+  Copyable(int);
+  Copyable(const Copyable &);
+  Copyable &operator=(const Copyable &);
+  int v;
+};
+
+// A [[now_init]] fill constructs each element at p + i
+[[now_init]] void fill(int *p [[ref_to_uninit]], int n) {
+  for (int i = 0; i < n; ++i)
+    std::construct_at(p + i, i);
+}
+
+// A fill template is judged per specialization
+template <class T>
+[[now_init]] void fill_value(T *p [[ref_to_uninit]], int n, const T &v) {
+  for (int i = 0; i < n; ++i)
+    std::construct_at(p + i, v);
+}
+void fill_both(Copyable *pc [[ref_to_uninit]], int *pi [[ref_to_uninit]]) {
+  fill_value(pc, 2, Copyable(1));
+  fill_value(pi, 2, 1);
+}
+
+// The element may be designated as &p[i] or std::addressof(p[i]), and be
+// initialized by a placement new or a [[must_init]] callee
+void element_address(int *p [[must_init]], int n) {
+  for (int i = 0; i < n; ++i)
+    std::construct_at(&p[i], 0);
+}
+void element_addressof(int *p [[must_init]], int n) {
+  for (int i = 0; i < n; ++i)
+    std::construct_at(std::addressof(p[i]), 0);
+}
+void element_placement(int *p [[must_init]], int n) {
+  for (int i = 0; i < n; ++i)
+    ::new (p + i) int(0);
+}
+void element_callee(int *p [[must_init]], int n) {
+  for (int i = 0; i < n; ++i)
+    fill_one(p + i);
+}
+
+// A built-in scalar store to the element initializes it
+void store_subscript(int *p [[must_init]], int n) {
+  for (int i = 0; i < n; ++i)
+    p[i] = 0;
+}
+void store_indirection(int *p [[must_init]], int n) {
+  for (int i = 0; i < n; ++i)
+    *(p + i) = 0;
+}
+
+// The index may be compared by != and stepped by i++ or i += 1, and assigned
+// rather than declared
+void index_not_equal(int *p [[must_init]], int n) {
+  for (int i = 0; i != n; i++)
+    p[i] = 0;
+}
+void index_add_one(int *p [[must_init]], int n) {
+  for (int i = 0; i < n; i += 1)
+    p[i] = 0;
+}
+void index_assigned(int *p [[must_init]], int n) {
+  int i [[uninit]];
+  for (i = 0; i < n; ++i)
+    p[i] = 0;
+}
+
+// The iterator form advances the parameter itself
+void iterator_construct(int *p [[must_init]], int *e) {
+  for (; p != e; ++p)
+    std::construct_at(p, 0);
+}
+void iterator_addressof(int *p [[must_init]], int *e) {
+  for (; e != p; ++p)
+    std::construct_at(std::addressof(*p), 0);
+}
+void iterator_store(int *p [[must_init]], int *e) {
+  for (; p != e; p++)
+    *p = 0;
+}
+
+// The index may be read by reference to const
+void take(const int &);
+void index_const_reference(int *p [[must_init]], int n) {
+  for (int i = 0; i < n; ++i) {
+    p[i] = 0;
+    take(i);
+  }
+}
+
+// The storage is initialized after the loop
+int read_after(int *p [[must_init]], int n) {
+  for (int i = 0; i < n; ++i)
+    p[i] = 0;
+  return *p;
+}
+
+// A construction after a constructing loop is a second construction
+void construct_after(int *p [[must_init]], int n) {
+  for (int i = 0; i < n; ++i)
+    std::construct_at(p + i, 0);
+  std::construct_at(p, 1); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// Loops that skip elements are not recognized: a stride of 2 (P4222R2 §6.1),
+// a start of 1, <=, and a continue before the store
+void stride_two(int *p [[must_init]], int n) { // expected-note {{declared here}}
+  for (int i = 0; i < n; i += 2)
+    p[i] = 0;
+} // expected-error {{storage referred to by parameter 'p' is not initialized on every path that returns under profile 'std::init'}}
+void start_one(int *p [[must_init]], int n) { // expected-note {{declared here}}
+  for (int i = 1; i < n; ++i)
+    p[i] = 0;
+} // expected-error {{storage referred to by parameter 'p' is not initialized on every path that returns under profile 'std::init'}}
+void less_equal(int *p [[must_init]], int n) { // expected-note {{declared here}}
+  for (int i = 0; i <= n; ++i)
+    p[i] = 0;
+} // expected-error {{storage referred to by parameter 'p' is not initialized on every path that returns under profile 'std::init'}}
+void continue_first(int *p [[must_init]], int n, bool c) { // expected-note {{declared here}}
+  for (int i = 0; i < n; ++i) {
+    if (c)
+      continue;
+    p[i] = 0;
+  }
+} // expected-error {{storage referred to by parameter 'p' is not initialized on every path that returns under profile 'std::init'}}
+
+// A break after the store leaves the loop off its exit
+void break_after_store(int *p [[must_init]], int n, bool c) { // expected-note {{declared here}}
+  for (int i = 0; i < n; ++i) {
+    p[i] = 0;
+    if (c)
+      break;
+  }
+} // expected-error {{storage referred to by parameter 'p' is not initialized on every path that returns under profile 'std::init'}}
+
+// A body naming the parameter again, a parameter moved before the loop, a
+// body changing the bound, the index bound to a class constructor's
+// argument, and a body a jump enters are not recognized
+void destroy_after_construct(int *p [[must_init]], int n) { // expected-note {{declared here}}
+  for (int i = 0; i < n; ++i) {
+    std::construct_at(p + i, 0);
+    std::destroy_at(p + i);
+  }
+} // expected-error {{storage referred to by parameter 'p' is not initialized on every path that returns under profile 'std::init'}}
+void moved_before(int *p [[must_init]], int n) { // expected-note {{declared here}}
+  ++p;
+  for (int i = 0; i < n; ++i)
+    p[i] = 0;
+} // expected-error {{storage referred to by parameter 'p' is not initialized on every path that returns under profile 'std::init'}}
+void bound_changes(int *p [[must_init]], int n) { // expected-note {{declared here}}
+  for (int i = 0; i < n; ++i) {
+    p[i] = 0;
+    --n;
+  }
+} // expected-error {{storage referred to by parameter 'p' is not initialized on every path that returns under profile 'std::init'}}
+void index_to_class(Copyable *p [[must_init]], int n) { // expected-note {{declared here}}
+  for (int i = 0; i < n; ++i)
+    std::construct_at(p + i, i);
+} // expected-error {{storage referred to by parameter 'p' is not initialized on every path that returns under profile 'std::init'}}
+void jump_into_body(int *p [[must_init]], int *e, bool c) { // expected-note {{declared here}}
+  if (c)
+    goto skip;
+  for (; p != e; ++p) {
+    *p = 0;
+  skip:;
+  }
+} // expected-error {{storage referred to by parameter 'p' is not initialized on every path that returns under profile 'std::init'}}
+
+// Only a parameter the body must initialize is credited: a loop over a plain
+// marked parameter or an [[uninit]] array is judged as before
+void plain_marked(int *q [[ref_to_uninit]], int n) {
+  for (int i = 0; i < n; ++i)
+    q[i] = 0;
+  use(*q); // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+void array_loop() {
+  int a [[uninit]] [16];
+  for (int i = 0; i < 16; ++i)
+    a[i] = i; // expected-error {{writing an element of an '[[uninit]]' object does not initialize it under profile 'std::init'; initialize the whole object}}
 }

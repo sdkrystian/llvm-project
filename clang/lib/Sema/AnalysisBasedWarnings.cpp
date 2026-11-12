@@ -5553,31 +5553,54 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
 }
 
 /// Append to \p EdgeEvents the credits of the loops of \p cfg that initialize
-/// storage element by element: a recognized range-for
+/// storage element by element, each on the edge from the loop's condition
+/// block to its exit, which a path leaving the loop by a break, return, goto,
+/// or throw does not take. A recognized range-for
 /// (SemaProfiles::initializingRangeFor) credits its range -- as a known
 /// callee's range parameter is credited, designated by the element type, a
-/// construction when the loop's first statement constructs -- on the edge
-/// from its condition block to its exit, provided each leaf of the range
-/// names tracked storage whole (several of them, on the arms of a
-/// conditional, may each be initialized); a path that leaves the loop by a
-/// break, return,
-/// goto, or throw takes no such edge. The bindings that credit stands for --
-/// the range's \c __range binding and an unmarked loop variable's -- go to
-/// \p Credited, consumed instead of judged (extractStdInitEvents).
+/// construction when the loop's first statement constructs -- provided each
+/// leaf of the range names tracked storage whole (several of them, on the
+/// arms of a conditional, may each be initialized); the bindings that credit
+/// stands for -- the range's \c __range binding and an unmarked loop
+/// variable's -- go to \p Credited, consumed instead of judged
+/// (extractStdInitEvents). A recognized counted loop
+/// (SemaProfiles::initializingCountedLoop) over a parameter the body must
+/// initialize credits that parameter's ParamReferent whole, as a call to a
+/// [[must_init]] parameter would (TrackedStorage::EntryTargets).
 static void appendLoopCredits(Sema &S, const Decl *D, const CFG &cfg,
                               const TrackedStorage &Storage,
                               EdgeEventMap &EdgeEvents,
                               llvm::SmallPtrSetImpl<const VarDecl *> &Credited,
                               SmallVectorImpl<const Expr *> &UnresolvedLeaves) {
   for (const CFGBlock *Cond : cfg) {
-    const auto *Loop =
-        dyn_cast_or_null<CXXForRangeStmt>(Cond->getTerminatorStmt());
-    if (!Loop || Cond->succ_size() != 2)
+    const Stmt *Term = Cond->getTerminatorStmt();
+    if (!isa_and_nonnull<CXXForRangeStmt, ForStmt>(Term) ||
+        Cond->succ_size() != 2)
       continue;
     const CFGBlock *Body = Cond->succ_begin()->getReachableBlock();
     const CFGBlock *Exit = (Cond->succ_begin() + 1)->getReachableBlock();
     if (!Exit || Exit == Body)
       continue;
+    std::pair<unsigned, unsigned> Edge{Cond->getBlockID(), Exit->getBlockID()};
+    if (const auto *For = dyn_cast<ForStmt>(Term)) {
+      std::optional<SemaProfiles::LoopInitialization> LI =
+          SemaProfiles::initializingCountedLoop(S.Context, For, D->getBody());
+      const auto *Target =
+          LI ? llvm::find_if(Storage.EntryTargets,
+                             [&](const TrackedStorage::EntryTarget &T) {
+                               return T.Param == LI->Param;
+                             })
+             : Storage.EntryTargets.end();
+      if (Target == Storage.EntryTargets.end())
+        continue;
+      DefAssignEvent Ev{DefAssignEventKind::Write, Target->Referent,
+                        For->getCond()};
+      if (LI->Constructs)
+        Ev.Constructs = ConstructExtent::Start;
+      EdgeEvents[Edge].push_back(Ev);
+      continue;
+    }
+    const auto *Loop = cast<CXXForRangeStmt>(Term);
     std::optional<SemaProfiles::LoopInitialization> LI =
         SemaProfiles::initializingRangeFor(Loop);
     const auto *RangeDS = dyn_cast_or_null<DeclStmt>(Loop->getRangeStmt());
@@ -5603,8 +5626,7 @@ static void appendLoopCredits(Sema &S, const Decl *D, const CFG &cfg,
     Args.appendFor(RangeInit, RangeT, DefAssignEventKind::Write, Elem,
                    /*RawExempt=*/false, /*SkipUninitMembers=*/false,
                    LI->Constructs, AsRange);
-    llvm::append_range(EdgeEvents[{Cond->getBlockID(), Exit->getBlockID()}],
-                       Credit);
+    llvm::append_range(EdgeEvents[Edge], Credit);
     Credited.insert(Range);
     if (!LI->LoopVar->hasAttr<RefToUninitAttr>())
       Credited.insert(LI->LoopVar);

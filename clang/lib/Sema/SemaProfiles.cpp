@@ -3317,7 +3317,234 @@ SemaProfiles::initializingRangeFor(const CXXForRangeStmt *S) {
         return RangeThis && isa<CXXThisExpr>(E);
       }))
     return std::nullopt;
-  return LoopInitialization{X, *Constructs};
+  return LoopInitialization{X, nullptr, *Constructs};
+}
+
+/// True if \p S, but its subtree \p Except, holds no statement expression and
+/// names the variables \p Vars only as the operand of a load or by one of the
+/// DeclRefExprs \p Read (outside the unevaluated operand of \c sizeof or
+/// \c alignof): no store to one, no increment, no address, no other reference
+/// binding, no by-reference capture.
+static bool loadsOnly(const Stmt *S,
+                      const llvm::SmallPtrSetImpl<const ValueDecl *> &Vars,
+                      const Stmt *Except = nullptr,
+                      ArrayRef<const DeclRefExpr *> Read = {}) {
+  if (!S || S == Except || isa<UnaryExprOrTypeTraitExpr>(S))
+    return true;
+  if (isa<StmtExpr>(S))
+    return false;
+  const auto *ICE = dyn_cast<ImplicitCastExpr>(S);
+  bool Load = ICE && ICE->getCastKind() == CK_LValueToRValue;
+  for (const Stmt *Child : S->children()) {
+    const auto *E = dyn_cast_or_null<Expr>(Child);
+    if (const auto *DRE =
+            E ? dyn_cast<DeclRefExpr>(E->IgnoreParens()) : nullptr;
+        DRE && Vars.contains(DRE->getDecl())) {
+      if (!Load && !llvm::is_contained(Read, DRE))
+        return false;
+      continue;
+    }
+    if (!loadsOnly(Child, Vars, Except, Read))
+      return false;
+  }
+  return true;
+}
+
+/// True if a jump from outside the loop body \p Body could enter it: it holds
+/// a label, or a case or default label of a switch statement outside it.
+static bool enterableByJump(const Stmt *Body, bool InSwitch = false) {
+  if (!Body)
+    return false;
+  if (isa<LabelStmt>(Body) || (isa<SwitchCase>(Body) && !InSwitch))
+    return true;
+  bool Switch = InSwitch || isa<SwitchStmt>(Body);
+  return llvm::any_of(Body->children(), [&](const Stmt *Child) {
+    return enterableByJump(Child, Switch);
+  });
+}
+
+std::optional<SemaProfiles::LoopInitialization>
+SemaProfiles::initializingCountedLoop(const ASTContext &Ctx, const ForStmt *S,
+                                      const Stmt *FunctionBody) {
+  const auto *Cond = dyn_cast_or_null<BinaryOperator>(S->getCond());
+  const Expr *Inc = S->getInc();
+  if (!Cond || !Inc || S->getConditionVariable() || !S->getBody())
+    return std::nullopt;
+  // The variable a DeclRefExpr \p E names through parentheses and implicit
+  // conversions.
+  auto VarOf = [](const Expr *E) -> const ValueDecl * {
+    const auto *DRE = dyn_cast<DeclRefExpr>(E->IgnoreParenImpCasts());
+    return DRE ? DRE->getDecl() : nullptr;
+  };
+  // The increment's variable: ++v, v++, or v += 1.
+  const ValueDecl *Stepped = nullptr;
+  if (const auto *UO = dyn_cast<UnaryOperator>(Inc->IgnoreParens());
+      UO && UO->isIncrementOp())
+    Stepped = VarOf(UO->getSubExpr());
+  else if (const auto *CAO =
+               dyn_cast<CompoundAssignOperator>(Inc->IgnoreParens());
+           CAO && CAO->getOpcode() == BO_AddAssign)
+    if (std::optional<llvm::APSInt> One =
+            CAO->getRHS()->getIntegerConstantExpr(Ctx);
+        One && *One == 1 && !CAO->getLHS()->getType()->isPointerType())
+      Stepped = VarOf(CAO->getLHS());
+  if (!Stepped)
+    return std::nullopt;
+  const auto *Param = dyn_cast<ParmVarDecl>(Stepped);
+  bool Iterator = Param && Param->getType()->isPointerType();
+  const auto *Index = dyn_cast<VarDecl>(Stepped);
+  if (!Iterator && (!Index || !Index->hasLocalStorage() ||
+                    !Index->getType()->isIntegralOrUnscopedEnumerationType() ||
+                    isa<ParmVarDecl>(Index)))
+    return std::nullopt;
+  // The init: none for an iterator loop; the index declared or assigned 0.
+  auto IsZero = [&](const Expr *E) {
+    std::optional<llvm::APSInt> V =
+        E ? E->getIntegerConstantExpr(Ctx) : std::nullopt;
+    return V && V->isZero();
+  };
+  const Stmt *Init = S->getInit();
+  if (Iterator) {
+    if (Init && !isa<NullStmt>(Init))
+      return std::nullopt;
+  } else if (const auto *DS = dyn_cast_or_null<DeclStmt>(Init)) {
+    if (!DS->isSingleDecl() || DS->getSingleDecl() != Index ||
+        !IsZero(Index->getInit()))
+      return std::nullopt;
+  } else if (const auto *BO = dyn_cast_or_null<BinaryOperator>(Init);
+             !BO || BO->getOpcode() != BO_Assign ||
+             VarOf(BO->getLHS()) != Index || !IsZero(BO->getRHS())) {
+    return std::nullopt;
+  }
+  // The condition: i < E, E > i, i != E, E != i; or P != E, E != P.
+  const Expr *Bound = nullptr;
+  BinaryOperatorKind Op = Cond->getOpcode();
+  if (VarOf(Cond->getLHS()) == Stepped &&
+      (Op == BO_NE || (!Iterator && Op == BO_LT)))
+    Bound = Cond->getRHS();
+  else if (VarOf(Cond->getRHS()) == Stepped &&
+           (Op == BO_NE || (!Iterator && Op == BO_GT)))
+    Bound = Cond->getLHS();
+  if (!Bound || Bound->HasSideEffects(Ctx, /*IncludePossibleEffects=*/true))
+    return std::nullopt;
+  // The pointer parameter an expression names.
+  auto PointerParam = [&](const Expr *E) -> const ParmVarDecl * {
+    const auto *P = dyn_cast_or_null<ParmVarDecl>(VarOf(E));
+    return P && P->getType()->isPointerType() ? P : nullptr;
+  };
+  // P + i or i + P (index), or P itself (iterator), as a pointer value.
+  auto ElementPointer = [&](const Expr *E) -> const ParmVarDecl * {
+    E = E->IgnoreParenImpCasts();
+    if (Iterator)
+      return PointerParam(E);
+    const auto *BO = dyn_cast<BinaryOperator>(E);
+    if (!BO || BO->getOpcode() != BO_Add)
+      return nullptr;
+    if (VarOf(BO->getRHS()) == Index)
+      return PointerParam(BO->getLHS());
+    return VarOf(BO->getLHS()) == Index ? PointerParam(BO->getRHS()) : nullptr;
+  };
+  // P[i] or *(P + i) (index), or *P (iterator), as a glvalue.
+  auto ElementGlvalue = [&](const Expr *E) -> const ParmVarDecl * {
+    E = E->IgnoreParens();
+    if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(E))
+      return !Iterator && VarOf(ASE->getIdx()) == Index
+                 ? PointerParam(ASE->getBase())
+                 : nullptr;
+    const auto *UO = dyn_cast<UnaryOperator>(E);
+    return UO && UO->getOpcode() == UO_Deref ? ElementPointer(UO->getSubExpr())
+                                             : nullptr;
+  };
+  const ParmVarDecl *P = nullptr;
+  // \p E, a DeclRefExpr naming P.
+  auto NamesP = [&](const Expr *E) {
+    const auto *DRE = dyn_cast<DeclRefExpr>(E);
+    return P && DRE && DRE->getDecl() == P;
+  };
+  const Stmt *S0 = firstLoopStatement(S->getBody());
+  std::optional<bool> Constructs = elementInitialization(
+      S0,
+      [&](const Expr *E, bool AsPointerValue) {
+        const ParmVarDecl *Found = nullptr;
+        if (!AsPointerValue)
+          Found = ElementGlvalue(E);
+        else if (const Expr *Op = addressOfOperand(E))
+          Found = ElementGlvalue(Op);
+        else
+          Found = ElementPointer(E);
+        if (!Found || (Iterator && Found != Param))
+          return false;
+        P = Found;
+        return true;
+      },
+      [&](const Expr *E) {
+        return !holdsStmtExprOr(E, [](const Expr *) { return false; });
+      });
+  // The first statement names P only in its designation of the element.
+  unsigned Uses = 0;
+  holdsStmtExprOr(S0, [&](const Expr *E) {
+    Uses += NamesP(E);
+    return false;
+  });
+  if (!Constructs || !P || Uses != 1)
+    return std::nullopt;
+  // The bound names neither the index nor P.
+  if (holdsStmtExprOr(Bound, [&](const Expr *E) {
+        const auto *DRE = dyn_cast<DeclRefExpr>(E);
+        return DRE && (DRE->getDecl() == Stepped || DRE->getDecl() == P);
+      }))
+    return std::nullopt;
+  // The body after its first statement names P nowhere.
+  if (const auto *CS = dyn_cast<CompoundStmt>(S->getBody()))
+    for (const Stmt *Rest : llvm::drop_begin(CS->body()))
+      if (holdsStmtExprOr(Rest, NamesP))
+        return std::nullopt;
+  // The index bound to a reference to const, or passed to a construction of a
+  // scalar element (std::construct_at's arguments initialize the element), is
+  // read.
+  SmallVector<const DeclRefExpr *, 2> Read;
+  holdsStmtExprOr(S->getBody(), [&](const Expr *E) {
+    const auto *CE = dyn_cast<CallExpr>(E);
+    const FunctionDecl *Callee = CE ? CE->getDirectCallee() : nullptr;
+    if (!Callee || Iterator)
+      return false;
+    CalleeLifecycleRoles Roles = getCalleeLifecycleRoles(Callee);
+    bool ScalarConstruction = CE == S0 && Roles.KnownParam &&
+                              Roles.KnownRole == KnownParamRole::Construct &&
+                              P->getType()->getPointeeType()->isScalarType();
+    const auto *MD = dyn_cast<CXXMethodDecl>(Callee);
+    unsigned Skip = MD && isa<CXXOperatorCallExpr>(CE) &&
+                    !MD->isExplicitObjectMemberFunction();
+    for (unsigned I = Skip, N = CE->getNumArgs(); I < N; ++I) {
+      const ParmVarDecl *Q = I - Skip < Callee->getNumParams()
+                                 ? Callee->getParamDecl(I - Skip)
+                                 : nullptr;
+      const auto *DRE =
+          dyn_cast<DeclRefExpr>(CE->getArg(I)->IgnoreParenImpCasts());
+      if (Q && DRE && Q->getType()->isReferenceType() &&
+          DRE->getDecl() == Index &&
+          (ScalarConstruction ||
+           Q->getType().getNonReferenceType().isConstQualified()))
+        Read.push_back(DRE);
+    }
+    return false;
+  });
+  // The body only loads the index, P, and the bound's variables, and no jump
+  // enters it past its first statement.
+  llvm::SmallPtrSet<const ValueDecl *, 4> Loaded{Stepped, P};
+  holdsStmtExprOr(Bound, [&](const Expr *E) {
+    if (const auto *DRE = dyn_cast<DeclRefExpr>(E))
+      Loaded.insert(DRE->getDecl());
+    return false;
+  });
+  if (!loadsOnly(S->getBody(), Loaded, /*Except=*/nullptr, Read) ||
+      enterableByJump(S->getBody()))
+    return std::nullopt;
+  // The loop starts at the storage the caller passed.
+  llvm::SmallPtrSet<const ValueDecl *, 1> Pointer{P};
+  if (!loadsOnly(FunctionBody, Pointer, Iterator ? Inc : nullptr))
+    return std::nullopt;
+  return LoopInitialization{nullptr, P, *Constructs};
 }
 
 bool SemaProfiles::isMarkedRangeForElement(const VarDecl *V, const Expr *Init) {

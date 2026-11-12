@@ -1191,7 +1191,15 @@ designated by the element type and a construction when the body's first
 statement constructs, given only where each leaf of the range names tracked
 storage whole; the range's ``__range`` binding and an unmarked loop
 variable's then add no site, their tracked leaves consumed
-(``AddBinding``'s ``Consume``).
+(``AddBinding``'s ``Consume``).  For a counted loop over a pointer parameter
+the body must initialize (``SemaProfiles::initializingCountedLoop``: an index
+or iterator loop whose body begins by initializing element ``i`` or ``*p``,
+with a body that only loads the index, the parameter, and the bound's
+variables and names the parameter only in that designation, in a function
+that modifies the parameter nowhere else) it is a whole credit of the
+parameter's ``ParamReferent``, the credit a ``[[must_init]]`` call gives
+the caller's storage; the parameter's own entity and the elements are
+untouched.
 
 The transfer function resolves every event and site leaf on a marked
 pointer's or reference's entity through ``Target`` before applying
@@ -1388,7 +1396,10 @@ to its anonymous referent: the obligation is about the storage the caller
 passed, and a reseat to a fresh referent (``p++``, ``p = nullptr``) resets
 the anonymous referent's flags.  Rule ``must_init`` requires ``Must`` of the
 ``ParamReferent`` in the same join of the normal exits
-(``appendExitObligationSites``), except in a coroutine.  In every
+(``appendExitObligationSites``), except in a coroutine; a store, credit, or
+construction through the parameter or a marked alias of it before a reseat
+credits it, and so does a recognized counted loop on its exit edge
+(``appendLoopCredits``).  In every
 member function, each ``[[ref_to_uninit]]`` pointer member
 reachable from the current object through members by value
 (``SemaProfiles::markedPointerMembers``) has a ``MemberPointee`` entity for
@@ -1815,10 +1826,16 @@ Deliberate Strictnesses
   null included: after ``if (!p) return;`` the storage is uninitialized on the
   null path, so rule ``must_init`` rejects the function.  The remedies are a
   plain ``[[ref_to_uninit]]`` parameter or suppressing ``must_init``.
-- An element-by-element fill of an obligated parameter's storage
-  (``p[i] = 0`` in a loop, ``*p++ = 0``) initializes nothing (see the element
-  write entry under Missed Diagnostics), so it leaves the obligation unkept.
-  The remedies are a ``std::uninitialized_*`` fill, ``memset``, or suppression.
+- An element-by-element fill of an obligated parameter's storage by a loop
+  the counted-loop recognizer does not accept
+  (``SemaProfiles::initializingCountedLoop``) -- ``*p++ = 0``,
+  ``std::construct_at(p + i, v)`` with a stride of 2 or from 1, a body that
+  names the parameter again or binds the index to a non-const reference
+  (``std::construct_at(p + i, i)`` for a class element, whose constructor
+  could take it as one) -- initializes nothing (see the element write
+  entry under Missed Diagnostics), so it leaves the obligation unkept.  The
+  remedies are a recognized loop, a ``std::uninitialized_*`` fill, ``memset``,
+  or suppression.
 - A function that hands out a mutable alias of an obligated parameter
   (``&p``, a by-reference capture) leaves its storage in an unknown state, so
   a write through the alias (a lambda's ``*p = 1``) does not keep the
@@ -1922,6 +1939,12 @@ Missed Diagnostics
   credited although P4222R2 §6 asks for ``construct_at``.  So do the
   element-assigning algorithms through a marked pointer, whose extent is
   unknown: ``std::fill(p, p + 1, 0)`` initializes ``p``'s whole referent.
+- A recognized counted loop over a parameter the body must initialize trusts
+  its bound as the extent of the caller's storage, which the callee cannot
+  know: ``for (int i = 0; i < n; ++i) p[i] = 0;`` keeps the obligation for
+  any ``n``, ``0`` included (a ``[[must_init]]`` call credits the caller's
+  whole referent the same way).  The credit also trusts that the body does
+  not reach the storage through an alias it does not name the parameter by.
 - A recognized range-for's credit of its range trusts that the body reaches
   the range only through the loop variable: after
   ``for (int &x : a) { x = 0; std::destroy_at(&r); }``, with ``r`` a marked
