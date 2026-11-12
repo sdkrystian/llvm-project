@@ -881,9 +881,19 @@ void Sema::InstantiateAttrs(const MultiLevelTemplateArgumentList &TemplateArgs,
     // dropped silently: the marker must not affect overload resolution, and a
     // dropped marker is inert -- the ref_to_uninit rule never consults a
     // marker on an entity that is not a pointer, a reference, or a handle.
-    if (isa<RefToUninitAttr>(TmplAttr) &&
+    if (isa<RefToUninitAttr>(TmplAttr) && !TmplAttr->isImplicit() &&
         Profiles().diagnoseInvalidRefToUninitMarker(
             New, TmplAttr->getLocation(), /*Diagnose=*/!isSFINAEContext()))
+      continue;
+
+    // Likewise for [[must_init]], which drops the [[ref_to_uninit]] it
+    // implies (the implicit one) with it, diagnosing once.
+    if ((isa<MustInitAttr>(TmplAttr) ||
+         (isa<RefToUninitAttr>(TmplAttr) && TmplAttr->isImplicit())) &&
+        Profiles().diagnoseInvalidRefToUninitMarker(
+            New, TmplAttr->getLocation(),
+            /*Diagnose=*/isa<MustInitAttr>(TmplAttr) && !isSFINAEContext(),
+            /*MustInit=*/true))
       continue;
 
     // Likewise for [[uninit]]: the handler deferred the reference-type

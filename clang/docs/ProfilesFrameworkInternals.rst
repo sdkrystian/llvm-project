@@ -744,15 +744,20 @@ follows:
        ``TrackedStorage::resolve``, and one definite-assignment run over a
        CFG of its own, built with exception edges over a fully linearized
        shape (the shared CFG the other analyses see is untouched); the
-       ``CallExpr`` arm turns a ``[[now_init]]`` call into a ``Gen`` bit for
-       the storage bound to the callee's marked parameters (P4222R2 §6.2)
-       and a ``[[now_uninit]]`` call into a ``Kill`` that clears the
-       assigned bit again (a local's escape credit already subsumes
-       ``[[now_init]]``).  Constructors cannot carry either attribute: a
-       construction can run with no call spelling (copy-initialization, a
-       by-value argument, a member initializer), so a lifecycle effect there
-       would be invisible at the site, and the engine would have to
-       enumerate every construction spelling.  A "destroyed here"
+       ``CallExpr`` arm turns a call into a ``Gen`` bit for the storage
+       bound to each parameter the callee must initialize -- a
+       ``[[must_init]]`` parameter, or a marked parameter of a
+       ``[[now_init]]`` callee (P4222R2 §6.2) -- and a ``[[now_uninit]]``
+       call into a ``Kill`` that clears the assigned bit again (a local's
+       escape credit already subsumes the ``Gen``).  ``[[must_init]]``
+       attaches an implicit ``[[ref_to_uninit]]`` to its parameter, so
+       every check that reads the parameter marker sees it.  Constructors
+       cannot carry ``[[now_init]]`` or ``[[now_uninit]]``, nor a
+       ``[[must_init]]`` parameter: a construction can run with no call
+       spelling (copy-initialization, a by-value argument, a member
+       initializer), so a lifecycle effect there would be invisible at the
+       site, and the engine would have to enumerate every construction
+       spelling.  A "destroyed here"
        note on the read is deferred -- a kill witness would have to be
        carried per bit through the meet and both engine replays, roughly
        doubling the engine state and touching the enqueue-skip invariant);
@@ -980,8 +985,8 @@ destination of ``memset``, ``memcpy``, and ``memmove``, and of their fortified
 ``va_copy``).  The binding to it is accepted in any live state, and the
 flow pass writes the argument's storage whole on a trusted match only: by name
 the acceptance survives but the credit does not, mirroring the release rows'
-``Kill``, because a credit suppresses later diagnostics.  Unlike
-``[[ref_to_uninit]]`` with ``[[now_init]]``, the role is one-directional: it
+``Kill``, because a credit suppresses later diagnostics.  Unlike a
+``[[must_init]]`` parameter, the role is one-directional: it
 asserts nothing about the prior state, so an initialized destination is legal
 and a repeated call is no double initialization.
 
@@ -1464,9 +1469,10 @@ unqualified, same-size signed and unsigned integer variants alike, an array by
 its base element type -- and by its extent, ``designationExtent``, when the
 designation is an array -- a ``void`` referent by any type); otherwise it
 designates a subobject, which earns no credit and is a subobject store or read
-(P4222R2 §4.2, §5.4).  A ``[[now_init]]`` or initializing parameter whose
-pointee is ``void``, ``char``, ``unsigned char``, or ``std::byte`` claims the
-bytes and covers any entity it reaches without a derived-to-base step.  A
+(P4222R2 §4.2, §5.4).  A ``[[must_init]]``, ``[[now_init]]``, or
+initializing parameter whose pointee is ``void``, ``char``,
+``unsigned char``, or ``std::byte`` claims the bytes and covers any entity it
+reaches without a derived-to-base step.  A
 Construct row whose callee takes constructor arguments
 (``constructsOneObject``) designates one element, ``T[1]``, and a marked
 pointer to a base class reaches only the base subobject of a referent of a
@@ -1532,11 +1538,12 @@ Deliberate Strictnesses
 - Inside a constructor body, only a plain assignment to an ``[[uninit]]``
   member (including through a transparent reference cast such as
   ``(int &)m = 1`` -- the same casts the recognizers see through)
-  or a call to a ``[[now_init]]`` function counts as its
-  initialization -- the latter for the current-object storage bound to the
-  callee's ``[[ref_to_uninit]]`` parameters (``&m``, ``m``, or ``this``
+  or a call binding it to a ``[[must_init]]`` parameter or a marked
+  parameter of a ``[[now_init]]`` function counts as its
+  initialization -- the latter for the current-object storage bound to that
+  parameter (``&m``, ``m``, or ``this``
   itself, which credits every tracked member), as a genuine dataflow fact,
-  so a ``[[now_init]]`` call on one branch still does not satisfy a read at
+  so such a call on one branch still does not satisfy a read at
   the join (P4222R2 §1.3).  A ``[[now_uninit]]`` call is the credit's
   destruction twin: a real kill bit for the same storage shapes, so a
   destroy on one branch already spoils a read at the join, even though the
@@ -1545,9 +1552,9 @@ Deliberate Strictnesses
   passing ``&m`` to a ``[[ref_to_uninit]]`` parameter of an *ordinary*
   function earns no credit, so a later read of the member is rejected: the
   paper rejects complex constructor code (P4222R2 §5.1) and credits a
-  callee's initialization only through a function marked ``[[now_init]]``
-  (P4222R2 §6); the remedy for an intended flow is ``[[now_init]]`` on the
-  callee or ``[[profiles::suppress]]``.
+  callee's initialization only through a ``[[must_init]]`` parameter
+  (P4222R2 §6.2); the remedy for an intended flow is ``[[must_init]]`` on the
+  callee's parameter or ``[[profiles::suppress]]``.
 - A by-value *parameter* of a tracked class is a copy of the caller's
   argument, so its marked members are tracked from an unassigned start: a
   read before a local assignment (or an escape of the parameter) is
@@ -1591,14 +1598,15 @@ Deliberate Strictnesses
 - Destroying through a ``[[ref_to_uninit]]`` pointer that was never stored
   through is rejected by ``destroy_uninit``: the marker asserts an
   uninitialized referent at entry or at its latest marked binding.  If a
-  helper filled the referent first, mark the helper ``[[now_init]]``, store
-  through the marker before the destroy, or suppress.
+  helper filled the referent first, mark the helper's parameter
+  ``[[must_init]]``, store through the marker before the destroy, or
+  suppress.
 - Passing ``&u`` to a ``[[ref_to_uninit]]`` parameter of an *ordinary*
   function initializes nothing (see the constructor-body entry above), so a
   later ``destroy_at(&u)`` is rejected by ``destroy_uninit`` even if the
   callee filled the storage -- the same strictness, and the same remedies,
-  as the unmarked-direction binding after such a call: ``[[now_init]]`` on
-  the callee or suppression.
+  as the unmarked-direction binding after such a call: ``[[must_init]]`` on
+  the callee's parameter or suppression.
 - Storage destroyed whole stays destroyed until it is initialized whole:
   constructing its elements one by one after ``std::destroy(arr, arr + 2)``
   leaves it destroyed, so its scope-exit destructor or a second whole destroy
@@ -1628,9 +1636,10 @@ Deliberate Strictnesses
   constructs it (``std::now_init`` is the remedy for a referent another
   member function initialized), and a member call on the object (a const one
   too: its pointee is not const) leaves it unknown.
-- A ``[[now_uninit]]`` or ``[[now_init]]`` member function called with a
-  marked pointer member (``drop(elem)``) is judged against the member's
-  referent and keeps it: a function that also reseats the member is judged
+- A ``[[now_uninit]]`` or ``[[now_init]]`` member function, or one with a
+  ``[[must_init]]`` parameter, called with a marked pointer member
+  (``drop(elem)``) is judged against the member's referent and keeps it: a
+  function that also reseats the member is judged
   against the old referent, so a later lifecycle call or read through the
   member is judged against it too.  The remedy is ``[[profiles::suppress]]``.
 
@@ -1676,8 +1685,9 @@ Deliberate Strictnesses
   definition has been parsed: a marker written between the class definition
   and the constructor's still sees a declared-but-undefined constructor and
   is rejected as running a constructor.
-- A ``construct_at`` or ``[[now_init]]`` credit of a base subobject of an
-  ``[[uninit]]`` local or a marked pointer's referent, and a store through a
+- A ``construct_at``, ``[[must_init]]``, or ``[[now_init]]`` credit of a
+  base subobject of an ``[[uninit]]`` local or a marked pointer's referent,
+  and a store through a
   narrower type, initialize nothing: the storage is one entity, so even the
   constructed base's own members stay uninitialized for a later read, though
   a later construction of the storage after such a credit is rejected.  The
@@ -1689,9 +1699,10 @@ Deliberate Strictnesses
   (``p->a = 1``) or suppression.
 - A class-type or array ``[[uninit]]`` member, and a member subobject holding
   tracked members, is initialized only whole -- ``std::construct_at``, the
-  ``std::uninitialized_*`` family, a ``[[now_init]]`` call, ``memset``,
-  ``memcpy``, ``memmove``, or a written mem-initializer: a class's assignment
-  (``m = Mid{1}`` in a constructor body) is a member call, never an
+  ``std::uninitialized_*`` family, a ``[[must_init]]`` or ``[[now_init]]``
+  call, ``memset``, ``memcpy``, ``memmove``, or a written mem-initializer: a
+  class's assignment (``m = Mid{1}`` in a constructor body) is a member call,
+  never an
   initialization, and a member-wise or element store is a subobject write
   (P4222R2 §4.6, §5.4, §5.5).  Outside its
   constructor, its bindings, member calls, and destroys are judged from an
@@ -1759,8 +1770,9 @@ Missed Diagnostics
   ``(c ? p : r) = &u``), a ``__block`` pointer, a marked pointer or reference
   bound to a whole local with tracked members (``C *p [[ref_to_uninit]] = &c``,
   which also escapes the local) -- fires in neither direction through the
-  pointer, a store or ``[[now_init]]`` call through it credits nothing, and a
-  marked binding to it asserts nothing: a later ``int *w = &u`` stays the
+  pointer, a store or ``[[must_init]]`` or ``[[now_init]]`` call through it
+  credits nothing, and a marked binding to it asserts nothing: a later
+  ``int *w = &u`` stays the
   unmarked-direction error.
 - A marked binding of a lifecycle entity or the current object asserts
   nothing, so after one accepted in an unknown state -- after an allocator's
@@ -1874,8 +1886,8 @@ Missed Diagnostics
   does hold one is an escape, as is one below a pointer-to-data-member step,
   ``(a.*pm).x``; nor is the source of a tracked copy or of a by-copy
   capture), so a read after the escape is accepted.  The
-  paper credits a callee's initialization only through a function marked
-  ``[[now_init]]`` (P4222R2 §6).
+  paper credits a callee's initialization only through a ``[[must_init]]``
+  parameter (P4222R2 §6.2).
 - A destroy of *unknown* storage is accepted (``destroy_uninit`` fires only
   on an affirmative classification), and so is a destroy after a merely
   *conditional* store: storage initialized on some path is accepted, short

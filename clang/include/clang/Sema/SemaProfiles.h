@@ -1114,6 +1114,9 @@ public:
     /// [[now_init]]: the callee initializes the storage bound to its
     /// [[ref_to_uninit]] parameters (P4222R2 §6.2).
     bool InitializesRefToUninitParams = false;
+    /// A parameter of the callee carries [[must_init]]: the callee
+    /// initializes the storage bound to it (P4222R2 §6.2).
+    bool HasMustInitParams = false;
     /// [[now_uninit]]: the callee ends the lifetime of the storage bound
     /// to its pointer, reference, and handle parameters (P4222R2 §4.4).
     bool DestroysParams = false;
@@ -1159,9 +1162,13 @@ public:
     /// True if the call releases the storage bound to \p P; a name-only
     /// match counts unless \p TrustedOnly.
     bool releasesParam(const ParmVarDecl *P, bool TrustedOnly) const;
+    /// True if the callee's declaration promises to initialize the storage
+    /// bound to \p P: \p P carries [[must_init]], or is a marked parameter
+    /// of a [[now_init]] callee.
+    bool mustInitializeParam(const ParmVarDecl *P) const;
     /// True if the call initializes the storage bound to \p P on a trusted
-    /// basis: a marked parameter of a [[now_init]] callee, or a trusted
-    /// row's Construct or InitializeAnyState role.
+    /// basis: mustInitializeParam, or a trusted row's Construct or
+    /// InitializeAnyState role.
     bool initializesParam(const ParmVarDecl *P) const;
     /// True if \p P is a transfer parameter of a std-table handle's
     /// construction or of an owner's reset: its binding is judged where the
@@ -1400,10 +1407,13 @@ public:
   /// is invalid -- silently in a SFINAE context (\p Diagnose false there), so
   /// the marker can never affect overload resolution; a dropped marker is
   /// inert. An undeduced type returns false too: validation defers to
-  /// checkDeducedMarkers. Not profile policy -- fires regardless of
-  /// -fprofiles, like the parse-time handler it serves.
+  /// checkDeducedMarkers. With \p MustInit, the marker is a parameter's
+  /// [[must_init]], which a pointer or reference to const cannot satisfy.
+  /// Not profile policy -- fires regardless of -fprofiles, like the
+  /// parse-time handler it serves.
   bool diagnoseInvalidRefToUninitMarker(const Decl *D, SourceLocation AttrLoc,
-                                        bool Diagnose = true);
+                                        bool Diagnose = true,
+                                        bool MustInit = false);
 
   /// [[uninit]] is meaningless on a reference (it must bind when declared).
   /// Returns true when \p D's type is a reference, diagnosing
@@ -1440,6 +1450,16 @@ public:
   /// profile policy -- fires regardless of -fprofiles, like the parse-time
   /// marker subject checks.
   void checkNowInitVacuity(FunctionDecl *FD);
+
+  /// A constructor's parameter cannot carry [[must_init]], as a constructor
+  /// cannot carry [[now_init]] (see ProfilesFrameworkInternals.rst, "The
+  /// std::init Implementation Map"): diagnose
+  /// err_lifecycle_attr_on_constructor on each [[must_init]] the parameters
+  /// of the constructor \p FD do not inherit, and drop it. Called with
+  /// checkNowInitVacuity, as a parameter's attribute handler runs before its
+  /// function is declared. Not profile policy -- fires regardless of
+  /// -fprofiles.
+  void checkMustInitOnConstructor(FunctionDecl *FD);
 
 private:
   /// Per profile, whether a rule diagnostic of it is enabled by a

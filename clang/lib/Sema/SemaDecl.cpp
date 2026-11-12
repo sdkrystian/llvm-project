@@ -10971,8 +10971,10 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
 
     // The [[now_init]] vacuity rule is checked only now: a [[ref_to_uninit]]
     // parameter marker written on a previous declaration arrives in the
-    // merge above, after the parse-time attribute handlers have run.
+    // merge above, after the parse-time attribute handlers have run. The
+    // [[must_init]] constructor ban needs the parameters' function.
     Profiles().checkNowInitVacuity(NewFD);
+    Profiles().checkMustInitOnConstructor(NewFD);
 
     NamedDecl *PrincipalDecl = (FunctionTemplate
                                 ? cast<NamedDecl>(FunctionTemplate)

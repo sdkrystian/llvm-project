@@ -1054,6 +1054,46 @@ without ``-fprofiles``.
   }];
 }
 
+def MustInitDocs : Documentation {
+  let Category = DocCatVariable;
+  let Heading = "must_init";
+  let Content = [{
+The ``[[must_init]]`` attribute marks a function parameter as referring to
+uninitialized memory that the function *initializes* before it returns. It
+implies ``[[ref_to_uninit]]`` on the parameter. It is purely informational:
+it has no effect on code generation.
+
+The attribute exists to support the initialization profile (see
+:doc:`ProfilesFramework`) and implements the annotation of P4222R2 §6.2.
+Under that profile the argument must refer to uninitialized memory, as for
+any ``[[ref_to_uninit]]`` parameter, and the storage it refers to is
+initialized after the call returns, so the caller may continue to use the
+original name:
+
+.. code-block:: c++
+
+  void fill(int *p [[must_init]]);
+
+  void f() {
+    int u [[uninit]];
+    fill(&u);
+    int v = u;  // OK: fill() initialized u
+  }
+
+The attribute applies to a parameter whose type is a pointer or reference to
+a non-const object, or a *handle* (an object of non-union class type that
+refers to memory, such as a span); any other type is diagnosed regardless of
+``-fprofiles``. It cannot be applied to a parameter of a constructor (also
+diagnosed regardless of ``-fprofiles``). The function-level attribute
+``[[now_init]]`` makes every ``[[ref_to_uninit]]`` parameter of a function
+behave as ``[[must_init]]``.
+
+Outside the initialization profile the attribute is otherwise silently
+accepted and has no effect, so code that uses it remains valid when compiled
+without ``-fprofiles``.
+  }];
+}
+
 def NowInitDocs : Documentation {
   let Category = DocCatFunction;
   let Heading = "now_init";

@@ -1775,6 +1775,12 @@ def RefToUninit : InheritableParamAttr {
   let Documentation = [RefToUninitDocs];
 }
 
+def MustInit : InheritableParamAttr {
+  let Spellings = [CXX11<"", "must_init", 202602>];
+  let Subjects = SubjectList<[ParmVar], ErrorDiag>;
+  let Documentation = [MustInitDocs];
+}
+
 def NowInit : InheritableAttr {
   let Spellings = [CXX11<"", "now_init", 202602>];
   let Subjects = SubjectList<[Function], ErrorDiag>;

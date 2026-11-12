@@ -5180,9 +5180,10 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
                   /*Constructs=*/false, TakesRange(P));
     });
   // A credit designates the parameter's pointee or referenced type; a
-  // [[now_init]] or initializing parameter claims raw bytes
-  // (designationCovers).
-  if (Roles.InitializesRefToUninitParams || Roles.KnownParam)
+  // parameter the callee must initialize (mustInitializeParam) or an
+  // initializing parameter claims raw bytes (designationCovers).
+  if (Roles.InitializesRefToUninitParams || Roles.HasMustInitParams ||
+      Roles.KnownParam)
     ForEachParam([&](const ParmVarDecl *P, const Expr *Arg) {
       if (!Roles.initializesParam(P))
         return;
@@ -5194,8 +5195,7 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
         if (QualType VT = SemaProfiles::rangeValueType(PT); !VT.isNull())
           Designated = VT;
       bool RawExempt =
-          (Roles.InitializesRefToUninitParams && Roles.isMarkedParam(P)) ||
-          Roles.isInitializingParam(P);
+          Roles.mustInitializeParam(P) || Roles.isInitializingParam(P);
       if (constructsOneObject(Roles, P) && Designated->isObjectType() &&
           !Designated->isIncompleteType())
         Designated = S.Context.getConstantArrayType(
@@ -5718,7 +5718,7 @@ static void extractStdInitEvents(
           SemaProfiles::CalleeLifecycleRoles Roles =
               SemaProfiles::getCalleeLifecycleRoles(Callee);
           if (Roles.DestroysParams || Roles.InitializesRefToUninitParams ||
-              Roles.KnownParam)
+              Roles.HasMustInitParams || Roles.KnownParam)
             forEachArgumentBinding(
                 Ctx, CE,
                 [&](const ParmVarDecl *P, QualType PT, const Expr *Arg,

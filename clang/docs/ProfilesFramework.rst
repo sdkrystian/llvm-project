@@ -398,11 +398,12 @@ which accesses no storage ([conv.lval]p3), is never a read of uninitialized
 memory.
 
 **Marker placement.**  The marker family -- ``[[uninit]]``,
-``[[ref_to_uninit]]``, ``[[now_init]]``, and ``[[now_uninit]]`` --
-appertains to *declarations*, in either of the two standard positions: the
-prefix decl-specifier position (``[[now_uninit]] void destroy_at(T* p);``)
-or the declarator-id position (``int u [[uninit]];``,
-``void destroy_at [[now_uninit]] (T* p);``).  The *type* positions some of
+``[[ref_to_uninit]]``, ``[[must_init]]``, ``[[now_init]]``, and
+``[[now_uninit]]`` -- appertains to *declarations*, in either of the two
+standard positions: the prefix decl-specifier position
+(``[[now_uninit]] void destroy_at(T* p);``) or the declarator-id position
+(``int u [[uninit]];``, ``void destroy_at [[now_uninit]] (T* p);``).  The
+*type* positions some of
 the paper's examples use -- after a ``*`` or ``&``, after an array bound,
 or after a parameter list -- are rejected: neither
 ``int arr[10] [[uninit]];`` nor ``void destroy_at(T* p) [[now_uninit]];``
@@ -557,9 +558,9 @@ constructor-less aggregate locals -- also inside a member subobject
 (``o.m.n``, ``this->m.n``) that has no default member initializer and whose
 class has no user-provided default constructor, so that ``m``'s written
 initializer,
-``std::construct_at(&o.m)``, a ``[[now_init]]`` call, or ``memset`` of it
-initializes ``n``, and an ``[[uninit]]`` member of a class type is tracked as
-a whole object (below); reads through ``[[ref_to_uninit]]``
+``std::construct_at(&o.m)``, a ``[[must_init]]`` or ``[[now_init]]`` call, or
+``memset`` of it initializes ``n``, and an ``[[uninit]]`` member of a class
+type is tracked as a whole object (below); reads through ``[[ref_to_uninit]]``
 pointers and references and reads of subobjects of ``[[uninit]]`` objects
 (copying an ``[[uninit]]`` array -- a by-copy capture ``[arr]``,
 ``auto [a, b] = arr;`` -- reads each element, and copying a whole class
@@ -569,7 +570,8 @@ defaulted comparison, the source of ``memcpy`` or ``memmove``, an argument of
 ``std::construct_at`` or the ``std::uninitialized_*`` family of the type they
 construct -- reads every subobject) are rejected unless
 the storage is initialized on every path reaching the read (§1.3) -- by a
-whole-entity store, a ``[[now_init]]`` call, or ``std::construct_at``; a path
+whole-entity store, a ``[[must_init]]`` or ``[[now_init]]`` call, or
+``std::construct_at``; a path
 past a mutable alias of the pointer, which leaves the referent's state
 unknown, does not count against the read (see
 `Binding Pointers and References`_):
@@ -605,10 +607,11 @@ unknown, does not count against the read (see
    };
 
 An ``[[uninit]]`` member of a class type is initialized only as a whole --
-by ``std::construct_at``, a ``[[now_init]]`` call, ``memset``, ``memcpy``,
-``memmove``, or a written mem-initializer -- and a read of a subobject of it
-is rejected unless that has happened on every path reaching the read; its
-assignment (``s = S{}``) is a member call on uninitialized storage, and a
+by ``std::construct_at``, a ``[[must_init]]`` or ``[[now_init]]`` call,
+``memset``, ``memcpy``, ``memmove``, or a written mem-initializer -- and a
+read of a subobject of it is rejected unless that has happened on every path
+reaching the read; its assignment (``s = S{}``) is a member call on
+uninitialized storage, and a
 member-wise store initializes nothing (see
 `Writes to Subobjects of Uninitialized Objects`_):
 
@@ -696,7 +699,8 @@ Piecemeal delayed initialization of an ``[[uninit]]`` object through its
 members or elements cannot be validated statically (§5.4, §5.5), so a store
 to a *proper subobject* of an ``[[uninit]]`` entity is rejected (rule
 ``uninit_write``) unless the entity is initialized on every path reaching the
-store (§1.3) -- by ``std::construct_at`` or a ``[[now_init]]`` call; writing
+store (§1.3) -- by ``std::construct_at`` or a ``[[must_init]]`` or
+``[[now_init]]`` call; writing
 the whole entity is that entity's initialization, stays legal, and initializes
 the entity for every path after it (see `Binding Pointers and References`_):
 
@@ -737,7 +741,8 @@ expression.  A class pointee's initialization is ``construct_at`` (its
 ``[[ref_to_uninit]]`` parameter accepts the pointer) or, for a scalar
 pointee, the whole ``*p`` store.  For a marked local pointer or reference the
 store is accepted once its referent is initialized on every path reaching it
-(``construct_at(p, ...)`` or a ``[[now_init]]`` call first).
+(``construct_at(p, ...)`` or a ``[[must_init]]`` or ``[[now_init]]`` call
+first).
 
 A compound assignment or increment/decrement of such a subobject also reads
 its old value, so the read diagnostic fires alongside this one.  Assigning a
@@ -900,7 +905,8 @@ execution of a tracked local's declaration -- a loop's next iteration, a
 backward ``goto`` -- begins a new, uninitialized object.  For tracked storage
 the binding is judged where it occurs, by the same local analysis that
 checks reads (§1.3): a whole-entity store (``u = 5``, ``*p = 5``, ``r = 5``,
-``a.m = 5``, ``this->m = 5``), a ``[[now_init]]`` call, or
+``a.m = 5``, ``this->m = 5``), a ``[[must_init]]`` or ``[[now_init]]`` call,
+or
 ``std::construct_at`` initializes the storage under whichever name reaches
 it -- ``*p = 5`` initializes ``u``, and ``u = 5`` what ``*p`` reads; handing
 out a mutable alias of a marked pointer (``T *&``, ``T **``, a by-reference
@@ -935,7 +941,8 @@ it, so a suppression for it belongs on the declaration.  A transparent cast is a
 store as to a binding: ``(int &)u = 5`` initializes an ``int u`` whole,
 ``*(int *)p = 5`` the ``int`` referent, and ``(int *&)p = q`` reseats ``p``
 (§4.3).  A store or a credit -- ``construct_at``, the ``uninitialized_*``
-family, a ``[[now_init]]`` call -- initializes the storage only when it
+family, a ``[[must_init]]`` or ``[[now_init]]`` call -- initializes the
+storage only when it
 designates the whole of it: one through another type than the storage's
 (same-size signed and unsigned integer types agree, and an array counts by its
 element type, though an array type must span the whole array) or through a
@@ -948,14 +955,14 @@ Such a credit still constructs an object.  In raw storage -- an array of
 ``std::byte``, ``char``, or ``unsigned char``, or a class of only such arrays
 -- it begins a new object even after the storage was destroyed, so the
 object may be destroyed again.  A construction --
-``construct_at``, the ``uninitialized_*`` family, a ``[[now_init]]`` call,
-not a store or a byte-writing callee (below) -- leaves the storage constructed
-until it is destroyed or released or a marked binding asserts it
-uninitialized: whole or at its start (through another type or a base, or the
-element at index 0), or in part (an element past the first).  So is storage
-that begins initialized: the current object in a member function, and the
-members a braced or value-initializing declaration or a copy initializes.  A
-marked binding
+``construct_at``, the ``uninitialized_*`` family, a ``[[must_init]]`` or
+``[[now_init]]`` call, not a store or a byte-writing callee (below) -- leaves
+the storage constructed until it is destroyed or released or a marked binding
+asserts it uninitialized: whole or at its start (through another type or a
+base, or the element at index 0), or in part (an element past the first).  So
+is storage that begins initialized: the current object in a member function,
+and the members a braced or value-initializing declaration or a copy
+initializes.  A marked binding
 of storage a construction may have constructed on some path -- whole or at the
 same start, or any part of it for a binding naming the storage whole -- is
 rejected, a construction included:
@@ -967,10 +974,10 @@ against each other, a destroy of the element at index 0 ends the object a
 construction began there, and a binding through an iterator or a handle's
 member call (``*it``, a range-for's element, ``s.data()``) or an offset
 handle are judged by the state on every path alone.
-``memset``, ``memcpy``, ``memmove``, and a ``[[now_init]]`` parameter whose
-pointee is ``void``, ``char``, ``unsigned char``, or ``std::byte`` claim the
-bytes and initialize the whole storage, unless reached through a conversion to
-a base class.
+``memset``, ``memcpy``, ``memmove``, and a ``[[must_init]]`` or
+``[[now_init]]`` parameter whose pointee is ``void``, ``char``,
+``unsigned char``, or ``std::byte`` claim the bytes and initialize the whole
+storage, unless reached through a conversion to a base class.
 The standard identity functions -- ``std::move``, ``std::forward``,
 ``std::forward_like``, ``std::move_if_noexcept``, and ``std::as_const`` -- are
 as transparent as such a cast: ``*std::move(p)`` reads what ``*p`` reads,
@@ -984,12 +991,14 @@ address-of step names the object: ``*&x``, ``(&x)->m``, and
 class-type referent never initializes: it is a member ``operator=`` call on
 uninitialized storage, rejected as above.
 
-One kind of call *does* count as initialization: the ``[[now_init]]``
-attribute (§6; §6.2 spells it ``[[must_init]]``, and its placement and
-spelling track an open committee question) declares that a function
-initializes the storage passed to each of its ``[[ref_to_uninit]]``
-parameters, and it requires at least one such
-parameter.  A call to a ``[[now_init]]`` function initializes the
+One kind of call *does* count as initialization: a parameter marked
+``[[must_init]]`` (§6.2), which implies ``[[ref_to_uninit]]``, declares that
+the function initializes the storage passed to it, and the ``[[now_init]]``
+attribute on a function (§4.7) declares the same of each of its
+``[[ref_to_uninit]]`` parameters and requires at least one (the attributes'
+placement and spelling track an open committee question).  ``[[must_init]]``
+cannot be applied to a pointer or reference to const, nor to a parameter of a
+constructor.  A call binding such a parameter initializes the
 argument's storage exactly as the equivalent direct store would --
 ``fill(&u)`` initializes ``u`` whole, ``fill(p)`` the storage ``p`` refers
 to there, ``fill(&a.m)`` the member ``m`` of ``a``,
@@ -1000,8 +1009,8 @@ nothing, §5.4) -- with the same reverse-direction consequence (after a
 already hold an object, which also catches double ``construct_at``).  This is
 the library annotation P4222R2 §4.4 requests, and
 Clang supplies it itself: a call to a ``std::construct_at`` whose first
-parameter is of pointer type is checked and credited as if the function were
-declared ``[[now_init]]`` with that parameter marked, so the real ``<memory>``
+parameter is of pointer type is checked and credited as if that parameter
+were marked ``[[must_init]]``, so the real ``<memory>``
 declaration -- included textually or imported from a module or header unit,
 whatever options built it -- checks the lifecycle *start* with no user
 declaration; so is ``std::allocator_traits<A>::construct``, the allocator-aware

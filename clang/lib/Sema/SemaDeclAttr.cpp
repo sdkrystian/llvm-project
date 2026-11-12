@@ -7269,6 +7269,22 @@ static void handleRefToUninitAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   D->addAttr(::new (S.Context) RefToUninitAttr(S.Context, AL));
 }
 
+static void handleMustInitAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  // D is a parameter; its type is checked as [[ref_to_uninit]]'s, and the
+  // constructor ban by SemaProfiles::checkMustInitOnConstructor.
+  if (S.Profiles().diagnoseInvalidRefToUninitMarker(D, AL.getLoc(),
+                                                    /*Diagnose=*/true,
+                                                    /*MustInit=*/true)) {
+    AL.setInvalid();
+    return;
+  }
+
+  D->addAttr(::new (S.Context) MustInitAttr(S.Context, AL));
+  // [[must_init]] implies [[ref_to_uninit]] (P4222R2 §6.2).
+  if (!D->hasAttr<RefToUninitAttr>())
+    D->addAttr(RefToUninitAttr::CreateImplicit(S.Context, AL.getRange()));
+}
+
 /// Diagnose \p AL, a [[now_init]] or [[now_uninit]] attribute, on a
 /// constructor \p D; see ProfilesFrameworkInternals.rst, "The std::init
 /// Implementation Map". Not profile policy -- fires regardless of -fprofiles.
@@ -8605,6 +8621,9 @@ ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D, const ParsedAttr &AL,
 
   case ParsedAttr::AT_RefToUninit:
     handleRefToUninitAttr(S, D, AL);
+    break;
+  case ParsedAttr::AT_MustInit:
+    handleMustInitAttr(S, D, AL);
     break;
 
   case ParsedAttr::AT_NowInit:

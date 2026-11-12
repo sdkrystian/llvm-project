@@ -1107,7 +1107,8 @@ bool SemaProfiles::isHandleType(QualType T) {
 
 bool SemaProfiles::diagnoseInvalidRefToUninitMarker(const Decl *D,
                                                     SourceLocation AttrLoc,
-                                                    bool Diagnose) {
+                                                    bool Diagnose,
+                                                    bool MustInit) {
   // A structured binding names the members it decomposes, which carry their
   // own markers, whatever its type.
   if (isa<DecompositionDecl>(D)) {
@@ -1138,10 +1139,14 @@ bool SemaProfiles::diagnoseInvalidRefToUninitMarker(const Decl *D,
           << (VD->getTLSKind() != VarDecl::TLS_None);
     return true;
   }
+  // [[must_init]] storage must be writable through the parameter.
   if ((!T->isPointerType() && !T->isReferenceType()) ||
-      T->isFunctionPointerType() || T->isFunctionReferenceType()) {
+      T->isFunctionPointerType() || T->isFunctionReferenceType() ||
+      (MustInit && getASTContext()
+                       .getBaseElementType(T->getPointeeType())
+                       .isConstQualified())) {
     if (Diagnose)
-      Diag(AttrLoc, diag::err_ref_to_uninit_attr_invalid_type);
+      Diag(AttrLoc, diag::err_ref_to_uninit_attr_invalid_type) << MustInit;
     return true;
   }
   return false;
@@ -1192,6 +1197,16 @@ void SemaProfiles::checkNowInitVacuity(FunctionDecl *FD) {
 
   Diag(A->getLocation(), diag::err_now_init_attr_no_marked_parameter);
   FD->dropAttr<NowInitAttr>();
+}
+
+void SemaProfiles::checkMustInitOnConstructor(FunctionDecl *FD) {
+  if (!isa<CXXConstructorDecl>(FD))
+    return;
+  for (ParmVarDecl *P : FD->parameters())
+    if (const auto *A = P->getAttr<MustInitAttr>(); A && !A->isInherited()) {
+      Diag(A->getLocation(), diag::err_lifecycle_attr_on_constructor) << A;
+      P->dropAttr<MustInitAttr>();
+    }
 }
 
 // std::init / ref_to_uninit (paper §5). Two mutually-recursive local
@@ -2501,6 +2516,10 @@ SemaProfiles::CalleeLifecycleRoles
 SemaProfiles::getCalleeLifecycleRoles(const FunctionDecl *FD) {
   SemaProfiles::CalleeLifecycleRoles Roles;
   Roles.InitializesRefToUninitParams = FD->hasAttr<NowInitAttr>();
+  Roles.HasMustInitParams =
+      llvm::any_of(FD->parameters(), [](const ParmVarDecl *P) {
+        return P->hasAttr<MustInitAttr>();
+      });
   Roles.DestroysParams = FD->hasAttr<NowUninitAttr>();
   if (const auto *Ctor = dyn_cast<CXXConstructorDecl>(FD))
     Roles.HandleTransfers = isStdHandleConstruction(Ctor);
@@ -2578,9 +2597,15 @@ bool SemaProfiles::CalleeLifecycleRoles::releasesParam(const ParmVarDecl *P,
   return roleOf(P) == KnownParamRole::Release && (KnownTrusted || !TrustedOnly);
 }
 
+bool SemaProfiles::CalleeLifecycleRoles::mustInitializeParam(
+    const ParmVarDecl *P) const {
+  return (HasMustInitParams && P->hasAttr<MustInitAttr>()) ||
+         (InitializesRefToUninitParams && isMarkedParam(P));
+}
+
 bool SemaProfiles::CalleeLifecycleRoles::initializesParam(
     const ParmVarDecl *P) const {
-  if (InitializesRefToUninitParams && isMarkedParam(P))
+  if (mustInitializeParam(P))
     return true;
   KnownParamRole R = roleOf(P);
   return KnownTrusted && (R == KnownParamRole::Construct ||

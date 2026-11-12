@@ -14449,8 +14449,10 @@ def err_uninit_attr_invalid_subject : Error<
   "'uninit' attribute cannot be applied to %select{a reference|"
   "a function parameter|a structured binding}0">;
 def err_ref_to_uninit_attr_invalid_type : Error<
-  "'ref_to_uninit' attribute only applies to pointers, references, non-union "
-  "classes, and functions returning them">;
+  "'%select{ref_to_uninit|must_init}0' attribute only applies to "
+  "%select{pointers, references, non-union classes, and functions returning "
+  "them|pointers and references to non-const objects, and non-union "
+  "classes}0">;
 def err_ref_to_uninit_attr_structured_binding : Error<
   "'ref_to_uninit' attribute cannot be applied to a structured binding">;
 def err_ref_to_uninit_attr_static_owner : Error<
