@@ -473,6 +473,10 @@ public:
   /// element -- operator[], at, front, or back: its call reads the array as a
   /// built-in array's element access does, on every path.
   static bool isStdArrayElementMember(const CXXMethodDecl *MD);
+  /// True if \p MD is the fill member of a std::array specialization whose
+  /// value type is scalar: a call to one assigns every element, which
+  /// initializes the array whole whatever its state.
+  static bool isStdArrayScalarFill(const CXXMethodDecl *MD);
 
   /// True if \p V is a handle variable whose referent the flow analysis
   /// tracks: a local or parameter of handle type (isHandleType) marked
@@ -1127,6 +1131,17 @@ public:
     /// The known-callee row's end iterator of the range at KnownParam, if
     /// the row has one: it bounds the range and is accepted in any state.
     std::optional<unsigned> EndParam;
+    /// The row assigns the scalar elements of the range at KnownParam
+    /// (std::fill, std::copy, and their kin): it initializes the range only
+    /// when the call provably covers the storage's whole extent, and is
+    /// otherwise an unmarked binding of it.
+    bool WholeExtent = false;
+    /// The known-callee row's element count of the range at KnownParam, if
+    /// the row has one (std::fill_n).
+    std::optional<unsigned> CountParam;
+    /// The source range of a copy row: its first iterator, followed by its
+    /// end, or the range itself (std::ranges::copy's).
+    std::optional<unsigned> SourceParam;
     /// The KnownParam's Construct role is a default-initialization's
     /// (std::uninitialized_default_construct), which leaves the [[uninit]]
     /// members of the range's objects uninitialized.
@@ -1203,6 +1218,11 @@ public:
   /// std::ranges object's, after the object -- or null; \p Partial is set
   /// when the call offsets it (std::end, std::next).
   static const Expr *derivedArgument(const CallExpr *CE, bool &Partial);
+  /// For a call \p CE of std::begin, std::cbegin, std::data, std::end,
+  /// std::cend, or the std::ranges object of one of those names (and
+  /// std::ranges::cdata), the range argument, with \p AtEnd set for an end;
+  /// null otherwise.
+  static const Expr *rangeEndpointArgument(const CallExpr *CE, bool &AtEnd);
   /// Derive what \p FD does to the storage bound to its parameters: the
   /// lifetime attributes of its most recent declaration plus the
   /// known-callee row, looked up at the call so the library's own

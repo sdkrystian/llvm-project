@@ -10,6 +10,7 @@
 // RUN: %clang_cc1 -triple i386-linux-gnu -fsyntax-only -verify=expected,pointer -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %t/va.cpp
 // RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %t/ranges_libcxx.cpp
 // RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %t/ranges_static.cpp
+// RUN: %clang_cc1 -fsyntax-only -verify -fprofiles -fprofiles-verify-deferred-checks -std=c++23 %t/algorithms.cpp
 
 // Clang knows the std::init roles of std::construct_at (its pointer first
 // parameter must refer to uninitialized memory and is initialized by the
@@ -2118,3 +2119,171 @@ int fill_iterators(int *p [[ref_to_uninit]], int *e [[ref_to_uninit]]) {
   std::ranges::uninitialized_fill(p, e, 1);
   return *p; // OK
 }
+
+//--- algorithms.cpp
+// The standard algorithms that assign the scalar elements of a range --
+// std::fill, std::fill_n, std::iota, std::generate, std::generate_n,
+// std::copy, std::copy_n, their execution-policy overloads and std::ranges
+// objects, and std::array::fill -- initialize it when the call provably
+// covers its whole extent, in libstdc++ 15's shapes.
+[[profiles::enforce(std::init)]];
+
+namespace std {
+using size_t = decltype(sizeof 0);
+using ptrdiff_t = decltype((int *)0 - (int *)0);
+template <class T, size_t N> constexpr T *begin(T (&a)[N]) noexcept;
+template <class T, size_t N> constexpr T *end(T (&a)[N]) noexcept;
+template <class T, size_t N> constexpr size_t size(const T (&a)[N]) noexcept;
+template <class FwdIt, class T> void fill(FwdIt first, FwdIt last, const T &v);
+template <class OutIt, class Size, class T> OutIt fill_n(OutIt first, Size n, const T &v);
+template <class FwdIt, class T> void iota(FwdIt first, FwdIt last, T v);
+template <class FwdIt, class Gen> void generate(FwdIt first, FwdIt last, Gen g);
+template <class OutIt, class Size, class Gen> OutIt generate_n(OutIt first, Size n, Gen g);
+template <class InIt, class OutIt> OutIt copy(InIt first, InIt last, OutIt result);
+template <class InIt, class Size, class OutIt> OutIt copy_n(InIt first, Size n, OutIt result);
+template <class Policy, class FwdIt, class T>
+void fill(Policy &&policy, FwdIt first, FwdIt last, const T &v);
+template <class Policy, class FwdIt1, class Size, class FwdIt2>
+FwdIt2 copy_n(Policy &&policy, FwdIt1 first, Size n, FwdIt2 result);
+template <class FwdIt, class T> void uninitialized_fill(FwdIt first, FwdIt last, const T &x);
+namespace execution {
+struct sequenced_policy {};
+inline constexpr sequenced_policy seq{};
+} // namespace execution
+template <class T, size_t N> struct array {
+  T _M_elems[N];
+  using value_type = T;
+  constexpr T *begin() noexcept;
+  constexpr T *end() noexcept;
+  constexpr size_t size() const noexcept;
+  constexpr T &operator[](size_t n) noexcept;
+  constexpr void fill(const T &v);
+};
+template <class T> class span {
+  T *_M_ptr;
+  size_t _M_extent;
+
+public:
+  using element_type = T;
+  T *begin() const noexcept;
+  T *end() const noexcept;
+  size_t size() const noexcept;
+};
+namespace ranges {
+struct __fill_fn {
+  template <class Out, class Sent, class T>
+  constexpr Out operator()(Out first, Sent last, const T &v) const;
+  template <class R, class T> constexpr R &operator()(R &&r, const T &v) const;
+};
+inline constexpr __fill_fn fill{};
+struct __fill_n_fn {
+  template <class Out, class T>
+  constexpr Out operator()(Out first, ptrdiff_t n, const T &v) const;
+};
+inline constexpr __fill_n_fn fill_n{};
+struct __iota_fn {
+  template <class Out, class Sent, class T>
+  constexpr Out operator()(Out first, Sent last, T v) const;
+  template <class R, class T> constexpr R &operator()(R &&r, T v) const;
+};
+inline constexpr __iota_fn iota{};
+struct __copy_fn {
+  template <class In, class Sent, class Out>
+  constexpr Out operator()(In first, Sent last, Out result) const;
+  template <class R, class Out> constexpr Out operator()(R &&r, Out result) const;
+};
+inline constexpr __copy_fn copy{};
+} // namespace ranges
+} // namespace std
+
+void use(int);
+
+// Every row over a whole array initializes it
+int fill_begin_end() { int a [[uninit]] [4]; std::fill(std::begin(a), std::end(a), 0); return a[3]; }
+int fill_pointer_end() { int a [[uninit]] [4]; std::fill(a, a + 4, 0); return a[3]; }
+int fill_element_end() { int a [[uninit]] [4]; std::fill(a, &a[4], 0); return a[3]; }
+int fill_n_count() { int a [[uninit]] [4]; std::fill_n(a, 4, 0); return a[3]; }
+int fill_n_size() { int a [[uninit]] [4]; std::fill_n(a, std::size(a), 0); return a[3]; }
+int iota_whole() { int a [[uninit]] [4]; std::iota(a, a + 4, 0); return a[3]; }
+int generate_whole() { int a [[uninit]] [4]; std::generate(a, a + 4, [] { return 1; }); return a[3]; }
+int generate_n_whole() { int a [[uninit]] [4]; std::generate_n(a, 4, [] { return 1; }); return a[3]; }
+int copy_whole(const int *s) { int a [[uninit]] [4]; std::copy(s, s + 4, a); return a[3]; }
+int copy_n_whole() { int a [[uninit]] [8]; std::copy_n("abcdefgh", 8, a); return a[3]; }
+int fill_policy() { int a [[uninit]] [4]; std::fill(std::execution::seq, a, a + 4, 0); return a[3]; }
+int copy_n_policy(const int *s) { int a [[uninit]] [4]; std::copy_n(std::execution::seq, s, 4, a); return a[3]; }
+int ranges_fill_range() { int a [[uninit]] [4]; std::ranges::fill(a, 0); return a[3]; }
+int ranges_fill_iterators() { int a [[uninit]] [4]; std::ranges::fill(a, a + 4, 0); return a[3]; }
+int ranges_fill_n() { int a [[uninit]] [4]; std::ranges::fill_n(a, 4, 0); return a[3]; }
+int ranges_iota_range() { int a [[uninit]] [4]; std::ranges::iota(a, 0); return a[3]; }
+int ranges_copy_range(const int (&s)[4]) { int a [[uninit]] [4]; std::ranges::copy(s, a); return a[3]; }
+
+// A std::array is filled through its iterators, as a range, or by its fill
+int std_array_iterators() { std::array<int, 4> a [[uninit]]; std::fill(a.begin(), a.end(), 0); return a[3]; }
+int std_array_range() { std::array<int, 4> a [[uninit]]; std::ranges::fill(a, 0); return a[3]; }
+int std_array_member_fill() { std::array<int, 4> a [[uninit]]; a.fill(0); return a[3]; }
+int std_array_fill_n_size() { std::array<int, 4> a [[uninit]]; std::fill_n(a.begin(), a.size(), 0); return a[3]; }
+
+// A marked span is filled through its own begin and end
+void span_iterators(std::span<int> s [[ref_to_uninit]]) { std::fill(s.begin(), s.end(), 0); }
+void span_size(std::span<int> s [[ref_to_uninit]]) { std::fill_n(s.begin(), s.size(), 0); }
+
+// A marked pointer's extent is unknown: the fill initializes its referent
+int marked_pointer(int *p [[ref_to_uninit]], int n) { std::fill(p, p + n, 0); return *p; }
+
+// Filling again, or filling initialized storage, assigns
+int fill_twice() { int a [[uninit]] [4]; std::fill(a, a + 4, 0); std::fill(a, a + 4, 1); return a[3]; }
+void fill_initialized() { int a[4] = {}; std::fill(a, a + 4, 1); }
+
+// An extent that is not provably whole initializes nothing
+int fill_prefix() {
+  int a [[uninit]] [4];
+  std::fill(a, a + 2, 0); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  return a[3]; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+void fill_n_short() {
+  int a [[uninit]] [4];
+  std::fill_n(a, 3, 0); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+void fill_from_element() {
+  int a [[uninit]] [4];
+  std::fill(&a[0], &a[4], 0); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+void fill_other_end(int (&b)[4]) {
+  int a [[uninit]] [4];
+  std::fill(a, b + 4, 0); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+void copy_short(const int *s) {
+  int a [[uninit]] [4];
+  std::copy(s, s + 3, a); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+void span_prefix(std::span<int> s [[ref_to_uninit]]) {
+  std::fill(s.begin(), s.begin() + 1, 0); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// A class value type is assigned by its own operator
+struct Assignable { Assignable &operator=(int); };
+void class_value(Assignable *p [[ref_to_uninit]]) {
+  std::fill(p, p + 4, 0); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// A copy reads its source
+void copy_from_uninitialized() {
+  int s [[uninit]] [4];
+  int a [[uninit]] [4];
+  std::copy(s, s + 4, a); // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+}
+
+// A constructor fills its [[uninit]] array members
+struct Members {
+  int buf [[uninit]] [8];
+  std::array<int, 4> arr [[uninit]];
+  Members() {
+    std::fill(buf, buf + 8, 0);
+    std::fill(arr.begin(), arr.end(), 0);
+    use(buf[7] + arr[3]);
+  }
+};
+
+// A function template is judged per specialization
+template <class T> T fill_template() { T a [[uninit]] [4]; std::fill(a, a + 4, T()); return a[3]; }
+template int fill_template<int>();

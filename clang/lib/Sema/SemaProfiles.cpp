@@ -1818,6 +1818,16 @@ struct KnownCalleeEntry {
   unsigned EndParam = NoEndParam;
   /// A Derive row whose result is past its argument's start (std::end).
   bool DeriveOffsets = false;
+  /// An InitializeAnyState row that assigns the range's elements, kept only
+  /// where its value type is scalar and crediting only a proven whole
+  /// extent (CalleeLifecycleRoles::WholeExtent).
+  bool ScalarValueOnly = false;
+  /// The index of the element count of the range Param begins, or
+  /// NoEndParam.
+  unsigned CountParam = NoEndParam;
+  /// The index of a copy row's source range (its first iterator, or the
+  /// range), or NoEndParam.
+  unsigned SourceParam = NoEndParam;
 };
 } // namespace
 
@@ -1880,6 +1890,20 @@ static constexpr KnownCalleeEntry stdAnyShapeRow(StringRef Name, unsigned Arity,
 /// \p E, whose role parameter may also be a handle.
 static constexpr KnownCalleeEntry orHandle(KnownCalleeEntry E) {
   E.AcceptsHandle = true;
+  return E;
+}
+
+/// \p E, an InitializeAnyState row that assigns the scalar elements of its
+/// range, bounded by its end iterator, the count \p CountParam, or the
+/// length of the source range \p SourceParam (KnownCalleeEntry).
+static constexpr KnownCalleeEntry
+scalarWrite(KnownCalleeEntry E,
+            unsigned CountParam = KnownCalleeEntry::NoEndParam,
+            unsigned SourceParam = KnownCalleeEntry::NoEndParam) {
+  E.ScalarValueOnly = true;
+  E.AcceptsHandle = true;
+  E.CountParam = CountParam;
+  E.SourceParam = SourceParam;
   return E;
 }
 
@@ -2063,6 +2087,27 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
     orHandle(stdRow("destroy", 3, 1, KnownParamRole::Destroy, 2)),
     orHandle(stdRow("destroy_n", 2, 0, KnownParamRole::Destroy)),
     orHandle(stdRow("destroy_n", 3, 1, KnownParamRole::Destroy)),
+    scalarWrite(stdRow("fill", 3, 0, KnownParamRole::InitializeAnyState, 1)),
+    scalarWrite(stdRow("fill", 4, 1, KnownParamRole::InitializeAnyState, 2)),
+    scalarWrite(stdRow("fill_n", 3, 0, KnownParamRole::InitializeAnyState), 1),
+    scalarWrite(stdRow("fill_n", 4, 1, KnownParamRole::InitializeAnyState), 2),
+    scalarWrite(stdRow("iota", 3, 0, KnownParamRole::InitializeAnyState, 1)),
+    scalarWrite(
+        stdRow("generate", 3, 0, KnownParamRole::InitializeAnyState, 1)),
+    scalarWrite(
+        stdRow("generate", 4, 1, KnownParamRole::InitializeAnyState, 2)),
+    scalarWrite(stdRow("generate_n", 3, 0, KnownParamRole::InitializeAnyState),
+                1),
+    scalarWrite(stdRow("generate_n", 4, 1, KnownParamRole::InitializeAnyState),
+                2),
+    scalarWrite(stdRow("copy", 3, 2, KnownParamRole::InitializeAnyState),
+                KnownCalleeEntry::NoEndParam, 0),
+    scalarWrite(stdRow("copy", 4, 3, KnownParamRole::InitializeAnyState),
+                KnownCalleeEntry::NoEndParam, 1),
+    scalarWrite(stdRow("copy_n", 3, 2, KnownParamRole::InitializeAnyState), 1,
+                0),
+    scalarWrite(stdRow("copy_n", 4, 3, KnownParamRole::InitializeAnyState), 2,
+                1),
     stdAnyShapeRow("begin", 1, KnownParamRole::Derive),
     stdAnyShapeRow("cbegin", 1, KnownParamRole::Derive),
     stdAnyShapeRow("data", 1, KnownParamRole::Derive),
@@ -2100,6 +2145,23 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
     cpoAnyShapeRow("empty", 1, KnownParamRole::AnyState),
     cpoAnyShapeRow("distance", 1, KnownParamRole::AnyState),
     cpoAnyShapeRow("distance", 2, KnownParamRole::AnyState),
+    scalarWrite(cpoRow("fill", 3, 0, KnownParamRole::InitializeAnyState, 1)),
+    scalarWrite(cpoRangeRow("fill", 2, 0, KnownParamRole::InitializeAnyState)),
+    scalarWrite(cpoRow("fill_n", 3, 0, KnownParamRole::InitializeAnyState), 1),
+    scalarWrite(
+        cpoRow("generate", 3, 0, KnownParamRole::InitializeAnyState, 1)),
+    scalarWrite(
+        cpoRangeRow("generate", 2, 0, KnownParamRole::InitializeAnyState)),
+    scalarWrite(cpoRow("generate_n", 3, 0, KnownParamRole::InitializeAnyState),
+                1),
+    scalarWrite(cpoRow("iota", 3, 0, KnownParamRole::InitializeAnyState, 1)),
+    scalarWrite(cpoRangeRow("iota", 2, 0, KnownParamRole::InitializeAnyState)),
+    scalarWrite(cpoRow("copy", 3, 2, KnownParamRole::InitializeAnyState),
+                KnownCalleeEntry::NoEndParam, 0),
+    scalarWrite(cpoRow("copy", 2, 1, KnownParamRole::InitializeAnyState),
+                KnownCalleeEntry::NoEndParam, 0),
+    scalarWrite(cpoRow("copy_n", 3, 2, KnownParamRole::InitializeAnyState), 1,
+                0),
     cpoRow("construct_at", KnownCalleeEntry::AnyArity, 0,
            KnownParamRole::Construct),
     cpoRow("destroy_at", 1, 0, KnownParamRole::Destroy),
@@ -2484,6 +2546,20 @@ bool SemaProfiles::bindsNoArgument(const FunctionDecl *FD) {
                    Entry->Role == KnownParamRole::AnyState);
 }
 
+const Expr *SemaProfiles::rangeEndpointArgument(const CallExpr *CE,
+                                                bool &AtEnd) {
+  bool Partial = false;
+  const Expr *Arg = derivedArgument(CE, Partial);
+  if (!Arg)
+    return nullptr;
+  StringRef Name = findKnownCallee(CE->getDirectCallee())->Name;
+  AtEnd = Name == "end" || Name == "cend";
+  return AtEnd || Name == "begin" || Name == "cbegin" || Name == "data" ||
+                 Name == "cdata"
+             ? Arg
+             : nullptr;
+}
+
 const Expr *SemaProfiles::derivedArgument(const CallExpr *CE, bool &Partial) {
   const FunctionDecl *FD = CE->getDirectCallee();
   const KnownCalleeEntry *Entry = FD ? findKnownCallee(FD) : nullptr;
@@ -2535,6 +2611,21 @@ SemaProfiles::getCalleeLifecycleRoles(const FunctionDecl *FD) {
       allocatorHasOwnMember(FD, "destroy")) {
     Roles.OpaqueParam = M.Entry->Param;
     return Roles;
+  }
+  // An element-assigning row applies to a range of scalars only; of any other
+  // value type its assignment is the class's, which initializes nothing.
+  if (M.Entry->ScalarValueOnly) {
+    QualType T = rangeValueType(FD->getParamDecl(M.Entry->Param)->getType());
+    if (!T.isNull())
+      if (const ArrayType *AT = FD->getASTContext().getAsArrayType(T))
+        T = AT->getElementType();
+    if (T.isNull() || !T->isScalarType())
+      return Roles;
+    Roles.WholeExtent = true;
+    if (M.Entry->CountParam < FD->getNumParams())
+      Roles.CountParam = M.Entry->CountParam;
+    if (M.Entry->SourceParam < FD->getNumParams())
+      Roles.SourceParam = M.Entry->SourceParam;
   }
   Roles.KnownParam = M.Entry->Param;
   Roles.KnownRole = M.Entry->Role;
@@ -3013,6 +3104,14 @@ bool SemaProfiles::isStdArrayObservingMember(const CXXMethodDecl *MD) {
     return false;
   return llvm::is_contained(ArrayRef<StringRef>{"size", "max_size", "empty"},
                             MD->getName());
+}
+
+bool SemaProfiles::isStdArrayScalarFill(const CXXMethodDecl *MD) {
+  const auto *CTSD = dyn_cast<ClassTemplateSpecializationDecl>(MD->getParent());
+  return MD->getIdentifier() && MD->getName() == "fill" &&
+         isStdArrayClass(CTSD) && CTSD->getTemplateArgs().size() != 0 &&
+         CTSD->getTemplateArgs()[0].getKind() == TemplateArgument::Type &&
+         CTSD->getTemplateArgs()[0].getAsType()->isScalarType();
 }
 
 bool SemaProfiles::isStdArrayElementMember(const CXXMethodDecl *MD) {
@@ -5347,11 +5446,13 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
       Target && bindingTargetCanCarryMarker(Kind) &&
       (Parm ? Roles.isMarkedParam(Parm) : Target->hasAttr<RefToUninitAttr>());
   // An initializing parameter or a range's end iterator accepts storage in
-  // any state; a transfer parameter's storage is judged where the handle
-  // under construction lands, and a handle an assignment takes by value
-  // where it is assigned (checkInitProfileHandleReseat).
-  if (Parm && (Roles.isInitializingParam(Parm) || Roles.isEndParam(Parm) ||
-               Roles.transfersParam(Parm) ||
+  // any state -- an element-assigning row's range only where the CFG pass
+  // proves the call covers it whole (CalleeLifecycleRoles::WholeExtent), so
+  // it is an unmarked binding here; a transfer parameter's storage is judged
+  // where the handle under construction lands, and a handle an assignment
+  // takes by value where it is assigned (checkInitProfileHandleReseat).
+  if (Parm && ((Roles.isInitializingParam(Parm) && !Roles.WholeExtent) ||
+               Roles.isEndParam(Parm) || Roles.transfersParam(Parm) ||
                (isHandleType(T) && isAssignmentSource(Parm))))
     return;
   // A role parameter taking a class-type range by reference judges the
@@ -5486,8 +5587,10 @@ void SemaProfiles::checkInitProfileObjectArgument(const Expr *Object,
   // argument for static call operators all the same, so skip them here.
   if (Method->isStatic())
     return;
-  // A std::array's address and observing members read no element.
-  if (isStdArrayAddressMember(Method) || isStdArrayObservingMember(Method))
+  // A std::array's address and observing members read no element, and its
+  // scalar fill assigns every element.
+  if (isStdArrayAddressMember(Method) || isStdArrayObservingMember(Method) ||
+      isStdArrayScalarFill(Method))
     return;
   // An arrow call's object argument arrives as the pointer expression, a dot
   // call's as the object glvalue; the implicit object parameter's type is the

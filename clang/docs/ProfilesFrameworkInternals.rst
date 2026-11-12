@@ -1001,7 +1001,24 @@ the acceptance survives but the credit does not, mirroring the release rows'
 ``Kill``, because a credit suppresses later diagnostics.  Unlike a
 ``[[must_init]]`` parameter, the role is one-directional: it
 asserts nothing about the prior state, so an initialized destination is legal
-and a repeated call is no double initialization.
+and a repeated call is no double initialization.  An *element-assigning* row
+(``KnownCalleeEntry::ScalarValueOnly``: ``std::fill``, ``std::fill_n``,
+``std::iota``, ``std::generate``, ``std::generate_n``, ``std::copy``,
+``std::copy_n``, their policy overloads and ``std::ranges`` objects) is an
+initializing row kept only where the range's value type is scalar -- a class's
+assignment is the class's, which initializes nothing -- and it credits only
+a proven whole extent (``CalleeLifecycleRoles::WholeExtent``,
+``coversWholeExtent`` in AnalysisBasedWarnings.cpp): the range passed as
+itself, an end iterator at the same storage's end, or a count
+(``CountParam``) or a copy's source length (``SourceParam``) equal to the
+element count, never a range starting at an element's address.  A marked
+pointer's referent, whose extent is unknown, is credited as the
+``std::uninitialized_*`` rows credit it.  The role argument is otherwise an
+ordinary unmarked binding: the parse-time funnel judges or defers it like any
+other, and the CFG pass judges it, or consumes its tracked leaves where the
+call credits the storage (``creditsInitializingParam``).  ``std::array``'s
+``fill`` of a scalar value type (``SemaProfiles::isStdArrayScalarFill``) binds
+no object argument and writes its object whole.
 
 
 Handles (std::init)
@@ -1674,9 +1691,11 @@ Deliberate Strictnesses
   a ``std::array``'s ``rbegin``) earns nothing, though a later construction
   of the whole storage is rejected, and a marked pointer's further elements
   (``p[1]``) are never credited.
-  ``std::fill`` assigns rather than initializes: into a
-  still-uninitialized ``[[uninit]]`` array it is rejected like any unmarked
-  binding (``std::uninitialized_fill`` and ``memset`` initialize).
+  ``std::fill`` and its kin assign rather than initialize where the value
+  type is not scalar or the call does not provably cover the whole storage
+  (``std::fill(a, a + 2, 0)``): into a still-uninitialized ``[[uninit]]``
+  array such a call is rejected like any unmarked binding
+  (``std::uninitialized_fill`` and ``memset`` initialize).
 - A marked handle's referent is one object, as a marked pointer's is, and an
   element through the handle (``s[i]``, ``s.front()``) is judged by its form,
   as ``p[i]`` is: a read of one is rejected even after the whole range is
@@ -1881,7 +1900,9 @@ Missed Diagnostics
 - ``memset``, ``memcpy``, and ``memmove`` initialize their whole destination
   whatever the byte count and the type: after ``memset(arr, 0, sizeof(int))`` a
   read of ``arr[3]`` is accepted, and a class object written by ``memcpy`` is
-  credited although P4222R2 §6 asks for ``construct_at``.
+  credited although P4222R2 §6 asks for ``construct_at``.  So do the
+  element-assigning algorithms through a marked pointer, whose extent is
+  unknown: ``std::fill(p, p + 1, 0)`` initializes ``p``'s whole referent.
 - Copies of a marked pointer's or handle's object representation other than a
   byte copy between two pointer objects of the same type --
   ``std::copy``/``std::ranges::copy`` of pointer objects, a byte copy or

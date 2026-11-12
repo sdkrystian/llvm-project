@@ -1281,6 +1281,25 @@ only the acceptance survives, so a later read of the destination is
 diagnosed there, while the ``__builtin_`` spellings keep their IDs
 everywhere.
 
+The standard algorithms that assign the elements of a range of scalars --
+``std::fill``, ``std::fill_n``, ``std::iota``, ``std::generate``,
+``std::generate_n``, ``std::copy``, and ``std::copy_n``, their
+execution-policy overloads and ``std::ranges`` objects -- and the ``fill``
+member of a ``std::array`` of scalars initialize the range when the call
+provably covers its whole storage: the range passed as itself
+(``std::ranges::fill(a, 0)``, ``a.fill(0)``), an end iterator at the same
+storage's end (``a + 4``, ``&a[4]``, ``std::end(a)``, ``a.end()``), or a count
+or a source length equal to its element count (a constant,
+``std::size(a)``, or ``a.size()``); a marked span is covered by its own
+``begin()`` and ``end()`` or ``size()``.  Like ``memset``, such a call accepts
+the range in any state and constructs nothing, so filling twice is no double
+initialization.  Through a marked pointer, whose extent is unknown, the call
+initializes the referent as ``std::uninitialized_fill`` does.  A call that
+does not provably cover the whole storage -- ``std::fill(a, a + 2, 0)``, or
+one starting at an element's address ``&a[0]`` -- and a call over a class
+value type, which assigns through the class's operator, bind the range as an
+ordinary unmarked argument, rejected while the storage is uninitialized.
+
 ``va_start`` and ``va_copy`` are recognized the same way: their ``va_list``
 destination accepts storage in any state and is initialized by the call, so
 ``va_list ap [[uninit]]; va_start(ap, n); ... va_end(ap);`` is the variadic

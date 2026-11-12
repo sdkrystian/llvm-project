@@ -2014,6 +2014,25 @@ static QualType designationKey(const ASTContext &Ctx, QualType T) {
   }
 }
 
+/// The number of elements of \p T as a constant array or a std::array, and
+/// in \p Elem their type; std::nullopt when \p T is neither.
+static std::optional<uint64_t> elementCount(const ASTContext &Ctx, QualType T,
+                                            QualType &Elem) {
+  if (const ConstantArrayType *CAT = Ctx.getAsConstantArrayType(T)) {
+    Elem = CAT->getElementType();
+    return CAT->getZExtSize();
+  }
+  const auto *CTSD = dyn_cast_or_null<ClassTemplateSpecializationDecl>(
+      T->getAsCXXRecordDecl());
+  if (!CTSD || !CTSD->getIdentifier() || CTSD->getName() != "array" ||
+      !CTSD->isInStdNamespace() || CTSD->getTemplateArgs().size() != 2 ||
+      CTSD->getTemplateArgs()[0].getKind() != TemplateArgument::Type ||
+      CTSD->getTemplateArgs()[1].getKind() != TemplateArgument::Integral)
+    return std::nullopt;
+  Elem = CTSD->getTemplateArgs()[0].getAsType();
+  return CTSD->getTemplateArgs()[1].getAsIntegral().getZExtValue();
+}
+
 /// The number of elements of \p T as a constant array or a std::array, nested
 /// ones multiplied out, or std::nullopt when \p T is neither or a bound is
 /// unknown.
@@ -2021,23 +2040,12 @@ static std::optional<uint64_t> designationExtent(const ASTContext &Ctx,
                                                  QualType T) {
   std::optional<uint64_t> N;
   while (true) {
-    if (const ConstantArrayType *CAT = Ctx.getAsConstantArrayType(T)) {
-      N = N.value_or(1) * CAT->getZExtSize();
-      T = CAT->getElementType();
-      continue;
-    }
-    if (T->isArrayType())
-      return std::nullopt;
-    const auto *CTSD = dyn_cast_or_null<ClassTemplateSpecializationDecl>(
-        T->getAsCXXRecordDecl());
-    if (!CTSD || !CTSD->getIdentifier() || CTSD->getName() != "array" ||
-        !CTSD->isInStdNamespace() || CTSD->getTemplateArgs().size() != 2 ||
-        CTSD->getTemplateArgs()[0].getKind() != TemplateArgument::Type ||
-        CTSD->getTemplateArgs()[1].getKind() != TemplateArgument::Integral)
-      return N;
-    N = N.value_or(1) *
-        CTSD->getTemplateArgs()[1].getAsIntegral().getZExtValue();
-    T = CTSD->getTemplateArgs()[0].getAsType();
+    QualType Elem;
+    std::optional<uint64_t> Count = elementCount(Ctx, T, Elem);
+    if (!Count)
+      return T->isArrayType() ? std::nullopt : N;
+    N = N.value_or(1) * *Count;
+    T = Elem;
   }
 }
 
@@ -4829,6 +4837,193 @@ static void noteUnresolvedFlowLeaf(SmallVectorImpl<const Expr *> &Unresolved,
     Unresolved.push_back(Leaf);
 }
 
+/// A position in storage a pointer or iterator argument designates: the
+/// storage, the element offset from its start or its end, and whether it is
+/// spelled as an element's address (\c &X[K]).
+struct StoragePosition {
+  const Expr *Storage = nullptr;
+  uint64_t Offset = 0;
+  bool AtEnd = false;
+  bool Element = false;
+};
+
+/// The position the pointer or iterator \p E designates: \c X (a decayed
+/// array), \c &X[K], \c P + K, std::begin, std::data, or std::end of \c X
+/// (or the std::ranges objects of those names), \c X.begin(), \c X.data(),
+/// or \c X.end(), or a pointer variable's own position; an explicit cast
+/// designates none.
+static std::optional<StoragePosition> storagePosition(const ASTContext &Ctx,
+                                                      const Expr *E) {
+  E = E->IgnoreImplicit()->IgnoreParenImpCasts();
+  if (E->getType()->isArrayType())
+    return StoragePosition{E};
+  if (const Expr *Op = SemaProfiles::addressOfOperand(E)) {
+    const auto *ASE = dyn_cast<ArraySubscriptExpr>(Op->IgnoreParens());
+    const Expr *Base = ASE ? ASE->getBase()->IgnoreParenImpCasts() : nullptr;
+    std::optional<llvm::APSInt> K =
+        Base ? ASE->getIdx()->getIntegerConstantExpr(Ctx) : std::nullopt;
+    if (!Base || !Base->getType()->isArrayType() || !K || K->isNegative())
+      return std::nullopt;
+    return StoragePosition{Base, K->getZExtValue(), /*AtEnd=*/false,
+                           /*Element=*/true};
+  }
+  if (const auto *BO = dyn_cast<BinaryOperator>(E);
+      BO && BO->getOpcode() == BO_Add && BO->getType()->isPointerType()) {
+    const Expr *Ptr = BO->getLHS(), *Off = BO->getRHS();
+    if (!Ptr->getType()->isPointerType())
+      std::swap(Ptr, Off);
+    std::optional<StoragePosition> Pos = storagePosition(Ctx, Ptr);
+    std::optional<llvm::APSInt> K = Off->getIntegerConstantExpr(Ctx);
+    if (!Pos || Pos->AtEnd || !K || K->isNegative())
+      return std::nullopt;
+    Pos->Offset += K->getZExtValue();
+    return Pos;
+  }
+  if (const auto *CE = dyn_cast<CallExpr>(E)) {
+    bool AtEnd = false;
+    if (const Expr *R = SemaProfiles::rangeEndpointArgument(CE, AtEnd))
+      return StoragePosition{R->IgnoreParenImpCasts(), 0, AtEnd};
+    const auto *MCE = dyn_cast<CXXMemberCallExpr>(CE);
+    const CXXMethodDecl *MD = MCE ? MCE->getMethodDecl() : nullptr;
+    const Expr *Obj = MCE ? MCE->getImplicitObjectArgument() : nullptr;
+    if (!MD || !MD->getIdentifier() || MCE->getNumArgs() || !Obj ||
+        Obj->getType()->isPointerType())
+      return std::nullopt;
+    StringRef Name = MD->getName();
+    if (Name == "begin" || Name == "cbegin" || Name == "data")
+      return StoragePosition{Obj->IgnoreParenImpCasts()};
+    if (Name == "end" || Name == "cend")
+      return StoragePosition{Obj->IgnoreParenImpCasts(), 0, /*AtEnd=*/true};
+    return std::nullopt;
+  }
+  if (isa<DeclRefExpr>(E) && E->getType()->isPointerType())
+    return StoragePosition{E};
+  return std::nullopt;
+}
+
+/// True if the glvalues or pointers \p A and \p B name the same storage: the
+/// same variable, or the same member of the same object.
+static bool namesSameStorage(const Expr *A, const Expr *B) {
+  A = A->IgnoreParenImpCasts();
+  B = B->IgnoreParenImpCasts();
+  if (isa<CXXThisExpr>(A))
+    return isa<CXXThisExpr>(B);
+  if (const auto *DA = dyn_cast<DeclRefExpr>(A)) {
+    const auto *DB = dyn_cast<DeclRefExpr>(B);
+    return DB && DA->getDecl() == DB->getDecl();
+  }
+  const auto *MA = dyn_cast<MemberExpr>(A);
+  const auto *MB = dyn_cast<MemberExpr>(B);
+  return MA && MB && MA->getMemberDecl() == MB->getMemberDecl() &&
+         MA->isArrow() == MB->isArrow() &&
+         namesSameStorage(MA->getBase(), MB->getBase());
+}
+
+/// True if the call-like \p CallLike of a callee with \p Roles, an
+/// element-assigning row (CalleeLifecycleRoles::WholeExtent), covers the
+/// whole storage its role argument begins -- not at an element's address,
+/// which names that element (P4222R2 §5.4): the range is passed as itself,
+/// or its end iterator is the same storage's end, or its count or its source
+/// range's length is the storage's element count (a constant, or the
+/// storage's size()) -- for a handle, which has no constant extent, an end
+/// or a count taken from the same handle.
+static bool coversWholeExtent(const ASTContext &Ctx, const Expr *CallLike,
+                              const SemaProfiles::CalleeLifecycleRoles &Roles) {
+  llvm::DenseMap<unsigned, std::pair<const ParmVarDecl *, const Expr *>> Args;
+  forEachArgumentBinding(
+      Ctx, CallLike,
+      [&](const ParmVarDecl *P, QualType, const Expr *Arg, bool Variadic) {
+        if (P && !Variadic)
+          Args[P->getFunctionScopeIndex()] = {P, Arg};
+      });
+  auto ArgAt = [&](std::optional<unsigned> I) -> const Expr * {
+    auto It = I ? Args.find(*I) : Args.end();
+    return It == Args.end() ? nullptr : It->second.second;
+  };
+  auto It = Args.find(*Roles.KnownParam);
+  if (It == Args.end())
+    return false;
+  // A range passed as itself is covered whole.
+  if (It->second.first->getType()->isReferenceType())
+    return true;
+  std::optional<StoragePosition> Begin =
+      storagePosition(Ctx, It->second.second);
+  if (!Begin || Begin->AtEnd || Begin->Offset || Begin->Element)
+    return false;
+  QualType Elem;
+  std::optional<uint64_t> N =
+      elementCount(Ctx, Begin->Storage->getType().getNonReferenceType(), Elem);
+  // A count equal to the element count, or the same storage's size().
+  auto CountCovers = [&](const Expr *Count) {
+    if (!Count)
+      return false;
+    Count = Count->IgnoreParenImpCasts();
+    if (std::optional<llvm::APSInt> K = Count->getIntegerConstantExpr(Ctx))
+      return N && !K->isNegative() && K->getZExtValue() == *N;
+    const auto *CE = dyn_cast<CallExpr>(Count);
+    const FunctionDecl *FD = CE ? CE->getDirectCallee() : nullptr;
+    if (!FD || !FD->getIdentifier() || FD->getName() != "size")
+      return false;
+    if (const auto *MCE = dyn_cast<CXXMemberCallExpr>(CE))
+      return MCE->getImplicitObjectArgument() &&
+             namesSameStorage(MCE->getImplicitObjectArgument(), Begin->Storage);
+    return FD->isInStdNamespace() && CE->getNumArgs() == 1 &&
+           namesSameStorage(CE->getArg(0), Begin->Storage);
+  };
+  if (Roles.EndParam) {
+    std::optional<StoragePosition> End =
+        ArgAt(Roles.EndParam) ? storagePosition(Ctx, ArgAt(Roles.EndParam))
+                              : std::nullopt;
+    return End && namesSameStorage(End->Storage, Begin->Storage) &&
+           (End->AtEnd || (N && End->Offset == *N));
+  }
+  if (Roles.CountParam)
+    return CountCovers(ArgAt(Roles.CountParam));
+  if (!Roles.SourceParam || !N)
+    return false;
+  // A copy's source range: as itself, or its first iterator and its end.
+  auto Src = Args.find(*Roles.SourceParam);
+  if (Src == Args.end())
+    return false;
+  if (Src->second.first->getType()->isReferenceType()) {
+    std::optional<uint64_t> SN = elementCount(
+        Ctx, Src->second.second->getType().getNonReferenceType(), Elem);
+    return SN && *SN == *N;
+  }
+  std::optional<StoragePosition> First =
+      storagePosition(Ctx, Src->second.second);
+  const Expr *LastArg = ArgAt(*Roles.SourceParam + 1);
+  std::optional<StoragePosition> Last =
+      LastArg ? storagePosition(Ctx, LastArg) : std::nullopt;
+  if (!First || First->AtEnd || !Last ||
+      !namesSameStorage(First->Storage, Last->Storage))
+    return false;
+  if (Last->AtEnd) {
+    std::optional<uint64_t> SN = elementCount(
+        Ctx, First->Storage->getType().getNonReferenceType(), Elem);
+    return SN && *SN >= First->Offset && *SN - First->Offset == *N;
+  }
+  return Last->Offset >= First->Offset && Last->Offset - First->Offset == *N;
+}
+
+/// True if the call-like \p CallLike of a callee with \p Roles initializes
+/// the storage bound to its parameter \p P: \p P is an initializing
+/// parameter, and an element-assigning row's
+/// (CalleeLifecycleRoles::WholeExtent) either covers its storage whole or
+/// begins at a marked pointer's referent, whose extent is unknown and which is
+/// credited as the std::uninitialized_* rows credit it.
+static bool
+creditsInitializingParam(const TrackedStorage &Storage, const Expr *CallLike,
+                         const SemaProfiles::CalleeLifecycleRoles &Roles,
+                         const ParmVarDecl *P, const Expr *Arg) {
+  if (!Roles.initializesParam(P))
+    return false;
+  if (!Roles.WholeExtent || !Roles.isInitializingParam(P))
+    return true;
+  return Storage.markedPointerObject({Arg->IgnoreImplicit(), {}}) ||
+         coversWholeExtent(Storage.Ctx, CallLike, Roles);
+}
+
 /// The lifecycle effects of the call-like \p CallLike on the storage bound to
 /// its parameters (\p Roles, derived by the caller; the pairs come from
 /// forEachArgumentBinding). A [[now_init]] callee writes the storage
@@ -5239,7 +5434,7 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
   if (Roles.InitializesRefToUninitParams || Roles.HasMustInitParams ||
       Roles.KnownParam)
     ForEachParam([&](const ParmVarDecl *P, const Expr *Arg) {
-      if (!Roles.initializesParam(P))
+      if (!creditsInitializingParam(Storage, CallLike, Roles, P, Arg))
         return;
       QualType PT = P->getType();
       // A class iterator or range designates its value type.
@@ -6308,12 +6503,14 @@ static void extractStdInitEvents(
     // (SemaProfiles::checkInitProfileBinding): a site judged at \p At against
     // the flow state when a leaf names tracked storage; the funnel judged
     // every other binding at parse time. A leaf no entity tracks is
-    // classified by form.
+    // classified by form. With \p Consume, the binding's flow-tracked leaves
+    // are judged by an event that stands for it (a credit of the storage),
+    // so no site is added.
     auto AddBindingAs = [&](K Kind, SourceLocation Loc, bool TargetMarked,
                             QualType T, const Expr *Src,
                             const NamedDecl *Subject, const Expr *At,
                             bool EveryPath, bool AsRange,
-                            bool Placement = false) {
+                            bool Placement = false, bool Consume = false) {
       bool IsHandle = SemaProfiles::isHandleType(T);
       if (!Src || T.isNull() || T->isDependentType() ||
           (!T->isPointerType() && !T->isReferenceType() && !IsHandle) ||
@@ -6458,7 +6655,7 @@ static void extractStdInitEvents(
               });
             });
       }
-      if (!AnyTracked && !AnyLifecycle)
+      if ((!AnyTracked && !AnyLifecycle) || Consume)
         return;
       // The parse-time funnel judged every leaf of a binding with no
       // flow-tracked leaf.
@@ -6478,18 +6675,20 @@ static void extractStdInitEvents(
                           QualType T, const Expr *Src, const NamedDecl *Subject,
                           const Expr *At, bool EveryPath = false,
                           bool AsRange = false,
-                          const ValueDecl *Target = nullptr) {
+                          const ValueDecl *Target = nullptr,
+                          bool Consume = false) {
       const auto *Parm = dyn_cast_or_null<ParmVarDecl>(Target);
       const auto *Callee =
           Parm ? dyn_cast<FunctionDecl>(Parm->getDeclContext()) : nullptr;
-      AddBindingAs(Kind, Loc, TargetMarked, T, Src, Subject, At, EveryPath,
-                   AsRange,
-                   Callee && SemaProfiles::isReservedPlacementNew(Callee));
+      AddBindingAs(
+          Kind, Loc, TargetMarked, T, Src, Subject, At, EveryPath, AsRange,
+          Callee && SemaProfiles::isReservedPlacementNew(Callee), Consume);
       if (!TargetMarked && !AsRange && !T.isNull() && !T->isDependentType() &&
           SemaProfiles::bindsHandleByReference(Kind, T, Target))
         AddBindingAs(Kind, Loc, /*TargetMarked=*/false,
                      T.getNonReferenceType().getUnqualifiedType(), Src, Subject,
-                     At, /*EveryPath=*/false, /*AsRange=*/false);
+                     At, /*EveryPath=*/false, /*AsRange=*/false,
+                     /*Placement=*/false, Consume);
     };
     // A read through (\p IsWrite false) or a store below tracked storage,
     // with the parse-time check's location (the glvalue for a read, the
@@ -6628,7 +6827,8 @@ static void extractStdInitEvents(
     // transfer parameter, std::now_init's (judged by form at parse time), or
     // a handle an assignment takes by value -- none for a [[now_uninit]] or
     // storage-release callee, whose parameters run the destroy rules
-    // instead.
+    // instead. An element-assigning row's range is an unmarked binding unless
+    // the call credits it (creditsInitializingParam).
     auto AppendArgumentBindings =
         [&](const Expr *CallLike,
             const SemaProfiles::CalleeLifecycleRoles &Roles) {
@@ -6644,7 +6844,8 @@ static void extractStdInitEvents(
                 else if (!Parm ||
                          !(Roles.destroysParam(Parm) ||
                            Roles.releasesParam(Parm, /*TrustedOnly=*/false) ||
-                           Roles.isInitializingParam(Parm) ||
+                           (Roles.isInitializingParam(Parm) &&
+                            !Roles.WholeExtent) ||
                            Roles.isEndParam(Parm) ||
                            Roles.transfersParam(Parm) ||
                            Roles.roleOf(Parm) == SemaProfiles::KnownParamRole::
@@ -6652,10 +6853,13 @@ static void extractStdInitEvents(
                            (SemaProfiles::isHandleType(T) &&
                             SemaProfiles::isAssignmentSource(Parm)))) {
                   size_t First = Sites.size();
-                  AddBinding(K::Parameter, Loc,
-                             Parm && Roles.isMarkedParam(Parm), T, Arg, nullptr,
-                             CallLike, SemaProfiles::isValueCopySource(Parm),
-                             AsRange, Parm);
+                  AddBinding(
+                      K::Parameter, Loc, Parm && Roles.isMarkedParam(Parm), T,
+                      Arg, nullptr, CallLike,
+                      SemaProfiles::isValueCopySource(Parm), AsRange, Parm,
+                      /*Consume=*/Parm && Roles.isInitializingParam(Parm) &&
+                          creditsInitializingParam(Storage, CallLike, Roles,
+                                                   Parm, Arg));
                   if (Parm && Roles.roleOf(Parm) ==
                                   SemaProfiles::KnownParamRole::AssertUninit)
                     for (BindingSite &Site : llvm::drop_begin(Sites, First))
@@ -7098,7 +7302,8 @@ static void extractStdInitEvents(
           DestroyedObject = Object;
         } else if (ObjectMethod && Object &&
                    !SemaProfiles::isStdArrayAddressMember(ObjectMethod) &&
-                   !SemaProfiles::isStdArrayObservingMember(ObjectMethod)) {
+                   !SemaProfiles::isStdArrayObservingMember(ObjectMethod) &&
+                   !SemaProfiles::isStdArrayScalarFill(ObjectMethod)) {
           QualType OT = Object->getType();
           QualType T =
               OT->isPointerType()
@@ -7159,6 +7364,35 @@ static void extractStdInitEvents(
         AppendCallEvents(CE, Callee, DestroyedObject);
         if (IsPointerCopy)
           AppendStore(CopyDst, CE, /*ReadsFirst=*/false, CopySrc);
+        // A std::array's scalar fill writes the array whole: the one whole
+        // entity every leaf of its object names, or each such entity on one
+        // of several arms.
+        if (ObjectMethod && Object &&
+            SemaProfiles::isStdArrayScalarFill(ObjectMethod)) {
+          bool Arrow = Object->getType()->isPointerType();
+          QualType ArrayT =
+              Arrow ? Object->getType()->getPointeeType() : Object->getType();
+          SmallVector<std::optional<unsigned>, 2> Named;
+          SemaProfiles::forEachTargetLeaf(
+              Object, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+                TrackedStorage::Resolution R =
+                    Storage.resolveFlowLeaf(Leaf, Arrow, ArrayT);
+                Named.push_back(R.Entity && !R.Subobject ? R.Entity
+                                                         : std::nullopt);
+              });
+          bool One = !Named.empty() && llvm::all_equal(Named);
+          for (std::optional<unsigned> Idx : Named) {
+            if (!Idx)
+              continue;
+            DefAssignEvent Ev{One ? DefAssignEventKind::Write
+                                  : DefAssignEventKind::MayWrite,
+                              *Idx, CE};
+            Ev.Designated = ArrayT;
+            BlockEvents.push_back(Ev);
+            if (One)
+              break;
+          }
+        }
         if (EscapesMemberPointers)
           EscapeMemberPointers(Object, CE, RoleMemberPointees(CE));
         // A member call on a marked local handle changes what it refers to:
