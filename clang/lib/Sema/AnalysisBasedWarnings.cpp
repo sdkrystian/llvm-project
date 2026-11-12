@@ -4054,6 +4054,15 @@ static void judgeAccessSite(const AccessSite &Site, bool IsWrite,
 /// have an entry.
 using OffendingReads = std::map<unsigned, SmallVector<const Expr *, 2>>;
 
+/// The events of CFG edges, by (predecessor, successor) block ID: a
+/// recognized loop's credit of the storage it initializes element by
+/// element, on the edge from its condition block to its exit
+/// (appendLoopCredits), which the paths that leave the loop by a jump do not
+/// take. Applied to the predecessor's exit state before every join that edge
+/// enters (runDefiniteAssignment).
+using EdgeEventMap = llvm::DenseMap<std::pair<unsigned, unsigned>,
+                                    SmallVector<DefAssignEvent, 1>>;
+
 /// Replay a block's events over \p St: the engine's one block-level transfer
 /// function, shared by the fixpoint and the reporting replay so the two can
 /// never disagree. An event or site leaf on a Pointee entity is resolved to
@@ -4409,12 +4418,14 @@ static bool isNormalExitEdge(const CFG &cfg, const CFGBlock &Pred,
 /// definitely assigned nor escaped, and appends every other rule's violations
 /// to \p Violations -- \p ExitSites and \p Obligations judged against the
 /// join of the states the function's normal exits leave (isNormalExitEdge).
+/// An edge's \p EdgeEvents apply to its predecessor's exit state in each
+/// join, a constant and monotone transfer like a block's.
 static OffendingReads runDefiniteAssignment(
     CFG &cfg, AnalysisDeclContext &AC, const TrackedStorage &Storage,
     ArrayRef<SmallVector<DefAssignEvent, 4>> Events,
-    ArrayRef<BindingSite> Sites, ArrayRef<DestroySite> DSites,
-    ArrayRef<AccessSite> ASites, ArrayRef<DestroySite> ExitSites,
-    ArrayRef<ObligationSite> Obligations,
+    const EdgeEventMap &EdgeEvents, ArrayRef<BindingSite> Sites,
+    ArrayRef<DestroySite> DSites, ArrayRef<AccessSite> ASites,
+    ArrayRef<DestroySite> ExitSites, ArrayRef<ObligationSite> Obligations,
     SmallVectorImpl<PendingViolation> &Violations) {
   const unsigned NumTracked = Storage.Entities.size();
   const unsigned NumBlocks = cfg.getNumBlockIDs();
@@ -4435,6 +4446,15 @@ static OffendingReads runDefiniteAssignment(
   }
   for (const TrackedStorage::EntryTarget &T : Storage.EntryTargets)
     FunctionEntry.setTarget(T.Pointee, T.Referent);
+  // The exit state of \p Pred as the edge to \p Succ leaves it.
+  auto EdgeExit = [&](const CFGBlock *Pred, const CFGBlock *Succ) {
+    FlowState St = ExitState[Pred->getBlockID()];
+    if (auto It = EdgeEvents.find({Pred->getBlockID(), Succ->getBlockID()});
+        It != EdgeEvents.end())
+      applyDefAssignEvents(It->second, Sites, DSites, ASites, Storage, St,
+                           /*Offending=*/nullptr, /*Violations=*/nullptr);
+    return St;
+  };
   const CFGBlock &CFGEntry = cfg.getEntry();
   ForwardDataflowWorklist Worklist(cfg, AC);
   Worklist.enqueueBlock(&CFGEntry);
@@ -4452,7 +4472,7 @@ static OffendingReads runDefiniteAssignment(
       for (const CFGBlock *Pred : B->preds()) {
         if (!Pred || !ExitState[Pred->getBlockID()].Reached)
           continue;
-        FlowState Cur = ExitState[Pred->getBlockID()];
+        FlowState Cur = EdgeExit(Pred, B);
         unsigned Rank = 0;
         for (; !Ranks.empty() && Ranks.back().second == Rank; ++Rank) {
           Cur.meet(Ranks.back().first);
@@ -4496,7 +4516,7 @@ static OffendingReads runDefiniteAssignment(
     for (const CFGBlock *Pred : Exit.preds())
       if (Pred && Visited[Pred->getBlockID()] &&
           isNormalExitEdge(cfg, *Pred, Exit))
-        AtExit.meet(ExitState[Pred->getBlockID()]);
+        AtExit.meet(EdgeExit(Pred, &Exit));
     if (AtExit.Reached) {
       for (const DestroySite &Site : ExitSites)
         judgeDestroySite(Site, AtExit, Storage, Violations);
@@ -5024,6 +5044,283 @@ creditsInitializingParam(const TrackedStorage &Storage, const Expr *CallLike,
          coversWholeExtent(Storage.Ctx, CallLike, Roles);
 }
 
+namespace {
+/// The argument resolution behind the lifecycle effects of a call-like
+/// (appendLifecycleCallEvents) and a recognized loop's credit of its range
+/// (appendLoopCredits): the leaves of an argument bound to a parameter, and
+/// the events an effect on the storage they name appends, anchored at the
+/// expression At.
+class ArgumentEffects {
+public:
+  /// One leaf of an argument (resolveArg): the whole entity it names, the
+  /// entities of an object it names as a whole, or nothing; and whether it is
+  /// flow-tracked.
+  struct ArgLeaf {
+    const Expr *E;
+    TrackedStorage::Resolution R;
+    std::pair<unsigned, unsigned> Whole{0, 0};
+    bool Tracked = false;
+    /// The member entities of an object a leaf tracked for a marked
+    /// parameter names as a whole (TrackedStorage::objectPart).
+    std::pair<unsigned, unsigned> Part{0, 0};
+    /// The form state of a leaf no entity tracks.
+    LeafState Form = LeafState::Unknown;
+    /// The leaf names an element of what a pointer or handle refers to
+    /// (SemaProfiles::designatesReferentElement, or an offset handle leaf).
+    bool Element = false;
+    /// The leaf names a local or by-value parameter with tracked members
+    /// whole, with no conversion: Whole is its member range.
+    bool LocalWhole = false;
+  };
+
+  ArgumentEffects(Sema &S, const Decl *D, const TrackedStorage &Storage,
+                  const Expr *At, SmallVectorImpl<DefAssignEvent> &Events,
+                  SmallVectorImpl<const Expr *> &UnresolvedLeaves)
+      : S(S), D(D), DC(cast<DeclContext>(D)), Storage(Storage), At(At),
+        Events(Events), UnresolvedLeaves(UnresolvedLeaves) {}
+
+  /// Resolve the leaves of \p Arg, bound to a parameter of type \p ParamTy
+  /// (SemaProfiles::bindingSourceOperand decides whether they are pointer
+  /// values or glvalues), into \p Leaves, and return whether any is
+  /// flow-tracked; one that resolves to no storage is noted
+  /// (noteUnresolvedFlowLeaf). A credit passes its \p Designated type and
+  /// RawExempt (TrackedStorage::resolve); a credit of an object passed as a
+  /// whole reaches only the entities of the base subobject its argument
+  /// converts to, and none when \p Designated is not that subobject's class.
+  /// \p Use is the parameter's (SemaProfiles::isFlowTrackedLeaf). With
+  /// \p AsRange, a class-type \p Arg is a range a known callee's role
+  /// parameter takes by reference, naming its elements; otherwise it names
+  /// the object.
+  bool
+  resolveArg(const Expr *Arg, QualType ParamTy,
+             SmallVectorImpl<ArgLeaf> &Leaves, QualType Designated = QualType(),
+             bool RawExempt = false,
+             SemaProfiles::FlowLeafUse Use = SemaProfiles::FlowLeafUse::Plain,
+             bool AsRange = false) const;
+  /// True if \p Leaves name one storage: each names the same whole entity,
+  /// or the same object as a whole.
+  static bool nameOneStorage(ArrayRef<ArgLeaf> Leaves) {
+    return llvm::all_of(Leaves, [&](const ArgLeaf &L) {
+      const ArgLeaf &First = Leaves.front();
+      return L.R.Entity == First.R.Entity &&
+             L.R.Subobject == First.R.Subobject && L.Whole == First.Whole;
+    });
+  }
+  /// The storage an argument names, as events of \p Kind: the resolved whole
+  /// entity, or every entity of the object passed as a whole. A credit passes
+  /// its \p Designated type and RawExempt (resolveArg), and a construction's
+  /// credit \p Constructs: it constructs what it names whole -- each storage an
+  /// argument naming several names -- and a subobject at the storage's start
+  /// or at an offset (DefAssignEvent::Constructs).
+  void appendFor(const Expr *Arg, QualType ParamTy, DefAssignEventKind Kind,
+                 QualType Designated = QualType(), bool RawExempt = false,
+                 bool SkipUninitMembers = false, bool Constructs = false,
+                 bool AsRange = false);
+
+private:
+  Sema &S;
+  const Decl *D;
+  const DeclContext *DC;
+  const TrackedStorage &Storage;
+  const Expr *At;
+  SmallVectorImpl<DefAssignEvent> &Events;
+  SmallVectorImpl<const Expr *> &UnresolvedLeaves;
+};
+} // namespace
+
+bool ArgumentEffects::resolveArg(const Expr *Arg, QualType ParamTy,
+                                 SmallVectorImpl<ArgLeaf> &Leaves,
+                                 QualType Designated, bool RawExempt,
+                                 SemaProfiles::FlowLeafUse Use,
+                                 bool AsRange) const {
+  bool AnyTracked = false;
+  // One leaf, used as a pointer value or a glvalue, below the casts
+  // \p OuterPath; a leaf no entity tracks takes \p Form's state. With
+  // \p InRange, the glvalue leaf is a range naming its elements
+  // (SemaProfiles::isFlowTrackedRangeLeaf).
+  auto AddLeaf = [&](const SemaProfiles::ShapeLeaf &Leaf, bool AsPointerValue,
+                     ArrayRef<const CXXRecordDecl *> OuterPath,
+                     llvm::function_ref<LeafState()> Form,
+                     bool InRange = false) {
+    ArgLeaf L{Leaf.E, Storage.resolveFlowLeaf(Leaf, AsPointerValue, Designated,
+                                              RawExempt)};
+    if (InRange)
+      L.R = Storage.asRange(L.R, Leaf);
+    // A credit through a conversion to a base class names the base
+    // subobject, whatever its designated type.
+    if (L.R.Entity && !Designated.isNull()) {
+      BasePath CastPath(OuterPath);
+      SemaProfiles::peelBaseCasts(Leaf.E, CastPath, Leaf.Arms);
+      if (!CastPath.empty()) {
+        L.R.Subobject = true;
+        L.R.Sub = SubKey();
+      }
+    }
+    L.Tracked =
+        InRange ? S.Profiles().isFlowTrackedRangeLeaf(Leaf, DC, Use)
+                : S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC, Use);
+    L.Element = SemaProfiles::designatesReferentElement(Leaf.E, AsPointerValue,
+                                                        Leaf.Arms);
+    if (L.Tracked && Use == SemaProfiles::FlowLeafUse::MarkedTarget &&
+        !L.R.Entity)
+      L.Part = Storage.objectPart(Leaf, AsPointerValue, OuterPath);
+    AnyTracked |= L.Tracked;
+    // The current object's lifetime entity stands beside its members.
+    if (!L.R.Entity || L.R.Entity == Storage.CurrentObjectRoot) {
+      const Expr *G = SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms);
+      if (const Expr *Op = SemaProfiles::addressOfOperand(G);
+          AsPointerValue && Op)
+        G = SemaProfiles::ignoreTransparentCasts(Op, Leaf.Arms);
+      L.Whole = Storage.wholeObject(G, Leaf.Arms);
+      if (L.Tracked && !L.R.Entity && L.Part.first == L.Part.second &&
+          L.Whole.first == L.Whole.second)
+        noteUnresolvedFlowLeaf(UnresolvedLeaves, Leaf.E);
+      BasePath CastPath(OuterPath);
+      SemaProfiles::peelBaseCasts(Leaf.E, CastPath, Leaf.Arms);
+      const auto *Ref = dyn_cast<DeclRefExpr>(G);
+      const auto *V = Ref ? dyn_cast<VarDecl>(Ref->getDecl()) : nullptr;
+      auto It = V ? Storage.LocalRange.find(V) : Storage.LocalRange.end();
+      L.LocalWhole = !L.R.Entity && CastPath.empty() &&
+                     It != Storage.LocalRange.end() && It->second == L.Whole;
+      if (!Designated.isNull())
+        L.Whole =
+            designatedWholeRange(Storage, Leaf, AsPointerValue, G, L.Whole,
+                                 OuterPath, Designated, RawExempt);
+      L.Form = Form();
+    }
+    Leaves.push_back(L);
+  };
+  // A handle's storage is what its walk reaches through a transfer leaf
+  // (SemaProfiles::forEachHandleSourceLeaf), a Partial leaf's a subobject
+  // of it; a range taken by reference is its own storage, else what its
+  // walk reaches.
+  if (SemaProfiles::isHandleType(ParamTy.getNonReferenceType())) {
+    using HandleLeaf = SemaProfiles::HandleLeaf;
+    SemaProfiles::HandleWalkMemo Memo;
+    // \p Object: \p HL is the argument itself, an object rather than a
+    // range unless \p AsRange.
+    auto Visit = [&](auto &Self, const HandleLeaf &HL,
+                     bool Object = false) -> void {
+      auto FormOf = [&](const SemaProfiles::ShapeLeaf &Leaf) {
+        return formState(S.Profiles().classifyInitHandleLeaf(
+            {Leaf.E, HL.M, HL.Partial, Leaf.Arms}, D));
+      };
+      if (HL.M == HandleLeaf::Mode::Handle) {
+        ArgLeaf L{HL.E, Storage.resolveHandleLeaf(HL, Designated, RawExempt)};
+        L.Tracked = S.Profiles().isFlowTrackedHandleLeaf(HL, DC);
+        L.Element = HL.Partial;
+        AnyTracked |= L.Tracked;
+        if (L.Tracked && !L.R.Entity)
+          noteUnresolvedFlowLeaf(UnresolvedLeaves, HL.E);
+        if (!L.R.Entity)
+          L.Form = FormOf(HL.E);
+        Leaves.push_back(L);
+        return;
+      }
+      SemaProfiles::forEachTargetLeaf(
+          HL.E, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+            AddLeaf(
+                Leaf, HL.M == HandleLeaf::Mode::PointerValue, {},
+                [&] { return FormOf(Leaf); },
+                /*InRange=*/HL.M == HandleLeaf::Mode::Range && !Object);
+            ArgLeaf &L = Leaves.back();
+            L.Element |= HL.Partial;
+            if (HL.Partial && L.R.Entity) {
+              L.R.Subobject = true;
+              L.R.Sub = SubKey();
+              L.R.AtStart = false;
+            }
+            if (HL.M == HandleLeaf::Mode::Range && !L.R.Entity &&
+                L.Whole.first == L.Whole.second) {
+              Leaves.pop_back();
+              SemaProfiles::forEachHandleSourceLeaf(
+                  Leaf.E,
+                  [&](const HandleLeaf &Inner) {
+                    // An offset range offsets what it refers to.
+                    Self(Self,
+                         HandleLeaf{Inner.E, Inner.M,
+                                    Inner.Partial || HL.Partial, Inner.Arms});
+                  },
+                  &Memo);
+            }
+          });
+    };
+    if (ParamTy->isReferenceType())
+      Visit(Visit, HandleLeaf{Arg, HandleLeaf::Mode::Range},
+            /*Object=*/!AsRange);
+    else
+      SemaProfiles::forEachHandleSourceLeaf(
+          Arg, [&](const HandleLeaf &HL) { Visit(Visit, HL); }, &Memo);
+    return AnyTracked;
+  }
+  bool AsPointerValue;
+  const Expr *Operand =
+      SemaProfiles::bindingSourceOperand(Arg, ParamTy, AsPointerValue);
+  if (!Operand)
+    return false;
+  // The derived-to-base casts above the leaves, which the leaf walk peels.
+  BasePath OuterPath;
+  SemaProfiles::peelBaseCasts(Operand, OuterPath);
+  SemaProfiles::forEachTargetLeaf(
+      Operand, [&](const SemaProfiles::ShapeLeaf &Leaf) {
+        AddLeaf(Leaf, AsPointerValue, OuterPath, [&] {
+          return formState(
+              S.Profiles().classifyInitBindingLeaf(Leaf, ParamTy, D));
+        });
+      });
+  return AnyTracked;
+}
+
+void ArgumentEffects::appendFor(const Expr *Arg, QualType ParamTy,
+                                DefAssignEventKind Kind, QualType Designated,
+                                bool RawExempt, bool SkipUninitMembers,
+                                bool Constructs, bool AsRange) {
+  SmallVector<ArgLeaf, 2> Leaves;
+  resolveArg(Arg, ParamTy, Leaves, Designated, RawExempt,
+             SemaProfiles::FlowLeafUse::Plain, AsRange);
+  if (Leaves.empty())
+    return;
+  if (nameOneStorage(Leaves))
+    Leaves.truncate(1);
+  else
+    Kind = Kind == DefAssignEventKind::Write ? DefAssignEventKind::MayWrite
+                                             : DefAssignEventKind::Escape;
+  auto Push = [&](unsigned Idx, SubKey Sub = SubKey()) {
+    DefAssignEvent Ev{Kind, Idx, At};
+    Ev.Designated = Designated;
+    Ev.RawExempt = RawExempt;
+    Ev.Sub = Sub;
+    Ev.SkipUninitMembers = SkipUninitMembers;
+    if (Constructs && !Sub.Class)
+      Ev.Constructs = ConstructExtent::Start;
+    Events.push_back(Ev);
+  };
+  for (const ArgLeaf &L : Leaves) {
+    if (L.R.Entity && !L.R.Subobject)
+      Push(*L.R.Entity);
+    // A credit of part of the storage may have initialized it, so it is no
+    // longer uninitialized on every path; a read still needs every part.
+    if (L.R.Entity && L.R.Subobject && Kind == DefAssignEventKind::Write) {
+      DefAssignEvent Ev{DefAssignEventKind::MayWrite, *L.R.Entity, At};
+      if (Constructs)
+        Ev.Constructs =
+            L.R.AtStart ? ConstructExtent::Start : ConstructExtent::Offset;
+      Events.push_back(Ev);
+    }
+    // A credit naming a SubMember whole credits that member.
+    if (L.R.Entity && L.R.Subobject && L.R.Sub.Exact)
+      Push(*L.R.Entity, L.R.Sub);
+    if (L.R.Entity && L.R.Entity != Storage.CurrentObjectRoot)
+      continue;
+    // The member entities of an object passed whole are its [[uninit]]
+    // members, which a default-initialization leaves uninitialized.
+    if (SkipUninitMembers)
+      continue;
+    for (unsigned Idx = L.Whole.first; Idx != L.Whole.second; ++Idx)
+      Push(Idx);
+  }
+}
+
 /// The lifecycle effects of the call-like \p CallLike on the storage bound to
 /// its parameters (\p Roles, derived by the caller; the pairs come from
 /// forEachArgumentBinding). A [[now_init]] callee writes the storage
@@ -5065,247 +5362,8 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
                           llvm::SmallPtrSetImpl<const Expr *> &JudgedLeaves,
                           SmallVectorImpl<const Expr *> &UnresolvedLeaves,
                           const Expr *DestroyedObject = nullptr) {
-  const auto *DC = cast<DeclContext>(D);
-  // Resolve the leaves of \p Arg, bound to a parameter of type \p ParamTy
-  // (SemaProfiles::bindingSourceOperand decides whether they are pointer
-  // values or glvalues): per leaf, the whole entity it names, the entities of
-  // an object it names as a whole, or nothing; and whether any leaf is
-  // flow-tracked.
-  struct ArgLeaf {
-    const Expr *E;
-    TrackedStorage::Resolution R;
-    std::pair<unsigned, unsigned> Whole{0, 0};
-    bool Tracked = false;
-    /// The member entities of an object a leaf tracked for a marked
-    /// parameter names as a whole (TrackedStorage::objectPart).
-    std::pair<unsigned, unsigned> Part{0, 0};
-    /// The form state of a leaf no entity tracks.
-    LeafState Form = LeafState::Unknown;
-    /// The leaf names an element of what a pointer or handle refers to
-    /// (SemaProfiles::designatesReferentElement, or an offset handle leaf).
-    bool Element = false;
-    /// The leaf names a local or by-value parameter with tracked members
-    /// whole, with no conversion: Whole is its member range.
-    bool LocalWhole = false;
-  };
-  // Resolve the leaves of \p Arg; a credit passes its \p Designated type and
-  // RawExempt (TrackedStorage::resolve). A credit of an object passed as a
-  // whole reaches only the entities of the base subobject its argument
-  // converts to, and none when \p Designated is not that subobject's class.
-  // \p Use is the parameter's (SemaProfiles::isFlowTrackedLeaf). With
-  // \p AsRange, a class-type \p Arg is a range a known callee's role
-  // parameter takes by reference, naming its elements; otherwise it names
-  // the object.
-  auto ResolveArg = [&](const Expr *Arg, QualType ParamTy,
-                        SmallVectorImpl<ArgLeaf> &Leaves,
-                        QualType Designated = QualType(),
-                        bool RawExempt = false,
-                        SemaProfiles::FlowLeafUse Use =
-                            SemaProfiles::FlowLeafUse::Plain,
-                        bool AsRange = false) {
-    bool AnyTracked = false;
-    // One leaf, used as a pointer value or a glvalue, below the casts
-    // \p OuterPath; a leaf no entity tracks takes \p Form's state. With
-    // \p InRange, the glvalue leaf is a range naming its elements
-    // (SemaProfiles::isFlowTrackedRangeLeaf).
-    auto AddLeaf = [&](const SemaProfiles::ShapeLeaf &Leaf, bool AsPointerValue,
-                       ArrayRef<const CXXRecordDecl *> OuterPath,
-                       llvm::function_ref<LeafState()> Form,
-                       bool InRange = false) {
-      ArgLeaf L{Leaf.E, Storage.resolveFlowLeaf(Leaf, AsPointerValue,
-                                                Designated, RawExempt)};
-      if (InRange)
-        L.R = Storage.asRange(L.R, Leaf);
-      // A credit through a conversion to a base class names the base
-      // subobject, whatever its designated type.
-      if (L.R.Entity && !Designated.isNull()) {
-        BasePath CastPath(OuterPath);
-        SemaProfiles::peelBaseCasts(Leaf.E, CastPath, Leaf.Arms);
-        if (!CastPath.empty()) {
-          L.R.Subobject = true;
-          L.R.Sub = SubKey();
-        }
-      }
-      L.Tracked = InRange ? S.Profiles().isFlowTrackedRangeLeaf(Leaf, DC, Use)
-                          : S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue,
-                                                           DC, Use);
-      L.Element = SemaProfiles::designatesReferentElement(
-          Leaf.E, AsPointerValue, Leaf.Arms);
-      if (L.Tracked && Use == SemaProfiles::FlowLeafUse::MarkedTarget &&
-          !L.R.Entity)
-        L.Part = Storage.objectPart(Leaf, AsPointerValue, OuterPath);
-      AnyTracked |= L.Tracked;
-      // The current object's lifetime entity stands beside its members.
-      if (!L.R.Entity || L.R.Entity == Storage.CurrentObjectRoot) {
-        const Expr *G = SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms);
-        if (const Expr *Op = SemaProfiles::addressOfOperand(G);
-            AsPointerValue && Op)
-          G = SemaProfiles::ignoreTransparentCasts(Op, Leaf.Arms);
-        L.Whole = Storage.wholeObject(G, Leaf.Arms);
-        if (L.Tracked && !L.R.Entity && L.Part.first == L.Part.second &&
-            L.Whole.first == L.Whole.second)
-          noteUnresolvedFlowLeaf(UnresolvedLeaves, Leaf.E);
-        BasePath CastPath(OuterPath);
-        SemaProfiles::peelBaseCasts(Leaf.E, CastPath, Leaf.Arms);
-        const auto *Ref = dyn_cast<DeclRefExpr>(G);
-        const auto *V = Ref ? dyn_cast<VarDecl>(Ref->getDecl()) : nullptr;
-        auto It = V ? Storage.LocalRange.find(V) : Storage.LocalRange.end();
-        L.LocalWhole = !L.R.Entity && CastPath.empty() &&
-                       It != Storage.LocalRange.end() && It->second == L.Whole;
-        if (!Designated.isNull())
-          L.Whole =
-              designatedWholeRange(Storage, Leaf, AsPointerValue, G, L.Whole,
-                                   OuterPath, Designated, RawExempt);
-        L.Form = Form();
-      }
-      Leaves.push_back(L);
-    };
-    // A handle's storage is what its walk reaches through a transfer leaf
-    // (SemaProfiles::forEachHandleSourceLeaf), a Partial leaf's a subobject
-    // of it; a range taken by reference is its own storage, else what its
-    // walk reaches.
-    if (SemaProfiles::isHandleType(ParamTy.getNonReferenceType())) {
-      using HandleLeaf = SemaProfiles::HandleLeaf;
-      SemaProfiles::HandleWalkMemo Memo;
-      // \p Object: \p HL is the argument itself, an object rather than a
-      // range unless \p AsRange.
-      auto Visit = [&](auto &Self, const HandleLeaf &HL,
-                       bool Object = false) -> void {
-        auto FormOf = [&](const SemaProfiles::ShapeLeaf &Leaf) {
-          return formState(S.Profiles().classifyInitHandleLeaf(
-              {Leaf.E, HL.M, HL.Partial, Leaf.Arms}, D));
-        };
-        if (HL.M == HandleLeaf::Mode::Handle) {
-          ArgLeaf L{HL.E, Storage.resolveHandleLeaf(HL, Designated, RawExempt)};
-          L.Tracked = S.Profiles().isFlowTrackedHandleLeaf(HL, DC);
-          L.Element = HL.Partial;
-          AnyTracked |= L.Tracked;
-          if (L.Tracked && !L.R.Entity)
-            noteUnresolvedFlowLeaf(UnresolvedLeaves, HL.E);
-          if (!L.R.Entity)
-            L.Form = FormOf(HL.E);
-          Leaves.push_back(L);
-          return;
-        }
-        SemaProfiles::forEachTargetLeaf(
-            HL.E, [&](const SemaProfiles::ShapeLeaf &Leaf) {
-              AddLeaf(
-                  Leaf, HL.M == HandleLeaf::Mode::PointerValue, {},
-                  [&] { return FormOf(Leaf); },
-                  /*InRange=*/HL.M == HandleLeaf::Mode::Range && !Object);
-              ArgLeaf &L = Leaves.back();
-              L.Element |= HL.Partial;
-              if (HL.Partial && L.R.Entity) {
-                L.R.Subobject = true;
-                L.R.Sub = SubKey();
-                L.R.AtStart = false;
-              }
-              if (HL.M == HandleLeaf::Mode::Range && !L.R.Entity &&
-                  L.Whole.first == L.Whole.second) {
-                Leaves.pop_back();
-                SemaProfiles::forEachHandleSourceLeaf(
-                    Leaf.E,
-                    [&](const HandleLeaf &Inner) {
-                      // An offset range offsets what it refers to.
-                      Self(Self,
-                           HandleLeaf{Inner.E, Inner.M,
-                                      Inner.Partial || HL.Partial, Inner.Arms});
-                    },
-                    &Memo);
-              }
-            });
-      };
-      if (ParamTy->isReferenceType())
-        Visit(Visit, HandleLeaf{Arg, HandleLeaf::Mode::Range},
-              /*Object=*/!AsRange);
-      else
-        SemaProfiles::forEachHandleSourceLeaf(
-            Arg, [&](const HandleLeaf &HL) { Visit(Visit, HL); }, &Memo);
-      return AnyTracked;
-    }
-    bool AsPointerValue;
-    const Expr *Operand =
-        SemaProfiles::bindingSourceOperand(Arg, ParamTy, AsPointerValue);
-    if (!Operand)
-      return false;
-    // The derived-to-base casts above the leaves, which the leaf walk peels.
-    BasePath OuterPath;
-    SemaProfiles::peelBaseCasts(Operand, OuterPath);
-    SemaProfiles::forEachTargetLeaf(
-        Operand, [&](const SemaProfiles::ShapeLeaf &Leaf) {
-          AddLeaf(Leaf, AsPointerValue, OuterPath, [&] {
-            return formState(
-                S.Profiles().classifyInitBindingLeaf(Leaf, ParamTy, D));
-          });
-        });
-    return AnyTracked;
-  };
-
-  // The leaves name one storage: each names the same whole entity, or the
-  // same object as a whole.
-  auto NameOneStorage = [](ArrayRef<ArgLeaf> Leaves) {
-    return llvm::all_of(Leaves, [&](const ArgLeaf &L) {
-      const ArgLeaf &First = Leaves.front();
-      return L.R.Entity == First.R.Entity &&
-             L.R.Subobject == First.R.Subobject && L.Whole == First.Whole;
-    });
-  };
-  // The storage an argument names, as events of \p Kind: the resolved whole
-  // entity, or every entity of the object passed as a whole. A credit passes
-  // its \p Designated type and RawExempt (ResolveArg), and a construction's
-  // credit \p Constructs: it constructs what it names whole -- each storage an
-  // argument naming several names -- and a subobject at the storage's start
-  // or at an offset (DefAssignEvent::Constructs).
-  auto AppendFor = [&](const Expr *Arg, QualType ParamTy,
-                       DefAssignEventKind Kind,
-                       QualType Designated = QualType(), bool RawExempt = false,
-                       bool SkipUninitMembers = false, bool Constructs = false,
-                       bool AsRange = false) {
-    SmallVector<ArgLeaf, 2> Leaves;
-    ResolveArg(Arg, ParamTy, Leaves, Designated, RawExempt,
-               SemaProfiles::FlowLeafUse::Plain, AsRange);
-    if (Leaves.empty())
-      return;
-    if (NameOneStorage(Leaves))
-      Leaves.truncate(1);
-    else
-      Kind = Kind == DefAssignEventKind::Write ? DefAssignEventKind::MayWrite
-                                               : DefAssignEventKind::Escape;
-    auto Push = [&](unsigned Idx, SubKey Sub = SubKey()) {
-      DefAssignEvent Ev{Kind, Idx, CallLike};
-      Ev.Designated = Designated;
-      Ev.RawExempt = RawExempt;
-      Ev.Sub = Sub;
-      Ev.SkipUninitMembers = SkipUninitMembers;
-      if (Constructs && !Sub.Class)
-        Ev.Constructs = ConstructExtent::Start;
-      BlockEvents.push_back(Ev);
-    };
-    for (const ArgLeaf &L : Leaves) {
-      if (L.R.Entity && !L.R.Subobject)
-        Push(*L.R.Entity);
-      // A credit of part of the storage may have initialized it, so it is no
-      // longer uninitialized on every path; a read still needs every part.
-      if (L.R.Entity && L.R.Subobject && Kind == DefAssignEventKind::Write) {
-        DefAssignEvent Ev{DefAssignEventKind::MayWrite, *L.R.Entity, CallLike};
-        if (Constructs)
-          Ev.Constructs =
-              L.R.AtStart ? ConstructExtent::Start : ConstructExtent::Offset;
-        BlockEvents.push_back(Ev);
-      }
-      // A credit naming a SubMember whole credits that member.
-      if (L.R.Entity && L.R.Subobject && L.R.Sub.Exact)
-        Push(*L.R.Entity, L.R.Sub);
-      if (L.R.Entity && L.R.Entity != Storage.CurrentObjectRoot)
-        continue;
-      // The member entities of an object passed whole are its [[uninit]]
-      // members, which a default-initialization leaves uninitialized.
-      if (SkipUninitMembers)
-        continue;
-      for (unsigned Idx = L.Whole.first; Idx != L.Whole.second; ++Idx)
-        Push(Idx);
-    }
-  };
+  ArgumentEffects Args(S, D, Storage, CallLike, BlockEvents, UnresolvedLeaves);
+  using ArgLeaf = ArgumentEffects::ArgLeaf;
   // The argument \p Arg, bound as \p T (to a [[ref_to_uninit]] parameter
   // when \p Marked), destroyed by \p Destroyer: one destroy site.
   auto AppendDestroy = [&](const Expr *Arg, QualType T, bool Exempt,
@@ -5316,14 +5374,15 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
     Site.Loc = Arg->IgnoreImplicit()->getExprLoc();
     Site.Exempt = Exempt;
     Site.Destroyer = Destroyer;
-    Site.Judged = ResolveArg(Arg, T, Leaves, QualType(), /*RawExempt=*/false,
-                             Marked ? SemaProfiles::FlowLeafUse::MarkedTarget
-                                    : SemaProfiles::FlowLeafUse::Destroy,
-                             AsRange);
+    Site.Judged =
+        Args.resolveArg(Arg, T, Leaves, QualType(), /*RawExempt=*/false,
+                        Marked ? SemaProfiles::FlowLeafUse::MarkedTarget
+                               : SemaProfiles::FlowLeafUse::Destroy,
+                        AsRange);
     // A leaf naming a local with tracked members whole, whose destroy the
     // parse-time funnel judged by form with the site's other leaves.
     bool AnyLocalWhole = false;
-    Site.Conditional = !NameOneStorage(Leaves);
+    Site.Conditional = !ArgumentEffects::nameOneStorage(Leaves);
     for (const ArgLeaf &L : Leaves) {
       if (L.Tracked)
         JudgedLeaves.insert(L.E);
@@ -5417,16 +5476,17 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
                       SemaProfiles::InitDestroyer::Function,
                       Roles.isMarkedParam(P), TakesRange(P));
       else if (Roles.releasesParam(P, /*TrustedOnly=*/true))
-        AppendFor(Arg, PT, DefAssignEventKind::Kill, QualType(),
-                  /*RawExempt=*/false, /*SkipUninitMembers=*/false,
-                  /*Constructs=*/false, TakesRange(P));
+        Args.appendFor(Arg, PT, DefAssignEventKind::Kill, QualType(),
+                       /*RawExempt=*/false, /*SkipUninitMembers=*/false,
+                       /*Constructs=*/false, TakesRange(P));
     });
   if (Roles.OpaqueParam)
     ForEachParam([&](const ParmVarDecl *P, const Expr *Arg) {
       if (P->getFunctionScopeIndex() == *Roles.OpaqueParam)
-        AppendFor(Arg, P->getType(), DefAssignEventKind::Escape, QualType(),
-                  /*RawExempt=*/false, /*SkipUninitMembers=*/false,
-                  /*Constructs=*/false, TakesRange(P));
+        Args.appendFor(Arg, P->getType(), DefAssignEventKind::Escape,
+                       QualType(),
+                       /*RawExempt=*/false, /*SkipUninitMembers=*/false,
+                       /*Constructs=*/false, TakesRange(P));
     });
   // A credit designates the parameter's pointee or referenced type; a
   // parameter the callee must initialize (mustInitializeParam) or an
@@ -5485,10 +5545,70 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
       }
       // A byte writer's credit takes storage in any state and constructs
       // nothing.
-      AppendFor(Arg, PT, DefAssignEventKind::Write, Designated, RawExempt,
-                SkipUninitMembers,
-                /*Constructs=*/!Roles.isInitializingParam(P), TakesRange(P));
+      Args.appendFor(Arg, PT, DefAssignEventKind::Write, Designated, RawExempt,
+                     SkipUninitMembers,
+                     /*Constructs=*/!Roles.isInitializingParam(P),
+                     TakesRange(P));
     });
+}
+
+/// Append to \p EdgeEvents the credits of the loops of \p cfg that initialize
+/// storage element by element: a recognized range-for
+/// (SemaProfiles::initializingRangeFor) credits its range -- as a known
+/// callee's range parameter is credited, designated by the element type, a
+/// construction when the loop's first statement constructs -- on the edge
+/// from its condition block to its exit, provided each leaf of the range
+/// names tracked storage whole (several of them, on the arms of a
+/// conditional, may each be initialized); a path that leaves the loop by a
+/// break, return,
+/// goto, or throw takes no such edge. The bindings that credit stands for --
+/// the range's \c __range binding and an unmarked loop variable's -- go to
+/// \p Credited, consumed instead of judged (extractStdInitEvents).
+static void appendLoopCredits(Sema &S, const Decl *D, const CFG &cfg,
+                              const TrackedStorage &Storage,
+                              EdgeEventMap &EdgeEvents,
+                              llvm::SmallPtrSetImpl<const VarDecl *> &Credited,
+                              SmallVectorImpl<const Expr *> &UnresolvedLeaves) {
+  for (const CFGBlock *Cond : cfg) {
+    const auto *Loop =
+        dyn_cast_or_null<CXXForRangeStmt>(Cond->getTerminatorStmt());
+    if (!Loop || Cond->succ_size() != 2)
+      continue;
+    const CFGBlock *Body = Cond->succ_begin()->getReachableBlock();
+    const CFGBlock *Exit = (Cond->succ_begin() + 1)->getReachableBlock();
+    if (!Exit || Exit == Body)
+      continue;
+    std::optional<SemaProfiles::LoopInitialization> LI =
+        SemaProfiles::initializingRangeFor(Loop);
+    const auto *RangeDS = dyn_cast_or_null<DeclStmt>(Loop->getRangeStmt());
+    const auto *Range = RangeDS && RangeDS->isSingleDecl()
+                            ? dyn_cast<VarDecl>(RangeDS->getSingleDecl())
+                            : nullptr;
+    if (!LI || !Range)
+      continue;
+    const Expr *RangeInit = Loop->getRangeInit();
+    QualType RangeT = Range->getType();
+    QualType Elem = LI->LoopVar->getType().getNonReferenceType();
+    bool AsRange = SemaProfiles::isHandleType(RangeT.getNonReferenceType());
+    SmallVector<DefAssignEvent, 1> Credit;
+    ArgumentEffects Args(S, D, Storage, RangeInit, Credit, UnresolvedLeaves);
+    SmallVector<ArgumentEffects::ArgLeaf, 2> Leaves;
+    Args.resolveArg(RangeInit, RangeT, Leaves, Elem, /*RawExempt=*/false,
+                    SemaProfiles::FlowLeafUse::Plain, AsRange);
+    if (Leaves.empty() ||
+        llvm::any_of(Leaves, [](const ArgumentEffects::ArgLeaf &L) {
+          return !L.R.Entity || L.R.Subobject;
+        }))
+      continue;
+    Args.appendFor(RangeInit, RangeT, DefAssignEventKind::Write, Elem,
+                   /*RawExempt=*/false, /*SkipUninitMembers=*/false,
+                   LI->Constructs, AsRange);
+    llvm::append_range(EdgeEvents[{Cond->getBlockID(), Exit->getBlockID()}],
+                       Credit);
+    Credited.insert(Range);
+    if (!LI->LoopVar->hasAttr<RefToUninitAttr>())
+      Credited.insert(LI->LoopVar);
+  }
 }
 
 /// Append to \p Out the children of \p S that the engine's CFG evaluates
@@ -5857,8 +5977,8 @@ static void extractStdInitEvents(
     Sema &S, const Decl *D, const CFG &cfg, const TrackedStorage &Storage,
     const CXXConstructorDecl *Ctor, bool StarThisCopyTrusted,
     std::vector<SmallVector<DefAssignEvent, 4>> &Events,
-    SmallVectorImpl<BindingSite> &Sites, SmallVectorImpl<DestroySite> &DSites,
-    SmallVectorImpl<AccessSite> &ASites,
+    EdgeEventMap &EdgeEvents, SmallVectorImpl<BindingSite> &Sites,
+    SmallVectorImpl<DestroySite> &DSites, SmallVectorImpl<AccessSite> &ASites,
     llvm::SmallPtrSetImpl<const Expr *> &JudgedLeaves,
     SmallVectorImpl<const Expr *> &UnresolvedLeaves) {
   using K = SemaProfiles::InitBindingKind;
@@ -6027,6 +6147,10 @@ static void extractStdInitEvents(
       }
     }
   }
+
+  // The recognized loops' credits, and the bindings they stand for.
+  llvm::SmallPtrSet<const VarDecl *, 4> Credited;
+  appendLoopCredits(S, D, cfg, Storage, EdgeEvents, Credited, UnresolvedLeaves);
 
   // Pass two: the events, in CFG element order.
   for (const CFGBlock *B : cfg) {
@@ -7613,6 +7737,8 @@ static void extractStdInitEvents(
           if (const Expr *Init = V->getInit()) {
             // A marked range-for element binds the range's elements
             // (SemaProfiles::isMarkedRangeForElement).
+            // A recognized loop's credit stands for its range's binding and
+            // an unmarked loop variable's (appendLoopCredits).
             if (SemaProfiles::isMarkedRangeForElement(V))
               AddBinding(K::Variable, V->getLocation(), /*TargetMarked=*/true,
                          V->getType(), SemaProfiles::rangeForRangeInit(V),
@@ -7623,7 +7749,7 @@ static void extractStdInitEvents(
               AddBinding(K::Variable, V->getLocation(),
                          V->hasAttr<RefToUninitAttr>(), V->getType(), Init,
                          nullptr, Init, /*EveryPath=*/false, /*AsRange=*/false,
-                         V);
+                         V, /*Consume=*/Credited.contains(V));
             if (!V->isImplicit())
               AppendAliasEscapes(Init, V->getType(), Init);
             // A declared marked pointer or reference refers to what its
@@ -8572,12 +8698,14 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
     return;
   }
   std::vector<SmallVector<DefAssignEvent, 4>> Events(cfg->getNumBlockIDs());
+  EdgeEventMap EdgeEvents;
   SmallVector<BindingSite, 8> Sites;
   SmallVector<DestroySite, 4> DSites;
   SmallVector<AccessSite, 8> ASites;
   SmallVector<const Expr *, 2> UnresolvedLeaves;
   extractStdInitEvents(S, D, *cfg, Storage, Ctor, StarThisCopyTrusted, Events,
-                       Sites, DSites, ASites, JudgedLeaves, UnresolvedLeaves);
+                       EdgeEvents, Sites, DSites, ASites, JudgedLeaves,
+                       UnresolvedLeaves);
   verifyDeferredInitSites(S, D, Deferred, cfg, JudgedLeaves);
   // A leaf the predicate tracks and the resolver drops falls between the two
   // (ProfilesFrameworkInternals.rst, "Flow-Tracked Storage (std::init)").
@@ -8603,8 +8731,8 @@ static void runStdInitMemberReadChecks(Sema &S, const Decl *D,
   SmallVector<ObligationSite, 2> Obligations;
   appendExitObligationSites(D, Storage, Obligations);
   OffendingReads Offending =
-      runDefiniteAssignment(*cfg, InitAC, Storage, Events, Sites, DSites,
-                            ASites, ExitSites, Obligations, Violations);
+      runDefiniteAssignment(*cfg, InitAC, Storage, Events, EdgeEvents, Sites,
+                            DSites, ASites, ExitSites, Obligations, Violations);
   reportMemberReadsBeforeInit(S, Offending, Storage, Entry.Name);
   reportFlowViolations(S, Violations, Entry.Name);
 }

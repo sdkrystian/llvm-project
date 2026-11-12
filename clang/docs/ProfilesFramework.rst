@@ -1103,6 +1103,23 @@ written.  Clang ships that definition, suppressed, in the resource header
 that defines its own ``std::now_init`` cannot also include it, as the two
 definitions conflict.
 
+A range-for loop whose body begins by initializing its element initializes its
+range when the loop completes (§6.1): the loop variable is a reference to a
+non-const element bound directly (``T &``, ``auto &``, ``auto &&``), and the
+body's first statement is a built-in store of scalar type to it
+(``for (int &x : a) x = 0;``) or a call that initializes the storage it refers
+to -- passed as ``&x``, ``std::addressof(x)``, or ``x`` to a parameter the
+callee initializes, a construction (``std::construct_at(&x, v)``) only through
+a marked loop variable -- whose stored value or other arguments do not name the
+variable; and the body names no variable of the range expression but an
+arithmetic one.  The range -- an ``[[uninit]]`` array, a ``std::array``, or
+what a marked reference or handle refers to -- is then initialized where the
+loop exits normally, constructed by a construction and assigned by a store,
+and its binding to the loop's implicit reference is not judged; a path that
+leaves the loop by a ``break``, ``return``, ``goto``, or ``throw`` leaves the
+range as it was.  Any other range-for over uninitialized storage is rejected at
+that binding.
+
 A placement ``new`` through a reserved placement ``operator new``
 (``::new (p) T(v)``, ``new (p) T[n]``) constructs as ``std::construct_at``
 does, with the new-expression's initialization, in storage the analysis
@@ -1418,7 +1435,9 @@ the object refers to what that parameter takes (with
 marker), and the parameter's own binding is judged as usual.  A range-for
 over a marked handle binds its elements to uninitialized memory:
 ``for (int &x [[ref_to_uninit]] : s)`` is accepted, and
-``for (int x : s)`` reads uninitialized memory.
+``for (int x : s)`` reads uninitialized memory; a loop that begins by
+initializing its element (``for (int &x : s) x = 0;``, see
+`Binding Pointers and References`_) initializes what the handle refers to.
 
 Inside a function body, what a marked local handle refers to is flow-tracked
 like a marked pointer's referent (see `Binding Pointers and References`_): it

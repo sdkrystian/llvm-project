@@ -1180,7 +1180,18 @@ predecessor not yet reached, is a state without nodes
 own: a ``Target`` joins to itself or to unidentified.  A block joins its
 predecessors' exit states as a balanced tree, so P predecessors that each
 change different nodes cost on the order of P log P leaf joins rather than P
-squared.
+squared.  An edge may carry events of its own (``EdgeEventMap``), applied to
+its predecessor's exit state in every join the edge enters, the normal exits'
+included: a recognized loop's credit of the storage it initializes element by
+element, on the edge from the loop's condition block to its exit
+(``appendLoopCredits``), which no path leaving the loop by a jump or an
+exception takes.  For a range-for (``SemaProfiles::initializingRangeFor``) it
+is the credit of its range as a known callee's range parameter is credited,
+designated by the element type and a construction when the body's first
+statement constructs, given only where each leaf of the range names tracked
+storage whole; the range's ``__range`` binding and an unmarked loop
+variable's then add no site, their tracked leaves consumed
+(``AddBinding``'s ``Consume``).
 
 The transfer function resolves every event and site leaf on a marked
 pointer's or reference's entity through ``Target`` before applying
@@ -1783,11 +1794,15 @@ Deliberate Strictnesses
   of an object other than the current one (``o.p``, ``q->p``) -- is judged by
   its form alone at every read, write, and destroy: a ``construct_at`` into
   it legalizes no later access.
-- A range-for over an ``[[uninit]]`` array or ``std::array`` binds the
+- A range-for over an ``[[uninit]]`` array or ``std::array`` that is not
+  recognized as initializing it -- its body does not begin with a store to or
+  an initializing call on its element (``if (c) continue;`` first,
+  ``x = x + 1``), it names the range, it copies the element or binds a const
+  reference, or it constructs through an unmarked loop variable -- binds the
   range to its implicit ``__range`` reference, an unmarked binding, so before
-  the array is filled the loop is rejected there whatever its body does, a
-  marked loop variable (``for (int &x [[ref_to_uninit]] : a)``) included.  A
-  fill of the whole array before the loop is the remedy.
+  the array is filled the loop is rejected there whatever its body does.  A
+  fill of the whole array before the loop, or a body that begins by storing
+  the element, is the remedy.
 - In a constructor, a binding of, or a destroy through, a member reached by a
   pointer-to-data-member step on the current object (``&(this->*pm).d``) is
   judged by its form, so it is rejected even after the member is constructed,
@@ -1907,6 +1922,10 @@ Missed Diagnostics
   credited although P4222R2 §6 asks for ``construct_at``.  So do the
   element-assigning algorithms through a marked pointer, whose extent is
   unknown: ``std::fill(p, p + 1, 0)`` initializes ``p``'s whole referent.
+- A recognized range-for's credit of its range trusts that the body reaches
+  the range only through the loop variable: after
+  ``for (int &x : a) { x = 0; std::destroy_at(&r); }``, with ``r`` a marked
+  reference to ``a``, a read of ``a[0]`` is accepted.
 - Copies of a marked pointer's or handle's object representation other than a
   byte copy between two pointer objects of the same type --
   ``std::copy``/``std::ranges::copy`` of pointer objects, a byte copy or

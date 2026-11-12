@@ -494,6 +494,25 @@ public:
   /// judged against the range's elements (rangeForRangeInit, with \p Init).
   static bool isMarkedRangeForElement(const VarDecl *V,
                                       const Expr *Init = nullptr);
+  /// A loop the flow pass credits on its exit as initializing storage element
+  /// by element: the range-for's loop variable, and whether the loop body's
+  /// first statement constructs the element rather than assigning it or
+  /// writing it in any state.
+  struct LoopInitialization {
+    const VarDecl *LoopVar = nullptr;
+    bool Constructs = false;
+  };
+  /// The range-for statement \p S as a loop initializing its range: a
+  /// reference loop variable binding \c *__begin directly, to a non-const
+  /// element, whose body begins with a built-in scalar store to the variable
+  /// or a call that initializes the parameter receiving \c &x,
+  /// \c std::addressof(x), or \c x -- a construction only through a marked
+  /// variable --, the store's value and the call's other arguments naming
+  /// neither the variable nor holding a statement expression, and whose body
+  /// names no variable of non-arithmetic type (nor \c this) the range
+  /// initializer names. None otherwise.
+  static std::optional<LoopInitialization>
+  initializingRangeFor(const CXXForRangeStmt *S);
   /// The variable a handle chain \p E bottoms out at -- stepping through
   /// member calls that return the handle itself, copies, a std-table
   /// construction to its first transfer argument (a pointer's value, or

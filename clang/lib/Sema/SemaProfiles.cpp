@@ -22,6 +22,7 @@
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/IgnoreExpr.h"
+#include "clang/AST/StmtCXX.h"
 #include "clang/Basic/Builtins.h"
 #include "clang/Basic/Module.h"
 #include "clang/Basic/SimpleTypoCorrection.h"
@@ -3158,6 +3159,165 @@ const Expr *SemaProfiles::rangeForRangeInit(const VarDecl *LoopVar,
            CE && CE->getNumArgs() == 1)
     Range = CE->getArg(0);
   return Range ? ImplicitInit(Range) : nullptr;
+}
+
+/// The first statement of the loop body \p Body -- the body itself when it
+/// is not a compound statement -- with attributes, implicit nodes
+/// (Expr::IgnoreImplicit), and parentheses peeled; null for an empty body.
+static const Stmt *firstLoopStatement(const Stmt *Body) {
+  if (const auto *CS = dyn_cast_or_null<CompoundStmt>(Body))
+    Body = CS->body_empty() ? nullptr : CS->body_front();
+  while (const auto *AS = dyn_cast_or_null<AttributedStmt>(Body))
+    Body = AS->getSubStmt();
+  const auto *E = dyn_cast_or_null<Expr>(Body);
+  while (E && E != E->IgnoreImplicit()->IgnoreParens())
+    E = E->IgnoreImplicit()->IgnoreParens();
+  return E ? E : Body;
+}
+
+/// True if \p S holds a statement expression or an expression \p Pred
+/// accepts, outside the unevaluated operand of \c sizeof or \c alignof.
+static bool holdsStmtExprOr(const Stmt *S,
+                            llvm::function_ref<bool(const Expr *)> Pred) {
+  if (!S || isa<UnaryExprOrTypeTraitExpr>(S))
+    return false;
+  if (isa<StmtExpr>(S))
+    return true;
+  if (const auto *E = dyn_cast<Expr>(S); E && Pred(E))
+    return true;
+  return llvm::any_of(S->children(), [&](const Stmt *Child) {
+    return holdsStmtExprOr(Child, Pred);
+  });
+}
+
+/// The initialization the statement \p S, a loop body's first, performs on
+/// the storage \p Designates accepts -- an argument, as a pointer value for a
+/// pointer parameter and a glvalue otherwise, or an assigned glvalue: a call
+/// or a reserved placement new that initializes the parameter receiving it
+/// (CalleeLifecycleRoles::initializesParam), or a built-in assignment of
+/// scalar type to it. \p Clean must accept every other operand. Returns
+/// whether the initialization constructs (a call's, unless the parameter is
+/// an initializing one), or none.
+static std::optional<bool> elementInitialization(
+    const Stmt *S,
+    llvm::function_ref<bool(const Expr *, bool AsPointerValue)> Designates,
+    llvm::function_ref<bool(const Expr *)> Clean) {
+  const auto *E = dyn_cast_or_null<Expr>(S);
+  if (!E)
+    return std::nullopt;
+  E = E->IgnoreParens();
+  if (const auto *BO = dyn_cast<BinaryOperator>(E)) {
+    if (BO->getOpcode() != BO_Assign ||
+        !BO->getLHS()->getType()->isScalarType() ||
+        !Designates(BO->getLHS()->IgnoreParens(), /*AsPointerValue=*/false) ||
+        !Clean(BO->getRHS()))
+      return std::nullopt;
+    return false;
+  }
+  const FunctionDecl *Callee = nullptr;
+  SmallVector<std::pair<const ParmVarDecl *, const Expr *>, 4> Args;
+  if (const auto *CE = dyn_cast<CallExpr>(E)) {
+    Callee = CE->getDirectCallee();
+    if (!Callee)
+      return std::nullopt;
+    unsigned Skip = 0;
+    if (const auto *MD = dyn_cast<CXXMethodDecl>(Callee);
+        MD && isa<CXXOperatorCallExpr>(CE) &&
+        !MD->isExplicitObjectMemberFunction())
+      Skip = 1;
+    for (unsigned I = 0, N = CE->getNumArgs(); I != N; ++I)
+      Args.push_back({I >= Skip && I - Skip < Callee->getNumParams()
+                          ? Callee->getParamDecl(I - Skip)
+                          : nullptr,
+                      CE->getArg(I)});
+    if (const auto *MCE = dyn_cast<CXXMemberCallExpr>(CE))
+      Args.push_back({nullptr, MCE->getImplicitObjectArgument()});
+  } else if (const auto *NE = dyn_cast<CXXNewExpr>(E)) {
+    Callee = NE->getOperatorNew();
+    if (!Callee || !SemaProfiles::isReservedPlacementNew(Callee) ||
+        NE->getNumPlacementArgs() != 1)
+      return std::nullopt;
+    Args.push_back({Callee->getParamDecl(1), NE->getPlacementArg(0)});
+    if (NE->hasInitializer())
+      Args.push_back({nullptr, NE->getInitializer()});
+    if (std::optional<const Expr *> Size = NE->getArraySize(); Size && *Size)
+      Args.push_back({nullptr, *Size});
+  } else {
+    return std::nullopt;
+  }
+  SemaProfiles::CalleeLifecycleRoles Roles =
+      SemaProfiles::getCalleeLifecycleRoles(Callee);
+  std::optional<bool> Constructs;
+  for (auto [P, Arg] : Args) {
+    if (!Arg)
+      continue;
+    if (P && !Constructs && Roles.initializesParam(P) &&
+        Designates(Arg->IgnoreParenImpCasts(), P->getType()->isPointerType())) {
+      Constructs = !Roles.isInitializingParam(P);
+      continue;
+    }
+    if (!Clean(Arg))
+      return std::nullopt;
+  }
+  return Constructs;
+}
+
+std::optional<SemaProfiles::LoopInitialization>
+SemaProfiles::initializingRangeFor(const CXXForRangeStmt *S) {
+  const VarDecl *X = S->getLoopVariable();
+  const Expr *RangeInit = S->getRangeInit();
+  if (!X || !RangeInit || X->isInvalidDecl() || !X->getInit() ||
+      !rangeForRangeInit(X))
+    return std::nullopt;
+  QualType T = X->getType();
+  if (!T->isReferenceType() || T->isDependentType() ||
+      T.getNonReferenceType().isConstQualified())
+    return std::nullopt;
+  // The variable binds *__begin directly: no temporary, no conversion.
+  const Expr *Init = X->getInit();
+  if (const auto *EWC = dyn_cast<ExprWithCleanups>(Init))
+    Init = EWC->getSubExpr();
+  Init = Init->IgnoreParens();
+  if (isa<MaterializeTemporaryExpr>(Init) || !Init->isGLValue() ||
+      !X->getASTContext().hasSameUnqualifiedType(Init->getType(),
+                                                 T.getNonReferenceType()))
+    return std::nullopt;
+  auto NamesX = [&](const Expr *E) {
+    const auto *DRE = dyn_cast<DeclRefExpr>(E);
+    return DRE && DRE->getDecl() == X;
+  };
+  std::optional<bool> Constructs = elementInitialization(
+      firstLoopStatement(S->getBody()),
+      [&](const Expr *E, bool AsPointerValue) {
+        if (AsPointerValue) {
+          E = addressOfOperand(E);
+          if (!E)
+            return false;
+        }
+        return NamesX(E->IgnoreParens());
+      },
+      [&](const Expr *E) { return !holdsStmtExprOr(E, NamesX); });
+  // A construction needs a marked variable.
+  if (!Constructs || (*Constructs && !X->hasAttr<RefToUninitAttr>()))
+    return std::nullopt;
+  // The body names none of the range's variables of non-arithmetic type,
+  // which could reach its storage.
+  llvm::SmallPtrSet<const ValueDecl *, 4> RangeVars;
+  bool RangeThis = false;
+  holdsStmtExprOr(RangeInit, [&](const Expr *E) {
+    if (const auto *DRE = dyn_cast<DeclRefExpr>(E);
+        DRE && !DRE->getType()->isArithmeticType())
+      RangeVars.insert(DRE->getDecl());
+    RangeThis |= isa<CXXThisExpr>(E);
+    return false;
+  });
+  if (holdsStmtExprOr(S->getBody(), [&](const Expr *E) {
+        if (const auto *DRE = dyn_cast<DeclRefExpr>(E))
+          return RangeVars.contains(DRE->getDecl());
+        return RangeThis && isa<CXXThisExpr>(E);
+      }))
+    return std::nullopt;
+  return LoopInitialization{X, *Constructs};
 }
 
 bool SemaProfiles::isMarkedRangeForElement(const VarDecl *V, const Expr *Init) {
