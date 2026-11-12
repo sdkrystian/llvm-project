@@ -77,6 +77,26 @@ void test_pointer_casts() {
   (void)vi; (void)ci1; (void)ci2; (void)cc1; (void)cc2; (void)ti; (void)dr;
 }
 
+namespace std {
+template <class To, class From> constexpr To bit_cast(const From &from) noexcept;
+template <class T> constexpr T *launder(T *p) noexcept;
+} // namespace std
+
+// std::bit_cast between object pointer types and std::launder yield their
+// argument's pointer value, as a pointer cast does
+void test_pointer_identity_functions() {
+  int *p [[ref_to_uninit]] = &g_uninit;
+  char *b1 [[ref_to_uninit]] = std::bit_cast<char *>(p); // OK
+  char *b2 = std::bit_cast<char *>(p);                    // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  int *l1 [[ref_to_uninit]] = std::launder(p);            // OK
+  int *l2 = std::launder(p);                               // expected-error {{pointer to uninitialized memory must be marked '[[ref_to_uninit]]' under profile 'std::init'}}
+  int *i = &g_init;
+  char *b3 = std::bit_cast<char *>(i);                    // OK
+  char *b4 [[ref_to_uninit]] = std::bit_cast<char *>(i); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  int *l3 [[ref_to_uninit]] = std::launder(i);            // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+  (void)b1; (void)b2; (void)l1; (void)l2; (void)b3; (void)b4; (void)l3;
+}
+
 void test_reference_target() {
   int &r1 [[ref_to_uninit]] = g_uninit; // OK
   int &r2 [[ref_to_uninit]] = g_init;   // expected-error {{reference marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}

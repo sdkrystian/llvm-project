@@ -1390,7 +1390,9 @@ judgment.  The
 standard identity functions (``std::move``,
 ``std::forward``, ``std::forward_like``, ``std::move_if_noexcept``,
 ``std::as_const``) are a step of that walk, recognized by builtin ID
-(``SemaProfiles::isShapeTransparentBuiltin``), and a call to one binds nothing:
+(``SemaProfiles::isShapeTransparentBuiltin``), as are ``std::launder`` and a
+``std::bit_cast`` between object pointer types, recognized by name
+(``SemaProfiles::isIdentityCall``), and a call to one binds nothing:
 judging its argument's binding to the parameter too would hand ``std::move``'s
 ``T &&`` a mutable alias of a marked pointer, which makes the pointer's referent
 unknown, so ``*std::move(p)`` would read nothing.  An opaque value is its
@@ -1749,7 +1751,7 @@ Missed Diagnostics
   nothing, so after one accepted in an unknown state -- after an allocator's
   own ``destroy`` (``std::allocator_traits<A>::destroy(a, &s)``) -- an
   unmarked binding of the storage or a member call on it is accepted.
-- The identity functions are recognized by builtin ID: under
+- The reference identity functions are recognized by builtin ID: under
   ``-fno-builtin`` (or ``-fno-builtin-std-<name>``) and for a user-written
   identity function (``template <class T> T &&fwd(T &)``), the call is an
   ordinary call -- its result is trusted, and a ``T *&`` parameter makes a

@@ -765,7 +765,9 @@ public:
   /// True if \p CE calls one of the standard library functions that return
   /// a reference to their argument (std::move, std::forward,
   /// std::forward_like, std::move_if_noexcept, std::as_const), recognized by
-  /// builtin ID.
+  /// builtin ID, or one that returns its argument's pointer value
+  /// (std::launder, and std::bit_cast between object pointer types),
+  /// recognized by name.
   static bool isIdentityCall(const CallExpr *CE);
 
   /// True if \p BuiltinID names a function whose call the std::init checks
@@ -1179,8 +1181,9 @@ public:
   /// begins: a pointer's pointee, the array a reference refers to, or a
   /// handle's handleValueType; null when unknown.
   static QualType rangeValueType(QualType T);
-  /// True if a call of \p FD binds none of its arguments: a builtin the
-  /// checks see through (isShapeTransparentBuiltin), or a known callee whose
+  /// True if a call of \p FD binds none of its arguments: a builtin or a
+  /// pointer identity function the checks see through
+  /// (isShapeTransparentBuiltin, isIdentityCall), or a known callee whose
   /// role is Derive or AnyState.
   static bool bindsNoArgument(const FunctionDecl *FD);
   /// The argument the result of the Derive call \p CE classifies as -- a

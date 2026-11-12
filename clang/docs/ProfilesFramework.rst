@@ -756,8 +756,9 @@ memory, and an unmarked one only to initialized memory.  Whether a source
 refers to uninitialized memory is recognized from its form -- the address
 (``&x``, ``std::addressof(x)``) or a subobject of an ``[[uninit]]`` entity, the
 value or dereference of a marked pointer or reference, pointer and reference
-casts of those and the standard identity functions applied to them, a call to a
-marked function, a call to a known allocator (``malloc``, ``aligned_alloc``,
+casts of those (``std::launder`` and a ``std::bit_cast`` between object pointer
+types included) and the standard identity functions applied to them, a call to
+a marked function, a call to a known allocator (``malloc``, ``aligned_alloc``,
 ``alloca``, raw ``::operator new``, ``std::allocator<T>::allocate``, and
 ``std::allocator_traits<A>::allocate`` calls return uninitialized memory, so
 do the handles ``std::make_unique_for_overwrite``,
@@ -975,7 +976,10 @@ The standard identity functions -- ``std::move``, ``std::forward``,
 ``std::forward_like``, ``std::move_if_noexcept``, and ``std::as_const`` -- are
 as transparent as such a cast: ``*std::move(p)`` reads what ``*p`` reads,
 ``int *q = std::move(p)`` binds what ``int *q = p`` binds, and the call itself
-binds nothing; ``std::addressof(x)`` is ``&x``.  An indirection through an
+binds nothing; ``std::addressof(x)`` is ``&x``.  ``std::launder(p)`` and
+``std::bit_cast<char *>(p)`` are pointer casts of ``p`` the same way: the call
+binds nothing, and ``char *c = std::bit_cast<char *>(p)`` binds what
+``char *c = (char *)p`` binds.  An indirection through an
 address-of step names the object: ``*&x``, ``(&x)->m``, and
 ``std::addressof(x)->m`` are ``x`` and ``x.m``.  Whole-object assignment of a
 class-type referent never initializes: it is a member ``operator=`` call on

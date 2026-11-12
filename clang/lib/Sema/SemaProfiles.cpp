@@ -1414,8 +1414,27 @@ bool SemaProfiles::isShapeTransparentBuiltin(unsigned BuiltinID) {
          BuiltinID == Builtin::BI__addressof;
 }
 
+/// True if \p FD is std::launder, or a std::bit_cast from an object pointer
+/// type to an object pointer type: a call yields its argument's pointer
+/// value, as a pointer cast does (P4222R2 §4.3).
+static bool isPointerIdentityFunction(const FunctionDecl *FD) {
+  if (!FD || !FD->getIdentifier() || FD->getNumParams() != 1 ||
+      !FD->isInStdNamespace())
+    return false;
+  if (FD->getName() == "launder")
+    return true;
+  auto IsObjectPointer = [](QualType T) {
+    T = T.getNonReferenceType();
+    return T->isPointerType() && !T->isFunctionPointerType();
+  };
+  return FD->getName() == "bit_cast" && IsObjectPointer(FD->getReturnType()) &&
+         IsObjectPointer(FD->getParamDecl(0)->getType());
+}
+
 bool SemaProfiles::isIdentityCall(const CallExpr *CE) {
-  return isIdentityBuiltin(CE->getBuiltinCallee()) && CE->getNumArgs() == 1;
+  return CE->getNumArgs() == 1 &&
+         (isIdentityBuiltin(CE->getBuiltinCallee()) ||
+          isPointerIdentityFunction(CE->getDirectCallee()));
 }
 
 const Expr *SemaProfiles::addressOfOperand(const Expr *E) {
@@ -2442,6 +2461,8 @@ QualType SemaProfiles::rangeValueType(QualType T) {
 
 bool SemaProfiles::bindsNoArgument(const FunctionDecl *FD) {
   if (unsigned ID = FD->getBuiltinID(); ID && isShapeTransparentBuiltin(ID))
+    return true;
+  if (isPointerIdentityFunction(FD))
     return true;
   const KnownCalleeEntry *Entry = findKnownCallee(FD);
   return Entry && (Entry->Role == KnownParamRole::Derive ||
