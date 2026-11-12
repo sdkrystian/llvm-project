@@ -1565,11 +1565,26 @@ and ``s.data()`` name the referent whole, also through a prefix
 judged against the referent but records nothing, so a second destroy or a
 read after it is missed), and ``s[i]``,
 ``front()``, ``back()``, an accessor with arguments, or a handle past its
-referent's start an element,
-which, as a marked pointer's element (P4222R2 §5.4), is never tracked and is
-judged by its form.  A handle's initializer, assignment, or ``reset`` with an
-argument reseats it to what its source's walk names (a tracked handle's
-referent, or storage a transfer leaf names whole); a ``reset()`` or an
+referent's start an element, which, as a marked pointer's element (P4222R2
+§5.4), is not tracked for a store, a credit, a marked binding, or a destroy.
+A read or an unmarked binding of one (``FlowLeafUse::ElementRead``,
+``Resolution::Element``) is judged against the referent's ``WholeRange``
+flag -- set by a credit that provably covers the whole range
+(``DefAssignEvent::WholeRange``: a range named directly
+(``namesRangeDirectly``, not a handle built over part of it) and passed as
+itself, but not as a copy's output, which stops at its source's end; an
+iterator pair or count ``coversWholeExtent`` proves; a callee that must
+initialize the handle named directly; a recognized range-for over a range
+named directly) and cleared by whatever clears ``Must`` and by a destroy of an
+element (``RangeBreak``) -- initialized with ``Must`` and it, while no
+``[[uninit]]`` member is pending or unassigned (``MembersPending``, the
+referent's SubMembers), and by its form otherwise; an element of an array a
+marked reference refers to is read the same way.  A marked pointer's referent
+never takes the flag (``TrackedEntity::PointerReferent``): its extent is
+unknown (P4222R2 §4.7).
+A handle's initializer, assignment, or ``reset`` with an argument reseats it
+to what its source's walk names (a tracked handle's referent, or storage a
+transfer leaf names whole); a ``reset()`` or an
 assignment of a non-class gives it an anonymous referent; ``++``, ``--``,
 ``+=``, ``-=``, and ``std::advance`` keep it but mark it offset
 (``FlowState::Offset``), so a credit or destroy through it is partial; and
@@ -1723,13 +1738,16 @@ Deliberate Strictnesses
   (``std::fill(a, a + 2, 0)``): into a still-uninitialized ``[[uninit]]``
   array such a call is rejected like any unmarked binding
   (``std::uninitialized_fill`` and ``memset`` initialize).
-- A marked handle's referent is one object, as a marked pointer's is, and an
-  element through the handle (``s[i]``, ``s.front()``) is judged by its form,
-  as ``p[i]`` is: a read of one is rejected even after the whole range is
-  filled -- ``*s.data()``, ``std::now_init(s.data())``, or an unmarked copy
-  of the handle reads it -- and an element store or
-  ``std::construct_at(&s[i])`` initializes nothing, so a fill of the whole
-  range is the way to initialize it.
+- A marked pointer's elements are judged by their form: ``p[i]`` is
+  rejected even after ``std::uninitialized_fill_n(p, n, v)``, as the
+  pointer's extent is unknown -- ``*p``, ``std::now_init(p)``, or an unmarked
+  copy of the pointer reads it.  An element through a marked handle
+  (``s[i]``, ``s.front()``) is read initialized only after a credit the
+  analysis proves covers the whole range: after a fill of a prefix
+  (``std::uninitialized_fill(s.begin(), s.begin() + 1, v)``), or of a count
+  that is not ``s.size()``, a read of ``s[0]`` is rejected, and an element
+  store or ``std::construct_at(&s[i])`` initializes nothing, so a fill of the
+  whole range is the way to initialize it.
 - A reference to a marked handle that a lambda or block reaches by capture
   (``const auto &r = s; [&] { return *r.data(); }``) is judged by its form
   there, as the marked handle: the referent's state is the enclosing
@@ -2035,7 +2053,9 @@ Missed Diagnostics
   ``std::destroy(p + 1, p + n)``, a destroy through an offset iterator -- is
   not judged and destroys nothing tracked, as an element credit initializes
   nothing: an element never constructed, or destroyed twice, is destroyed
-  without a diagnostic (P4222R2 §5.4's element form).
+  without a diagnostic (P4222R2 §5.4's element form).  It only ends a marked
+  handle's or reference's whole range (``RangeBreak``), so its elements are
+  read by form again.
 - A placement ``new`` through a pointer of unknown provenance (``new (p) T``
   for an unmarked ``p``, ``new (&*it) T``, ``new (up.get()) T``), into raw
   storage that is not flow-tracked (``SemaProfiles::isRawStorageType``), or

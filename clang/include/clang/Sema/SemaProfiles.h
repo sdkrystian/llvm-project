@@ -478,6 +478,11 @@ public:
   /// initializes the array whole whatever its state.
   static bool isStdArrayScalarFill(const CXXMethodDecl *MD);
 
+  /// True if the glvalue \p E reads a subobject of a named [[uninit]] object
+  /// through a member or element chain, rather than through a marker: the
+  /// provenance select of the read-through diagnostic.
+  static bool isUninitObjectMemberChain(const Expr *E);
+
   /// True if \p V is a handle variable whose referent the flow analysis
   /// tracks: a local or parameter of handle type (isHandleType) marked
   /// [[ref_to_uninit]].
@@ -572,8 +577,17 @@ public:
   /// source of an unmarked value copy (isValueCopySource) -- a subobject of
   /// such a local enclosing tracked members is tracked and read by its
   /// members' state; in a constructor body, so are the current object's
-  /// subobjects, for a MarkedTarget too.
-  enum class FlowLeafUse { Plain, MarkedTarget, Destroy, ValueCopy };
+  /// subobjects, for a MarkedTarget too. For an ElementRead -- a read, or an
+  /// unmarked binding or object argument, otherwise a Plain use -- an element
+  /// of what a marked handle or reference refers to (\c s[i], \c s.front(),
+  /// \c r[i]) is tracked, judged against a credit of the whole range.
+  enum class FlowLeafUse {
+    Plain,
+    MarkedTarget,
+    Destroy,
+    ValueCopy,
+    ElementRead
+  };
 
   /// True if the leaf \p Leaf of a binding source names storage the
   /// std::init CFG pass flow-tracks -- an [[uninit]] local or parameter (or
@@ -674,11 +688,13 @@ public:
   bool isFlowTrackedHandleLeaf(const HandleLeaf &L,
                                const DeclContext *CurContext) const;
   /// True if any leaf of the glvalue \p G is flow-tracked in the current
-  /// context: the read-through and subobject-write checks leave such an
-  /// access to the CFG pass. The tracked leaves are appended to \p Leaves
-  /// when given.
-  bool hasFlowTrackedGlvalueLeaf(
-      const Expr *G, SmallVectorImpl<const Expr *> *Leaves = nullptr) const;
+  /// context for \p Use: the read-through and subobject-write checks leave
+  /// such an access to the CFG pass. The tracked leaves are appended to
+  /// \p Leaves when given.
+  bool
+  hasFlowTrackedGlvalueLeaf(const Expr *G,
+                            SmallVectorImpl<const Expr *> *Leaves = nullptr,
+                            FlowLeafUse Use = FlowLeafUse::Plain) const;
   /// The operand a binding of \p Src as \p T classifies, and whether it is
   /// used as a pointer value (\p AsPointerValue): a pointer binding or a
   /// read-only alias of a pointer reads the source's value; a reference
@@ -1186,7 +1202,7 @@ public:
     /// otherwise an unmarked binding of it.
     bool WholeExtent = false;
     /// The known-callee row's element count of the range at KnownParam, if
-    /// the row has one (std::fill_n).
+    /// the row has one (std::fill_n, std::uninitialized_fill_n).
     std::optional<unsigned> CountParam;
     /// The source range of a copy row: its first iterator, followed by its
     /// end, or the range itself (std::ranges::copy's).

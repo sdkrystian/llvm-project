@@ -1934,6 +1934,10 @@ struct TrackedEntity {
   /// its start (an element at index zero), not whole: a destroy through it
   /// ends the object there alone, as a destroy of the argument does.
   bool AtStart = false;
+  /// The referent of a marked pointer -- its anonymous referent, a pointer
+  /// member's MemberPointee, or a pointer parameter's ParamReferent -- whose
+  /// extent is unknown, so no credit makes it whole (FlowState::WholeRange).
+  bool PointerReferent = false;
   /// A lifecycle entity: storage tracked only because a lifecycle leaf of the
   /// body names it (collectLifecycleNames) -- a member of the current object
   /// (SemaProfiles::lifecycleMember), tracked whole, a base of it, or a local
@@ -2216,6 +2220,7 @@ struct TrackedStorage {
       E.Steps = Path;
       E.Type = Path.back().Field->getType()->getPointeeType();
       E.TrackReads = false;
+      E.PointerReferent = true;
       Entities.push_back(std::move(E));
     }
     MemberPointerRange = {Begin, (unsigned)Entities.size()};
@@ -2420,6 +2425,7 @@ struct TrackedStorage {
     E.Type = Entities[Pointee].Type;
     E.TrackReads = false;
     E.Entry = EntryState::Unassigned;
+    E.PointerReferent = P->getType()->isPointerType();
     unsigned Idx = Entities.size();
     Entities.push_back(std::move(E));
     addSubMembers(Idx, /*Table=*/true, /*Lifecycle=*/true);
@@ -2482,14 +2488,20 @@ struct TrackedStorage {
     /// reference from a handle (*it, s.data(), up.get(), a range-for's
     /// element), whose position within the referent is not followed.
     bool ViaHandle = false;
+    /// The leaf names an element of what a marked handle or reference refers
+    /// to (s[i], s.front(), r[i]), resolved only on request (Elements):
+    /// Entity is the handle's or reference's, and the element is judged
+    /// against a credit of its whole range (FlowState::WholeRange).
+    bool Element = false;
   };
   /// Resolve the glvalue \p E through SemaProfiles::flowLeafShape: a tracked
   /// member of the current object (this->m, m, (*this).m, this->c.m) or of a
   /// directly named tracked local (V.m, V.c.m, through containers), an
   /// [[uninit]] local or a subobject of it (u, u.x, arr[i]), or a marked local
   /// pointer's, reference's, or handle's referent or a subobject of it (*p,
-  /// p->m, r, r.m, *up, up->m; never an element, P4222R2 §5.4), or a marked
-  /// pointer member's referent (*elem, mem.elem->x). A sub-access below another
+  /// p->m, r, r.m, *up, up->m; an element only with \p Elements, P4222R2
+  /// §5.4), or a marked pointer member's referent (*elem, mem.elem->x). A
+  /// sub-access below another
   /// named class or array member of a tracked aggregate (x.in.v, x.arr[0])
   /// names no entity and is benign or an escape by that member's type. The one
   /// resolver behind every event arm, so a leaf affects flow state exactly as
@@ -2501,21 +2513,25 @@ struct TrackedStorage {
   /// here and against the storage it refers to by the transfer function
   /// (DefAssignEvent::Designated). With \p Pointee, \p E is a pointer value
   /// and the glvalue resolved is what it points to
-  /// (SemaProfiles::flowLeafShape).
+  /// (SemaProfiles::flowLeafShape). With \p Elements, an element of what a
+  /// marked handle or reference refers to resolves to it
+  /// (Resolution::Element, SemaProfiles::FlowLeafUse::ElementRead).
   Resolution resolve(const SemaProfiles::ShapeLeaf &Leaf,
                      QualType Designated = QualType(), bool RawExempt = false,
-                     bool Pointee = false) const;
+                     bool Pointee = false, bool Elements = false) const;
 
   /// Resolve a binding or argument leaf: the glvalue \p E (resolve), or --
   /// with \p AsPointerValue, a leaf used as a pointer value -- the storage
   /// \c &x names, the element pointer arithmetic points to (as \c &p[n]
   /// does), the array a decayed array decays from, or a marked local
   /// pointer's referent (its value). \p Designated and \p RawExempt are
-  /// resolve's; for a pointer value, the designated type is the pointee's.
+  /// resolve's, and so are \p Elements; for a pointer value, the designated
+  /// type is the pointee's.
   Resolution resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
                              bool AsPointerValue,
                              QualType Designated = QualType(),
-                             bool RawExempt = false) const;
+                             bool RawExempt = false,
+                             bool Elements = false) const;
 
   /// \p R, the resolution of the glvalue leaf \p Leaf of a range, as the
   /// range's elements (SemaProfiles::isFlowTrackedRangeLeaf): when the range
@@ -2649,6 +2665,8 @@ unsigned TrackedStorage::addLocalEntity(TrackedEntity::Kind K, const VarDecl *V,
   E.Type = T;
   E.TrackReads = false;
   E.Entry = Entry;
+  E.PointerReferent =
+      K != TrackedEntity::Kind::WholeLocal && V->getType()->isPointerType();
   unsigned Idx = Entities.size();
   Entities.push_back(std::move(E));
   // A construction alias always refers to other storage.
@@ -2826,8 +2844,8 @@ TrackedStorage::partRange(std::pair<unsigned, unsigned> Range,
 
 TrackedStorage::Resolution
 TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
-                        QualType Designated, bool RawExempt,
-                        bool Pointee) const {
+                        QualType Designated, bool RawExempt, bool Pointee,
+                        bool Elements) const {
   std::optional<SemaProfiles::FlowLeafShape> Shape =
       SemaProfiles::flowLeafShape(Leaf.E, Leaf.Arms, Pointee);
   if (!Shape)
@@ -2926,12 +2944,18 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
     return R;
   }
   const VarDecl *V = Shape->Local;
-  // *up, up->m: a marked handle's referent or a subobject of it; never an
-  // element (s[i], or through an offset handle), as for a pointer.
+  // *up, up->m: a marked handle's referent or a subobject of it; an element
+  // (s[i], or through an offset handle) only with \p Elements.
   if (Shape->ThroughHandle) {
-    if (Shape->Subscript)
+    if (Shape->Subscript && !Elements)
       return {};
     if (std::optional<unsigned> Idx = markedHandleObject(V)) {
+      if (Shape->Subscript) {
+        R.Entity = Idx;
+        R.Subobject = R.Element = true;
+        R.AtStart = false;
+        return R;
+      }
       R.Entity = Idx;
       R.Subobject = !Shape->Members.empty() || DesignatesPart(*Idx);
       R.Sub = subKey(*Idx, *Shape);
@@ -2961,6 +2985,12 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
                     DesignatesPart(It->second);
       R.Sub = subKey(It->second, *Shape);
       R.AtStart = Shape->Members.empty() && !Shape->OffsetElement;
+    } else if (Ent.K == TrackedEntity::Kind::Pointee &&
+               V->getType()->isReferenceType() && Shape->Subscript &&
+               Elements) {
+      R.Entity = It->second;
+      R.Subobject = R.Element = true;
+      R.AtStart = false;
     } else if (Ent.K == TrackedEntity::Kind::Pointee &&
                V->getType()->isReferenceType() && !Shape->Subscript) {
       R.Entity = It->second;
@@ -3009,12 +3039,13 @@ TrackedStorage::resolve(const SemaProfiles::ShapeLeaf &Leaf,
 TrackedStorage::Resolution
 TrackedStorage::resolveFlowLeaf(const SemaProfiles::ShapeLeaf &Leaf,
                                 bool AsPointerValue, QualType Designated,
-                                bool RawExempt) const {
+                                bool RawExempt, bool Elements) const {
   if (!AsPointerValue)
-    return resolve(Leaf, Designated, RawExempt);
+    return resolve(Leaf, Designated, RawExempt, /*Pointee=*/false, Elements);
   const Expr *E = SemaProfiles::ignoreTransparentCasts(Leaf.E, Leaf.Arms);
   if (const Expr *Op = SemaProfiles::addressOfOperand(E))
-    return resolve({Op, Leaf.Arms, Leaf.OuterBases}, Designated, RawExempt);
+    return resolve({Op, Leaf.Arms, Leaf.OuterBases}, Designated, RawExempt,
+                   /*Pointee=*/false, Elements);
   if (SemaProfiles::pointerArithmeticBase(E))
     return resolve({E, Leaf.Arms}, Designated, RawExempt, /*Pointee=*/true);
   // A decayed array is the array it decays from.
@@ -3196,7 +3227,9 @@ TrackedStorage::markedPointerObject(const SemaProfiles::ShapeLeaf &Leaf) const {
 /// unchanged. Binding: a pointer, reference, or handle binding whose source has
 /// a tracked leaf (BindingSites[Aux]), judged by the binding rule.
 /// ReadThrough / SubobjectWrite: a read through, or a store below, tracked
-/// storage (AccessSites[Aux]), judged by uninit_read / uninit_write. An event
+/// storage (AccessSites[Aux]), judged by uninit_read / uninit_write.
+/// RangeBreak: an element of the range Idx refers to was destroyed, so the
+/// range is no longer initialized whole (FlowState::WholeRange). An event
 /// on a Pointee entity acts on the storage the pointer refers to at its program
 /// point (referent). Every event but a Reset and a scope-exit Destroy carries
 /// the anchor expression the diagnostic and the suppression walk use. A Reset
@@ -3216,7 +3249,8 @@ enum class DefAssignEventKind {
   AggregateEscape,
   Binding,
   ReadThrough,
-  SubobjectWrite
+  SubobjectWrite,
+  RangeBreak
 };
 /// What a Reseat makes its marked pointer, reference, or handle refer to.
 enum class ReseatTarget {
@@ -3295,6 +3329,10 @@ struct DefAssignEvent {
   /// constructed of the storage the event reaches; a SubMember's credit
   /// constructs nothing here.
   ConstructExtent Constructs = ConstructExtent::None;
+  /// Write: the credit provably covers the whole range of what it names (a
+  /// range passed as itself, an iterator pair or count spanning it, a
+  /// recognized loop), which sets FlowState::WholeRange.
+  bool WholeRange = false;
 };
 
 /// The form classification of a binding leaf: the parse-time recognizers'
@@ -3347,6 +3385,11 @@ struct BindingLeaf {
   /// members whole, which the parse-time funnel judged by form: Range decides
   /// a double destruction alone.
   bool DestroyedOnly = false;
+  /// The leaf names an element of what Entity's marked handle or reference
+  /// refers to (TrackedStorage::Resolution::Element): initialized where the
+  /// referent is initialized whole (FlowState::WholeRange), and otherwise of
+  /// its form's State.
+  bool Element = false;
 };
 
 /// A ref_to_uninit binding site derived from a CFG element: the construct's
@@ -3675,9 +3718,16 @@ struct FlowState {
     /// with no whole destroy, release, reset, escape, or uninitialized
     /// assertion since.
     PartConstructed = 1u << 11,
+    /// Initialized whole as a range on every path -- by a credit that
+    /// provably covers it (DefAssignEvent::WholeRange) -- with no destroy of
+    /// it or an element of it, release, reset, escape, or uninitialized
+    /// assertion since: an element read through a marked handle or reference
+    /// is initialized (BindingLeaf::Element). Never set on a marked
+    /// pointer's referent (TrackedEntity::PointerReferent).
+    WholeRange = 1u << 12,
   };
   /// The flags the join intersects; it unites the others.
-  static constexpr uint16_t JoinIntersects = Must | Esc | Null;
+  static constexpr uint16_t JoinIntersects = Must | Esc | Null | WholeRange;
 
   /// False for the identity of the join.
   bool Reached = false;
@@ -3800,6 +3850,18 @@ static LeafState leafState(const BindingLeaf &L, const FlowState &St,
   if (!L.Entity)
     return L.State;
   std::optional<unsigned> R = referent(*L.Entity, St, Storage);
+  // An element is initialized where its range is initialized whole, and
+  // otherwise judged by its form.
+  if (L.Element) {
+    bool Whole = R && St.has(*R, FlowState::Must) &&
+                 St.has(*R, FlowState::WholeRange) &&
+                 !St.has(*R, FlowState::MembersPending);
+    for (unsigned I = R ? Storage.Entities[*R].Subs.first : 0,
+                  N = R ? Storage.Entities[*R].Subs.second : 0;
+         I != N && Whole; ++I)
+      Whole = St.has(I, FlowState::Must);
+    return Whole ? LeafState::Initialized : L.State;
+  }
   if (!R)
     return LeafState::Unknown;
   auto StateOf = [&](unsigned I) {
@@ -4144,10 +4206,11 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
   auto MayWrite = [&](unsigned I) {
     St.update(I, FlowState::May, FlowState::EntryAsserted);
   };
-  // The construction bits, which a whole destroy, release, reset, escape, or
-  // uninitialized assertion clears.
-  constexpr uint16_t ConstructBits =
-      FlowState::Constructed | FlowState::PartConstructed;
+  // The construction bits and the whole-range bit, which a whole destroy,
+  // release, reset, escape, or uninitialized assertion clears.
+  constexpr uint16_t ConstructBits = FlowState::Constructed |
+                                     FlowState::PartConstructed |
+                                     FlowState::WholeRange;
   // Mark the storage Idx refers to as a construction's credit left it,
   // whether or not its designation covers the storage: an object of another
   // type, or a base, constructed there is still an object. Through an offset
@@ -4185,6 +4248,8 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
         WriteStorage(Ev, *R, Write);
         if (Ev.SkipUninitMembers)
           St.update(*R, FlowState::MembersPending);
+        if (Ev.WholeRange && !Storage.Entities[*R].PointerReferent)
+          St.update(*R, FlowState::WholeRange);
       } else if (Ev.Sub.Class && Ev.Sub.Exact) {
         // A store naming one member of storage with no SubMember for it (a
         // void referent viewed as a class) ends its pending members.
@@ -4237,7 +4302,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
           continue;
         uint16_t Set = FlowState::MayUnassigned | FlowState::MayDestroyed;
         uint16_t Clear = FlowState::Must | FlowState::EntryAsserted |
-                         FlowState::MembersPending;
+                         FlowState::MembersPending | FlowState::WholeRange;
         if (Site.Conditional)
           Set |= FlowState::May;
         else
@@ -4248,7 +4313,7 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
         for (unsigned A : Site.StartAffected)
           if (std::optional<unsigned> R = referent(A, St, Storage);
               R && !St.has(A, FlowState::Offset))
-            St.update(*R, 0, FlowState::Constructed);
+            St.update(*R, 0, FlowState::Constructed | FlowState::WholeRange);
       for (const auto &[A, K] : Site.SubAffected) {
         std::optional<unsigned> R = referent(A, St, Storage);
         std::optional<unsigned> Sub = R && !St.has(A, FlowState::Offset)
@@ -4341,6 +4406,10 @@ applyDefAssignEvents(ArrayRef<DefAssignEvent> BlockEvents,
                         FlowState::EntryAsserted | FlowState::MembersPending |
                         ConstructBits);
         });
+      break;
+    case DefAssignEventKind::RangeBreak:
+      if (std::optional<unsigned> R = referent(Ev.Idx, St, Storage))
+        St.update(*R, 0, FlowState::WholeRange);
       break;
     case DefAssignEventKind::Reset:
       for (unsigned R = Ev.Idx, E = std::max(Ev.Idx + 1, Ev.Aux); R != E; ++R)
@@ -4939,6 +5008,20 @@ static bool namesSameStorage(const Expr *A, const Expr *B) {
          namesSameStorage(MA->getBase(), MB->getBase());
 }
 
+/// True if the range or handle expression \p E names its storage directly --
+/// a variable, a member, or a copy of one -- rather than a handle built over
+/// part of it, so a credit of it as a range covers the whole range.
+static bool namesRangeDirectly(const Expr *E) {
+  E = E->IgnoreImplicit()->IgnoreParens();
+  if (const auto *CCE = dyn_cast<CXXConstructExpr>(E);
+      CCE && CCE->getNumArgs() == 1 &&
+      CCE->getConstructor()->isCopyOrMoveConstructor())
+    E = CCE->getArg(0)->IgnoreImplicit()->IgnoreParens();
+  while (const auto *ME = dyn_cast<MemberExpr>(E))
+    E = ME->getBase()->IgnoreImplicit()->IgnoreParens();
+  return isa<DeclRefExpr, CXXThisExpr>(E);
+}
+
 /// True if the call-like \p CallLike of a callee with \p Roles, an
 /// element-assigning row (CalleeLifecycleRoles::WholeExtent), covers the
 /// whole storage its role argument begins -- not at an element's address,
@@ -4990,6 +5073,10 @@ static bool coversWholeExtent(const ASTContext &Ctx, const Expr *CallLike,
     return FD->isInStdNamespace() && CE->getNumArgs() == 1 &&
            namesSameStorage(CE->getArg(0), Begin->Storage);
   };
+  // A copy stops at the end of its source, which the output range's end does
+  // not bound.
+  if (Roles.EndParam && Roles.SourceParam)
+    return false;
   if (Roles.EndParam) {
     std::optional<StoragePosition> End =
         ArgAt(Roles.EndParam) ? storagePosition(Ctx, ArgAt(Roles.EndParam))
@@ -5068,6 +5155,9 @@ public:
     /// The leaf names an element of what a pointer or handle refers to
     /// (SemaProfiles::designatesReferentElement, or an offset handle leaf).
     bool Element = false;
+    /// For an element of what a marked handle or reference refers to, that
+    /// handle's or reference's entity (TrackedStorage::Resolution::Element).
+    std::optional<unsigned> Container;
     /// The leaf names a local or by-value parameter with tracked members
     /// whole, with no conversion: Whole is its member range.
     bool LocalWhole = false;
@@ -5111,11 +5201,13 @@ public:
   /// its \p Designated type and RawExempt (resolveArg), and a construction's
   /// credit \p Constructs: it constructs what it names whole -- each storage an
   /// argument naming several names -- and a subobject at the storage's start
-  /// or at an offset (DefAssignEvent::Constructs).
+  /// or at an offset (DefAssignEvent::Constructs). A whole credit
+  /// \p WholeRange covers the whole range of what it names
+  /// (DefAssignEvent::WholeRange).
   void appendFor(const Expr *Arg, QualType ParamTy, DefAssignEventKind Kind,
                  QualType Designated = QualType(), bool RawExempt = false,
                  bool SkipUninitMembers = false, bool Constructs = false,
-                 bool AsRange = false);
+                 bool AsRange = false, bool WholeRange = false);
 
 private:
   Sema &S;
@@ -5161,6 +5253,12 @@ bool ArgumentEffects::resolveArg(const Expr *Arg, QualType ParamTy,
                 : S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC, Use);
     L.Element = SemaProfiles::designatesReferentElement(Leaf.E, AsPointerValue,
                                                         Leaf.Arms);
+    if (L.Element)
+      if (TrackedStorage::Resolution ER = Storage.resolveFlowLeaf(
+              Leaf, AsPointerValue, QualType(), /*RawExempt=*/false,
+              /*Elements=*/true);
+          ER.Element)
+        L.Container = ER.Entity;
     if (L.Tracked && Use == SemaProfiles::FlowLeafUse::MarkedTarget &&
         !L.R.Entity)
       L.Part = Storage.objectPart(Leaf, AsPointerValue, OuterPath);
@@ -5209,6 +5307,8 @@ bool ArgumentEffects::resolveArg(const Expr *Arg, QualType ParamTy,
         ArgLeaf L{HL.E, Storage.resolveHandleLeaf(HL, Designated, RawExempt)};
         L.Tracked = S.Profiles().isFlowTrackedHandleLeaf(HL, DC);
         L.Element = HL.Partial;
+        if (L.Element)
+          L.Container = L.R.Entity;
         AnyTracked |= L.Tracked;
         if (L.Tracked && !L.R.Entity)
           noteUnresolvedFlowLeaf(UnresolvedLeaves, HL.E);
@@ -5274,7 +5374,8 @@ bool ArgumentEffects::resolveArg(const Expr *Arg, QualType ParamTy,
 void ArgumentEffects::appendFor(const Expr *Arg, QualType ParamTy,
                                 DefAssignEventKind Kind, QualType Designated,
                                 bool RawExempt, bool SkipUninitMembers,
-                                bool Constructs, bool AsRange) {
+                                bool Constructs, bool AsRange,
+                                bool WholeRange) {
   SmallVector<ArgLeaf, 2> Leaves;
   resolveArg(Arg, ParamTy, Leaves, Designated, RawExempt,
              SemaProfiles::FlowLeafUse::Plain, AsRange);
@@ -5293,6 +5394,7 @@ void ArgumentEffects::appendFor(const Expr *Arg, QualType ParamTy,
     Ev.SkipUninitMembers = SkipUninitMembers;
     if (Constructs && !Sub.Class)
       Ev.Constructs = ConstructExtent::Start;
+    Ev.WholeRange = WholeRange && Kind == DefAssignEventKind::Write;
     Events.push_back(Ev);
   };
   for (const ArgLeaf &L : Leaves) {
@@ -5387,9 +5489,14 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
       if (L.Tracked)
         JudgedLeaves.insert(L.E);
       // An element of what a pointer or handle refers to is not judged and
-      // destroys nothing tracked (SemaProfiles::designatesReferentElement).
-      if (L.Element)
+      // destroys nothing tracked (SemaProfiles::designatesReferentElement),
+      // but a marked handle's or reference's range is no longer whole.
+      if (L.Element) {
+        if (L.Container)
+          BlockEvents.push_back(
+              {DefAssignEventKind::RangeBreak, *L.Container, CallLike});
         continue;
+      }
       // The parse-time funnel judged a construction alias, an unmarked
       // pointer, by its form, which never rejects a destroy.
       if (L.R.Entity && Storage.Entities[*L.R.Entity].K ==
@@ -5543,12 +5650,27 @@ appendLifecycleCallEvents(Sema &S, const Decl *D, const Expr *CallLike,
           SkipUninitMembers = true;
         }
       }
+      // A credit of a range named directly and passed as itself (not a
+      // copy's output, which stops at its source's end), by an iterator pair
+      // or a count spanning it (coversWholeExtent), or by a callee that must
+      // initialize the handle passed covers the whole range.
+      bool WholeRange =
+          (PT->isReferenceType() && !Roles.SourceParam &&
+           (TakesRange(P) || PT.getNonReferenceType()->isArrayType()) &&
+           namesRangeDirectly(Arg)) ||
+          (!PT->isReferenceType() &&
+           Roles.roleOf(P) != SemaProfiles::KnownParamRole::None &&
+           (Roles.EndParam || Roles.CountParam || Roles.SourceParam) &&
+           coversWholeExtent(S.Context, CallLike, Roles)) ||
+          (Roles.mustInitializeParam(P) &&
+           SemaProfiles::isHandleType(PT.getNonReferenceType()) &&
+           namesRangeDirectly(Arg));
       // A byte writer's credit takes storage in any state and constructs
       // nothing.
       Args.appendFor(Arg, PT, DefAssignEventKind::Write, Designated, RawExempt,
                      SkipUninitMembers,
                      /*Constructs=*/!Roles.isInitializingParam(P),
-                     TakesRange(P));
+                     TakesRange(P), WholeRange);
     });
 }
 
@@ -5625,7 +5747,8 @@ static void appendLoopCredits(Sema &S, const Decl *D, const CFG &cfg,
       continue;
     Args.appendFor(RangeInit, RangeT, DefAssignEventKind::Write, Elem,
                    /*RawExempt=*/false, /*SkipUninitMembers=*/false,
-                   LI->Constructs, AsRange);
+                   LI->Constructs, AsRange,
+                   /*WholeRange=*/namesRangeDirectly(RangeInit));
     llvm::append_range(EdgeEvents[Edge], Credit);
     Credited.insert(Range);
     if (!LI->LoopVar->hasAttr<RefToUninitAttr>())
@@ -6686,7 +6809,7 @@ static void extractStdInitEvents(
       SemaProfiles::FlowLeafUse Use =
           TargetMarked ? SemaProfiles::FlowLeafUse::MarkedTarget
           : EveryPath  ? SemaProfiles::FlowLeafUse::ValueCopy
-                       : SemaProfiles::FlowLeafUse::Plain;
+                       : SemaProfiles::FlowLeafUse::ElementRead;
       auto AddLeaf = [&](const SemaProfiles::ShapeLeaf &Leaf,
                          bool AsPointerValue,
                          llvm::function_ref<LeafState()> Form) {
@@ -6694,19 +6817,23 @@ static void extractStdInitEvents(
         if (S.Profiles().isFlowTrackedLeaf(Leaf, AsPointerValue, DC, Use)) {
           AnyTracked = true;
           JudgedLeaves.insert(Leaf.E);
-          TrackedStorage::Resolution R =
-              Storage.resolveFlowLeaf(Leaf, AsPointerValue);
+          TrackedStorage::Resolution R = Storage.resolveFlowLeaf(
+              Leaf, AsPointerValue, QualType(), /*RawExempt=*/false,
+              /*Elements=*/Use == SemaProfiles::FlowLeafUse::ElementRead);
           L.Entity = R.Entity;
           L.Sub = R.Sub;
           L.WholeLeaf = !R.Subobject;
           L.AtStart = R.AtStart;
           L.ViaHandle = R.ViaHandle;
+          L.Element = R.Element;
+          if (L.Element)
+            L.State = Form();
           // A value copy through a pointer to data member reads what the
           // step may name.
           if (!L.Entity && Use == SemaProfiles::FlowLeafUse::ValueCopy &&
               R.Opaque.first != R.Opaque.second)
             L.Range = R.Opaque;
-          else if (!L.Entity && Use != SemaProfiles::FlowLeafUse::Plain)
+          else if (!L.Entity && Use != SemaProfiles::FlowLeafUse::ElementRead)
             L.Range = Storage.objectPart(Leaf, AsPointerValue, OuterPath, Use);
           if (!L.Entity && L.Range.first == L.Range.second)
             noteUnresolvedFlowLeaf(UnresolvedLeaves, Leaf.E);
@@ -6902,12 +7029,30 @@ static void extractStdInitEvents(
               }
             }
             BindingLeaf L;
-            if (S.Profiles().isFlowTrackedLeaf(Leaf,
-                                               /*AsPointerValue=*/false, DC)) {
+            // A read may name an element of what a marked handle or reference
+            // refers to (SemaProfiles::FlowLeafUse::ElementRead).
+            if (S.Profiles().isFlowTrackedLeaf(
+                    Leaf, /*AsPointerValue=*/false, DC,
+                    IsWrite ? SemaProfiles::FlowLeafUse::Plain
+                            : SemaProfiles::FlowLeafUse::ElementRead)) {
               AnyTracked = true;
               JudgedLeaves.insert(Leaf.E);
               TrackedStorage::Resolution R = Storage.resolveFlowLeaf(
-                  Leaf, /*AsPointerValue=*/false, Designated);
+                  Leaf, /*AsPointerValue=*/false, Designated,
+                  /*RawExempt=*/false, /*Elements=*/!IsWrite);
+              if (R.Element) {
+                L.Entity = R.Entity;
+                L.Element = true;
+                L.State = formState(S.Profiles().classifyInitAccessLeaf(
+                    Leaf, SemaProfiles::InitAccessKind::Read, D));
+                // Worded as the parse-time check words the form's verdict.
+                if (SemaProfiles::isUninitObjectMemberChain(G))
+                  AnyUninitObject = true;
+                else
+                  AnyPointee = true;
+                Site.Leaves.push_back(L);
+                return;
+              }
               if (R.Entity) {
                 const TrackedEntity &Ent = Storage.Entities[*R.Entity];
                 bool Pointee = Ent.isPointee();

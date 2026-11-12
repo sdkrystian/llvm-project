@@ -1894,6 +1894,22 @@ static constexpr KnownCalleeEntry orHandle(KnownCalleeEntry E) {
   return E;
 }
 
+/// \p E with the element count \p CountParam of the range its role parameter
+/// begins.
+static constexpr KnownCalleeEntry withCount(KnownCalleeEntry E,
+                                            unsigned CountParam) {
+  E.CountParam = CountParam;
+  return E;
+}
+
+/// \p E with the source range \p SourceParam of the copy into the range its
+/// role parameter begins.
+static constexpr KnownCalleeEntry withSource(KnownCalleeEntry E,
+                                             unsigned SourceParam) {
+  E.SourceParam = SourceParam;
+  return E;
+}
+
 /// \p E, an InitializeAnyState row that assigns the scalar elements of its
 /// range, bounded by its end iterator, the count \p CountParam, or the
 /// length of the source range \p SourceParam (KnownCalleeEntry).
@@ -2052,38 +2068,64 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
     stdRow("destroy_at", KnownCalleeEntry::AnyArity, 0,
            KnownParamRole::Destroy),
     stdRow("now_init", 1, 0, KnownParamRole::AssertInitialized),
-    orHandle(stdRow("uninitialized_copy", 3, 2, KnownParamRole::Construct)),
-    orHandle(stdRow("uninitialized_copy", 4, 3, KnownParamRole::Construct)),
-    orHandle(stdRow("uninitialized_copy_n", 3, 2, KnownParamRole::Construct)),
-    orHandle(stdRow("uninitialized_copy_n", 4, 3, KnownParamRole::Construct)),
-    orHandle(stdRow("uninitialized_move", 3, 2, KnownParamRole::Construct)),
-    orHandle(stdRow("uninitialized_move", 4, 3, KnownParamRole::Construct)),
-    orHandle(stdRow("uninitialized_move_n", 3, 2, KnownParamRole::Construct)),
-    orHandle(stdRow("uninitialized_move_n", 4, 3, KnownParamRole::Construct)),
+    withSource(
+        orHandle(stdRow("uninitialized_copy", 3, 2, KnownParamRole::Construct)),
+        0),
+    withSource(
+        orHandle(stdRow("uninitialized_copy", 4, 3, KnownParamRole::Construct)),
+        1),
+    withCount(orHandle(stdRow("uninitialized_copy_n", 3, 2,
+                              KnownParamRole::Construct)),
+              1),
+    withCount(orHandle(stdRow("uninitialized_copy_n", 4, 3,
+                              KnownParamRole::Construct)),
+              2),
+    withSource(
+        orHandle(stdRow("uninitialized_move", 3, 2, KnownParamRole::Construct)),
+        0),
+    withSource(
+        orHandle(stdRow("uninitialized_move", 4, 3, KnownParamRole::Construct)),
+        1),
+    withCount(orHandle(stdRow("uninitialized_move_n", 3, 2,
+                              KnownParamRole::Construct)),
+              1),
+    withCount(orHandle(stdRow("uninitialized_move_n", 4, 3,
+                              KnownParamRole::Construct)),
+              2),
     orHandle(stdRow("uninitialized_fill", 3, 0, KnownParamRole::Construct, 1)),
     orHandle(stdRow("uninitialized_fill", 4, 1, KnownParamRole::Construct, 2)),
-    orHandle(stdRow("uninitialized_fill_n", 3, 0, KnownParamRole::Construct)),
-    orHandle(stdRow("uninitialized_fill_n", 4, 1, KnownParamRole::Construct)),
+    withCount(orHandle(stdRow("uninitialized_fill_n", 3, 0,
+                              KnownParamRole::Construct)),
+              1),
+    withCount(orHandle(stdRow("uninitialized_fill_n", 4, 1,
+                              KnownParamRole::Construct)),
+              2),
     orHandle(stdRow("uninitialized_value_construct", 2, 0,
                     KnownParamRole::Construct, 1)),
     orHandle(stdRow("uninitialized_value_construct", 3, 1,
                     KnownParamRole::Construct, 2)),
-    orHandle(stdRow("uninitialized_value_construct_n", 2, 0,
-                    KnownParamRole::Construct)),
-    orHandle(stdRow("uninitialized_value_construct_n", 3, 1,
-                    KnownParamRole::Construct)),
+    withCount(orHandle(stdRow("uninitialized_value_construct_n", 2, 0,
+                              KnownParamRole::Construct)),
+              1),
+    withCount(orHandle(stdRow("uninitialized_value_construct_n", 3, 1,
+                              KnownParamRole::Construct)),
+              2),
     orHandle(stdRow("uninitialized_default_construct", 2, 0,
                     KnownParamRole::Construct, 1,
                     /*ConstructIfDefaultInitDeterminate=*/true)),
     orHandle(stdRow("uninitialized_default_construct", 3, 1,
                     KnownParamRole::Construct, 2,
                     /*ConstructIfDefaultInitDeterminate=*/true)),
-    orHandle(stdRow("uninitialized_default_construct_n", 2, 0,
-                    KnownParamRole::Construct, KnownCalleeEntry::NoEndParam,
-                    /*ConstructIfDefaultInitDeterminate=*/true)),
-    orHandle(stdRow("uninitialized_default_construct_n", 3, 1,
-                    KnownParamRole::Construct, KnownCalleeEntry::NoEndParam,
-                    /*ConstructIfDefaultInitDeterminate=*/true)),
+    withCount(
+        orHandle(stdRow("uninitialized_default_construct_n", 2, 0,
+                        KnownParamRole::Construct, KnownCalleeEntry::NoEndParam,
+                        /*ConstructIfDefaultInitDeterminate=*/true)),
+        1),
+    withCount(
+        orHandle(stdRow("uninitialized_default_construct_n", 3, 1,
+                        KnownParamRole::Construct, KnownCalleeEntry::NoEndParam,
+                        /*ConstructIfDefaultInitDeterminate=*/true)),
+        2),
     orHandle(stdRow("destroy", 2, 0, KnownParamRole::Destroy, 1)),
     orHandle(stdRow("destroy", 3, 1, KnownParamRole::Destroy, 2)),
     orHandle(stdRow("destroy_n", 2, 0, KnownParamRole::Destroy)),
@@ -2172,32 +2214,45 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
     orHandle(cpoRow("uninitialized_fill", 3, 0, KnownParamRole::Construct, 1)),
     orHandle(
         cpoRangeRow("uninitialized_fill", 2, 0, KnownParamRole::Construct)),
-    orHandle(cpoRow("uninitialized_fill_n", 3, 0, KnownParamRole::Construct)),
-    orHandle(cpoRow("uninitialized_copy", 4, 2, KnownParamRole::Construct, 3)),
-    orHandle(
-        cpoRangeRow("uninitialized_copy", 2, 1, KnownParamRole::Construct)),
-    orHandle(
-        cpoRow("uninitialized_copy_n", 4, 2, KnownParamRole::Construct, 3)),
-    orHandle(cpoRow("uninitialized_move", 4, 2, KnownParamRole::Construct, 3)),
-    orHandle(
-        cpoRangeRow("uninitialized_move", 2, 1, KnownParamRole::Construct)),
-    orHandle(
-        cpoRow("uninitialized_move_n", 4, 2, KnownParamRole::Construct, 3)),
+    withCount(orHandle(cpoRow("uninitialized_fill_n", 3, 0,
+                              KnownParamRole::Construct)),
+              1),
+    withSource(orHandle(cpoRow("uninitialized_copy", 4, 2,
+                               KnownParamRole::Construct, 3)),
+               0),
+    withSource(orHandle(cpoRangeRow("uninitialized_copy", 2, 1,
+                                    KnownParamRole::Construct)),
+               0),
+    withSource(orHandle(cpoRow("uninitialized_copy_n", 4, 2,
+                               KnownParamRole::Construct, 3)),
+               0),
+    withSource(orHandle(cpoRow("uninitialized_move", 4, 2,
+                               KnownParamRole::Construct, 3)),
+               0),
+    withSource(orHandle(cpoRangeRow("uninitialized_move", 2, 1,
+                                    KnownParamRole::Construct)),
+               0),
+    withSource(orHandle(cpoRow("uninitialized_move_n", 4, 2,
+                               KnownParamRole::Construct, 3)),
+               0),
     orHandle(cpoRow("uninitialized_value_construct", 2, 0,
                     KnownParamRole::Construct, 1)),
     orHandle(cpoRangeRow("uninitialized_value_construct", 1, 0,
                          KnownParamRole::Construct)),
-    orHandle(cpoRow("uninitialized_value_construct_n", 2, 0,
-                    KnownParamRole::Construct)),
+    withCount(orHandle(cpoRow("uninitialized_value_construct_n", 2, 0,
+                              KnownParamRole::Construct)),
+              1),
     orHandle(cpoRow("uninitialized_default_construct", 2, 0,
                     KnownParamRole::Construct, 1,
                     /*ConstructIfDefaultInitDeterminate=*/true)),
     orHandle(cpoRangeRow("uninitialized_default_construct", 1, 0,
                          KnownParamRole::Construct,
                          /*ConstructIfDefaultInitDeterminate=*/true)),
-    orHandle(cpoRow("uninitialized_default_construct_n", 2, 0,
-                    KnownParamRole::Construct, KnownCalleeEntry::NoEndParam,
-                    /*ConstructIfDefaultInitDeterminate=*/true)),
+    withCount(
+        orHandle(cpoRow("uninitialized_default_construct_n", 2, 0,
+                        KnownParamRole::Construct, KnownCalleeEntry::NoEndParam,
+                        /*ConstructIfDefaultInitDeterminate=*/true)),
+        1),
 };
 
 /// True if a parameter of type \p T has the shape \p Shape.
@@ -2623,11 +2678,11 @@ SemaProfiles::getCalleeLifecycleRoles(const FunctionDecl *FD) {
     if (T.isNull() || !T->isScalarType())
       return Roles;
     Roles.WholeExtent = true;
-    if (M.Entry->CountParam < FD->getNumParams())
-      Roles.CountParam = M.Entry->CountParam;
-    if (M.Entry->SourceParam < FD->getNumParams())
-      Roles.SourceParam = M.Entry->SourceParam;
   }
+  if (M.Entry->CountParam < FD->getNumParams())
+    Roles.CountParam = M.Entry->CountParam;
+  if (M.Entry->SourceParam < FD->getNumParams())
+    Roles.SourceParam = M.Entry->SourceParam;
   Roles.KnownParam = M.Entry->Param;
   Roles.KnownRole = M.Entry->Role;
   Roles.KnownTrusted = M.Trusted;
@@ -4502,7 +4557,7 @@ void SemaProfiles::judgeInitProfileBinding(
       hasFlowTrackedLeaf(Src, T, &Leaves,
                          TargetMarked ? FlowLeafUse::MarkedTarget
                          : ValueCopy  ? FlowLeafUse::ValueCopy
-                                      : FlowLeafUse::Plain,
+                                      : FlowLeafUse::ElementRead,
                          AsRange)) {
     DeferredInitSite Site{DeferredInitSite::Kind::Binding,
                           Kind,
@@ -5449,7 +5504,8 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
   // The current object as a whole, outside its constructors.
   auto CurrentObjectTracked = [&] {
     const CXXMethodDecl *MD = enclosingInstanceMethod(CurContext);
-    return Use != FlowLeafUse::Plain && MD && !isa<CXXConstructorDecl>(MD);
+    return Use != FlowLeafUse::Plain && Use != FlowLeafUse::ElementRead && MD &&
+           !isa<CXXConstructorDecl>(MD);
   };
   auto LifecycleUse = [&] {
     return Use == FlowLeafUse::MarkedTarget || Use == FlowLeafUse::Destroy;
@@ -5599,9 +5655,10 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
     return true;
   };
   // *up, up->m: a marked handle's referent or a subobject of it; an element
-  // (s[i], or through an offset handle) is never tracked, as for a pointer.
+  // (s[i], or through an offset handle) only for an ElementRead.
+  bool Elements = Use == FlowLeafUse::ElementRead;
   if (Shape->ThroughHandle)
-    return !Shape->Subscript && isFlowTrackedHandleVar(V) &&
+    return (!Shape->Subscript || Elements) && isFlowTrackedHandleVar(V) &&
            NoteSubPath(handleValueType(V->getType()));
   // *p, p->m, (*p).m: a marked pointer's referent or a subobject of it; an
   // element (p[i]) is never tracked (P4222R2 §5.4).
@@ -5611,9 +5668,11 @@ bool SemaProfiles::isFlowTrackedLeaf(const ShapeLeaf &Leaf, bool AsPointerValue,
   // u, u.x, arr[i]: an [[uninit]] local as a whole or a subobject of it.
   if (V->hasAttr<UninitAttr>())
     return NoteSubPath(V->getType());
-  // r, r.m: a marked reference's referent or a subobject of it.
+  // r, r.m: a marked reference's referent or a subobject of it; an element
+  // only for an ElementRead.
   if (V->hasAttr<RefToUninitAttr>() && V->getType()->isReferenceType())
-    return !Shape->Subscript && NoteSubPath(V->getType().getNonReferenceType());
+    return (!Shape->Subscript || Elements) &&
+           NoteSubPath(V->getType().getNonReferenceType());
   // a.m: a tracked member of an aggregate local or by-value parameter; for a
   // marked target, also a, or a subobject enclosing tracked members.
   if (const CXXRecordDecl *RD = flowTrackedAggregateClass(V)) {
@@ -5788,12 +5847,14 @@ const Expr *SemaProfiles::bindingSourceOperand(const Expr *Src, QualType T,
 }
 
 bool SemaProfiles::hasFlowTrackedGlvalueLeaf(
-    const Expr *G, SmallVectorImpl<const Expr *> *Leaves) const {
+    const Expr *G, SmallVectorImpl<const Expr *> *Leaves,
+    FlowLeafUse Use) const {
   if (!G)
     return false;
   bool Any = false;
   forEachTargetLeaf(G, [&](const ShapeLeaf &Leaf) {
-    if (!isFlowTrackedLeaf(Leaf, /*AsPointerValue=*/false, SemaRef.CurContext))
+    if (!isFlowTrackedLeaf(Leaf, /*AsPointerValue=*/false, SemaRef.CurContext,
+                           Use))
       return;
     Any = true;
     if (Leaves && !llvm::is_contained(*Leaves, Leaf.E))
@@ -6074,6 +6135,12 @@ void SemaProfiles::checkInitProfileDestructorCall(const Expr *Object) {
 // there on. The walk need not distinguish field from non-field members: the
 // semantic recognizer classifies a non-field member access Initialized, so no
 // such chain ever reaches this phrasing helper.
+static bool isMemberChainOfUninitObject(const Expr *E);
+
+bool SemaProfiles::isUninitObjectMemberChain(const Expr *E) {
+  return isMemberChainOfUninitObject(E);
+}
+
 static bool isMemberChainOfUninitObject(const Expr *E) {
   E = E->IgnoreParenImpCasts();
   while (true) {
@@ -6206,7 +6273,8 @@ void SemaProfiles::checkInitProfileReadThrough(SourceLocation Loc,
   // A read with a flow-tracked leaf is the CFG pass's (its ReadThrough
   // sites), judged against the flow state at its program point.
   if (SmallVector<const Expr *, 2> Leaves;
-      !AfterFlowPass && hasFlowTrackedGlvalueLeaf(Glvalue, &Leaves)) {
+      !AfterFlowPass &&
+      hasFlowTrackedGlvalueLeaf(Glvalue, &Leaves, FlowLeafUse::ElementRead)) {
     recordDeferredInitSite({DeferredInitSite::Kind::ReadThrough,
                             InitBindingKind::Variable, Loc, /*Flag=*/false,
                             ValueType, Glvalue, /*Subject=*/nullptr,

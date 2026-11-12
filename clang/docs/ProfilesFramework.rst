@@ -1464,9 +1464,17 @@ The referent is one object: ``*up``, ``up->m``, ``*it``, ``up.get()``, and
 ``s.data()`` name it whole, also through a prefix (``s.first(2).data()``),
 while ``s[i]``, ``s.front()``, ``s.back()``, any other accessor with arguments,
 and an access through a handle past the referent's start
-(``s.subspan(1).data()``) name an element, judged by its form as
-``p[i]`` through a marked pointer is: a read of it is rejected whatever the
-referent's state, and a store to it initializes nothing.  Incrementing or
+(``s.subspan(1).data()``) name an element: a read of it, or an unmarked
+binding of it, is accepted after a credit of the handle's whole range -- a
+fill of the handle itself (``std::ranges::uninitialized_fill(s, 0)``), from
+``s.begin()`` to ``s.end()``, of ``s.size()`` elements, by a ``[[must_init]]``
+callee given the handle, or a range-for over it that initializes each element,
+but not through a handle built over part of the referent or a copy into it,
+which stops at its source's end -- on every path, with no element destroyed
+since, and is rejected otherwise, and a store to it initializes nothing.  An
+element of an array a marked reference refers to (``r[i]``) is read the same
+way, while ``p[i]`` through a marked pointer, whose extent is unknown, is
+rejected whatever the referent's state.  Incrementing or
 advancing an iterator keeps its referent but reaches part of it, as a prefix
 does, so a fill through either initializes the referent on no path; a reset
 or an assignment gives the handle a new referent, a move or ``release()``

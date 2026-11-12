@@ -818,22 +818,102 @@ int fill_then_read(std::span<int> s [[ref_to_uninit]]) {
   return a + *s.begin() + t[1];
 }
 
-// An element through a marked handle is judged by its form, as through a
-// marked pointer: a read is rejected in any state, and a store is trusted
-int element_form(std::span<int> s [[ref_to_uninit]]) {
+// An element through a marked handle is read initialized after a credit of
+// the whole range, and a store to one is trusted
+int element_after_fill(std::span<int> s [[ref_to_uninit]]) {
   std::uninitialized_fill(s.begin(), s.end(), 0);
   s[1] = 5;
-  return s[0] + s.front(); // expected-error 2 {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  return s[0] + s.front() + s.back() + *(s.begin() + 1);
+}
+int element_after_range_fill(std::span<int> s [[ref_to_uninit]]) {
+  std::ranges::uninitialized_fill(s, 0);
+  int &r = s[1];
+  return s[2] + r;
+}
+
+// A span over an [[uninit]] array, filled whole, reads its elements
+int element_over_array() {
+  int a [[uninit]] [4];
+  std::span<int> s [[ref_to_uninit]] {a, 4};
+  std::uninitialized_fill(s.begin(), s.end(), 0);
+  return s[0];
+}
+
+// An element read before the fill, after a fill on one path, or after a
+// fill of a prefix is rejected
+int element_before_fill(std::span<int> s [[ref_to_uninit]]) {
+  return s[0]; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+int element_one_path(std::span<int> s [[ref_to_uninit]], bool c) {
+  if (c)
+    std::ranges::uninitialized_fill(s, 0);
+  return s[0]; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+int element_after_prefix(std::span<int> s [[ref_to_uninit]]) {
+  std::uninitialized_fill(s.begin(), s.begin() + 1, 0);
+  return s[0]; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A destroyed element leaves the range no longer initialized whole
+int element_after_destroy(std::span<int> s [[ref_to_uninit]]) {
+  std::ranges::uninitialized_fill(s, 0);
+  std::destroy_at(&s[1]);
+  return s[1]; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// An element of an array a marked reference refers to, after a fill of the
+// whole array
+int reference_element(int (&r [[ref_to_uninit]])[4]) {
+  std::ranges::uninitialized_fill(r, 0);
+  return r[3];
+}
+int reference_element_prefix(int (&r [[ref_to_uninit]])[4]) {
+  std::uninitialized_fill(r, r + 2, 0);
+  return r[3]; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A fill through a span built over part of the referent, or by a callee
+// given such a span, does not cover the whole range
+void fill_span(std::span<int> s [[must_init]]);
+int element_after_part_span(std::span<int> s [[ref_to_uninit]]) {
+  std::ranges::uninitialized_fill(std::span<int>(s.data(), 2), 0);
+  return s[1]; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+int element_after_callee_part(std::span<int> s [[ref_to_uninit]]) {
+  fill_span(std::span<int>(s.data(), 2));
+  return s[3]; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+}
+int element_after_callee(std::span<int> s [[ref_to_uninit]]) {
+  fill_span(s);
+  return s[3];
+}
+
+// After a default-construct, an [[uninit]] member of an element stays
+// indeterminate
+struct Pending {
+  int x [[uninit]];
+  int y = 0;
+};
+int element_member_pending(std::span<Pending> s [[ref_to_uninit]]) {
+  std::uninitialized_default_construct(s.begin(), s.end());
+  return s[0].x; // expected-error {{read of a subobject of an '[[uninit]]' object accesses uninitialized memory under profile 'std::init'}}
+}
+
+// A marked pointer's extent is unknown: its elements stay judged by form
+int pointer_element(int *p [[ref_to_uninit]]) {
+  std::uninitialized_fill(p, p + 4, 0);
+  return p[1]; // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
 }
 
 // A prefix of a marked handle starts at its referent, so a read through it
-// reads the referent; a handle past the start reaches an element
+// reads the referent; a handle past the start reaches an element, read
+// initialized after a fill of the whole range
 int prefix_read(std::span<int> s [[ref_to_uninit]]) {
   std::uninitialized_fill(s.begin(), s.end(), 0);
   int a = *s.first(2).data() + *s.first<2>().data() + *s.subspan(0, 2).data();
   for (int x : s.first(2))
     a += x;
-  return a + *s.subspan(1).data(); // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
+  return a + *s.subspan(1).data();
 }
 int prefix_read_unfilled(std::span<int> s [[ref_to_uninit]]) {
   return *s.first(2).data(); // expected-error {{read through a '[[ref_to_uninit]]' pointer or reference accesses uninitialized memory under profile 'std::init'}}
