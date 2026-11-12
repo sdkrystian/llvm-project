@@ -894,9 +894,10 @@ Clang itself supplies the standard library's lifecycle roles: the std lifecycle
 functions are rows of ``KnownCallees`` keyed by namespace-std name and arity
 (``std::construct_at`` and ``std::destroy_at`` of any arity).  A std row names
 one role parameter -- ``Construct`` for ``construct_at`` and the
-``std::uninitialized_*`` output range, ``AssertUninit`` for ``std::now_init``'s
-parameter, ``Destroy`` for ``destroy_at`` and the first iterator of
-``std::destroy`` and ``std::destroy_n`` -- and matches only where that parameter
+``std::uninitialized_*`` output range, ``AssertInitialized`` for
+``std::now_init``'s parameter, ``Destroy`` for ``destroy_at`` and the first
+iterator of ``std::destroy`` and ``std::destroy_n`` -- and matches only where
+that parameter
 of the called declaration has the row's shape (``ParamShape``), a pointer for
 every namespace-std row -- or, for an ``uninitialized_*`` row, also a handle
 (``KnownCalleeEntry::AcceptsHandle``) -- so a specialization whose iterator is
@@ -910,7 +911,14 @@ up at each call
 declarations stay as written, so a module or header unit built without
 ``-fprofiles`` reads the same, and a library definition is judged against its
 author's markers alone.  The ``Construct`` rows are bidirectional like
-``construct_at`` (P4222R2 §4.7 rejects an initialized range).  The
+``construct_at`` (P4222R2 §4.7 rejects an initialized range).
+``std::now_init``'s argument is judged as bound to a marked parameter by form
+at the call (``judgeInitProfileBinding``'s ``ByForm``), never deferred to the
+CFG pass, which makes no binding site of it: the call attests an
+initialization the analysis need not see, so its verdict must not depend on how
+much of that initialization the analysis does see -- a fill it recognizes, a
+store, or a ``std::construct_at`` leaves the argument as acceptable as one it
+does not.  The
 default-construct rows are ``Construct`` rows only where default-initialization
 of the called specialization's range value type (``rangeValueType``: a
 pointer's pointee, an array's element, or a class iterator's or range's
@@ -1421,8 +1429,9 @@ storage whole reads both, one at its start (``Resolution::AtStart``: no member
 step below the entity and no element step but at index zero,
 ``FlowLeafShape::OffsetElement``) reads ``Constructed``, and an object named
 whole by its member entities reads theirs; a leaf through a handle's member
-call (``Resolution::ViaHandle``) or an offset handle, and ``std::now_init``'s
-argument (``BindingSite::AssertUninit``), read neither.  An unmarked-target
+call (``Resolution::ViaHandle``) or an offset handle, and the argument of an
+``AssertUninit`` default-construct row (``BindingSite::AssertUninit``), read
+neither.  An unmarked-target
 binding and ``destroy_uninit`` are suppressed
 by ``May``; a read through a marker or of a subobject of an ``[[uninit]]``
 object, a subobject write, and the unmarked binding of a value copy's source
@@ -1637,9 +1646,10 @@ Deliberate Strictnesses
 - A marked handle's referent is one object, as a marked pointer's is, and an
   element through the handle (``s[i]``, ``s.front()``) is judged by its form,
   as ``p[i]`` is: a read of one is rejected even after the whole range is
-  filled -- ``*s.data()`` or an unmarked copy of the handle reads it -- and an
-  element store or ``std::construct_at(&s[i])`` initializes nothing, so a fill
-  of the whole range is the way to initialize it.
+  filled -- ``*s.data()``, ``std::now_init(s.data())``, or an unmarked copy
+  of the handle reads it -- and an element store or
+  ``std::construct_at(&s[i])`` initializes nothing, so a fill of the whole
+  range is the way to initialize it.
 - A reference to a marked handle that a lambda or block reaches by capture
   (``const auto &r = s; [&] { return *r.data(); }``) is judged by its form
   there, as the marked handle: the referent's state is the enclosing
@@ -1790,7 +1800,13 @@ Missed Diagnostics
   ``std::destroy_n`` and their ``std::ranges`` objects take a pointer or a
   class-type iterator, or an array or class-type range.  A whole
   ``[[uninit]]`` array passed as a range is initialized or destroyed whatever
-  the range's length.
+  the range's length.  ``std::now_init``'s argument is judged by its marking
+  alone, so a marked pointer or an ``[[uninit]]`` variable's address is
+  accepted where the storage is known to be initialized.
+- A default-construct row whose range only keeps its state
+  (``AssertUninit``) is not judged by the construction bits: over
+  ``int a [[uninit]] [2]``, ``std::construct_at(&a[0], 1)`` followed by
+  ``std::uninitialized_default_construct(a, a + 2)`` is accepted.
 - A ``std::shared_ptr``'s destruction is not judged (its ownership is
   shared), nor is a ``std::unique_ptr``'s reset or reassignment through a
   conditional naming several owners.

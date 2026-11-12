@@ -2011,7 +2011,7 @@ static constexpr KnownCalleeEntry KnownCallees[] = {
            KnownParamRole::Construct),
     stdRow("destroy_at", KnownCalleeEntry::AnyArity, 0,
            KnownParamRole::Destroy),
-    stdRow("now_init", 1, 0, KnownParamRole::AssertUninit),
+    stdRow("now_init", 1, 0, KnownParamRole::AssertInitialized),
     orHandle(stdRow("uninitialized_copy", 3, 2, KnownParamRole::Construct)),
     orHandle(stdRow("uninitialized_copy", 4, 3, KnownParamRole::Construct)),
     orHandle(stdRow("uninitialized_copy_n", 3, 2, KnownParamRole::Construct)),
@@ -2550,6 +2550,7 @@ bool SemaProfiles::CalleeLifecycleRoles::isMarkedParam(
     const ParmVarDecl *P) const {
   KnownParamRole R = roleOf(P);
   return P->hasAttr<RefToUninitAttr>() || R == KnownParamRole::AssertUninit ||
+         R == KnownParamRole::AssertInitialized ||
          R == KnownParamRole::Construct;
 }
 
@@ -3910,7 +3911,8 @@ void SemaProfiles::checkInitProfileBinding(const InitializedEntity &Entity,
 void SemaProfiles::judgeInitProfileBinding(
     InitBindingKind Kind, SourceLocation Loc, bool TargetMarked, QualType T,
     const Expr *Src, const Decl *D, const NamedDecl *Subject,
-    const Decl *AfterFlowPass, bool ValueCopy, bool AsRange, bool Placement) {
+    const Decl *AfterFlowPass, bool ValueCopy, bool AsRange, bool Placement,
+    bool ByForm) {
   // A RecoveryExpr is a placeholder for an initialization that already failed,
   // not a source the user wrote, so it must not drive this rule; see also
   // inRebuiltOrSynthesizedCode.
@@ -3921,7 +3923,7 @@ void SemaProfiles::judgeInitProfileBinding(
   // program point, on each instantiation's own CFG (see
   // ProfilesFrameworkInternals.rst, "Flow-Tracked Storage").
   if (SmallVector<const Expr *, 2> Leaves;
-      !AfterFlowPass &&
+      !AfterFlowPass && !ByForm &&
       hasFlowTrackedLeaf(Src, T, &Leaves,
                          TargetMarked ? FlowLeafUse::MarkedTarget
                          : ValueCopy  ? FlowLeafUse::ValueCopy
@@ -5357,11 +5359,15 @@ void SemaProfiles::checkInitProfileBinding(InitBindingKind Kind,
               !TargetMarked,
           InitDestroyer::Function, TargetMarked, AsRange);
   } else {
+    // std::now_init's argument is judged by its marking alone (see
+    // ProfilesFrameworkInternals.rst, "The std::init Implementation Map").
     judgeInitProfileBinding(
         Kind, Loc, TargetMarked, T, Src, D,
         /*Subject=*/nullptr, /*AfterFlowPass=*/nullptr,
         /*ValueCopy=*/!TargetMarked && isValueCopySource(Parm), AsRange,
-        /*Placement=*/Callee && isReservedPlacementNew(Callee));
+        /*Placement=*/Callee && isReservedPlacementNew(Callee),
+        /*ByForm=*/Parm &&
+            Roles.roleOf(Parm) == KnownParamRole::AssertInitialized);
     if (!TargetMarked && !AsRange && bindsHandleByReference(Kind, T, Target))
       judgeInitProfileBinding(Kind, Loc, /*TargetMarked=*/false,
                               T.getNonReferenceType().getUnqualifiedType(), Src,

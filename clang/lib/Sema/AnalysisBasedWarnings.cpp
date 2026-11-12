@@ -3333,9 +3333,8 @@ struct BindingSite {
   /// the diagnostics name; null for a pointer or reference.
   QualType HandleType;
   /// The target is a parameter whose row only asserts the storage
-  /// uninitialized (KnownParamRole::AssertUninit, std::now_init): it attests
-  /// that an initialization the analysis may not see completed, so the
-  /// construction bits do not judge it.
+  /// uninitialized (KnownParamRole::AssertUninit): the construction bits do
+  /// not judge it.
   bool AssertUninit = false;
 };
 
@@ -3799,11 +3798,11 @@ static LeafState leafState(const BindingLeaf &L, const FlowState &St,
 /// Judge a binding site against \p St with the funnel's verdict rule: a
 /// marked target rejects a source that is initialized (on every path) or
 /// Mixed, or that a construction may have constructed on some path
-/// (FlowState::Constructed, PartConstructed) unless the target is
-/// std::now_init's (BindingSite::AssertUninit); an unmarked one a source that
-/// is uninitialized (on every path) or Mixed -- for a whole copy, a source
-/// left uninitialized on some path (BindingSite::EveryPath); an Unknown source
-/// fires in neither direction.
+/// (FlowState::Constructed, PartConstructed) unless the target only asserts
+/// the storage uninitialized (BindingSite::AssertUninit); an unmarked one a
+/// source that is uninitialized (on every path) or Mixed -- for a whole copy,
+/// a source left uninitialized on some path (BindingSite::EveryPath); an
+/// Unknown source fires in neither direction.
 static void judgeBindingSite(const BindingSite &Site, const FlowState &St,
                              const TrackedStorage &Storage,
                              SmallVectorImpl<PendingViolation> &Out) {
@@ -6572,9 +6571,10 @@ static void extractStdInitEvents(
     // (forEachArgumentBinding) of a callee with \p Roles: a VariadicArgument
     // binding per variadic argument, a Parameter binding per declared
     // parameter other than an initializing one, a range's end iterator, a
-    // transfer parameter, or a handle an assignment takes by value --
-    // none for a [[now_uninit]] or storage-release callee, whose parameters
-    // run the destroy rules instead.
+    // transfer parameter, std::now_init's (judged by form at parse time), or
+    // a handle an assignment takes by value -- none for a [[now_uninit]] or
+    // storage-release callee, whose parameters run the destroy rules
+    // instead.
     auto AppendArgumentBindings =
         [&](const Expr *CallLike,
             const SemaProfiles::CalleeLifecycleRoles &Roles) {
@@ -6593,6 +6593,8 @@ static void extractStdInitEvents(
                            Roles.isInitializingParam(Parm) ||
                            Roles.isEndParam(Parm) ||
                            Roles.transfersParam(Parm) ||
+                           Roles.roleOf(Parm) == SemaProfiles::KnownParamRole::
+                                                     AssertInitialized ||
                            (SemaProfiles::isHandleType(T) &&
                             SemaProfiles::isAssignmentSource(Parm)))) {
                   size_t First = Sites.size();

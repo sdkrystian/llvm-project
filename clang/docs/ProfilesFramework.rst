@@ -966,8 +966,7 @@ rejected, a construction included:
 against each other, a destroy of the element at index 0 ends the object a
 construction began there, and a binding through an iterator or a handle's
 member call (``*it``, a range-for's element, ``s.data()``) or an offset
-handle, and ``std::now_init``'s argument, are judged by the state on every
-path alone.
+handle are judged by the state on every path alone.
 ``memset``, ``memcpy``, ``memmove``, and a ``[[now_init]]`` parameter whose
 pointee is ``void``, ``char``, ``unsigned char``, or ``std::byte`` claim the
 bytes and initialize the whole storage, unless reached through a conversion to
@@ -1057,8 +1056,13 @@ of class type (a range by its storage, then by what it refers to):
 array ``arr4`` whole (§5.5), and the sentinel of an output
 range, like an end iterator, is accepted in any state.  The §4.4
 ``now_init()`` identity function is treated the same way: the parameter of a
-``std::now_init`` with one pointer parameter is treated as marked, so its
-argument must refer to uninitialized memory, its unmarked return is trusted as
+``std::now_init`` with one pointer parameter is treated as marked, and its
+argument is judged by its marking alone, never by the state of the storage:
+an argument of the form of initialized memory -- an unmarked pointer, or the
+address of a variable not marked ``[[uninit]]`` -- is rejected, and any other
+is accepted, also where a fill, a store, or ``std::construct_at`` initialized
+the storage (``std::now_init(p)`` after
+``std::uninitialized_fill_n(p, n, v)``).  Its unmarked return is trusted as
 initialized (``*std::now_init(p)`` reads the storage ``p`` refers to without
 verification -- the paper's "cast in disguise"), and the argument's own storage
 keeps its state (§6.1: use the returned pointer, not the original name); only

@@ -1072,8 +1072,13 @@ public:
     /// No role parameter.
     None,
     /// The storage must be uninitialized and keeps its state, as for a
-    /// [[ref_to_uninit]] parameter (std::now_init, P4222R2 §4.4).
+    /// [[ref_to_uninit]] parameter (std::uninitialized_default_construct
+    /// where default-initialization leaves a scalar indeterminate).
     AssertUninit,
+    /// The argument is judged as bound to a [[ref_to_uninit]] parameter by
+    /// its form alone, never by flow, and the storage keeps its state
+    /// (std::now_init, P4222R2 §4.4).
+    AssertInitialized,
     /// The storage must be uninitialized and is initialized by the call, as
     /// for a [[ref_to_uninit]] parameter of a [[now_init]] function
     /// (std::construct_at, the std::uninitialized_* output range).
@@ -1292,14 +1297,16 @@ private:
   /// a known callee's role parameter takes by reference, classified as a
   /// handle range (HandleLeaf::Mode::Range) rather than as a glvalue. A
   /// \p Placement source is a reserved placement new's address, judged by
-  /// form only where it names known storage (classifyInitBindingLeaf).
+  /// form only where it names known storage (classifyInitBindingLeaf). A
+  /// \p ByForm source is judged by form here, never deferred to the flow pass
+  /// (KnownParamRole::AssertInitialized).
   void judgeInitProfileBinding(InitBindingKind Kind, SourceLocation Loc,
                                bool TargetMarked, QualType T, const Expr *Src,
                                const Decl *D,
                                const NamedDecl *Subject = nullptr,
                                const Decl *AfterFlowPass = nullptr,
                                bool ValueCopy = false, bool AsRange = false,
-                               bool Placement = false);
+                               bool Placement = false, bool ByForm = false);
 
 public:
   /// Enumerate the leaves the store target, binding source, read, or lifecycle

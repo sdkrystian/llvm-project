@@ -69,6 +69,16 @@ template <class T> struct allocator_traits<allocator<T>> {
 };
 template <class T> T *addressof(T &r) noexcept;
 enum class byte : unsigned char {};
+template <class T> class span {
+  T *_M_ptr;
+  __SIZE_TYPE__ _M_extent;
+
+public:
+  using element_type = T;
+  T *data() const noexcept;
+  T *begin() const noexcept;
+  T *end() const noexcept;
+};
 namespace ranges {
 struct __uninitialized_fill_fn {
   template <class I, class S, class T> I operator()(I first, S last, const T &x) const;
@@ -239,6 +249,41 @@ void now_init_return_only() {
 // A pointer to initialized storage cannot be passed to now_init (§4.2).
 void now_init_initialized_source() {
   int x = 1;
+  std::now_init(&x); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
+}
+
+// now_init's argument is judged by its marking alone: storage a recognized
+// technique already initialized is accepted
+int now_init_after_fill(int *p [[ref_to_uninit]], int n) {
+  std::uninitialized_fill_n(p, n, 0);
+  int *q = std::now_init(p); // OK
+  return q[n - 1];
+}
+int now_init_after_construct_at(int *p [[ref_to_uninit]]) {
+  std::construct_at(p);
+  return *std::now_init(p); // OK
+}
+int now_init_after_store() {
+  int v [[uninit]];
+  v = 1;
+  return *std::now_init(&v); // OK
+}
+int now_init_after_span_fill(std::span<int> out [[ref_to_uninit]]) {
+  std::ranges::uninitialized_fill(out, 0);
+  return std::now_init(out.data())[0]; // OK
+}
+int now_init_filled_array() {
+  Payload arr [[uninit]] [4];
+  std::uninitialized_fill(arr, arr + 4, Payload{1});
+  Payload *a = std::now_init(arr); // OK
+  return a[3].y;
+}
+
+// A variable not marked [[uninit]] is initialized memory by its form, also
+// after a destroy
+void now_init_destroyed_unmarked() {
+  int x = 1;
+  std::destroy_at(&x);
   std::now_init(&x); // expected-error {{pointer marked '[[ref_to_uninit]]' must refer to uninitialized memory under profile 'std::init'}}
 }
 
