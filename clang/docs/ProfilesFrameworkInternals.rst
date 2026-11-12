@@ -918,7 +918,12 @@ CFG pass, which makes no binding site of it: the call attests an
 initialization the analysis need not see, so its verdict must not depend on how
 much of that initialization the analysis does see -- a fill it recognizes, a
 store, or a ``std::construct_at`` leaves the argument as acceptable as one it
-does not.  The
+does not.  The resource header ``profiles_std_init.h`` defines
+``std::now_init`` as the paper's marked identity function, which the name row
+recognizes as it does a library's own; its definition carries
+``[[profiles::suppress(std::init)]]`` because its body binds the marked
+parameter to the unmarked return, which a build under
+``-fno-profiles-exempt-system-headers`` rejects otherwise.  The
 default-construct rows are ``Construct`` rows only where default-initialization
 of the called specialization's range value type (``rangeValueType``: a
 pointer's pointee, an array's element, or a class iterator's or range's

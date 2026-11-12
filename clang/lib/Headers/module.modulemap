@@ -373,3 +373,9 @@ module ptrauth [system] {
   header "ptrauth.h"
   export *
 }
+
+module profiles_std_init [system] {
+  requires cplusplus
+  header "profiles_std_init.h"
+  export *
+}

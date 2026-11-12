@@ -12,6 +12,7 @@ set(core_files
   iso646.h
   limits.h
   module.modulemap
+  profiles_std_init.h
   stdalign.h
   stdarg.h
   __stdarg___gnuc_va_list.h

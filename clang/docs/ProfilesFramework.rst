@@ -1074,7 +1074,11 @@ rule -- in a system header the `System Headers`_ exemption covers it, under
 ``-fno-profiles-exempt-system-headers`` the library writes
 ``[[profiles::suppress(std::init)]]`` on it, and outside a system header it is
 diagnosed per instantiation -- while an unmarked definition is judged as
-written.
+written.  Clang ships that definition, suppressed, in the resource header
+``<profiles_std_init.h>``: ``#include <profiles_std_init.h>`` declares
+``std::now_init`` in C++11 and later with any standard library.  A program
+that defines its own ``std::now_init`` cannot also include it, as the two
+definitions conflict.
 
 A placement ``new`` through a reserved placement ``operator new``
 (``::new (p) T(v)``, ``new (p) T[n]``) constructs as ``std::construct_at``
